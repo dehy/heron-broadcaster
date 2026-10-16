@@ -35,7 +35,3 @@ The name comes from "air on" sounding like *héron* (French for heron): keeping 
 |---|---|
 | [Roadmap](roadmap/README.md) | Milestones M0 to M10, dependencies and acceptance criteria |
 | [Open questions](open-questions.md) | Decisions still to be made |
-
-## Source of truth
-
-The Notion workspace (hub page "Heron Broadcaster", the "Architecture & Claude Code brief" page and the "Roadmap" database) holds the same plan and is where progress is tracked. These documents were organized from the original Claude Code handoff brief.
