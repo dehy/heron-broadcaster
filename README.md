@@ -55,7 +55,7 @@ Start with [docs/README.md](docs/README.md): requirements, architecture, data mo
 
 ## Built with Claude
 
-Heron Broadcaster is written with [Claude](https://claude.com/claude-code), Anthropic's AI coding assistant, and we say so openly. A human maintainer sets the direction and makes the decisions ([docs/decisions.md](docs/decisions.md)), and reviews every change. Commits written with Claude carry a `Co-Authored-By: Claude` trailer.
+Heron Broadcaster is written with [Claude](https://claude.com/claude-code), Anthropic's AI coding assistant. This is a deliberate choice, and we stand behind it openly. A human maintainer sets the direction and makes the decisions ([docs/decisions.md](docs/decisions.md)), and reviews every change. Commits written with Claude carry a `Co-Authored-By: Claude` trailer.
 
 ## License
 
