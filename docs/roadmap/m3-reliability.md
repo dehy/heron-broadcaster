@@ -9,6 +9,7 @@
 - Icecast reconnect with exponential backoff.
 - Persisted engine state and resume on restart.
 - Docker restart policies and health checks.
+- Clock sync monitoring in `heron-engine`: `heron_clock_synchronized` and `heron_clock_offset_seconds` in `/metrics`, and a warning in `/healthz` when the clock is not synced or is off by more than about 1 s (see [Requirements – Reliability](../requirements.md#5-reliability-247)).
 
 ## Acceptance criteria
 
@@ -19,6 +20,7 @@
   - [ ] delete a queued file;
   - [ ] inject a silent file.
 - [ ] An engine restart resumes playback within a few seconds.
+- [ ] With time sync stopped on the host, `heron_clock_synchronized` drops to 0 and `/healthz` reports a clock warning.
 
 ## References
 

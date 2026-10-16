@@ -108,5 +108,10 @@ Delivered across [M2](roadmap/m2-engine-core.md), [M4](roadmap/m4-api-control-pl
 - Icecast **reconnect** with exponential backoff.
 - Engine state persisted locally so a restart resumes the queue.
 - Docker restart policies and health checks on every service.
+- **Clock sync monitoring:** read the kernel's clock sync status and estimated error (read-only `adjtimex`/`ntp_adjtime`, no `CAP_SYS_TIME` needed) and expose them:
+  - in `/metrics`, as `heron_clock_synchronized` and `heron_clock_offset_seconds`;
+  - as a warning in the `/healthz` response, and later in the dashboard, when the clock is not synced or is off by more than about 1 s.
+
+  This tells operators when scheduling might be off, without Heron taking over the clock.
 
 Delivered in [M3 – 24/7 reliability](roadmap/m3-reliability.md).
