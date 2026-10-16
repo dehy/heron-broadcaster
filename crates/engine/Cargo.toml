@@ -1,0 +1,21 @@
+[package]
+name = "heron-engine"
+description = "Heron Broadcaster real-time playout engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+heron-service.workspace = true
+
+[lints]
+workspace = true
