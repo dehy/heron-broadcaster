@@ -53,6 +53,10 @@ Running a binary locally: `cargo run -p heron-api -- --help`. All options can al
 
 Start with [docs/README.md](docs/README.md): requirements, architecture, data model, conventions and the milestone roadmap.
 
+## Built with Claude
+
+Heron Broadcaster is written with [Claude](https://claude.com/claude-code), Anthropic's AI coding assistant, and we say so openly. A human maintainer sets the direction and makes the decisions ([docs/decisions.md](docs/decisions.md)), and reviews every change. Commits written with Claude carry a `Co-Authored-By: Claude` trailer.
+
 ## License
 
 Heron Broadcaster is free software, licensed under the [GNU Affero General Public License v3.0 or later](LICENSE).
