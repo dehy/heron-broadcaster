@@ -9,3 +9,4 @@
 pub mod clock;
 pub mod decoder;
 pub mod mixer;
+pub mod player;

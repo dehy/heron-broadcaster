@@ -162,6 +162,12 @@ pub enum Command {
         track: Box<LoadedTrack>,
         transition: FrameTransition,
     },
+    /// Replans the transition into the cued track, when the track on air
+    /// is not the one it was planned against.
+    Retarget {
+        transition: FrameTransition,
+        fade_in: Option<FrameRamp>,
+    },
     /// Removes the cued track if it has not started.
     Uncue,
     /// Fades out the track on air and starts the cued track now.
@@ -374,6 +380,8 @@ pub struct Mixer {
     voices: [Option<Voice>; 3],
     /// Slot of the track on air (0 or 1).
     main: Option<usize>,
+    /// Slot of the last track started on a deck: decks alternate.
+    last_main: usize,
     cued: Option<(Box<LoadedTrack>, FrameTransition)>,
     frame: u64,
     pause_gain: f32,
@@ -397,6 +405,7 @@ impl Mixer {
         let mixer = Self {
             voices: [None, None, None],
             main: None,
+            last_main: 1,
             cued: None,
             frame: 0,
             pause_gain: 1.0,
@@ -488,6 +497,15 @@ impl Mixer {
                     }
                     self.cued = Some((track, transition));
                 }
+                Command::Retarget {
+                    transition,
+                    fade_in,
+                } => {
+                    if let Some((track, planned)) = &mut self.cued {
+                        *planned = transition;
+                        track.fade_in = fade_in;
+                    }
+                }
                 Command::Uncue => {
                     if let Some((track, _)) = self.cued.take() {
                         self.emit(Event::Uncued {
@@ -553,12 +571,20 @@ impl Mixer {
                 }
                 1 - main
             }
-            None => usize::from(self.voices[0].is_some() && self.voices[1].is_none()),
+            None => {
+                let other = 1 - self.last_main;
+                if self.voices[other].is_none() || self.voices[self.last_main].is_some() {
+                    other
+                } else {
+                    self.last_main
+                }
+            }
         };
         // Still busy with an older track's tail: it has to go.
         self.stop_slot(slot, EndReason::Replaced);
         self.start_voice(slot, track);
         self.main = Some(slot);
+        self.last_main = slot;
     }
 
     fn start_voice(&mut self, slot: usize, track: Box<LoadedTrack>) {

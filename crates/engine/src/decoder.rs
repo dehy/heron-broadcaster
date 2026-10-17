@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use heron_analysis::Decoder;
@@ -23,7 +23,7 @@ const BUFFER_SECONDS: usize = 10;
 /// files above +12 dBTP).
 const MAX_SAMPLE: f32 = 4.0;
 /// How long the decoder sleeps when the buffer is full.
-const FULL_WAIT: Duration = Duration::from_millis(20);
+const FULL_WAIT: Duration = Duration::from_millis(5);
 
 #[derive(Debug, Default)]
 struct DecodeState {
@@ -33,6 +33,21 @@ struct DecodeState {
     failed: AtomicBool,
     /// The deck no longer wants the audio.
     cancelled: AtomicBool,
+    /// Frames pushed to the deck so far.
+    frames: AtomicU64,
+}
+
+/// Watches a decode thread from outside the deck.
+#[derive(Clone, Debug)]
+pub struct DecodeMonitor(Arc<DecodeState>);
+
+impl DecodeMonitor {
+    /// Decoding failed before producing any audio: the track cannot play.
+    pub fn is_unplayable(&self) -> bool {
+        self.0.done.load(Ordering::Acquire)
+            && self.0.failed.load(Ordering::Acquire)
+            && self.0.frames.load(Ordering::Acquire) == 0
+    }
 }
 
 /// The deck's end of a decode thread.
@@ -67,6 +82,10 @@ impl DecodedSource {
                 thread_state.done.store(true, Ordering::Release);
             })?;
         Ok(Self { consumer, state })
+    }
+
+    pub fn monitor(&self) -> DecodeMonitor {
+        DecodeMonitor(Arc::clone(&self.state))
     }
 
     /// Decoding failed. The track may still have played up to the error.
@@ -141,6 +160,9 @@ impl Writer<'_> {
             first.copy_from_slice(&samples[..split]);
             second.copy_from_slice(&samples[split..room]);
             chunk.commit_all();
+            self.state
+                .frames
+                .fetch_add((room / CHANNELS) as u64, Ordering::Release);
             samples = &samples[room..];
         }
         true

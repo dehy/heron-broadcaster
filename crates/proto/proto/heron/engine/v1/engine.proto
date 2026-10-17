@@ -1,0 +1,219 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Control interface of heron-engine, used by heron-api.
+//
+// Times are milliseconds. Settings and output configuration travel as JSON,
+// in the same shape as the `settings` and `outputs` tables (heron-core types),
+// so the engine and the database never disagree on their format.
+
+syntax = "proto3";
+
+package heron.engine.v1;
+
+service Engine {
+  // Queue. The engine keeps the queue in memory and plays it on its own.
+  rpc Enqueue(EnqueueRequest) returns (EnqueueResponse);
+  rpc RemoveFromQueue(RemoveFromQueueRequest) returns (RemoveFromQueueResponse);
+  rpc ClearQueue(ClearQueueRequest) returns (ClearQueueResponse);
+
+  // Transport.
+  rpc Skip(SkipRequest) returns (SkipResponse);
+  rpc Pause(PauseRequest) returns (PauseResponse);
+  rpc Resume(ResumeRequest) returns (ResumeResponse);
+  rpc PlayFx(PlayFxRequest) returns (PlayFxResponse);
+  rpc StopFx(StopFxRequest) returns (StopFxResponse);
+
+  // State.
+  rpc GetState(GetStateRequest) returns (EngineState);
+  rpc GetLevels(GetLevelsRequest) returns (Levels);
+  // Track changes as they happen.
+  rpc WatchEvents(WatchEventsRequest) returns (stream EngineEvent);
+
+  // Configuration, kept by the engine across restarts.
+  rpc GetConfig(GetConfigRequest) returns (EngineConfig);
+  rpc SetPlayoutSettings(SetPlayoutSettingsRequest) returns (SetPlayoutSettingsResponse);
+  rpc SetOutputs(SetOutputsRequest) returns (SetOutputsResponse);
+}
+
+// A track to play, with everything the engine needs: it never reads the database.
+message Track {
+  // Library track ID, when the track comes from the library.
+  optional uint64 track_id = 1;
+  // Path relative to the library root, with `/` separators.
+  string path = 2;
+  optional string title = 3;
+  optional string artist = 4;
+  optional string album = 5;
+  uint32 duration_ms = 6;
+  // Gap Killer cue points, overrides already applied.
+  uint32 cue_in_ms = 7;
+  uint32 cue_out_ms = 8;
+  // Crossfade point from the analysis (`fade_out_start_ms`).
+  optional uint32 mix_point_ms = 9;
+  optional double integrated_lufs = 10;
+  optional double true_peak_db = 11;
+  // Per-track crossfade overrides (`track_overrides.crossfade`), JSON. Empty for none.
+  string crossfade_overrides_json = 12;
+}
+
+message QueueEntry {
+  // Assigned by the engine, unique for its lifetime.
+  uint64 entry_id = 1;
+  Track track = 2;
+}
+
+message EnqueueRequest {
+  repeated Track tracks = 1;
+  // Where to insert, 0 being next. Appended when missing.
+  optional uint32 position = 2;
+}
+
+message EnqueueResponse {
+  repeated uint64 entry_ids = 1;
+}
+
+message RemoveFromQueueRequest {
+  uint64 entry_id = 1;
+}
+
+message RemoveFromQueueResponse {}
+
+message ClearQueueRequest {}
+
+message ClearQueueResponse {}
+
+message SkipRequest {}
+
+message SkipResponse {}
+
+message PauseRequest {}
+
+message PauseResponse {}
+
+message ResumeRequest {}
+
+message ResumeResponse {}
+
+message PlayFxRequest {
+  Track track = 1;
+}
+
+message PlayFxResponse {
+  uint64 entry_id = 1;
+}
+
+message StopFxRequest {}
+
+message StopFxResponse {}
+
+message GetStateRequest {}
+
+enum Deck {
+  DECK_UNSPECIFIED = 0;
+  DECK_A = 1;
+  DECK_B = 2;
+  DECK_FX = 3;
+}
+
+message DeckState {
+  Deck deck = 1;
+  // Missing when the deck is empty.
+  optional QueueEntry entry = 2;
+  // From the cue-in.
+  uint64 position_ms = 3;
+  uint64 length_ms = 4;
+  // The track listeners hear as "now playing".
+  bool on_air = 5;
+}
+
+message OutputState {
+  uint64 id = 1;
+  string name = 2;
+  bool enabled = 3;
+  // stopped, connecting, connected or reconnecting.
+  string state = 4;
+  optional string error = 5;
+  uint64 bytes_sent = 6;
+  optional uint64 connected_since_unix = 7;
+  uint64 dropped_chunks = 8;
+}
+
+message EngineState {
+  bool paused = 1;
+  repeated DeckState decks = 2;
+  // Loaded and waiting for its transition.
+  optional QueueEntry cued = 3;
+  repeated QueueEntry queue = 4;
+  repeated OutputState outputs = 5;
+  // Audio rendered since the engine started.
+  uint64 rendered_ms = 6;
+  uint64 underruns = 7;
+}
+
+message GetLevelsRequest {}
+
+// dBFS, -120 for silence.
+message ChannelLevels {
+  float peak_left = 1;
+  float peak_right = 2;
+  float rms_left = 3;
+  float rms_right = 4;
+}
+
+message Levels {
+  ChannelLevels master = 1;
+  ChannelLevels deck_a = 2;
+  ChannelLevels deck_b = 3;
+  ChannelLevels fx = 4;
+}
+
+message WatchEventsRequest {}
+
+enum EndReason {
+  END_REASON_UNSPECIFIED = 0;
+  END_REASON_FINISHED = 1;
+  END_REASON_SKIPPED = 2;
+  END_REASON_STOPPED = 3;
+  END_REASON_REPLACED = 4;
+}
+
+message TrackStarted {
+  Deck deck = 1;
+  QueueEntry entry = 2;
+}
+
+message TrackEnded {
+  Deck deck = 1;
+  QueueEntry entry = 2;
+  uint64 played_ms = 3;
+  EndReason reason = 4;
+}
+
+message EngineEvent {
+  uint64 timestamp_unix_ms = 1;
+  oneof event {
+    TrackStarted track_started = 2;
+    TrackEnded track_ended = 3;
+  }
+}
+
+message GetConfigRequest {}
+
+message EngineConfig {
+  // heron_core::PlayoutSettings.
+  string playout_settings_json = 1;
+  // heron_core::OutputsConfig.
+  string outputs_json = 2;
+}
+
+message SetPlayoutSettingsRequest {
+  string settings_json = 1;
+}
+
+message SetPlayoutSettingsResponse {}
+
+message SetOutputsRequest {
+  string outputs_json = 1;
+}
+
+message SetOutputsResponse {}
