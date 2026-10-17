@@ -23,9 +23,6 @@ jobs:
         image: mariadb:11.8
         env:
           MARIADB_ROOT_PASSWORD: root
-          MARIADB_DATABASE: heron_test
-          MARIADB_USER: heron
-          MARIADB_PASSWORD: heron
         ports:
           - 3306:3306
         options: >-
@@ -34,7 +31,8 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      HERON_TEST_DATABASE_URL: mysql://heron:heron@127.0.0.1:3306/heron_test
+      # Tests create and drop their own scratch databases.
+      HERON_TEST_DATABASE_URL: mysql://root:root@127.0.0.1:3306
     steps:
       - uses: actions/checkout@v5
       # rustup installs the toolchain pinned in rust-toolchain.toml.
@@ -69,12 +67,23 @@ jobs:
       - run: scripts/check-spdx.sh
 
   compose:
-    name: Docker Compose (build, start, migrate)
-    runs-on: ubuntu-latest
+    name: Docker Compose on ${{ matrix.arch }} (build, start, import)
+    # Native runners for both architectures: Heron must run on a Raspberry Pi.
+    runs-on: ${{ matrix.runner }}
     needs: [rust, web]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
-      - run: cp .env.example .env && mkdir -p data/music data/fallback
+      - run: cp .env.example .env && mkdir -p data/fallback
+      - name: Generate a test library
+        run: scripts/generate-test-library.sh data/music 60
       - run: docker compose build
       - run: docker compose up -d --wait --wait-timeout 300
       - name: Migrations were applied
@@ -84,6 +93,8 @@ jobs:
             "SELECT COUNT(*) FROM _sqlx_migrations WHERE success = 1" | grep -qv '^0$'
       - name: Web app reaches the API
         run: curl -fsS http://localhost:8000/api/v1/status | grep -q '"database":"ok"'
+      - name: Every track is imported and analyzed
+        run: scripts/wait-for-analysis.sh http://localhost:8000 60 300
       - if: failure()
         run: docker compose ps && docker compose logs
       - if: always()
