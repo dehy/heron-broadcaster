@@ -7084,11 +7084,13 @@
       "StationSettings": {
         "type": "object",
         "description": "The station itself.",
+        "required": [
+          "timezone"
+        ],
         "properties": {
           "timezone": {
             "type": "string",
-            "description": "IANA time zone the clocks and restrictions follow, e.g.\n`Europe/Paris`. By default the server's (`TZ`), or UTC.",
-            "default": "Europe/Paris"
+            "description": "IANA time zone the clocks and restrictions follow, e.g.\n`Europe/Paris`. By default the server's (`TZ`), or UTC."
           }
         },
         "additionalProperties": false

@@ -2521,7 +2521,6 @@ export interface components {
             /**
              * @description IANA time zone the clocks and restrictions follow, e.g.
              *     `Europe/Paris`. By default the server's (`TZ`), or UTC.
-             * @default Europe/Paris
              */
             timezone: string;
         };

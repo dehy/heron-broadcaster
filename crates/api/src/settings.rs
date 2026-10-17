@@ -53,8 +53,10 @@ impl Default for QueueSettings {
 }
 
 /// The station itself.
+// No `serde(default)`: the default time zone is the server's, and the
+// OpenAPI document must not depend on the machine that generates it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct StationSettings {
     /// IANA time zone the clocks and restrictions follow, e.g.
     /// `Europe/Paris`. By default the server's (`TZ`), or UTC.
