@@ -97,8 +97,9 @@ Delivered in [M9 – AGC & multiband processing](roadmap/m9-agc-multiband.md).
 - Details in [Encoders and outputs](outputs.md).
 - **Webhooks** on track start, end and skip: configurable payload, HMAC signature, retries with backoff, delivery log.
 - REST API, WebSocket for live state, public now-playing and history endpoints.
+- **Listener statistics** from the stream servers (Icecast, Shoutcast): listeners per day, per hour, per output and per track, peak, average and total listening hours, without storing IP addresses. See [M7b](roadmap/m7b-listener-statistics.md).
 
-Delivered across [M2](roadmap/m2-engine-core.md), [M4](roadmap/m4-api-control-plane.md), [M7](roadmap/m7-webhooks-output-api.md) and [M10](roadmap/m10-sinks-live-dj.md).
+Delivered across [M2](roadmap/m2-engine-core.md), [M4](roadmap/m4-api-control-plane.md), [M7](roadmap/m7-webhooks-output-api.md), [M7b](roadmap/m7b-listener-statistics.md) and [M10](roadmap/m10-sinks-live-dj.md).
 
 ## 5. Reliability (24/7)
 

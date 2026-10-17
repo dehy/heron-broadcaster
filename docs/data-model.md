@@ -66,6 +66,16 @@ See [Encoders and outputs](outputs.md). The engine never reads these tables: the
 | `encoder_profiles` | id, name, encoder (mp3, aac, opus, vorbis, external_ffmpeg), bitrate_kbps, sample_rate, channels, options (JSON: VBR/CBR, ffmpeg binary path and arguments, …) |
 | `outputs` | id, name, kind (icecast, shoutcast_v1, shoutcast_v2, hls, file, pipe), encoder_profile_id, config (JSON: host, port, mount, credentials, HLS directory and segment settings, …), metadata_enabled, enabled |
 
+## Listener statistics
+
+See [M7b](roadmap/m7b-listener-statistics.md). Sketch, defined with that milestone. No IP address is ever stored.
+
+| Table | Columns |
+|---|---|
+| `listener_samples` | output_id, sampled_at (each minute), listeners |
+| `listener_sessions` | id, output_id, listener_key (daily salted hash of IP and player), user_agent, started_at, ended_at, duration_s |
+| `listener_daily` | output_id, day, hour (NULL for the whole day), distinct_listeners, peak, average, listening_hours, sessions |
+
 ## Integrations and access
 
 | Table | Columns |
