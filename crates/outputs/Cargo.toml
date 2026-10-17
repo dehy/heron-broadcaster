@@ -9,5 +9,25 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 
+[dependencies]
+base64.workspace = true
+bytes.workspace = true
+heron-core.workspace = true
+heron-dsp.workspace = true
+metrics.workspace = true
+# LAME (LGPL), built from source: nothing to install on the host.
+mp3lame-encoder.workspace = true
+percent-encoding.workspace = true
+rtrb.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+symphonia.workspace = true
+tokio = { workspace = true, features = ["io-util", "sync"] }
+
 [lints]
 workspace = true

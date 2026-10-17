@@ -22,14 +22,18 @@ heron-service = { path = "crates/service" }
 anyhow = "1.0.104"
 audioadapter-buffers = "5.2.0"
 axum = "0.8.9"
+base64 = "0.23.1"
 blake3 = "1.8.7"
+bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 ebur128 = "0.1.10"
 hound = "3.5.1"
 lofty = "0.25.4"
 metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
+mp3lame-encoder = "0.2.5"
 notify = "8.2.0"
+percent-encoding = "2.3.2"
 rtrb = "0.4.0"
 rubato = "5.0.1"
 serde = { version = "1.0.229", features = ["derive"] }
