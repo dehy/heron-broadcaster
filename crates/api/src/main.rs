@@ -2,10 +2,14 @@
 
 //! `heron-api`: HTTP and WebSocket API, library scanner and queue manager.
 //!
-//! In M0 it connects to MariaDB, applies the migrations and serves the ops
-//! endpoints plus `GET /api/v1/status`.
+//! It applies the database migrations on startup, scans the music library
+//! and serves the API and the ops endpoints.
+
+mod library;
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -13,13 +17,12 @@ use axum::Router;
 use axum::extract::State;
 use axum::routing::get;
 use clap::{Parser, Subcommand};
-use heron_service::db::{self, DatabaseHealth};
+use heron_service::db::{self, DatabaseHealth, MIGRATOR};
 use heron_service::{HealthCheck, LogArgs};
+use library::{Library, ScanOptions};
 use serde::Serialize;
 
 const SERVICE: &str = "heron-api";
-
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
 #[derive(Debug, Parser)]
 #[command(name = SERVICE, version, about = "Heron Broadcaster API")]
@@ -39,6 +42,24 @@ struct Cli {
     /// MariaDB URL, e.g. `mysql://heron:secret@mariadb:3306/heron`.
     #[arg(long, env = "HERON_DATABASE_URL", hide_env_values = true)]
     database_url: Option<String>,
+
+    /// Root of the music library. Track paths are stored relative to it.
+    #[arg(long, env = "HERON_LIBRARY_DIR", default_value = "/music")]
+    library_dir: PathBuf,
+
+    /// Seconds between full library scans (file system events also trigger scans).
+    #[arg(long, env = "HERON_SCAN_INTERVAL", default_value_t = 3600)]
+    scan_interval: u64,
+
+    /// Watch the library for changes. Turn off on file systems without
+    /// change notifications (some network shares); periodic scans still run.
+    #[arg(long, env = "HERON_LIBRARY_WATCH", default_value_t = true, action = clap::ArgAction::Set)]
+    library_watch: bool,
+
+    /// Seconds a file must stay unmodified before it is imported, so files
+    /// still being copied are not read half-written.
+    #[arg(long, env = "HERON_IMPORT_SETTLE", default_value_t = 5)]
+    import_settle: u64,
 
     #[command(flatten)]
     log: LogArgs,
@@ -79,22 +100,33 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         "database schema is up to date"
     );
 
+    let library = Arc::new(Library::new(pool.clone(), cli.library_dir));
+    let scanner = tokio::spawn(library.clone().run(ScanOptions {
+        interval: Duration::from_secs(cli.scan_interval.max(60)),
+        watch: cli.library_watch,
+        settle: Duration::from_secs(cli.import_settle),
+    }));
+
     let health = DatabaseHealth(pool.clone());
     let router = Router::new()
         .route("/api/v1/status", get(status))
+        .route("/api/v1/library/status", get(library_status))
         .with_state(AppState {
             health: health.clone(),
+            library,
         })
         .merge(heron_service::ops_router(SERVICE, metrics, health));
 
-    heron_service::serve(cli.http_addr, router).await?;
+    let served = heron_service::serve(cli.http_addr, router).await;
+    scanner.abort();
     pool.close().await;
-    Ok(())
+    Ok(served?)
 }
 
 #[derive(Clone)]
 struct AppState {
     health: DatabaseHealth,
+    library: Arc<Library>,
 }
 
 #[derive(Serialize)]
@@ -116,22 +148,37 @@ async fn status(State(state): State<AppState>) -> axum::Json<Status> {
     })
 }
 
+async fn library_status(
+    State(state): State<AppState>,
+) -> Result<axum::Json<library::LibraryStatus>, (axum::http::StatusCode, String)> {
+    state
+        .library
+        .status()
+        .await
+        .map(axum::Json)
+        .map_err(|error| {
+            tracing::warn!(%error, "cannot read the library status");
+            (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "library status unavailable".to_owned(),
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Applies the migrations to the MariaDB in `HERON_TEST_DATABASE_URL`
-    /// (an empty database). Skipped when the variable is not set; CI sets it.
+    use heron_service::db::ScratchDatabase;
+
+    /// Applies the migrations to a scratch MariaDB database (see
+    /// `HERON_TEST_DATABASE_URL`). Skipped when no test database is configured.
     #[tokio::test]
     async fn migrations_apply_and_are_idempotent() {
-        let Ok(url) = std::env::var("HERON_TEST_DATABASE_URL") else {
-            eprintln!("HERON_TEST_DATABASE_URL not set, skipping");
+        let Some(db) = ScratchDatabase::create().await else {
             return;
         };
-        let pool = db::connect(&url, db::ConnectOptions::default())
-            .await
-            .unwrap();
-        MIGRATOR.run(&pool).await.unwrap();
+        let pool = db.pool.clone();
         MIGRATOR.run(&pool).await.unwrap();
 
         let tables: Vec<String> = sqlx::query_scalar(
@@ -164,8 +211,7 @@ mod tests {
             assert!(tables.iter().any(|t| t == expected), "missing {expected}");
         }
 
-        // Long paths stay unique through the generated hash column. Rolled
-        // back so the test can run again on the same database.
+        // Long paths stay unique through the generated hash column.
         let mut tx = pool.begin().await.unwrap();
         let long_path = format!("/music/{}.flac", "a".repeat(3000));
         sqlx::query("INSERT INTO tracks (path) VALUES (?)")
@@ -179,5 +225,6 @@ mod tests {
             .await;
         assert!(duplicate.is_err());
         tx.rollback().await.unwrap();
+        db.drop().await;
     }
 }
