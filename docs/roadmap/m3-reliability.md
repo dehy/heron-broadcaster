@@ -10,7 +10,7 @@ Already delivered in [M2](m2-engine-core.md): the queue lives in the engine's me
 - Keeping more of the upcoming tracks ready (decoded or read into memory), so a slow or unreachable library does not cause underruns.
 - Persist the queue and resume playback on restart.
 - Docker restart policies and health checks.
-- Clock sync monitoring in `heron-engine`: `heron_clock_synchronized` and `heron_clock_offset_seconds` in `/metrics`, and a warning in `/healthz` when the clock is not synced or is off by more than about 1 s (see [Requirements – Reliability](../requirements.md#5-reliability-247)).
+- Clock sync monitoring in `heron-engine`: `heron_clock_synchronized` and `heron_clock_offset_seconds` in `/metrics`, and a warning in `/healthz` when the clock is not synced or is off by more than about 1 s (see [Requirements – Reliability](../requirements.md#5-reliability-247)). The reading itself (`heron_service::clock`) was added in [M5](m5-web-ui.md), whose dashboard shows the warning through `GET /api/v1/status`.
 
 ## Acceptance criteria
 

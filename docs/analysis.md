@@ -39,7 +39,9 @@ After (and during) a scan, every present track whose analysis is missing, made b
 | Worker crashed | Its jobs are reclaimed after a 5 min lease, or immediately when the same instance restarts |
 | Analyzer shut down | Running jobs are put back without counting the attempt |
 
-Re-analysis happens automatically when `ALGORITHM_VERSION` in `heron-analysis` is bumped (algorithm or decoder changes) or when the analysis settings change (their fingerprint is stored as `params_hash`). Version 2 (M1b) adds the Chromaprint fingerprint, so upgrading from M1 analyzes every track once more.
+Re-analysis happens automatically when `ALGORITHM_VERSION` in `heron-analysis` is bumped (algorithm or decoder changes) or when the analysis settings change (their fingerprint is stored as `params_hash`). Version 2 (M1b) adds the Chromaprint fingerprint, and version 3 (M5) the waveform overview, so each of those upgrades analyzes every track once more (in the background: tracks keep playing with their previous analysis).
+
+**Waveform:** the analysis also keeps the highest sample peak of every 50 ms, on a dB scale (one byte per point, from −72 dBFS to full scale: quiet intros and outros stay visible), in `track_waveforms`. The web UI draws it with the cue and fade points (`GET /api/v1/tracks/{id}/waveform`). About 1.2 kB per minute of audio.
 
 ## Analyzer
 

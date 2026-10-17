@@ -1,6 +1,6 @@
 # API and control plane
 
-`heron-api` is the station's control plane: the REST API and live WebSocket the web UI uses, the queue manager feeding the engine, the play history, and the configuration it pushes to the engine. Built in [M4](roadmap/m4-api-control-plane.md).
+`heron-api` is the station's control plane: the REST API and live WebSocket the [web UI](web.md) uses, the queue manager feeding the engine, the play history, and the configuration it pushes to the engine. Built in [M4](roadmap/m4-api-control-plane.md), completed for the web UI in [M5](roadmap/m5-web-ui.md).
 
 The engine never depends on it: when the API is down, the engine plays what it has queued with the configuration it last received ([Audio engine](audio-engine.md)).
 
@@ -18,8 +18,8 @@ Local users only for now ([Decisions](decisions.md#decisions-made-after-the-hand
 | Role | Can |
 |---|---|
 | `viewer` | See everything except users and secrets (output passwords, the AcoustID key are never sent back to anyone) |
-| `operator` | Also run the station: queue, skip, pause, FX, track overrides and categories, queue settings |
-| `admin` | Also playout, analysis and library settings, encoder profiles, outputs and users |
+| `operator` | Also run the station: queue, skip, pause, FX, track overrides and categories, queue settings, the review of identifications |
+| `admin` | Also playout, analysis and library settings, organizing the library and undoing batches, encoder profiles, outputs and users |
 
 Create the first admin on the command line (the password is read without echo; from stdin when it is not a terminal):
 
@@ -34,17 +34,18 @@ Then:
 - **Web app:** `POST /api/v1/auth/login` with `{"username", "password"}` sets a session cookie (`heron_session`, `HttpOnly`, `SameSite=Strict`, `Secure` when the proxy reports HTTPS through `X-Forwarded-Proto`). Sessions last 30 days from the last use. Requests that change something with a cookie must also send an `X-Requested-With` header (any value): pages on other sites cannot add it, so they cannot act on your behalf.
 - **Scripts:** create an API token (`POST /api/v1/tokens`, shown once) and send `Authorization: Bearer heron_…`. Tokens act as their user, with its role; they can expire and be revoked.
 - Passwords (8 characters at least) are hashed with Argon2id, one at a time so sign-ins never take CPU from the engine on a Raspberry Pi. After 5 failed sign-ins a username is locked for a minute. Only hashes of session and API tokens are stored. Changing a password signs the user out everywhere else; disabling a user ends their sessions and stops their tokens. The last enabled admin cannot be demoted, disabled or deleted.
-- `GET /api/v1/status`, `/api/v1/library/status` and `/api/v1/openapi.json` need no sign-in.
+- `GET /api/v1/status`, `/api/v1/library/status` and `/api/v1/openapi.json` need no sign-in. `/status` also reports the server clock's synchronization (`clock`, read from the kernel with a read-only `adjtimex`: containers share the host's clock), with a `warning` when it is not synchronized or may be off by more than a second; the web UI shows it on every page.
 
 ## Routes
 
 | Area | Routes |
 |---|---|
-| Account | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `PUT /auth/password`; `GET`, `POST /tokens`, `DELETE /tokens/{id}` |
+| Account | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `PUT /auth/password`, `PUT /auth/preferences` (`{"theme"}`: system, light, dark); `GET`, `POST /tokens`, `DELETE /tokens/{id}` |
 | Users (admins) | `GET`, `POST /users`; `PATCH`, `DELETE /users/{id}` |
 | Engine and decks | `GET /engine` (reachable, configuration in sync), `GET /player` (decks, cued track, queue, outputs), `GET /player/levels`, `POST /player/skip`, `/player/pause`, `/player/resume`, `POST /player/fx` (`{"track_id"}`), `DELETE /player/fx` |
 | Queue | `GET /queue` (the cued track first), `POST /queue` (`{"track_ids", "position"}`), `DELETE /queue`, `DELETE /queue/{entry_id}`, `PUT /queue/{entry_id}/position` |
-| Library | `GET /library/status`; `GET /tracks` (`q`, `category_id`, `filter`: playable, missing, unanalyzed, silent, disabled, needs_review; `sort`; `limit`, `offset`); `GET`, `PATCH /tracks/{id}` (`enabled`); `PUT`, `DELETE /tracks/{id}/overrides`; `PUT /tracks/{id}/categories`; `POST /playout/transition` (preview a transition between two tracks, optionally with unsaved settings) |
+| Library | `GET /library/status`; `GET /tracks` (`q`, `category_id`, `filter`: playable, missing, unanalyzed, silent, disabled, needs_review; `sort`; `limit`, `offset`); `GET`, `PATCH /tracks/{id}` (`enabled`); `PUT`, `DELETE /tracks/{id}/overrides`; `PUT /tracks/{id}/categories`; `GET /tracks/{id}/waveform`; `GET /tracks/{id}/audio` (the file, with range requests, for previews); `POST /playout/transition` (preview a transition between two tracks, optionally with unsaved settings) |
+| Library management | `GET /library/review`; `POST /tracks/{id}/review/apply` (`{"release_id", "recording_id"}`, one of its candidates), `POST /tracks/{id}/review/keep`; `POST /library/organize` (dry run), `POST /library/organize/{plan_task_id}/apply`; `GET /library/batches`, `POST /library/batches/{id}/undo`; `GET /library/tasks`, `GET /library/tasks/{id}` — see [below](#library-management) |
 | Categories | `GET`, `POST /categories`; `GET`, `PUT`, `DELETE /categories/{id}` |
 | History | `GET /history` (`before`, `after`, `track_id`, `exclude_fx`, `limit`) |
 | Settings | `GET`, `PUT /settings/playout`, `/settings/analysis`, `/settings/queue`; `GET`, `PATCH /settings/library` |
@@ -75,6 +76,16 @@ The engine holds the queue; the API feeds it and edits it.
 - **Positions** count the waiting tracks: 0 is next (before the cued track), 1 right after it, and so on.
 - **Following the library:** every 5 seconds, waiting tracks are checked against the database. A track the librarian moved, or whose cue points changed, is updated in place (same entry and position); a track whose file disappeared or was deleted leaves the queue. The track on air plays on (its file is already open).
 - Each track carries its source (`rotation` for autofill, `manual` when queued by hand), recorded in the history.
+
+## Library management
+
+The API cannot write files (its library mount is read-only), so what changes files is queued as a **library task** (`library_tasks`) that `heron-librarian` runs, one at a time, in order. The routes answer `202` with the task; poll `GET /library/tasks/{id}` until its `status` is `done` (with its `plan` or `report`) or `failed` (with its `error`). A task stays `pending` while the librarian is stopped.
+
+- **Review:** `GET /library/review` lists the tracks whose identification was not confident enough, with the releases AcoustID found (`candidates`). Applying one queues a `review_apply` task: the librarian looks the release up on MusicBrainz, writes its tags into the file, files it where the layout says and saves the cover, as a `review` batch. Keeping the file's own tags only changes the database (status `kept`).
+- **Organize:** `POST /library/organize` queues a dry run; its `plan` lists every move. `POST /library/organize/{plan_task_id}/apply` carries it out as one batch (once per dry run; tracks moved since are skipped).
+- **Undo:** `POST /library/batches/{id}/undo` reverts any batch (import, organization, review). Undoing a review puts the track back in review.
+
+Tasks running when the librarian stops are marked failed; ask again (an interrupted undo resumes). See [Library management](library.md).
 
 ## Play history
 
@@ -109,5 +120,4 @@ On top of the scanner's: `heron_api_engine_connected` (0 or 1), `heron_api_engin
 
 - Autofill is not a rotation: no separation between artists or titles, no categories or clocks before [M6](roadmap/m6-rotation-clockwheels.md).
 - Plays made while the API is away are not recorded (the engine keeps no event history).
-- The API reads the library: the review of identifications and reorganization (`heron-librarian review`, `organize`, `undo`) are not in the API yet; they come with their screens in [M5](roadmap/m5-web-ui.md).
 - HTTPS is left to a reverse proxy in front of `heron-web`.

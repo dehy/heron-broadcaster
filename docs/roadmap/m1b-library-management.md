@@ -1,6 +1,6 @@
 # M1b – Library management
 
-**Depends on:** M1. Can run in parallel with M2. The review screen comes with [M5](m5-web-ui.md).
+**Depends on:** M1. Can run in parallel with M2. The review screen came with [M5](m5-web-ui.md).
 
 Like iTunes' "Keep Music folder organized" and "Copy files to the Music folder when adding": you drop files into an incoming folder, and Heron identifies them, fixes their tags and files them under Artist / Album / Track.
 
