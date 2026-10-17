@@ -7,7 +7,8 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | # | Milestone | Depends on | Status |
 |---|---|---|---|
 | M0 | [Foundations](m0-foundations.md) | — | Done ([#1](https://github.com/dehy/heron-broadcaster/pull/1)) |
-| M1 | [Import & analysis](m1-import-analysis.md) | M0 | In review |
+| M1 | [Import & analysis](m1-import-analysis.md) | M0 | In review ([#3](https://github.com/dehy/heron-broadcaster/pull/3)) |
+| M1b | [Library management](m1b-library-management.md) | M1 | Not started |
 | M2 | [Engine core](m2-engine-core.md) | M1 | Not started |
 | M3 | [24/7 reliability](m3-reliability.md) | M2 | Not started |
 | M4 | [API & control plane](m4-api-control-plane.md) | M2 | Not started |
@@ -21,9 +22,10 @@ Progress is tracked here: the status column below and the acceptance checklists 
 ## Dependency graph
 
 ```
-M0 ─► M1 ─► M2 ─┬─► M3 ─► M10
-                ├─► M4 ─┬─► M5
-                │       ├─► M6
-                │       └─► M7
-                └─► M8 ─► M9
+M0 ─► M1 ─┬─► M1b
+          └─► M2 ─┬─► M3 ─► M10
+                  ├─► M4 ─┬─► M5
+                  │       ├─► M6
+                  │       └─► M7
+                  └─► M8 ─► M9
 ```
