@@ -9,13 +9,29 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "heron-engine"
+path = "src/main.rs"
+
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
+heron-analysis.workspace = true
+heron-core.workspace = true
+heron-dsp.workspace = true
+heron-service.workspace = true
+rtrb.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-heron-service.workspace = true
+
+[dev-dependencies]
+hound.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true
