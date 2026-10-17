@@ -24,11 +24,17 @@ heron-analysis.workspace = true
 heron-core.workspace = true
 heron-dsp.workspace = true
 heron-outputs.workspace = true
+heron-proto.workspace = true
 heron-service.workspace = true
+lofty.workspace = true
 metrics.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 rtrb.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tokio-stream = { workspace = true, features = ["sync"] }
+tonic.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

@@ -954,13 +954,19 @@ dependencies = [
  "heron-core",
  "heron-dsp",
  "heron-outputs",
+ "heron-proto",
  "heron-service",
  "hound",
+ "lofty",
  "metrics",
  "rtrb",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-stream",
+ "tonic",
  "tracing",
 ]
 
@@ -2871,6 +2877,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

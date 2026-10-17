@@ -7,6 +7,9 @@
 //! every other service is down.
 
 pub mod clock;
+pub mod config;
 pub mod decoder;
+pub mod engine;
+pub mod grpc;
 pub mod mixer;
 pub mod player;
