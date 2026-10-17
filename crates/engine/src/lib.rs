@@ -6,4 +6,6 @@
 //! The engine never connects to the database and must keep playing when
 //! every other service is down.
 
+pub mod clock;
+pub mod decoder;
 pub mod mixer;

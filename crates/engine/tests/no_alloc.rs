@@ -65,7 +65,10 @@ fn realtime<R>(f: impl FnOnce() -> R) -> (R, usize) {
     REALTIME.with(|flag| flag.set(true));
     let result = f();
     REALTIME.with(|flag| flag.set(false));
-    (result, REALTIME_ALLOCATIONS.load(Ordering::Relaxed) - before)
+    (
+        result,
+        REALTIME_ALLOCATIONS.load(Ordering::Relaxed) - before,
+    )
 }
 
 #[test]
@@ -197,4 +200,58 @@ fn the_mixer_does_not_allocate() {
     }
     assert!(script.is_empty());
     assert_eq!(total, 0, "the audio thread allocated or freed memory");
+}
+
+#[test]
+fn reading_decoded_tracks_does_not_allocate() {
+    use heron_engine::decoder::DecodedSource;
+    use std::time::{Duration, Instant};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("track.wav");
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 44_100,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+    for n in 0..44_100 * 2 {
+        writer.write_sample(((n % 200) * 100) as i16).unwrap();
+    }
+    writer.finalize().unwrap();
+
+    let source = DecodedSource::spawn(path, 100, 900).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while source.buffered_frames() < 800 * 48 {
+        assert!(Instant::now() < deadline, "decoding is too slow");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    let (mut mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
+    let track = Box::new(LoadedTrack {
+        entry_id: 1,
+        source: Box::new(source),
+        length: 800 * 48,
+        gain: 1.0,
+        fade_in: None,
+    });
+    assert!(
+        handle
+            .commands
+            .push(Command::Cue {
+                track,
+                transition: FrameTransition::back_to_back(),
+            })
+            .is_ok()
+    );
+    let mut block = vec![0.0_f32; BLOCK_FRAMES * CHANNELS];
+    let mut total = 0;
+    for _ in 0..100 {
+        let ((), allocations) = realtime(|| mixer.render(&mut block));
+        total += allocations;
+    }
+    assert_eq!(total, 0, "the audio thread allocated or freed memory");
+    // The track played to its end and was handed back.
+    assert!(handle.trash.pop().is_ok());
 }

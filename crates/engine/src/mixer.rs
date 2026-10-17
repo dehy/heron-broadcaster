@@ -610,7 +610,9 @@ impl Mixer {
         let read = voice.track.source.read(scratch);
         let meter = &mut self.meters[slot];
         for (index, (input, output)) in scratch[..read * CHANNELS]
-            .as_chunks::<CHANNELS>().0.iter()
+            .as_chunks::<CHANNELS>()
+            .0
+            .iter()
             .zip(out.as_chunks_mut::<CHANNELS>().0)
             .enumerate()
         {
