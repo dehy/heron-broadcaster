@@ -11,7 +11,9 @@ pub mod fingerprint;
 #[cfg(feature = "mysql")]
 pub mod jobs;
 
-pub use analyzer::{Analysis, Analyzer, FRAME_MS};
+pub use analyzer::{
+    Analysis, Analyzer, FRAME_MS, WAVEFORM_FLOOR_DB, WAVEFORM_INTERVAL_MS, Waveform,
+};
 pub use decode::{Decoder, analyze_and_fingerprint, analyze_file};
 pub use fingerprint::{Chromaprint, fingerprint_file};
 
@@ -21,7 +23,8 @@ pub use fingerprint::{Chromaprint, fingerprint_file};
 ///
 /// - 1: M1.
 /// - 2: adds the Chromaprint fingerprint (M1b).
-pub const ALGORITHM_VERSION: u32 = 2;
+/// - 3: adds the waveform overview (M5).
+pub const ALGORITHM_VERSION: u32 = 3;
 
 /// Errors raised while analyzing a file.
 #[derive(Debug, thiserror::Error)]

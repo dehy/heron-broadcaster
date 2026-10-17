@@ -228,6 +228,15 @@ pub async fn complete(
     .bind(analysis.has_internal_silence)
     .execute(&mut *tx)
     .await?;
+    sqlx::query(
+        "INSERT INTO track_waveforms (track_id, interval_ms, peaks) VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE interval_ms = VALUES(interval_ms), peaks = VALUES(peaks)",
+    )
+    .bind(job.track_id)
+    .bind(analysis.waveform.interval_ms)
+    .bind(analysis.waveform.peaks.as_slice())
+    .execute(&mut *tx)
+    .await?;
     if let Some(chromaprint) = chromaprint {
         sqlx::query(
             "INSERT INTO track_fingerprints (track_id, chromaprint) VALUES (?, ?)
@@ -390,6 +399,10 @@ mod tests {
             cue_out_ms: 178_500,
             fade_out_start_ms: Some(176_000),
             has_internal_silence: false,
+            waveform: crate::Waveform {
+                interval_ms: 50,
+                peaks: vec![0, 128, 255],
+            },
         }
     }
 
@@ -440,6 +453,13 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(stored, chromaprint().as_bytes());
+        let waveform: (u16, Vec<u8>) =
+            sqlx::query_as("SELECT interval_ms, peaks FROM track_waveforms WHERE track_id = ?")
+                .bind(track_id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(waveform, (50, vec![0, 128, 255]));
         assert_eq!(enqueue_stale(pool, &settings).await.unwrap(), 0);
 
         let changed = AnalysisSettings {
