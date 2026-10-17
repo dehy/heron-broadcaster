@@ -20,9 +20,21 @@ use tokio::sync::{broadcast, watch};
 
 use crate::decoder::DecodedSource;
 use crate::mixer::{
-    Command, Deck, EndReason, Event, FrameRamp, FrameTransition, LoadedTrack, MixerHandle,
-    MixerStatus, frames_to_ms, ms_to_frames,
+    AudioSource, Command, Deck, EndReason, Event, FrameRamp, FrameTransition, LoadedTrack,
+    MixerHandle, MixerStatus, frames_to_ms, ms_to_frames,
 };
+
+/// Opens the audio of a file between its cue points (in ms).
+pub type SourceLoader = fn(PathBuf, u32, u32) -> std::io::Result<Box<dyn AudioSource>>;
+
+/// Decodes on a thread of its own, ahead of the deck.
+fn spawn_decoder(
+    path: PathBuf,
+    cue_in_ms: u32,
+    cue_out_ms: u32,
+) -> std::io::Result<Box<dyn AudioSource>> {
+    Ok(Box::new(DecodedSource::spawn(path, cue_in_ms, cue_out_ms)?))
+}
 
 /// A track to play, as sent by the API.
 #[derive(Clone, Debug, PartialEq)]
@@ -104,6 +116,7 @@ pub struct Player {
     on_air: Option<u64>,
     paused: bool,
     next_entry_id: u64,
+    load_source: SourceLoader,
     events: broadcast::Sender<PlayerEvent>,
     now_playing: watch::Sender<NowPlaying>,
 }
@@ -126,9 +139,16 @@ impl Player {
             on_air: None,
             paused: false,
             next_entry_id: 1,
+            load_source: spawn_decoder,
             events,
             now_playing,
         }
+    }
+
+    /// Replaces how tracks are opened (decode threads by default).
+    pub fn with_source_loader(mut self, load_source: SourceLoader) -> Self {
+        self.load_source = load_source;
+        self
     }
 
     pub fn status(&self) -> &MixerStatus {
@@ -420,10 +440,10 @@ impl Player {
     ) -> Result<Box<LoadedTrack>, PlayerError> {
         let playout = &entry.track.playout;
         let path = self.resolve(&entry.track.path)?;
-        let source = DecodedSource::spawn(path, playout.cue_in_ms, playout.cue_out_ms)?;
+        let source = (self.load_source)(path, playout.cue_in_ms, playout.cue_out_ms)?;
         Ok(Box::new(LoadedTrack {
             entry_id: entry.entry_id,
-            source: Box::new(source),
+            source,
             length: ms_to_frames(playout.playable_ms()),
             gain: db_to_gain(playout.gain_db(&self.settings.loudness)),
             fade_in: self.fade_in(entry, transition),

@@ -120,12 +120,37 @@ enum DecodeError {
     Resample(#[from] heron_dsp::resample::Error),
 }
 
+/// Where decoded audio goes.
+trait Output {
+    /// Takes `samples`; returns `false` when no more audio is wanted.
+    fn write(&mut self, samples: &[f32]) -> bool;
+}
+
+impl Output for Vec<f32> {
+    fn write(&mut self, samples: &[f32]) -> bool {
+        self.extend_from_slice(samples);
+        true
+    }
+}
+
+/// Decodes the part of `path` between the cue points into memory, on the
+/// calling thread. Same audio as [`DecodedSource`]; for offline rendering
+/// and tests.
+pub fn decode_to_memory(path: &Path, cue_in_ms: u32, cue_out_ms: u32) -> Vec<f32> {
+    let mut audio = Vec::new();
+    let range = ms_to_frames(cue_in_ms)..ms_to_frames(cue_out_ms);
+    if let Err(error) = decode(path, range, &mut audio) {
+        tracing::warn!(path = %path.display(), %error, "decoding failed");
+    }
+    audio
+}
+
 struct Writer<'a> {
     producer: rtrb::Producer<f32>,
     state: &'a DecodeState,
 }
 
-impl Writer<'_> {
+impl Output for Writer<'_> {
     /// Pushes `samples`, waiting for room. Returns `false` when the deck no
     /// longer wants the audio.
     fn write(&mut self, mut samples: &[f32]) -> bool {
@@ -157,7 +182,7 @@ impl Writer<'_> {
 fn decode(
     path: &Path,
     range: std::ops::Range<u64>,
-    writer: &mut Writer<'_>,
+    writer: &mut impl Output,
 ) -> Result<(), DecodeError> {
     let mut decoder = Decoder::open(path)?;
     let mut resampler: Option<StreamResampler> = None;

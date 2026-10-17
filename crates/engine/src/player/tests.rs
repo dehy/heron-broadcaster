@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The player driving a mixer rendered offline, with real files.
-
-use std::time::Duration;
+//!
+//! Files are decoded in memory, synchronously, so the tests do not depend on
+//! how fast decode threads run on the test machine (they have tests of their own).
 
 use heron_core::playout::CrossfadeOverrides;
 use tempfile::TempDir;
 
 use super::*;
-use crate::mixer::{CHANNELS, Mixer};
+use crate::decoder::decode_to_memory;
+use crate::mixer::{CHANNELS, Mixer, VecSource};
 
 const BLOCK: usize = 4_800;
 
@@ -32,7 +34,11 @@ impl Station {
             handle,
             events_tx,
             now_playing_tx,
-        );
+        )
+        .with_source_loader(|path, cue_in_ms, cue_out_ms| {
+            let audio = decode_to_memory(&path, cue_in_ms, cue_out_ms);
+            Ok(Box::new(VecSource::new(audio)))
+        });
         Self {
             library,
             player,
@@ -68,14 +74,12 @@ impl Station {
         }
     }
 
-    /// Renders `seconds` of audio at ten times real time, letting the
-    /// decoders keep up.
+    /// Renders `seconds` of audio, the player handling events between blocks.
     fn play(&mut self, seconds: f64) -> Vec<f32> {
         let mut output = Vec::new();
         let mut block = vec![0.0; BLOCK * CHANNELS];
         for _ in 0..(seconds * 10.0).round() as usize {
             self.player.tick();
-            std::thread::sleep(Duration::from_millis(10));
             self.mixer.render(&mut block);
             output.extend_from_slice(&block);
         }
