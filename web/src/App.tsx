@@ -1,132 +1,295 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useEffect, useState } from "react";
-import { type ApiStatus, type LibraryStatus, fetchLibraryStatus, fetchStatus } from "./api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type ReactNode, useEffect, useState } from "react";
+import { api, done, errorMessage, fetchStatus, unwrap } from "./api";
+import { Banner, Icon, type IconName, Loading, Logo } from "./components/ui";
+import { startLive, stopLive, useLive } from "./lib/live";
+import { Link, match, navigate, useLocation } from "./lib/router";
+import { ME_KEY, UserContext, useCan, useMeQuery } from "./lib/session";
+import { applyTheme, storedTheme } from "./lib/theme";
+import { Account } from "./pages/Account";
+import { Categories } from "./pages/Categories";
+import { Dashboard } from "./pages/Dashboard";
+import { History } from "./pages/History";
+import { Library } from "./pages/Library";
+import { Login } from "./pages/Login";
+import { Outputs } from "./pages/Outputs";
+import { Playout } from "./pages/Playout";
+import { QueuePage } from "./pages/Queue";
+import { Review } from "./pages/Review";
+import { Settings } from "./pages/Settings";
+import { Track } from "./pages/Track";
+import { Users } from "./pages/Users";
 
-type Loaded<T> = { kind: "loading" } | { kind: "ok"; value: T } | { kind: "error"; message: string };
-
-const REFRESH_MS = 5000;
-
-/** Polls `load` every few seconds. */
-function usePolling<T>(load: (signal: AbortSignal) => Promise<T>): Loaded<T> {
-  const [state, setState] = useState<Loaded<T>>({ kind: "loading" });
-  useEffect(() => {
-    const controller = new AbortController();
-    const refresh = () => {
-      load(controller.signal)
-        .then((value) => setState({ kind: "ok", value }))
-        .catch((error: unknown) => {
-          if (!controller.signal.aborted) {
-            setState({ kind: "error", message: String(error) });
-          }
-        });
-    };
-    refresh();
-    const timer = setInterval(refresh, REFRESH_MS);
-    return () => {
-      controller.abort();
-      clearInterval(timer);
-    };
-  }, [load]);
-  return state;
-}
+applyTheme(storedTheme());
 
 export function App() {
-  const status = usePolling(fetchStatus);
-  const library = usePolling(fetchLibraryStatus);
+  const me = useMeQuery();
+  const user = me.data;
 
+  useEffect(() => {
+    if (user) {
+      applyTheme(user.theme);
+      startLive();
+    } else if (user === null) {
+      stopLive();
+    }
+  }, [user]);
+
+  if (me.isPending) {
+    return <Loading label="Contacting Heron…" />;
+  }
+  if (me.isError) {
+    return (
+      <main className="login">
+        <Banner kind="bad">The API cannot be reached: {errorMessage(me.error)}</Banner>
+      </main>
+    );
+  }
+  if (!user) {
+    return <Login />;
+  }
   return (
-    <main>
-      <h1>Heron Broadcaster</h1>
-      <p className="tagline">Keeping the air on, 24/7.</p>
-      <section aria-live="polite">
-        <h2>System status</h2>
-        <StatusView state={status} />
-      </section>
-      <section aria-live="polite">
-        <h2>Library</h2>
-        <LibraryView state={library} />
-      </section>
-    </main>
+    <UserContext.Provider value={user}>
+      <Shell />
+    </UserContext.Provider>
   );
 }
 
-function StatusView({ state }: { state: Loaded<ApiStatus> }) {
-  switch (state.kind) {
-    case "loading":
-      return <p>Contacting the API…</p>;
-    case "error":
-      return <p className="bad">API unreachable: {state.message}</p>;
-    case "ok":
+interface Page {
+  path: string;
+  label: string;
+  icon: IconName;
+  section?: string;
+  admin?: boolean;
+}
+
+const PAGES: Page[] = [
+  { path: "/", label: "On air", icon: "air" },
+  { path: "/queue", label: "Queue", icon: "queue" },
+  { path: "/history", label: "History", icon: "history" },
+  { path: "/library", label: "Tracks", icon: "library", section: "Library" },
+  { path: "/categories", label: "Categories", icon: "tag" },
+  { path: "/review", label: "Review & organize", icon: "review" },
+  { path: "/playout", label: "Crossfade & loudness", icon: "fade", section: "Station" },
+  { path: "/outputs", label: "Outputs", icon: "output" },
+  { path: "/settings", label: "Settings", icon: "settings" },
+  { path: "/users", label: "Users", icon: "users", admin: true },
+];
+
+function route(pathname: string): ReactNode {
+  const track = match("/library/:id", pathname);
+  if (track) {
+    return <Track id={Number(track.id)} />;
+  }
+  switch (pathname) {
+    case "/":
+      return <Dashboard />;
+    case "/queue":
+      return <QueuePage />;
+    case "/history":
+      return <History />;
+    case "/library":
+      return <Library />;
+    case "/categories":
+      return <Categories />;
+    case "/review":
+      return <Review />;
+    case "/playout":
+      return <Playout />;
+    case "/outputs":
+      return <Outputs />;
+    case "/settings":
+      return <Settings />;
+    case "/users":
+      return <Users />;
+    case "/account":
+      return <Account />;
+    default:
       return (
-        <dl>
-          <dt>API</dt>
-          <dd className="good">
-            {state.value.service} {state.value.version}
-          </dd>
-          <dt>Database</dt>
-          <dd className={state.value.database === "ok" ? "good" : "bad"}>{state.value.database}</dd>
-          <dt>Engine</dt>
-          <dd className={state.value.engine === "ok" ? "good" : "bad"}>{state.value.engine}</dd>
-        </dl>
+        <Banner kind="warn">
+          There is no page here. <Link to="/">Back on air</Link>
+        </Banner>
       );
   }
 }
 
-function LibraryView({ state }: { state: Loaded<LibraryStatus> }) {
-  switch (state.kind) {
-    case "loading":
-      return <p>Loading…</p>;
-    case "error":
-      return <p className="bad">Library status unavailable: {state.message}</p>;
-    case "ok": {
-      const library = state.value;
-      const queue = library.analysis_queue;
-      const percent = library.tracks > 0 ? Math.floor((library.analyzed / library.tracks) * 100) : 100;
-      return (
-        <>
-          <dl>
-            <dt>Tracks</dt>
-            <dd>{library.tracks.toLocaleString()}</dd>
-            <dt>Analyzed</dt>
-            <dd>
-              {library.analyzed.toLocaleString()} ({percent} %)
-            </dd>
-            {queue.pending + queue.running > 0 && (
-              <>
-                <dt>In progress</dt>
-                <dd>{(queue.pending + queue.running).toLocaleString()} queued</dd>
-              </>
-            )}
-            {queue.failed > 0 && (
-              <>
-                <dt>Failed</dt>
-                <dd className="bad">{queue.failed.toLocaleString()} unreadable files</dd>
-              </>
-            )}
-            {library.silent > 0 && (
-              <>
-                <dt>Silent</dt>
-                <dd className="bad">{library.silent.toLocaleString()} tracks with no audio</dd>
-              </>
-            )}
-            {library.missing > 0 && (
-              <>
-                <dt>Missing</dt>
-                <dd className="bad">{library.missing.toLocaleString()} files no longer found</dd>
-              </>
-            )}
-          </dl>
-          <progress max={100} value={percent} aria-label="Analysis progress" />
-          {library.last_scan && (
-            <p className="muted">
-              Last scan {new Date(library.last_scan.finished_at_unix * 1000).toLocaleString()},{" "}
-              {library.last_scan.files.toLocaleString()} files in{" "}
-              {(library.last_scan.duration_ms / 1000).toFixed(1)} s
-            </p>
-          )}
-        </>
-      );
+function isCurrent(page: string, pathname: string): boolean {
+  return page === "/" ? pathname === "/" : pathname === page || pathname.startsWith(`${page}/`);
+}
+
+function Shell() {
+  const { pathname } = useLocation();
+  const [navOpen, setNavOpen] = useState(false);
+  const isAdmin = useCan("admin");
+  const client = useQueryClient();
+  const user = client.getQueryData<{ username: string }>(ME_KEY);
+  const review = useQuery({
+    queryKey: ["review-count"],
+    queryFn: () => unwrap(api.GET("/api/v1/library/review", { params: { query: { limit: 1 } } })),
+    refetchInterval: 60_000,
+  });
+  const reviewCount = review.data?.total ?? 0;
+
+  useEffect(() => {
+    setNavOpen(false);
+  }, [pathname]);
+
+  const signOut = async () => {
+    await done(api.POST("/api/v1/auth/logout")).catch(() => {});
+    stopLive();
+    client.setQueryData(ME_KEY, null);
+    client.removeQueries({ predicate: (query) => query.queryKey[0] !== ME_KEY[0] });
+    navigate("/");
+  };
+
+  let section: string | undefined;
+  return (
+    <div className={navOpen ? "shell nav-open" : "shell"}>
+      {navOpen && (
+        <div className="scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />
+      )}
+      <aside className="sidebar" aria-label="Navigation">
+        <Link to="/" className="brand">
+          <Logo /> Heron
+        </Link>
+        <nav className="nav">
+          {PAGES.filter((page) => !page.admin || isAdmin).map((page) => {
+            const heading = page.section !== undefined && page.section !== section;
+            if (page.section) {
+              section = page.section;
+            }
+            return (
+              <div key={page.path} style={{ display: "contents" }}>
+                {heading && <div className="nav-section">{page.section}</div>}
+                <Link
+                  to={page.path}
+                  aria-current={isCurrent(page.path, pathname) ? "page" : undefined}
+                >
+                  <Icon name={page.icon} /> {page.label}
+                  {page.path === "/review" && reviewCount > 0 && (
+                    <span className="count" title="Tracks waiting for review">
+                      {reviewCount}
+                    </span>
+                  )}
+                </Link>
+              </div>
+            );
+          })}
+        </nav>
+        <div className="sidebar-footer">
+          <nav className="nav">
+            <Link to="/account" aria-current={pathname === "/account" ? "page" : undefined}>
+              <Icon name="user" /> <span className="ellipsis">{user?.username ?? "Account"}</span>
+            </Link>
+            <a
+              href="/"
+              onClick={(event) => {
+                event.preventDefault();
+                void signOut();
+              }}
+            >
+              <Icon name="logout" /> Sign out
+            </a>
+          </nav>
+        </div>
+      </aside>
+      <div className="main">
+        <div className="topbar">
+          <button
+            type="button"
+            className="btn ghost icon"
+            aria-label="Menu"
+            aria-expanded={navOpen}
+            onClick={() => setNavOpen(true)}
+          >
+            <Icon name="menu" />
+          </button>
+          <Link to="/" className="brand">
+            <Logo size={20} /> Heron
+          </Link>
+          <span className="spacer" />
+          <OnAirBadge />
+        </div>
+        <main className="content">
+          <Warnings />
+          {route(pathname)}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function OnAirBadge() {
+  const player = useLive((live) => live.player);
+  const onAir = player?.decks.some((deck) => deck.on_air) && !player.paused;
+  return onAir ? (
+    <span className="on-air-pill">
+      <span className="dot" style={{ background: "#fff" }} /> ON AIR
+    </span>
+  ) : null;
+}
+
+/** Problems worth knowing on every page. */
+function Warnings() {
+  const connected = useLive((live) => live.connected);
+  const player = useLive((live) => live.player);
+  const status = useQuery({ queryKey: ["status"], queryFn: () => fetchStatus(), refetchInterval: 15_000 });
+  const engine = useQuery({
+    queryKey: ["engine"],
+    queryFn: () => unwrap(api.GET("/api/v1/engine")),
+    refetchInterval: 15_000,
+  });
+  const [disconnectedSince, setDisconnectedSince] = useState<number | null>(null);
+  useEffect(() => {
+    setDisconnectedSince(connected ? null : Date.now());
+  }, [connected]);
+  // Brief reconnections are not worth a banner.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (connected) {
+      return;
     }
+    const timer = setTimeout(() => tick((n) => n + 1), 3_000);
+    return () => clearTimeout(timer);
+  }, [connected]);
+
+  const warnings: ReactNode[] = [];
+  if (status.isError) {
+    warnings.push(<>The API cannot be reached: {errorMessage(status.error)}</>);
+  } else if (!connected && disconnectedSince !== null && Date.now() - disconnectedSince > 2_500) {
+    warnings.push(<>Live updates are disconnected. Reconnecting…</>);
   }
+  if (status.data?.database === "unavailable") {
+    warnings.push(<>The database is unavailable: the station plays on, but nothing can be changed.</>);
+  }
+  if (player === null || status.data?.engine === "unavailable") {
+    warnings.push(<>The engine cannot be reached. Its outputs keep streaming what it has queued.</>);
+  }
+  if (engine.data?.config.state === "failed") {
+    warnings.push(
+      <>
+        The engine refused the station's configuration: {engine.data.config.error}.{" "}
+        <Link to="/outputs">Check the outputs</Link>
+      </>,
+    );
+  }
+  const clock = status.data?.clock.warning;
+  if (clock) {
+    warnings.push(
+      <>
+        <strong>Clock:</strong> {clock}. Scheduled programming may start at the wrong time.
+      </>,
+    );
+  }
+  return (
+    <>
+      {warnings.map((warning, index) => (
+        <Banner key={index} kind={index === 0 && status.isError ? "bad" : "warn"}>
+          {warning}
+        </Banner>
+      ))}
+    </>
+  );
 }

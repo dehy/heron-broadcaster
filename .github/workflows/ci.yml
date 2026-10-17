@@ -50,7 +50,7 @@ jobs:
           git diff --exit-code web/openapi.json
 
   web:
-    name: Web (typecheck, build)
+    name: Web (typecheck, test, build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -68,6 +68,7 @@ jobs:
       - name: Client types match the OpenAPI document
         run: npm run generate-api && git diff --exit-code src/api/schema.ts
       - run: npm run typecheck
+      - run: npm test
       - run: npm run build
 
   spdx:

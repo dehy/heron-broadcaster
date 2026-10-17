@@ -10,6 +10,36 @@ export type Schemas = components["schemas"];
 export type ApiStatus = Schemas["Status"];
 export type LibraryStatus = Schemas["LibraryStatus"];
 export type LiveMessage = Schemas["LiveMessage"];
+export type User = Schemas["User"];
+export type Role = Schemas["Role"];
+export type Theme = Schemas["Theme"];
+export type PlayerState = Schemas["PlayerState"];
+export type QueueEntry = Schemas["QueueEntry"];
+export type DeckState = Schemas["DeckState"];
+export type DeckPosition = Schemas["DeckPosition"];
+export type Levels = Schemas["Levels"];
+export type ChannelLevels = Schemas["ChannelLevels"];
+export type TrackEvent = Schemas["TrackEvent"];
+export type TrackSummary = Schemas["TrackSummary"];
+export type TrackDetail = Schemas["TrackDetail"];
+export type TrackOverrides = Schemas["TrackOverrides"];
+export type Category = Schemas["Category"];
+export type PlayoutSettings = Schemas["PlayoutSettings"];
+export type Fade = Schemas["Fade"];
+export type FadeCurve = Schemas["FadeCurve"];
+export type TransitionPreview = Schemas["TransitionPreview"];
+export type OutputView = Schemas["OutputView"];
+export type OutputStatus = Schemas["OutputStatus"];
+export type EncoderProfileView = Schemas["EncoderProfileView"];
+export type LibraryTask = Schemas["LibraryTask"];
+export type Play = Schemas["Play"];
+
+export type TrackFilter = NonNullable<
+  NonNullable<paths["/api/v1/tracks"]["get"]["parameters"]["query"]>["filter"]
+>;
+export type TrackSort = NonNullable<
+  NonNullable<paths["/api/v1/tracks"]["get"]["parameters"]["query"]>["sort"]
+>;
 
 // Requests that change something must say they come from a script, not
 // from a form on another site (see docs/api.md#authentication).
@@ -17,19 +47,45 @@ export const api = createClient<paths>({
   headers: { "X-Requested-With": "heron-web" },
 });
 
-/** The data of a response, or an error with the API's message. */
-async function unwrap<T>(
+/** An error answered by the API, with its code (`not_found`, `conflict`…). */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+function toError(error: unknown, response: Response): ApiError {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const code = "error" in error ? String(error.error) : "error";
+    return new ApiError(response.status, code, String(error.message));
+  }
+  return new ApiError(response.status, "error", `The API answered ${response.status}`);
+}
+
+/** The data of a response, or an `ApiError`. */
+export async function unwrap<T>(
   result: Promise<{ data?: T; error?: unknown; response: Response }>,
 ): Promise<T> {
   const { data, error, response } = await result;
-  if (data === undefined) {
-    const message =
-      typeof error === "object" && error !== null && "message" in error
-        ? String(error.message)
-        : `API answered ${response.status}`;
-    throw new Error(message);
+  if (!response.ok || data === undefined) {
+    throw toError(error, response);
   }
   return data;
+}
+
+/** For answers without a body (204). */
+export async function done(
+  result: Promise<{ error?: unknown; response: Response }>,
+): Promise<void> {
+  const { error, response } = await result;
+  if (!response.ok) {
+    throw toError(error, response);
+  }
 }
 
 export const fetchStatus = (signal?: AbortSignal) =>
@@ -37,3 +93,44 @@ export const fetchStatus = (signal?: AbortSignal) =>
 
 export const fetchLibraryStatus = (signal?: AbortSignal) =>
   unwrap(api.GET("/api/v1/library/status", signal ? { signal } : {}));
+
+/** The signed-in user, or `null` when signed out. */
+export async function fetchMe(): Promise<User | null> {
+  const { data, response } = await api.GET("/api/v1/auth/me");
+  if (response.status === 401) {
+    return null;
+  }
+  if (!data) {
+    throw new ApiError(response.status, "error", `The API answered ${response.status}`);
+  }
+  return data;
+}
+
+/** Roles in increasing order of what they can do. */
+const ROLES: Role[] = ["viewer", "operator", "admin"];
+
+/** Whether `role` can do what `needed` can. */
+export function can(role: Role | undefined, needed: Role): boolean {
+  return role !== undefined && ROLES.indexOf(role) >= ROLES.indexOf(needed);
+}
+
+/** Drops `undefined` and empty values from query parameters. */
+export function query<T extends Record<string, unknown>>(
+  params: T,
+): { [K in keyof T]?: Exclude<T[K], undefined | null> } {
+  const out: { [K in keyof T]?: Exclude<T[K], undefined | null> } = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") {
+      (out as Record<string, unknown>)[key] = value;
+    }
+  }
+  return out;
+}
+
+/** Message of any error, for people. */
+export function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}

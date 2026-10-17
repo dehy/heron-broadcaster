@@ -1,0 +1,143 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+// The live WebSocket (/api/v1/live): decks, queue, outputs, positions,
+// levels and track changes, kept in one store that components read slices
+// of. Reconnects with a growing delay when the connection drops.
+
+import { useSyncExternalStore } from "react";
+import type { DeckPosition, Levels, LiveMessage, PlayerState, TrackEvent } from "../api";
+
+export interface Positions {
+  decks: DeckPosition[];
+  /** `performance.now()` when they arrived, to move them on between messages. */
+  receivedAt: number;
+}
+
+export interface LiveState {
+  connected: boolean;
+  /** `undefined` before the first message, `null` while the engine is unreachable. */
+  player: PlayerState | null | undefined;
+  positions: Positions | null;
+  levels: Levels | null;
+  /** The most recent track changes, newest first. */
+  events: TrackEvent[];
+}
+
+const MAX_EVENTS = 20;
+const MAX_DELAY_MS = 10_000;
+
+let state: LiveState = {
+  connected: false,
+  player: undefined,
+  positions: null,
+  levels: null,
+  events: [],
+};
+const listeners = new Set<() => void>();
+let socket: WebSocket | null = null;
+let retry: ReturnType<typeof setTimeout> | null = null;
+let delay = 500;
+let wanted = false;
+
+function set(changes: Partial<LiveState>) {
+  state = { ...state, ...changes };
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+function handle(message: LiveMessage) {
+  switch (message.type) {
+    case "state":
+      set({ player: message.player ?? null });
+      break;
+    case "positions":
+      set({ positions: { decks: message.decks, receivedAt: performance.now() } });
+      break;
+    case "levels":
+      set({ levels: message.levels });
+      break;
+    case "track":
+      set({ events: [message.event, ...state.events].slice(0, MAX_EVENTS) });
+      break;
+  }
+}
+
+function connect() {
+  if (!wanted || socket) {
+    return;
+  }
+  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${scheme}://${window.location.host}/api/v1/live`);
+  socket = ws;
+  ws.onopen = () => {
+    delay = 500;
+    set({ connected: true });
+  };
+  ws.onmessage = (event) => {
+    try {
+      handle(JSON.parse(String(event.data)) as LiveMessage);
+    } catch {
+      // A message this version does not know: ignored.
+    }
+  };
+  ws.onclose = () => {
+    socket = null;
+    set({ connected: false, levels: null });
+    if (wanted) {
+      retry = setTimeout(connect, delay);
+      delay = Math.min(delay * 2, MAX_DELAY_MS);
+    }
+  };
+}
+
+/** Opens the connection (once signed in). */
+export function startLive() {
+  wanted = true;
+  connect();
+}
+
+/** Closes it (signed out). */
+export function stopLive() {
+  wanted = false;
+  if (retry) {
+    clearTimeout(retry);
+    retry = null;
+  }
+  socket?.close();
+  socket = null;
+  state = { connected: false, player: undefined, positions: null, levels: null, events: [] };
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/** A slice of the live state; re-renders only when it changes. */
+export function useLive<T>(select: (state: LiveState) => T): T {
+  return useSyncExternalStore(subscribe, () => select(state));
+}
+
+/**
+ * Where a deck is now, moved on from the last positions message unless
+ * the player is paused.
+ */
+export function positionNow(
+  positions: Positions | null,
+  deck: string,
+  paused: boolean,
+  now = performance.now(),
+): { position_ms: number; length_ms: number } | null {
+  const found = positions?.decks.find((d) => d.deck === deck);
+  if (!positions || !found) {
+    return null;
+  }
+  const elapsed = paused ? 0 : Math.max(0, now - positions.receivedAt);
+  return {
+    position_ms: Math.min(found.position_ms + elapsed, found.length_ms),
+    length_ms: found.length_ms,
+  };
+}
