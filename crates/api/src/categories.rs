@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Categories: groups of tracks the clockwheels call (M6). A track can be
-//! in several categories.
+//! Categories: groups of tracks the clockwheels call. A track can be in
+//! several categories. A category can override the separation windows of
+//! the rotation settings (a power rotation repeats its titles sooner).
 
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use heron_rotation::SeparationOverrides;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
@@ -21,13 +23,28 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_category, update_category, delete_category))
 }
 
-#[derive(Clone, Debug, Serialize, ToSchema, sqlx::FromRow)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct Category {
     pub id: u64,
     pub name: String,
     /// `#rrggbb`.
     pub color: Option<String>,
     pub tracks: i64,
+    /// Windows this category overrides; the others follow the rotation
+    /// settings (clock slots can override them again).
+    pub separation: SeparationOverrides,
+}
+
+type CategoryRow = (u64, String, Option<String>, i64, Option<String>);
+
+fn category((id, name, color, tracks, separation): CategoryRow) -> Category {
+    Category {
+        id,
+        name,
+        color,
+        tracks,
+        separation: crate::rotation::overrides(separation.as_deref()),
+    }
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -36,6 +53,21 @@ pub struct CategoryInput {
     pub name: String,
     /// `#rrggbb`, or none.
     pub color: Option<String>,
+    /// None overridden by default.
+    #[serde(default)]
+    pub separation: SeparationOverrides,
+}
+
+/// Overrides as stored: `NULL` for none.
+pub fn separation_json(overrides: &SeparationOverrides) -> ApiResult<Option<String>> {
+    let windows = heron_rotation::Windows::default().with(overrides);
+    windows.check().map_err(ApiError::Invalid)?;
+    if overrides.is_empty() {
+        return Ok(None);
+    }
+    serde_json::to_string(overrides)
+        .map(Some)
+        .map_err(|error| ApiError::Internal(error.to_string()))
 }
 
 impl CategoryInput {
@@ -62,7 +94,8 @@ impl CategoryInput {
 }
 
 const SELECT: &str = "SELECT c.id, c.name, c.color,
-           (SELECT COUNT(*) FROM track_categories tc WHERE tc.category_id = c.id) AS tracks
+           (SELECT COUNT(*) FROM track_categories tc WHERE tc.category_id = c.id) AS tracks,
+           CAST(c.separation AS CHAR)
     FROM categories c";
 
 fn conflict(error: sqlx::Error) -> ApiError {
@@ -79,10 +112,11 @@ async fn list_categories(
     _user: CurrentUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<Category>>> {
-    let categories = sqlx::query_as(sqlx::AssertSqlSafe(format!("{SELECT} ORDER BY c.name")))
-        .fetch_all(&state.pool)
-        .await?;
-    Ok(Json(categories))
+    let rows: Vec<CategoryRow> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("{SELECT} ORDER BY c.name")))
+            .fetch_all(&state.pool)
+            .await?;
+    Ok(Json(rows.into_iter().map(category).collect()))
 }
 
 #[utoipa::path(get, path = "/categories/{id}", tag = "categories",
@@ -93,11 +127,12 @@ async fn get_category(
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> ApiResult<Json<Category>> {
-    sqlx::query_as(sqlx::AssertSqlSafe(format!("{SELECT} WHERE c.id = ?")))
-        .bind(id)
-        .fetch_optional(&state.pool)
-        .await?
-        .map(Json)
+    let row: Option<CategoryRow> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("{SELECT} WHERE c.id = ?")))
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
+    row.map(|row| Json(category(row)))
         .ok_or_else(|| ApiError::not_found("category"))
 }
 
@@ -112,9 +147,11 @@ async fn create_category(
 ) -> ApiResult<(StatusCode, Json<Category>)> {
     user.require(Role::Operator)?;
     let (name, color) = input.check()?;
-    let id = sqlx::query("INSERT INTO categories (name, color) VALUES (?, ?)")
+    let separation = separation_json(&input.separation)?;
+    let id = sqlx::query("INSERT INTO categories (name, color, separation) VALUES (?, ?, ?)")
         .bind(name)
         .bind(color)
+        .bind(separation)
         .execute(&state.pool)
         .await
         .map_err(conflict)?
@@ -123,7 +160,8 @@ async fn create_category(
     Ok((StatusCode::CREATED, Json(category)))
 }
 
-/// Renames or recolors a category. Operators and admins.
+/// Renames, recolors a category or changes its separation. Operators and
+/// admins.
 #[utoipa::path(put, path = "/categories/{id}", tag = "categories",
     params(("id" = u64, Path)), request_body = CategoryInput,
     responses((status = 200, body = Category), (status = "4XX", body = ErrorBody)))]
@@ -135,9 +173,11 @@ async fn update_category(
 ) -> ApiResult<Json<Category>> {
     user.require(Role::Operator)?;
     let (name, color) = input.check()?;
-    sqlx::query("UPDATE categories SET name = ?, color = ? WHERE id = ?")
+    let separation = separation_json(&input.separation)?;
+    sqlx::query("UPDATE categories SET name = ?, color = ?, separation = ? WHERE id = ?")
         .bind(name)
         .bind(color)
+        .bind(separation)
         .bind(id)
         .execute(&state.pool)
         .await
@@ -145,8 +185,8 @@ async fn update_category(
     get_category(user, State(state), Path(id)).await
 }
 
-/// Deletes a category; its tracks stay in the library. Refused while a
-/// clock uses it. Operators and admins.
+/// Deletes a category and its restrictions; its tracks stay in the
+/// library. Refused while a clock uses it. Operators and admins.
 #[utoipa::path(delete, path = "/categories/{id}", tag = "categories",
     params(("id" = u64, Path)),
     responses((status = 204), (status = "4XX", body = ErrorBody)))]
@@ -156,9 +196,14 @@ async fn delete_category(
     Path(id): Path<u64>,
 ) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
+    let mut tx = state.pool.begin().await?;
+    sqlx::query("DELETE FROM restrictions WHERE target = 'category' AND target_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     let deleted = sqlx::query("DELETE FROM categories WHERE id = ?")
         .bind(id)
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|error| {
             if is_still_used(&error) {
@@ -170,6 +215,7 @@ async fn delete_category(
     if deleted.rows_affected() == 0 {
         return Err(ApiError::not_found("category"));
     }
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -182,6 +228,7 @@ mod tests {
         let input = |name: &str, color: Option<&str>| CategoryInput {
             name: name.to_owned(),
             color: color.map(str::to_owned),
+            separation: SeparationOverrides::default(),
         };
         assert_eq!(
             input(" Gold ", Some("#FFAA00")).check().unwrap(),
@@ -190,5 +237,24 @@ mod tests {
         assert!(input("", None).check().is_err());
         assert!(input("Gold", Some("orange")).check().is_err());
         assert_eq!(input("Gold", Some("")).check().unwrap().1, None);
+    }
+
+    #[test]
+    fn stores_only_overridden_windows() {
+        assert_eq!(
+            separation_json(&SeparationOverrides::default()).unwrap(),
+            None
+        );
+        let overrides = SeparationOverrides {
+            track_min: Some(90),
+            ..SeparationOverrides::default()
+        };
+        let json = separation_json(&overrides).unwrap().unwrap();
+        assert_eq!(crate::rotation::overrides(Some(&json)), overrides);
+        let too_long = SeparationOverrides {
+            title_min: Some(20_000),
+            ..SeparationOverrides::default()
+        };
+        assert!(separation_json(&too_long).is_err());
     }
 }

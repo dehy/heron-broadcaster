@@ -1020,3 +1020,372 @@ async fn web_ui_routes() {
     assert_eq!(viewer.get("/library/review").await["total"], 0);
     station.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rotation_follows_clocks_restrictions_and_logs_its_picks() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+    let pool = &station.db.pool;
+    let t = &station.tracks;
+
+    // Artists from the tags: names matched loosely, featuring split.
+    for (track, artist) in [
+        (t[0], "Neal Morse"),
+        (t[1], "NÉAL  MORSE feat. Mike Portnoy"),
+        (t[2], "The Neal Morse Band"),
+        (t[3], "Simon & Garfunkel"),
+        (t[4], "Paul Simon"),
+    ] {
+        sqlx::query("UPDATE tracks SET artist = ? WHERE id = ?")
+            .bind(artist)
+            .bind(track)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+    sqlx::query("UPDATE tracks SET artist = 'Simon' WHERE id = ?")
+        .bind(t[4])
+        .execute(pool)
+        .await
+        .unwrap();
+    crate::artists::link_pending(pool).await.unwrap();
+    let page = admin.get("/artists?q=neal%20morse").await;
+    assert_eq!(page["total"], 2, "{page}");
+    let neal = page["artists"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["name"] == "Neal Morse")
+        .unwrap()
+        .clone();
+    assert_eq!(neal["tracks"], 2, "{neal}");
+    assert_eq!(neal["names"].as_array().unwrap().len(), 1);
+    let band = page["artists"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["name"] == "The Neal Morse Band")
+        .unwrap()
+        .clone();
+    assert_eq!(admin.get("/artists?q=portnoy").await["total"], 1);
+    // Linking again changes nothing.
+    assert_eq!(crate::artists::link_pending(pool).await.unwrap(), 0);
+
+    // "Simon & Garfunkel" names Simon: suggested, never applied alone.
+    let suggestions = admin.get("/artist-suggestions").await;
+    let suggestion = &suggestions.as_array().unwrap()[0];
+    assert_eq!(suggestion["source"], "names", "{suggestions}");
+    let (status, _) = viewer
+        .send(
+            Method::POST,
+            &format!("/artist-suggestions/{}", suggestion["id"]),
+            json!({"accept": true}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            &format!("/artist-suggestions/{}", suggestion["id"]),
+            json!({"accept": true}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(
+        admin
+            .get("/artist-suggestions")
+            .await
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let simon = &admin.get("/artists?q=garfunkel").await["artists"][0];
+    assert_eq!(simon["similar"].as_array().unwrap().len(), 1, "{simon}");
+
+    // The band is the same artist: merged, its tracks follow.
+    let (status, merged) = admin
+        .send(
+            Method::POST,
+            &format!("/artists/{}/merge", neal["id"]),
+            json!({"artist_id": band["id"]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{merged}");
+    assert_eq!(merged["tracks"], 3);
+    assert_eq!(merged["names"].as_array().unwrap().len(), 2);
+    // A name moved back to an artist of its own.
+    let band_name = merged["names"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["name"] == "The Neal Morse Band")
+        .unwrap()["id"]
+        .clone();
+    let (status, own) = admin
+        .send(
+            Method::PUT,
+            &format!("/artist-names/{band_name}"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{own}");
+    assert_eq!(own["tracks"], 1);
+    let (status, _) = admin
+        .request(
+            Method::PUT,
+            &format!("/artists/{}/similar/{}", neal["id"], own["id"]),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Settings: the time zone and the rotation rules are checked.
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/station",
+            json!({"timezone": "Mars/Olympus"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/station",
+            json!({"timezone": "Europe/Paris"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/rotation",
+            json!({"weights": {"play_factor": 0.1}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Two categories, a clock calling them in turn, all week.
+    let mut categories = Vec::new();
+    for (name, members) in [("A", &t[..3]), ("B", &t[3..])] {
+        let (status, category) = admin
+            .send(
+                Method::POST,
+                "/categories",
+                json!({"name": name, "separation": {"track_min": 1}}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{category}");
+        assert_eq!(category["separation"]["track_min"], 1);
+        for track in members {
+            let (status, _) = admin
+                .send(
+                    Method::PUT,
+                    &format!("/tracks/{track}/categories"),
+                    json!([{"category_id": category["id"]}]),
+                )
+                .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+        categories.push(category["id"].as_u64().unwrap());
+    }
+    let (status, _) = viewer
+        .send(
+            Method::POST,
+            "/clocks",
+            json!({"name": "Nope", "slots": []}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, clock) = admin
+        .send(
+            Method::POST,
+            "/clocks",
+            json!({"name": "Hour", "slots": [
+                {"category_id": categories[0], "method": "random"},
+                {"category_id": categories[1], "method": "weighted",
+                 "separation": {"artist_min": 0}},
+            ]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{clock}");
+    let clock_id = clock["id"].as_u64().unwrap();
+    assert_eq!(clock["slots"][1]["separation"]["artist_min"], 0);
+    let week: Vec<Value> = (1..=7)
+        .flat_map(|day| {
+            (0..24).map(move |hour| json!({"day_of_week": day, "hour": hour, "clock_id": clock_id}))
+        })
+        .collect();
+    let (status, schedule) = admin.send(Method::PUT, "/schedule", json!(week)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(schedule.as_array().unwrap().len(), 168);
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/schedule",
+            json!([{"day_of_week": 8, "hour": 0, "clock_id": clock_id}]),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = admin
+        .send(
+            Method::DELETE,
+            &format!("/categories/{}", categories[0]),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "clocks use it");
+
+    // The last track is banned all week: never picked.
+    let banned = t[4];
+    let (status, restriction) = admin
+        .send(
+            Method::POST,
+            "/restrictions",
+            json!({
+                "target": {"kind": "track", "id": banned},
+                "rule": {"kind": "daypart", "mode": "ban", "days": [1, 2, 3, 4, 5, 6, 7],
+                         "start_hour": 0, "end_hour": 24},
+                "note": "pulled",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{restriction}");
+    assert!(
+        restriction["target_name"]
+            .as_str()
+            .unwrap()
+            .contains("Simon")
+    );
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/restrictions",
+            json!({
+                "target": {"kind": "category", "id": categories[0]},
+                "rule": {"kind": "daypart", "mode": "ban", "days": [], "start_hour": 0, "end_hour": 24},
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        admin
+            .get(&format!("/restrictions?target=track&target_id={banned}"))
+            .await
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // Weights halve with each play.
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/rotation",
+            json!({"weights": {"play_factor": 0.5}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // From now on the clock runs: A, B, A, B…
+    let (status, _) = admin.request(Method::DELETE, "/queue", None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let first_pick: u64 =
+        sqlx::query_scalar("SELECT CAST(COALESCE(MAX(id), 0) AS UNSIGNED) FROM rotation_picks")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let picks = eventually(
+        "clock picks that played",
+        Duration::from_secs(20),
+        || async {
+            let picks = admin.get("/rotation/picks?limit=200").await;
+            let picks: Vec<Value> = picks
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|p| p["id"].as_u64().unwrap() > first_pick)
+                .cloned()
+                .collect();
+            let played = picks
+                .iter()
+                .filter(|p| p["played_at_unix_ms"].is_i64())
+                .count();
+            (picks.len() >= 6 && played >= 3).then_some(picks)
+        },
+    )
+    .await;
+    let mut slots: Vec<(u64, u64)> = picks
+        .iter()
+        .rev()
+        .map(|p| {
+            let explanation = &p["explanation"];
+            assert_eq!(explanation["clock_id"], clock_id, "{p}");
+            assert_ne!(p["track_id"], banned, "{p}");
+            (
+                explanation["slot"].as_u64().unwrap(),
+                explanation["slot_category_id"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    slots.dedup();
+    assert!(slots.len() >= 4, "slots alternate: {slots:?}");
+    for (slot, category) in &slots {
+        assert_eq!(*category, categories[*slot as usize]);
+    }
+    // Tracks repeat within a minute: rules were relaxed, and the plays say so.
+    let relaxed: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM play_history h JOIN rotation_picks p ON p.play_id = h.id
+         WHERE p.step > 0 AND JSON_VALUE(h.relaxation_applied, '$.step') = p.step",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let relaxed_picks: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM rotation_picks WHERE step > 0 AND play_id IS NOT NULL",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(relaxed_picks > 0);
+    assert_eq!(relaxed, relaxed_picks);
+    let weight: f64 =
+        sqlx::query_scalar("SELECT MIN(weight) FROM track_categories WHERE category_id = ?")
+            .bind(categories[0])
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(weight < 1.0, "weights moved: {weight}");
+
+    // The clock as it will sound, and a simulation of it.
+    let preview = admin.get(&format!("/clocks/{clock_id}/preview")).await;
+    assert_eq!(preview["slots"][0]["tracks"], 3, "{preview}");
+    assert_eq!(preview["slots"][1]["average_ms"], 3_000);
+    assert!(preview["runs_per_hour"].as_f64().unwrap() > 100.0);
+    let (status, report) = admin
+        .send(
+            Method::POST,
+            "/rotation/simulate",
+            json!({"hours": 2, "seed": 7}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    let simulation = &report["simulation"];
+    assert!(
+        simulation["violations"].as_array().unwrap().is_empty(),
+        "{simulation}"
+    );
+    let simulated = simulation["picks"].as_array().unwrap();
+    assert!(simulated.len() > 2_000);
+    assert!(simulated.iter().all(|p| p["track_id"] != banned));
+    assert_eq!(report["tracks"].as_array().unwrap().len(), 4);
+    let (status, _) = viewer
+        .send(Method::POST, "/rotation/simulate", json!({"hours": 1}))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    station.stop().await;
+}

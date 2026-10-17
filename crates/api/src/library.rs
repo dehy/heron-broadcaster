@@ -104,6 +104,8 @@ struct FileInfo {
     title: Option<String>,
     artist: Option<String>,
     album: Option<String>,
+    /// The first MusicBrainz artist ID of the artist tag.
+    musicbrainz_artist_id: Option<String>,
     duration_ms: Option<u32>,
 }
 
@@ -429,8 +431,9 @@ impl Library {
     async fn insert(&self, file: &DiskFile, info: &FileInfo) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO tracks
-                 (path, file_hash, file_size, file_mtime_us, title, artist, album, duration_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                 (path, file_hash, file_size, file_mtime_us, title, artist, album,
+                  musicbrainz_artist_id, duration_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(file.path.as_str())
         .bind(&info.hash[..])
@@ -439,6 +442,7 @@ impl Library {
         .bind(&info.title)
         .bind(&info.artist)
         .bind(&info.album)
+        .bind(&info.musicbrainz_artist_id)
         .bind(info.duration_ms)
         .execute(&self.pool)
         .await?;
@@ -456,7 +460,8 @@ impl Library {
         sqlx::query(
             "UPDATE tracks
              SET file_hash = ?, file_size = ?, file_mtime_us = ?, title = ?, artist = ?,
-                 album = ?, duration_ms = COALESCE(?, duration_ms), missing_since = NULL
+                 album = ?, musicbrainz_artist_id = ?, duration_ms = COALESCE(?, duration_ms),
+                 missing_since = NULL
              WHERE id = ?",
         )
         .bind(&info.hash[..])
@@ -465,6 +470,7 @@ impl Library {
         .bind(&info.title)
         .bind(&info.artist)
         .bind(&info.album)
+        .bind(&info.musicbrainz_artist_id)
         .bind(info.duration_ms)
         .bind(id)
         .execute(&mut *tx)
@@ -561,6 +567,7 @@ fn read_file(path: &Path) -> std::io::Result<FileInfo> {
         title: read.tags.title,
         artist: read.tags.artist,
         album: read.tags.album,
+        musicbrainz_artist_id: read.tags.musicbrainz.first_artist(),
         duration_ms: read.duration_ms,
     })
 }

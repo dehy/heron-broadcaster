@@ -280,6 +280,25 @@ impl Library {
         }
     }
 
+    /// How far back separation can look, in ms: the longest window the
+    /// settings, a category or a slot uses (an hour at least).
+    pub fn horizon_ms(&self) -> i64 {
+        let base = self.settings.separation;
+        let mut longest = base.longest_min();
+        for category in self.categories.values() {
+            longest = longest.max(base.with(&category.separation).longest_min());
+        }
+        for slot in self.clocks.values().flat_map(|clock| &clock.slots) {
+            let category = self
+                .categories
+                .get(&slot.category)
+                .map(|c| c.separation)
+                .unwrap_or_default();
+            longest = longest.max(base.with(&category).with(&slot.separation).longest_min());
+        }
+        i64::from(longest.max(60)) * 60_000
+    }
+
     /// Station time at `at_ms` (Unix milliseconds).
     pub fn local(&self, at_ms: i64) -> jiff::Zoned {
         Timestamp::from_millisecond(at_ms)

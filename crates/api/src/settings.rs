@@ -7,11 +7,15 @@
 //!   re-analyzes the library.
 //! - `library`: identification and layout, read by `heron-librarian`.
 //! - `queue`: the queue manager.
+//! - `rotation`: separation rules, fallback category and weights.
+//! - `station`: the time zone clocks and restrictions follow.
 
 use axum::Json;
 use axum::extract::State;
 use heron_core::{AnalysisSettings, LibrarySettings, PlayoutSettings};
 use heron_library::layout::Layout;
+use heron_rotation::RotationSettings;
+use jiff::tz::TimeZone;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
@@ -44,6 +48,44 @@ impl Default for QueueSettings {
         Self {
             autofill: true,
             min_queued: 3,
+        }
+    }
+}
+
+/// The station itself.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct StationSettings {
+    /// IANA time zone the clocks and restrictions follow, e.g.
+    /// `Europe/Paris`. By default the server's (`TZ`), or UTC.
+    pub timezone: String,
+}
+
+impl StationSettings {
+    pub const SETTINGS_NAME: &'static str = "station";
+
+    /// The time zone; UTC if the stored one is unknown.
+    pub fn time_zone(&self) -> TimeZone {
+        TimeZone::get(&self.timezone).unwrap_or_else(|error| {
+            tracing::warn!(timezone = %self.timezone, %error, "unknown time zone: using UTC");
+            TimeZone::UTC
+        })
+    }
+}
+
+impl Default for StationSettings {
+    fn default() -> Self {
+        let from_env = std::env::var("TZ")
+            .ok()
+            .map(|tz| tz.trim_start_matches(':').to_owned())
+            .filter(|tz| TimeZone::get(tz).is_ok());
+        let system = || {
+            TimeZone::try_system()
+                .ok()
+                .and_then(|tz| tz.iana_name().map(str::to_owned))
+        };
+        Self {
+            timezone: from_env.or_else(system).unwrap_or_else(|| "UTC".to_owned()),
         }
     }
 }
@@ -157,6 +199,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_analysis, put_analysis))
         .routes(routes!(get_library, patch_library))
         .routes(routes!(get_queue_settings, put_queue_settings))
+        .routes(routes!(get_rotation_settings, put_rotation_settings))
+        .routes(routes!(get_station, put_station))
 }
 
 /// Crossfades and loudness normalization.
@@ -329,6 +373,76 @@ async fn put_queue_settings(
     }
     save(&state.pool, QueueSettings::SETTINGS_NAME, &settings).await?;
     state.queue.wake();
+    Ok(Json(settings))
+}
+
+/// Separation rules, the fallback category and weights.
+#[utoipa::path(get, path = "/settings/rotation", tag = "settings",
+    responses((status = 200, body = RotationSettings), (status = "4XX", body = ErrorBody)))]
+async fn get_rotation_settings(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<RotationSettings>> {
+    Ok(Json(
+        load(&state.pool, RotationSettings::SETTINGS_NAME).await?,
+    ))
+}
+
+/// Replaces the rotation settings (missing fields take the defaults).
+/// Operators and admins.
+#[utoipa::path(put, path = "/settings/rotation", tag = "settings",
+    request_body = RotationSettings,
+    responses((status = 200, body = RotationSettings), (status = "4XX", body = ErrorBody)))]
+async fn put_rotation_settings(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(settings): Json<RotationSettings>,
+) -> ApiResult<Json<RotationSettings>> {
+    user.require(Role::Operator)?;
+    settings.check().map_err(ApiError::Invalid)?;
+    if let Some(id) = settings.fallback_category_id {
+        let exists: Option<u64> = sqlx::query_scalar("SELECT id FROM categories WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
+        if exists.is_none() {
+            return Err(ApiError::Invalid(format!("no category {id}")));
+        }
+    }
+    save(&state.pool, RotationSettings::SETTINGS_NAME, &settings).await?;
+    tracing::info!(user = %user.username, ?settings, "rotation settings changed");
+    Ok(Json(settings))
+}
+
+#[utoipa::path(get, path = "/settings/station", tag = "settings",
+    responses((status = 200, body = StationSettings), (status = "4XX", body = ErrorBody)))]
+async fn get_station(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<StationSettings>> {
+    Ok(Json(
+        load(&state.pool, StationSettings::SETTINGS_NAME).await?,
+    ))
+}
+
+/// Replaces the station settings. Admins only.
+#[utoipa::path(put, path = "/settings/station", tag = "settings",
+    request_body = StationSettings,
+    responses((status = 200, body = StationSettings), (status = "4XX", body = ErrorBody)))]
+async fn put_station(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(settings): Json<StationSettings>,
+) -> ApiResult<Json<StationSettings>> {
+    user.require(Role::Admin)?;
+    TimeZone::get(&settings.timezone).map_err(|_| {
+        ApiError::Invalid(format!(
+            "unknown time zone {:?}: use an IANA name such as Europe/Paris",
+            settings.timezone
+        ))
+    })?;
+    save(&state.pool, StationSettings::SETTINGS_NAME, &settings).await?;
+    tracing::info!(user = %user.username, timezone = %settings.timezone, "station settings changed");
     Ok(Json(settings))
 }
 

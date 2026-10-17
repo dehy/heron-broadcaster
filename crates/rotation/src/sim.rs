@@ -66,22 +66,6 @@ pub struct Simulation {
     pub violations: Vec<Violation>,
 }
 
-/// The longest window anything in the library uses, in ms.
-fn horizon_ms(library: &Library) -> i64 {
-    let base = library.settings.separation;
-    let mut longest = base.longest_min();
-    for category in library.categories.values() {
-        longest = longest.max(base.with(&category.separation).longest_min());
-        for clock in library.clocks.values() {
-            for slot in clock.slots.iter().filter(|s| s.category == category.id) {
-                let windows = base.with(&category.separation).with(&slot.separation);
-                longest = longest.max(windows.longest_min());
-            }
-        }
-    }
-    i64::from(longest.max(60)) * 60_000
-}
-
 /// Programming from `start_ms` for `duration_ms`, after `history`; weights
 /// move with each play as configured.
 pub fn simulate(
@@ -94,7 +78,7 @@ pub fn simulate(
 ) -> Simulation {
     let mut working = library.clone();
     let before = history.plays().to_vec();
-    let horizon = horizon_ms(library);
+    let horizon = library.horizon_ms();
     let mut rng = Rng::new(seed);
     let mut picks = Vec::new();
     let mut gap_minutes = 0;
