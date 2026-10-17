@@ -42,11 +42,15 @@ pub struct QueueCounts {
     pub failed: u64,
 }
 
+/// Delay before a job whose file changed is tried again.
+pub const FILE_CHANGED_DELAY: Duration = Duration::from_secs(30);
+
 /// What [`complete`] did with a result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Completion {
     Saved,
-    /// The file changed while it was analyzed: the job is queued again.
+    /// The file is not the one the scanner recorded (still being copied, or
+    /// the scanner has not seen the change yet): the job is postponed.
     FileChanged,
     /// The track was deleted meanwhile: the result is dropped.
     TrackGone,
@@ -99,13 +103,13 @@ pub async fn enqueue_stale(pool: &MySqlPool, settings: &AnalysisSettings) -> Res
     Ok(result.rows_affected())
 }
 
-/// Claims the oldest pending job, or a running one whose worker has held it
-/// for longer than `lease` (the worker probably died).
+/// Claims the oldest pending job that is due, or a running one whose worker
+/// has held it for longer than `lease` (the worker probably died).
 pub async fn claim(pool: &MySqlPool, worker: &str, lease: Duration) -> Result<Option<Job>, Error> {
     let mut tx = pool.begin().await?;
     let row = sqlx::query(
         "SELECT id, track_id, attempts FROM analysis_jobs
-         WHERE status = 'pending'
+         WHERE (status = 'pending' AND (not_before IS NULL OR not_before <= NOW(6)))
             OR (status = 'running' AND claimed_at < NOW(6) - INTERVAL ? SECOND)
          ORDER BY id
          LIMIT 1
@@ -180,7 +184,13 @@ pub async fn complete(
     };
     if stamp_from_row(&track)? != Some(analyzed) {
         tx.rollback().await?;
-        retry_or_fail(pool, job, "the file changed during analysis", true).await?;
+        postpone(
+            pool,
+            job,
+            "the file differs from the scanned one",
+            FILE_CHANGED_DELAY,
+        )
+        .await?;
         return Ok(Completion::FileChanged);
     }
 
@@ -224,29 +234,76 @@ pub async fn complete(
     Ok(Completion::Saved)
 }
 
-/// Records a failed attempt. The job goes back to the queue when `retry`
-/// is set and attempts remain, and is failed for good otherwise.
-/// Returns whether it will be retried.
+/// Delay before retry number `attempt` (1-based) of a failed job.
+pub fn retry_delay(attempt: u32) -> Duration {
+    Duration::from_secs(30).saturating_mul(1 << attempt.saturating_sub(1).min(6))
+}
+
+/// Records a failed attempt. The job goes back to the queue after `delay`
+/// when `retry` is set and attempts remain, and is failed for good
+/// otherwise. Returns whether it will be retried.
 pub async fn retry_or_fail(
     pool: &MySqlPool,
     job: &Job,
     error: &str,
     retry: bool,
+    delay: Duration,
 ) -> Result<bool, Error> {
     let retry = retry && job.attempts < MAX_ATTEMPTS;
     let status = if retry { "pending" } else { "failed" };
-    let error: String = error.chars().take(MAX_ERROR_LEN).collect();
+    let mut tx = pool.begin().await?;
     sqlx::query(
         "UPDATE analysis_jobs
-         SET status = ?, error = ?, claimed_by = NULL, claimed_at = NULL
+         SET status = ?, error = ?, claimed_by = NULL, claimed_at = NULL,
+             not_before = NOW(6) + INTERVAL ? MICROSECOND
          WHERE id = ?",
     )
     .bind(status)
-    .bind(error)
+    .bind(truncate(error))
+    .bind(micros(delay))
+    .bind(job.id)
+    .execute(&mut *tx)
+    .await?;
+    if !retry {
+        // An older analysis of a file that no longer decodes must not be used.
+        sqlx::query("DELETE FROM track_analysis WHERE track_id = ?")
+            .bind(job.track_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(retry)
+}
+
+/// Puts a job back for later without counting the attempt: the file was not
+/// ready, which says nothing about whether it can be analyzed.
+pub async fn postpone(
+    pool: &MySqlPool,
+    job: &Job,
+    reason: &str,
+    delay: Duration,
+) -> Result<(), Error> {
+    sqlx::query(
+        "UPDATE analysis_jobs
+         SET status = 'pending', error = ?, claimed_by = NULL, claimed_at = NULL,
+             attempts = GREATEST(attempts, 1) - 1,
+             not_before = NOW(6) + INTERVAL ? MICROSECOND
+         WHERE id = ?",
+    )
+    .bind(truncate(reason))
+    .bind(micros(delay))
     .bind(job.id)
     .execute(pool)
     .await?;
-    Ok(retry)
+    Ok(())
+}
+
+fn truncate(error: &str) -> String {
+    error.chars().take(MAX_ERROR_LEN).collect()
+}
+
+fn micros(delay: Duration) -> u64 {
+    u64::try_from(delay.as_micros()).unwrap_or(u64::MAX)
 }
 
 /// Puts back the running jobs of a worker instance (on shutdown, or at
@@ -387,6 +444,16 @@ mod tests {
             .unwrap();
         assert_eq!(completion, Completion::FileChanged);
         assert_eq!(counts(pool).await.unwrap().pending, 1, "queued again");
+        assert!(
+            claim(pool, "test/1", LEASE).await.unwrap().is_none(),
+            "postponed, not claimable at once"
+        );
+        sqlx::query("UPDATE analysis_jobs SET not_before = NULL")
+            .execute(pool)
+            .await
+            .unwrap();
+        let again = claim(pool, "test/1", LEASE).await.unwrap().unwrap();
+        assert_eq!(again.attempts, 1, "a postponed attempt is not counted");
         db.drop().await;
     }
 
@@ -397,25 +464,46 @@ mod tests {
         };
         let pool = &db.pool;
         let settings = AnalysisSettings::default();
-        add_track(pool, "broken.mp3").await;
+        let track_id = add_track(pool, "broken.mp3").await;
+        // An analysis from an older version, which re-analysis will replace.
+        sqlx::query(
+            "INSERT INTO track_analysis (track_id, analysis_version, params_hash, cue_in_ms, cue_out_ms)
+             VALUES (?, 0, '', 0, 1000)",
+        )
+        .bind(track_id)
+        .execute(pool)
+        .await
+        .unwrap();
         enqueue_stale(pool, &settings).await.unwrap();
 
         for attempt in 1..=MAX_ATTEMPTS {
             let job = claim(pool, "test/1", LEASE).await.unwrap().unwrap();
             assert_eq!(job.attempts, attempt);
-            let retried = retry_or_fail(pool, &job, "disk hiccup", true)
+            let retried = retry_or_fail(pool, &job, "disk hiccup", true, Duration::ZERO)
                 .await
                 .unwrap();
             assert_eq!(retried, attempt < MAX_ATTEMPTS);
         }
         assert!(claim(pool, "test/1", LEASE).await.unwrap().is_none());
         assert_eq!(counts(pool).await.unwrap().failed, 1);
+        let analyses: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM track_analysis")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        assert_eq!(analyses, 0, "no stale analysis left behind");
         assert_eq!(
             enqueue_stale(pool, &settings).await.unwrap(),
             0,
             "not re-queued while the file is unchanged"
         );
         db.drop().await;
+    }
+
+    #[test]
+    fn retry_delays_grow_and_are_capped() {
+        assert_eq!(retry_delay(1), Duration::from_secs(30));
+        assert_eq!(retry_delay(2), Duration::from_secs(60));
+        assert_eq!(retry_delay(50), Duration::from_secs(30 * 64));
     }
 
     #[tokio::test]

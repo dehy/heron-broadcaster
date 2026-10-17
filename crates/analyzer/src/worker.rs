@@ -84,7 +84,8 @@ async fn process(pool: &MySqlPool, config: &WorkerConfig, job: Job) {
         Ok(Completion::TrackGone) => "track_gone",
         Err(error) => {
             let retry = error.is_transient();
-            match jobs::retry_or_fail(pool, &job, &error.to_string(), retry).await {
+            let delay = jobs::retry_delay(job.attempts);
+            match jobs::retry_or_fail(pool, &job, &error.to_string(), retry, delay).await {
                 Ok(true) => {
                     tracing::warn!(path = %job.path, attempt = job.attempts, %error, "analysis failed, will retry");
                     "retry"
@@ -113,11 +114,26 @@ async fn analyze(
     let stamp = FileStamp::from_metadata(&tokio::fs::metadata(&path).await?);
     let started = Instant::now();
     let task_settings = settings.clone();
-    let analysis =
-        tokio::task::spawn_blocking(move || heron_analysis::analyze_file(&path, &task_settings))
-            .await
-            .map_err(|error| std::io::Error::other(format!("analysis task failed: {error}")))??;
+    let task_path = path.clone();
+    let analysis = tokio::task::spawn_blocking(move || {
+        heron_analysis::analyze_file(&task_path, &task_settings)
+    })
+    .await
+    .map_err(|error| std::io::Error::other(format!("analysis task failed: {error}")))??;
     let elapsed = started.elapsed();
+
+    // A file still being written (network shares report the mtime lazily)
+    // changes under the decoder: try again once it has settled.
+    if FileStamp::from_metadata(&tokio::fs::metadata(&path).await?) != stamp {
+        jobs::postpone(
+            pool,
+            job,
+            "the file changed during analysis",
+            jobs::FILE_CHANGED_DELAY,
+        )
+        .await?;
+        return Ok(Completion::FileChanged);
+    }
 
     let completion = jobs::complete(pool, job, stamp, &analysis, &settings).await?;
     metrics::histogram!("heron_analysis_seconds").record(elapsed.as_secs_f64());
