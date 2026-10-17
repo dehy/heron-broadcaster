@@ -13,8 +13,8 @@
 
 ## Acceptance criteria
 
-- [ ] `docker compose up` starts all services; migrations run automatically.
-- [ ] CI is green.
+- [x] `docker compose up` starts all services; migrations run automatically.
+- [x] CI is green.
 
 ## References
 

@@ -14,6 +14,7 @@
 - Real-time pacing clock; optional monitor output.
 - Encoder/output model from [Encoders and outputs](../outputs.md): encoder profiles, `OutputSink` trait, encoder fan-out, **multiple outputs at once**, each isolated from the audio thread and from each other.
 - MP3 encoder (LAME) and Icecast sink, metadata updates.
+- Migration seeding the default `MP3 128k` profile.
 - gRPC control: load tracks, skip, pause, read state and levels.
 
 ## Acceptance criteria
@@ -27,4 +28,4 @@
 
 - [Audio engine](../audio-engine.md)
 - [Encoders and outputs](../outputs.md)
-- Open question: default encoder settings ([Open questions](../open-questions.md))
+- [Encoders and outputs – Default profiles](../outputs.md#default-profiles)

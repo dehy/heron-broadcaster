@@ -6,6 +6,7 @@
 
 - Encoders (see [Encoders and outputs](../outputs.md#encoders)):
   - AAC-LC, built in (FFmpeg's native `aac` encoder, built without `--enable-nonfree`);
+  - migration seeding the default `AAC 96k` profile;
   - Opus and Vorbis;
   - external FFmpeg encoder using a user-provided binary (for fdk-aac / HE-AAC), with a capability check and restart on failure.
 - Sinks:

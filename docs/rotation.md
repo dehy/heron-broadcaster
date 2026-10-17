@@ -35,15 +35,31 @@ Configurable weight reduction on play and increase on request.
 
 ### Rule relaxation
 
-When no track satisfies the rules, relax them in a defined order, then fall back to a safe category. Log every relaxation. **The queue must never be empty.**
+When no track satisfies the rules, relax them step by step, then fall back to a safe category. Log every relaxation. **The queue must never be empty.**
 
-Initial proposal for the order, still to confirm (see [Open questions](open-questions.md)):
+The rule listeners notice least is relaxed first, and each rule is **halved before it is dropped**, so a small library gets "a bit less separation" rather than losing a rule outright.
 
-1. Album separation
-2. Title separation
-3. Artist separation
-4. Track separation
-5. Fallback category
+| Step | Relaxation | With the default windows |
+|---|---|---|
+| 0 | All rules as configured | album 60, artist 120, title 240, track 240 min |
+| 1 | Album separation halved | album 30 |
+| 2 | Album separation dropped | album off |
+| 3 | Artist separation halved | artist 60 |
+| 4 | Artist separation dropped | artist off |
+| 5 | Title separation halved | title 120 |
+| 6 | Title separation dropped | title off |
+| 7 | Track separation halved | track 120 |
+| 8 | Track separation quartered | track 60 |
+| 9 | Fallback category, track separation still at a quarter | |
+| 10 | Fallback category, least recently played track, no rules | |
+
+- Rotation tries the steps in order, stops at the first one that yields at least one candidate, then applies the slot's selection method to those candidates.
+- Track separation is never dropped inside the slot's own category: playing the exact same recording again is the most audible repeat.
+- Step 10 cannot fail while the fallback category has a track; picking the least recently played one still avoids an immediate repeat. If the fallback category is empty, the engine's fallback directory takes over.
+- Slots with **enforce rules** off skip the separation rules entirely.
+- Every relaxed pick records its step in `play_history.relaxation_applied` and in the selection log.
+
+**Why artist before title** (the handoff proposed title first): repeating an artist within two hours is common and accepted on radio, while hearing the same song again, even in another version, is a clear repeat to listeners.
 
 ### Scheduling
 
