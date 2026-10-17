@@ -127,7 +127,32 @@ pub async fn link_pending(pool: &MySqlPool) -> ApiResult<usize> {
     if created {
         suggest_from_names(pool).await?;
     }
+    if !rows.is_empty() {
+        forget_unused(pool).await?;
+    }
     Ok(rows.len())
+}
+
+/// Deletes the artists nothing refers to any more: no track, nothing done
+/// by hand (names moved, similar artists, restrictions, MusicBrainz ID).
+async fn forget_unused(pool: &MySqlPool) -> ApiResult<()> {
+    let forgotten = sqlx::query(
+        "DELETE FROM artists
+         WHERE musicbrainz_id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM track_artists ta WHERE ta.artist_id = artists.id)
+           AND NOT EXISTS (SELECT 1 FROM artist_names n WHERE n.artist_id = artists.id AND n.by_hand)
+           AND NOT EXISTS (SELECT 1 FROM artist_similar s
+                           WHERE s.artist_id = artists.id OR s.similar_id = artists.id)
+           AND NOT EXISTS (SELECT 1 FROM restrictions r
+                           WHERE r.target = 'artist' AND r.target_id = artists.id)",
+    )
+    .execute(pool)
+    .await?
+    .rows_affected();
+    if forgotten > 0 {
+        tracing::info!(artists = forgotten, "forgot artists no track uses any more");
+    }
+    Ok(())
 }
 
 /// The artist a name belongs to, created with it if the name is new.

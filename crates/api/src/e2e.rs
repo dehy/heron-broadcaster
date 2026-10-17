@@ -1031,6 +1031,9 @@ async fn rotation_follows_clocks_restrictions_and_logs_its_picks() {
     let pool = &station.db.pool;
     let t = &station.tracks;
 
+    crate::artists::link_pending(pool).await.unwrap();
+    assert_eq!(admin.get("/artists?q=artist%201").await["total"], 1);
+
     // Artists from the tags: names matched loosely, featuring split.
     for (track, artist) in [
         (t[0], "Neal Morse"),
@@ -1071,8 +1074,9 @@ async fn rotation_follows_clocks_restrictions_and_logs_its_picks() {
         .unwrap()
         .clone();
     assert_eq!(admin.get("/artists?q=portnoy").await["total"], 1);
-    // Linking again changes nothing.
+    // Linking again changes nothing; the artists of the old tags are gone.
     assert_eq!(crate::artists::link_pending(pool).await.unwrap(), 0);
+    assert_eq!(admin.get("/artists?q=artist%201").await["total"], 0);
 
     // "Simon & Garfunkel" names Simon: suggested, never applied alone.
     let suggestions = admin.get("/artist-suggestions").await;
@@ -1362,7 +1366,14 @@ async fn rotation_follows_clocks_restrictions_and_logs_its_picks() {
     assert!(weight < 1.0, "weights moved: {weight}");
 
     // The clock as it will sound, and a simulation of it.
-    let preview = admin.get(&format!("/clocks/{clock_id}/preview")).await;
+    let (status, preview) = admin
+        .send(
+            Method::POST,
+            "/clocks/preview",
+            json!({"slots": clock["slots"]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
     assert_eq!(preview["slots"][0]["tracks"], 3, "{preview}");
     assert_eq!(preview["slots"][1]["average_ms"], 3_000);
     assert!(preview["runs_per_hour"].as_f64().unwrap() > 100.0);
