@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 /// Shape of a fade.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum FadeCurve {
     #[default]
@@ -38,6 +39,7 @@ impl FadeCurve {
 
 /// One side of a crossfade.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct Fade {
     pub enabled: bool,
@@ -60,6 +62,7 @@ impl Default for Fade {
 
 /// Where the next track starts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CrossfadeMode {
     /// At the crossfade point found by the analysis (dB trigger, min and max
@@ -73,6 +76,7 @@ pub enum CrossfadeMode {
 /// Station-wide crossfade settings, modeled on SAM Broadcaster's
 /// "Cross-Fading" screen. Stored under `playout` in the `settings` table.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct CrossfadeSettings {
     /// Fade-out of the outgoing track, from the moment the next one starts.
@@ -110,6 +114,7 @@ impl Default for CrossfadeSettings {
 /// use the station settings. The fade-out, mode and fixed time apply to the
 /// transition out of the track; the fade-in to the transition into it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct CrossfadeOverrides {
     pub fade_out: Option<Fade>,
@@ -122,6 +127,7 @@ pub struct CrossfadeOverrides {
 
 /// Loudness normalization from the analyzed integrated loudness (EBU R128).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct LoudnessSettings {
     pub enabled: bool,
@@ -147,6 +153,7 @@ impl Default for LoudnessSettings {
 /// Playout settings, stored under `playout` in the `settings` table and
 /// pushed to the engine.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct PlayoutSettings {
     pub crossfade: CrossfadeSettings,
@@ -161,6 +168,7 @@ impl PlayoutSettings {
 /// Per-track overrides (`track_overrides`). Missing fields use the analysis
 /// and station settings.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct TrackOverrides {
     pub cue_in_ms: Option<u32>,
@@ -171,6 +179,7 @@ pub struct TrackOverrides {
 
 /// Why a track is played (`play_history.source`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum PlaySource {
     /// Picked by the rotation (the queue manager's autofill until M6).

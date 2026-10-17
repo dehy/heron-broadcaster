@@ -2,27 +2,41 @@
 
 //! `heron-api`: HTTP and WebSocket API, library scanner and queue manager.
 //!
-//! It applies the database migrations on startup, scans the music library
-//! and serves the API and the ops endpoints.
+//! It applies the database migrations on startup, scans the music library,
+//! feeds the engine and serves the API and the ops endpoints. See
+//! `docs/api.md`.
 
+mod app;
+mod auth;
+mod categories;
+#[cfg(test)]
+mod e2e;
+mod engine;
+mod error;
+mod history;
 mod library;
+mod live;
+mod outputs;
+mod player;
+mod queue;
+mod settings;
+mod sync;
+mod tracks;
+mod users;
 
+use std::io::{BufRead, IsTerminal, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use axum::Router;
-use axum::extract::State;
-use axum::routing::get;
+use app::{AppState, SERVICE};
+use auth::{Passwords, Role};
 use clap::{Parser, Subcommand};
+use heron_service::LogArgs;
 use heron_service::db::{self, DatabaseHealth, MIGRATOR};
-use heron_service::{HealthCheck, LogArgs};
 use library::{Library, ScanOptions};
-use serde::Serialize;
-
-const SERVICE: &str = "heron-api";
 
 #[derive(Debug, Parser)]
 #[command(name = SERVICE, version, about = "Heron Broadcaster API")]
@@ -40,8 +54,21 @@ struct Cli {
     http_addr: SocketAddr,
 
     /// MariaDB URL, e.g. `mysql://heron:secret@mariadb:3306/heron`.
-    #[arg(long, env = "HERON_DATABASE_URL", hide_env_values = true)]
+    #[arg(
+        long,
+        env = "HERON_DATABASE_URL",
+        hide_env_values = true,
+        global = true
+    )]
     database_url: Option<String>,
+
+    /// gRPC address of the engine.
+    #[arg(
+        long,
+        env = "HERON_ENGINE_URL",
+        default_value = "http://heron-engine:50051"
+    )]
+    engine_url: String,
 
     /// Root of the music library. Track paths are stored relative to it.
     #[arg(long, env = "HERON_LIBRARY_DIR", default_value = "/music")]
@@ -69,6 +96,27 @@ struct Cli {
 enum Command {
     /// Exit 0 if the running server answers `/healthz` (used by Docker).
     Healthcheck,
+    /// Print the OpenAPI document (JSON).
+    Openapi,
+    /// Manage users. Passwords are read from the terminal, or from the
+    /// first line of stdin when it is not a terminal.
+    #[command(subcommand)]
+    User(UserCommand),
+}
+
+#[derive(Debug, Subcommand)]
+enum UserCommand {
+    /// Create a user, e.g. the first admin: `user add admin --role admin`.
+    Add {
+        username: String,
+        /// viewer, operator or admin.
+        #[arg(long, default_value = "viewer")]
+        role: Role,
+    },
+    /// Set a user's password (and sign them out everywhere).
+    Passwd { username: String },
+    /// List users.
+    List,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -78,6 +126,12 @@ fn main() -> anyhow::Result<()> {
             heron_service::probe::probe(cli.http_addr, "/healthz", Duration::from_secs(3))?;
             Ok(())
         }
+        Some(Command::Openapi) => {
+            let document = serde_json::to_string_pretty(&app::openapi())?;
+            println!("{document}");
+            Ok(())
+        }
+        Some(Command::User(command)) => manage_users(cli.database_url, command),
         None => run(cli),
     }
 }
@@ -99,70 +153,134 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         migrations = MIGRATOR.iter().count(),
         "database schema is up to date"
     );
+    let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE enabled")
+        .fetch_one(&pool)
+        .await?;
+    if users == 0 {
+        tracing::warn!(
+            "no user yet: create the first admin with \
+             `docker compose exec heron-api heron-api user add admin --role admin`"
+        );
+    }
 
     let library = Arc::new(Library::new(pool.clone(), cli.library_dir));
-    let scanner = tokio::spawn(library.clone().run(ScanOptions {
+    let engine = engine::EngineLink::new(&cli.engine_url)
+        .with_context(|| format!("invalid engine URL {}", cli.engine_url))?;
+    let queue = queue::QueueManager::new(pool.clone(), Arc::clone(&engine));
+    let sync = sync::ConfigSync::new(pool.clone(), Arc::clone(&engine));
+
+    let mut tasks = engine.spawn();
+    let history_events = engine.events();
+    tasks.push(tokio::spawn(library.clone().run(ScanOptions {
         interval: Duration::from_secs(cli.scan_interval.max(60)),
         watch: cli.library_watch,
         settle: Duration::from_secs(cli.import_settle),
-    }));
+    })));
+    tasks.push(tokio::spawn(
+        history::HistoryRecorder::new(pool.clone()).run(history_events),
+    ));
+    tasks.push(tokio::spawn(Arc::clone(&queue).run()));
+    tasks.push(tokio::spawn(Arc::clone(&sync).run()));
+    tasks.push(tokio::spawn(users::purge_sessions(pool.clone())));
 
     let health = DatabaseHealth(pool.clone());
-    let router = Router::new()
-        .route("/api/v1/status", get(status))
-        .route("/api/v1/library/status", get(library_status))
-        .with_state(AppState {
-            health: health.clone(),
-            library,
-        })
-        .merge(heron_service::ops_router(SERVICE, metrics, health));
+    let state = AppState {
+        pool: pool.clone(),
+        health: health.clone(),
+        library,
+        engine,
+        queue,
+        sync,
+        passwords: Arc::new(Passwords::default()),
+    };
+    let router = app::router(state).merge(heron_service::ops_router(SERVICE, metrics, health));
 
     let served = heron_service::serve(cli.http_addr, router).await;
-    scanner.abort();
+    for task in tasks {
+        task.abort();
+    }
     pool.close().await;
     Ok(served?)
 }
 
-#[derive(Clone)]
-struct AppState {
-    health: DatabaseHealth,
-    library: Arc<Library>,
+/// Reads a password without echoing it on a terminal.
+fn read_password(prompt: &str) -> anyhow::Result<String> {
+    let stdin = std::io::stdin();
+    let terminal = stdin.is_terminal();
+    let mut saved = None;
+    if terminal {
+        eprint!("{prompt}");
+        std::io::stderr().flush()?;
+        if let Ok(mut termios) = rustix::termios::tcgetattr(&stdin) {
+            saved = Some(termios.clone());
+            termios
+                .local_modes
+                .remove(rustix::termios::LocalModes::ECHO);
+            let _ =
+                rustix::termios::tcsetattr(&stdin, rustix::termios::OptionalActions::Now, &termios);
+        }
+    }
+    let mut line = String::new();
+    let read = stdin.lock().read_line(&mut line);
+    if let Some(saved) = saved {
+        let _ = rustix::termios::tcsetattr(&stdin, rustix::termios::OptionalActions::Now, &saved);
+        eprintln!();
+    }
+    read?;
+    Ok(line.trim_end_matches(['\r', '\n']).to_owned())
 }
 
-#[derive(Serialize)]
-struct Status {
-    service: &'static str,
-    version: &'static str,
-    database: &'static str,
-}
-
-async fn status(State(state): State<AppState>) -> axum::Json<Status> {
-    let database = match state.health.check().await {
-        Ok(()) => "ok",
-        Err(_) => "unavailable",
-    };
-    axum::Json(Status {
-        service: SERVICE,
-        version: env!("CARGO_PKG_VERSION"),
-        database,
-    })
-}
-
-async fn library_status(
-    State(state): State<AppState>,
-) -> Result<axum::Json<library::LibraryStatus>, (axum::http::StatusCode, String)> {
-    state
-        .library
-        .status()
+#[tokio::main(flavor = "current_thread")]
+async fn manage_users(database_url: Option<String>, command: UserCommand) -> anyhow::Result<()> {
+    let database_url =
+        database_url.context("HERON_DATABASE_URL (or --database-url) is required")?;
+    let pool = db::connect(
+        &database_url,
+        db::ConnectOptions {
+            max_connections: 1,
+            max_attempts: 3,
+        },
+    )
+    .await?;
+    MIGRATOR
+        .run(&pool)
         .await
-        .map(axum::Json)
-        .map_err(|error| {
-            tracing::warn!(%error, "cannot read the library status");
-            (
-                axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                "library status unavailable".to_owned(),
-            )
-        })
+        .context("failed to apply database migrations")?;
+    let passwords = Passwords::default();
+    match command {
+        UserCommand::Add { username, role } => {
+            let password = read_password("Password: ")?;
+            let user = users::add_user(&pool, &passwords, &username, &password, role)
+                .await
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            println!("user {} created ({})", user.username, user.role.as_str());
+        }
+        UserCommand::Passwd { username } => {
+            let id = users::user_id(&pool, &username)
+                .await
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            let password = read_password("New password: ")?;
+            users::set_password(&pool, &passwords, id, &password, None)
+                .await
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            println!("password of {username} changed");
+        }
+        UserCommand::List => {
+            let users = users::all_users(&pool)
+                .await
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            for user in users {
+                println!(
+                    "{:<24} {:<9} {}",
+                    user.username,
+                    user.role.as_str(),
+                    if user.enabled { "" } else { "disabled" }
+                );
+            }
+        }
+    }
+    pool.close().await;
+    Ok(())
 }
 
 #[cfg(test)]

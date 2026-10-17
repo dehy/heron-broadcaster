@@ -9,10 +9,15 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 
+[features]
+# OpenAPI schemas of the settings, for heron-api.
+openapi = ["dep:utoipa"]
+
 [dependencies]
 blake3.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+utoipa = { workspace = true, optional = true }
 
 [lints]
 workspace = true

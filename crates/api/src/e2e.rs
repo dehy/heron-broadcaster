@@ -1,0 +1,842 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! End to end: the API over HTTP and WebSocket, a scratch MariaDB database
+//! (`HERON_TEST_DATABASE_URL`) and a real engine playing a small library in
+//! real time, in process. Skipped without a test database.
+
+use std::net::SocketAddr;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use heron_engine::config::EngineConfig;
+use heron_engine::engine::{Engine, EngineOptions};
+use heron_engine::grpc::EngineService;
+use heron_service::db::{DatabaseHealth, ScratchDatabase};
+use reqwest::{Method, StatusCode};
+use serde_json::{Value, json};
+use tempfile::TempDir;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::TcpListenerStream;
+use tokio_tungstenite::tungstenite;
+
+use crate::app::{self, AppState};
+use crate::auth::{Passwords, Role};
+use crate::library::Library;
+use crate::{engine, history, queue, sync, users};
+
+/// Tracks short enough to see several play during a test.
+const TRACK_SECONDS: f64 = 3.0;
+
+struct Station {
+    db: ScratchDatabase,
+    library: TempDir,
+    _state_dir: TempDir,
+    _engine: Arc<Engine>,
+    state: AppState,
+    api: SocketAddr,
+    tracks: Vec<u64>,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+}
+
+fn write_wav(path: &Path, seconds: f64, freq: f64) {
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 44_100,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).unwrap();
+    for n in 0..(seconds * 44_100.0) as u64 {
+        let t = n as f64 / 44_100.0;
+        let value = (t * freq * std::f64::consts::TAU).sin() * 0.3 * f64::from(i16::MAX);
+        writer.write_sample(value as i16).unwrap();
+        writer.write_sample(value as i16).unwrap();
+    }
+    writer.finalize().unwrap();
+}
+
+impl Station {
+    async fn start() -> Option<Self> {
+        Self::start_with(None).await
+    }
+
+    /// With the engine's configuration saved before it starts, as `ctl` left it.
+    async fn start_with(engine_config: Option<EngineConfig>) -> Option<Self> {
+        let db = ScratchDatabase::create().await?;
+        let pool = db.pool.clone();
+
+        // A library of analyzed tracks, as the scanner and analyzer leave it.
+        let library = tempfile::tempdir().unwrap();
+        let mut tracks = Vec::new();
+        for n in 1..=5 {
+            let path = format!("Artist {n}/Track {n}.wav");
+            std::fs::create_dir_all(library.path().join(format!("Artist {n}"))).unwrap();
+            write_wav(
+                &library.path().join(&path),
+                TRACK_SECONDS,
+                220.0 * f64::from(n),
+            );
+            let id = sqlx::query(
+                "INSERT INTO tracks (path, title, artist, album, duration_ms) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(&path)
+            .bind(format!("Track {n}"))
+            .bind(format!("Artist {n}"))
+            .bind("Album")
+            .bind(3_000u32)
+            .execute(&pool)
+            .await
+            .unwrap()
+            .last_insert_id();
+            sqlx::query(
+                "INSERT INTO track_analysis (track_id, analysis_version, params_hash, cue_in_ms, cue_out_ms,
+                                             integrated_lufs, true_peak_db)
+                 VALUES (?, 1, ?, 0, 3000, -13.0, -7.0)",
+            )
+            .bind(id)
+            .bind([0u8; 32].as_slice())
+            .execute(&pool)
+            .await
+            .unwrap();
+            tracks.push(id);
+        }
+
+        let state_dir = tempfile::tempdir().unwrap();
+        if let Some(config) = engine_config {
+            config.save(state_dir.path()).unwrap();
+        }
+        let engine = Engine::start(
+            EngineOptions {
+                library_dir: library.path().to_path_buf(),
+                state_dir: state_dir.path().to_path_buf(),
+                monitor: false,
+            },
+            tokio::runtime::Handle::current(),
+        )
+        .unwrap();
+        let grpc = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let grpc_addr = grpc.local_addr().unwrap();
+        let service = EngineService::server(Arc::clone(&engine));
+        let mut tasks = vec![tokio::spawn(async move {
+            let _ = tonic::transport::Server::builder()
+                .add_service(service)
+                .serve_with_incoming(TcpListenerStream::new(grpc))
+                .await;
+        })];
+
+        let link = engine::EngineLink::new(&format!("http://{grpc_addr}")).unwrap();
+        let queue = queue::QueueManager::new(pool.clone(), Arc::clone(&link));
+        let sync = sync::ConfigSync::new(pool.clone(), Arc::clone(&link));
+        let history_events = link.events();
+        tasks.extend(link.spawn());
+        tasks.push(tokio::spawn(
+            history::HistoryRecorder::new(pool.clone()).run(history_events),
+        ));
+        tasks.push(tokio::spawn(Arc::clone(&queue).run()));
+        tasks.push(tokio::spawn(Arc::clone(&sync).run()));
+
+        let state = AppState {
+            pool: pool.clone(),
+            health: DatabaseHealth(pool.clone()),
+            library: Arc::new(Library::new(pool.clone(), library.path().to_path_buf())),
+            engine: link,
+            queue,
+            sync,
+            passwords: Arc::new(Passwords::default()),
+        };
+        let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let api = http.local_addr().unwrap();
+        let router = app::router(state.clone());
+        tasks.push(tokio::spawn(async move {
+            let _ = axum::serve(http, router).await;
+        }));
+
+        for (name, role) in [("admin", Role::Admin), ("viewer", Role::Viewer)] {
+            users::add_user(&pool, &state.passwords, name, "correct horse", role)
+                .await
+                .unwrap();
+        }
+        Some(Self {
+            db,
+            library,
+            _state_dir: state_dir,
+            _engine: engine,
+            state,
+            api,
+            tracks,
+            tasks,
+        })
+    }
+
+    fn client(&self) -> Client {
+        Client {
+            http: reqwest::Client::new(),
+            base: format!("http://{}/api/v1", self.api),
+            cookie: None,
+            bearer: None,
+        }
+    }
+
+    async fn signed_in(&self, username: &str) -> Client {
+        let mut client = self.client();
+        let response = client
+            .http
+            .post(format!("{}/auth/login", client.base))
+            .json(&json!({"username": username, "password": "correct horse"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let cookie = response.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        assert!(cookie.contains("HttpOnly"));
+        client.cookie = Some(cookie.split(';').next().unwrap().to_owned());
+        client
+    }
+
+    async fn stop(self) {
+        for task in self.tasks {
+            task.abort();
+        }
+        self.db.drop().await;
+    }
+}
+
+struct Client {
+    http: reqwest::Client,
+    base: String,
+    cookie: Option<String>,
+    bearer: Option<String>,
+}
+
+impl Client {
+    async fn request(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        let mut request = self.http.request(method, format!("{}{path}", self.base));
+        if let Some(cookie) = &self.cookie {
+            request = request
+                .header("cookie", cookie)
+                .header("x-requested-with", "test");
+        }
+        if let Some(token) = &self.bearer {
+            request = request.bearer_auth(token);
+        }
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        let response = request.send().await.unwrap();
+        let status = response.status();
+        let text = response.text().await.unwrap();
+        let value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        (status, value)
+    }
+
+    async fn get(&self, path: &str) -> Value {
+        let (status, value) = self.request(Method::GET, path, None).await;
+        assert_eq!(status, StatusCode::OK, "GET {path}: {value}");
+        value
+    }
+
+    async fn send(&self, method: Method, path: &str, body: Value) -> (StatusCode, Value) {
+        self.request(method, path, Some(body)).await
+    }
+}
+
+/// Polls `check` until it returns something, for at most `timeout`.
+async fn eventually<T, F: Future<Output = Option<T>>>(
+    what: &str,
+    timeout: Duration,
+    mut check: impl FnMut() -> F,
+) -> T {
+    let start = Instant::now();
+    loop {
+        if let Some(value) = check().await {
+            return value;
+        }
+        assert!(start.elapsed() < timeout, "timed out waiting for {what}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+fn waiting_tracks(queue: &Value) -> Vec<u64> {
+    queue
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["track"]["track_id"].as_u64().unwrap())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sign_in_and_roles() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let anonymous = station.client();
+    // Public.
+    let status = anonymous.get("/status").await;
+    assert_eq!(status["database"], "ok");
+    assert_eq!(anonymous.get("/library/status").await["tracks"], 5);
+    let openapi = anonymous.get("/openapi.json").await;
+    assert!(openapi["paths"]["/api/v1/queue"]["post"].is_object());
+    assert!(openapi["components"]["schemas"]["LiveMessage"].is_object());
+
+    // Everything else needs a session or a token.
+    let (status, body) = anonymous.request(Method::GET, "/queue", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"], "unauthorized");
+    let (status, _) = anonymous
+        .send(
+            Method::POST,
+            "/auth/login",
+            json!({"username": "admin", "password": "wrong password"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let viewer = station.signed_in("viewer").await;
+    assert_eq!(viewer.get("/auth/me").await["role"], "viewer");
+    let (status, _) = viewer.request(Method::POST, "/player/skip", None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = viewer.request(Method::GET, "/users", None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // A cookie alone cannot change anything (cross-site requests).
+    let admin = station.signed_in("admin").await;
+    let response = admin
+        .http
+        .post(format!("{}/player/skip", admin.base))
+        .header("cookie", admin.cookie.as_deref().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    // API tokens act as their user.
+    let (status, token) = admin
+        .send(Method::POST, "/tokens", json!({"name": "automation"}))
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let mut scripted = station.client();
+    scripted.bearer = Some(token["token"].as_str().unwrap().to_owned());
+    assert_eq!(scripted.get("/auth/me").await["username"], "admin");
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/tokens/{}", token["id"]), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = scripted.request(Method::GET, "/auth/me", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // The last admin stays an admin.
+    let me = admin.get("/auth/me").await;
+    let (status, _) = admin
+        .send(
+            Method::PATCH,
+            &format!("/users/{}", me["id"]),
+            json!({"role": "viewer"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // Signing out ends the session.
+    let (status, _) = admin.request(Method::POST, "/auth/logout", None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = admin.request(Method::GET, "/auth/me", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    station.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn queue_manager_feeds_the_engine_and_records_history() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+
+    // Autofill keeps three tracks waiting, and something goes on air.
+    let queue = eventually("autofill", Duration::from_secs(10), || async {
+        let queue = admin.get("/queue").await;
+        (queue.as_array().unwrap().len() >= 3).then_some(queue)
+    })
+    .await;
+    assert!(
+        queue.as_array().unwrap()[0]["track"]["source"] == "rotation",
+        "{queue}"
+    );
+    let player = eventually("a track on air", Duration::from_secs(10), || async {
+        let player = admin.get("/player").await;
+        let on_air = player["decks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|deck| deck["on_air"] == true);
+        on_air.then_some(player)
+    })
+    .await;
+    assert_eq!(player["paused"], false);
+
+    // A track queued next, then moved and removed.
+    let manual = station.tracks[4];
+    let (status, queued) = admin
+        .send(
+            Method::POST,
+            "/queue",
+            json!({"track_ids": [manual], "position": 0}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{queued}");
+    let entry = queued["entry_ids"][0].as_u64().unwrap();
+    let waiting = admin.get("/queue").await;
+    assert_eq!(waiting[0]["entry_id"], entry);
+    assert_eq!(waiting[0]["track"]["source"], "manual");
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/queue/{entry}/position"),
+            json!({"position": 2}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let waiting = admin.get("/queue").await;
+    assert_eq!(waiting[2]["entry_id"], entry, "{waiting}");
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/queue/{entry}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(!waiting_tracks(&admin.get("/queue").await).is_empty());
+
+    // Missing files are refused.
+    sqlx::query("UPDATE tracks SET missing_since = NOW(6) WHERE id = ?")
+        .bind(manual)
+        .execute(&station.db.pool)
+        .await
+        .unwrap();
+    let (status, body) = admin
+        .send(Method::POST, "/queue", json!({"track_ids": [manual]}))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // The live socket reports track changes.
+    let url = format!("ws://{}/api/v1/live?levels=false", station.api);
+    let mut request = tungstenite::client::IntoClientRequest::into_client_request(url).unwrap();
+    request
+        .headers_mut()
+        .insert("cookie", admin.cookie.as_deref().unwrap().parse().unwrap());
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    let mut next = async || -> Value {
+        let message = tokio::time::timeout(Duration::from_secs(10), socket.next())
+            .await
+            .expect("live message")
+            .unwrap()
+            .unwrap();
+        serde_json::from_str(message.to_text().unwrap()).unwrap()
+    };
+    let first = next().await;
+    assert_eq!(first["type"], "state");
+    assert!(first["player"]["decks"].is_array());
+
+    // Skip: the play ends as skipped in the history, the next one starts.
+    let (status, _) = admin.request(Method::POST, "/player/skip", None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let mut saw_event = false;
+    for _ in 0..50 {
+        let message = next().await;
+        if message["type"] == "track" {
+            saw_event = true;
+            break;
+        }
+    }
+    assert!(saw_event, "no track event on the live socket");
+    let history = eventually("a skipped play", Duration::from_secs(10), || async {
+        let history = admin.get("/history").await;
+        let skipped = history
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|play| play["end_reason"] == "skipped");
+        skipped.then_some(history)
+    })
+    .await;
+    let play = &history[0];
+    assert!(
+        play["track_id"].is_u64() && play["artist"].is_string(),
+        "{play}"
+    );
+    assert_eq!(play["source"], "rotation");
+
+    // Every play that ended is complete.
+    eventually("finished plays", Duration::from_secs(10), || async {
+        let history = admin.get("/history").await;
+        history
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|play| {
+                play["end_reason"] == "finished" && play["played_ms"].as_u64() > Some(2_000)
+            })
+            .then_some(())
+    })
+    .await;
+
+    // Autofill off: the queue drains.
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/queue",
+            json!({"autofill": false, "min_queued": 3}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = admin.request(Method::DELETE, "/queue", None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(waiting_tracks(&admin.get("/queue").await).is_empty());
+    station.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_and_outputs_reach_the_engine() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    eventually("the engine", Duration::from_secs(10), || async {
+        let engine = admin.get("/engine").await;
+        (engine["config"]["state"] == "synced").then_some(())
+    })
+    .await;
+
+    // Playout settings.
+    let mut playout = admin.get("/settings/playout").await;
+    playout["crossfade"]["min_track_ms"] = json!(30_000);
+    let (status, body) = admin.send(Method::PUT, "/settings/playout", playout).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    eventually(
+        "playout settings in the engine",
+        Duration::from_secs(5),
+        || async {
+            let config = station.state.engine.config().await.ok()?;
+            config
+                .playout_settings_json
+                .contains("\"min_track_ms\":30000")
+                .then_some(())
+        },
+    )
+    .await;
+
+    // An output: validated, stored without showing its password, pushed.
+    let profiles = admin.get("/encoder-profiles").await;
+    let profile = profiles[0]["id"].as_u64().unwrap();
+    let (status, body) = admin
+        .send(
+            Method::POST,
+            "/outputs",
+            json!({"name": "Bad", "kind": "icecast", "encoder_profile_id": profile,
+                   "config": {"host": "127.0.0.1", "mount": "live", "password": "x"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, output) = admin
+        .send(
+            Method::POST,
+            "/outputs",
+            json!({"name": "Icecast", "kind": "icecast", "encoder_profile_id": profile,
+                   "config": {"host": "127.0.0.1", "port": 9, "mount": "/live", "password": "hackme"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{output}");
+    assert!(output["config"].get("password").is_none());
+    assert_eq!(output["secrets_set"], json!(["password"]));
+    let id = output["id"].as_u64().unwrap();
+    eventually(
+        "the output in the engine",
+        Duration::from_secs(10),
+        || async {
+            let config = station.state.engine.config().await.ok()?;
+            config.outputs_json.contains("hackme").then_some(())
+        },
+    )
+    .await;
+
+    // Updating without the password keeps it.
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/outputs/{id}"),
+            json!({"name": "Icecast", "kind": "icecast", "encoder_profile_id": profile,
+                   "config": {"host": "127.0.0.1", "port": 9, "mount": "/other"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    eventually(
+        "the changed output in the engine",
+        Duration::from_secs(10),
+        || async {
+            let config = station.state.engine.config().await.ok()?;
+            (config.outputs_json.contains("/other") && config.outputs_json.contains("hackme"))
+                .then_some(())
+        },
+    )
+    .await;
+    let outputs = eventually("the output's state", Duration::from_secs(10), || async {
+        let outputs = admin.get("/outputs").await;
+        outputs[0]["status"].is_object().then_some(outputs)
+    })
+    .await;
+    assert_ne!(outputs[0]["status"]["state"], "connected");
+
+    // A profile in use cannot be deleted.
+    let (status, _) = admin
+        .request(
+            Method::DELETE,
+            &format!("/encoder-profiles/{profile}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/outputs/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    eventually(
+        "the output gone from the engine",
+        Duration::from_secs(10),
+        || async {
+            let config = station.state.engine.config().await.ok()?;
+            (!config.outputs_json.contains("hackme")).then_some(())
+        },
+    )
+    .await;
+
+    // Library settings never show the AcoustID key.
+    let (status, library) = admin
+        .send(
+            Method::PATCH,
+            "/settings/library",
+            json!({"acoustid_key": "s3cret"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(library["acoustid_key_set"], true);
+    assert!(!library.to_string().contains("s3cret"));
+    let (status, _) = admin
+        .send(
+            Method::PATCH,
+            "/settings/library",
+            json!({"layout": "{nope}"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    station.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn library_tracks_overrides_and_categories() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    let page = admin.get("/tracks?q=artist%203&limit=10").await;
+    assert_eq!(page["total"], 1);
+    let id = page["items"][0]["id"].as_u64().unwrap();
+    assert_eq!(admin.get("/tracks?filter=playable").await["total"], 5);
+
+    let (status, category) = admin
+        .send(
+            Method::POST,
+            "/categories",
+            json!({"name": "Gold", "color": "#FFAA00"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, duplicate) = admin
+        .send(Method::POST, "/categories", json!({"name": "Gold"}))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{duplicate}");
+    let (status, assigned) = admin
+        .send(
+            Method::PUT,
+            &format!("/tracks/{id}/categories"),
+            json!([{"category_id": category["id"], "weight": 2.0}]),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{assigned}");
+    let in_gold = admin
+        .get(&format!("/tracks?category_id={}", category["id"]))
+        .await;
+    assert_eq!(in_gold["total"], 1);
+
+    let (status, body) = admin
+        .send(
+            Method::PUT,
+            &format!("/tracks/{id}/overrides"),
+            json!({"cue_in_ms": 500, "crossfade": {"crossfade": false}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let detail = admin.get(&format!("/tracks/{id}")).await;
+    assert_eq!(detail["playout"]["cue_in_ms"], 500);
+    assert_eq!(detail["overrides"]["crossfade"]["crossfade"], false);
+    assert_eq!(detail["categories"][0]["name"], "Gold");
+    assert_eq!(detail["analysis"]["cue_out_ms"], 3000);
+    // Loudness: −13 LUFS brought to −16.
+    assert_eq!(detail["playout"]["gain_db"], -3.0);
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/tracks/{id}/overrides"),
+            json!({"cue_in_ms": 4000, "cue_out_ms": 1000}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, preview) = admin
+        .send(
+            Method::POST,
+            "/playout/transition",
+            json!({"from_track_id": station.tracks[0], "to_track_id": id}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    // Tracks under 20 s play back to back.
+    assert_eq!(preview["overlap_ms"], 0);
+
+    let (status, _) = admin
+        .send(
+            Method::PATCH,
+            &format!("/tracks/{id}"),
+            json!({"enabled": false}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(admin.get("/tracks?filter=disabled").await["total"], 1);
+    station.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn queued_tracks_follow_the_library() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/queue",
+            json!({"autofill": true, "min_queued": 4}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let queue = eventually("four waiting tracks", Duration::from_secs(10), || async {
+        let queue = admin.get("/queue").await;
+        (queue.as_array().unwrap().len() >= 4).then_some(queue)
+    })
+    .await;
+
+    // The librarian moves the last waiting track's file, and records it.
+    let last = &queue[3];
+    let (entry, track) = (
+        last["entry_id"].as_u64().unwrap(),
+        last["track"]["track_id"].as_u64().unwrap(),
+    );
+    let old = last["track"]["path"].as_str().unwrap().to_owned();
+    let new = format!("Moved/{}", old.replace('/', " - "));
+    std::fs::create_dir_all(station.library.path().join("Moved")).unwrap();
+    std::fs::rename(
+        station.library.path().join(&old),
+        station.library.path().join(&new),
+    )
+    .unwrap();
+    sqlx::query("UPDATE tracks SET path = ? WHERE id = ?")
+        .bind(&new)
+        .bind(track)
+        .execute(&station.db.pool)
+        .await
+        .unwrap();
+    eventually(
+        "the queued track to follow its file",
+        Duration::from_secs(8),
+        || async {
+            let queue = admin.get("/queue").await;
+            queue
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["entry_id"] == entry && e["track"]["path"] == new.as_str())
+                .then_some(())
+        },
+    )
+    .await;
+
+    // A waiting track whose file disappeared leaves the queue.
+    let queue = admin.get("/queue").await;
+    let gone = &queue[queue.as_array().unwrap().len() - 1];
+    let gone_entry = gone["entry_id"].as_u64().unwrap();
+    sqlx::query("UPDATE tracks SET missing_since = NOW(6) WHERE id = ?")
+        .bind(gone["track"]["track_id"].as_u64().unwrap())
+        .execute(&station.db.pool)
+        .await
+        .unwrap();
+    eventually(
+        "the missing track out of the queue",
+        Duration::from_secs(8),
+        || async {
+            let queue = admin.get("/queue").await;
+            (!queue
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["entry_id"] == gone_entry))
+            .then_some(())
+        },
+    )
+    .await;
+    station.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn adopts_outputs_configured_on_the_engine() {
+    let engine_config: EngineConfig = serde_json::from_value(json!({
+        "playout": {"crossfade": {"min_track_ms": 25000}},
+        "outputs": {
+            "encoder_profiles": [
+                {"id": 1, "name": "MP3 128k", "encoder": "mp3", "bitrate_kbps": 128,
+                 "sample_rate": 44100, "channels": 2},
+                {"id": 7, "name": "MP3 64k", "encoder": "mp3", "bitrate_kbps": 64,
+                 "sample_rate": 44100, "channels": 2}
+            ],
+            "outputs": [
+                {"id": 3, "name": "Low", "kind": "icecast", "encoder_profile_id": 7,
+                 "config": {"host": "127.0.0.1", "port": 9, "mount": "/low", "password": "p"}}
+            ]
+        }
+    }))
+    .unwrap();
+    let Some(station) = Station::start_with(Some(engine_config.clone())).await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    eventually("the first sync", Duration::from_secs(10), || async {
+        let engine = admin.get("/engine").await;
+        (engine["config"]["state"] == "synced").then_some(())
+    })
+    .await;
+    let outputs = admin.get("/outputs").await;
+    assert_eq!(outputs[0]["id"], 3);
+    assert_eq!(outputs[0]["encoder_profile_id"], 7);
+    let playout = admin.get("/settings/playout").await;
+    assert_eq!(playout["crossfade"]["min_track_ms"], 25000);
+
+    // Same IDs: the engine kept its configuration as it was.
+    let config = station.state.engine.config().await.unwrap();
+    let outputs: heron_core::OutputsConfig = serde_json::from_str(&config.outputs_json).unwrap();
+    assert_eq!(outputs.outputs, engine_config.outputs.outputs);
+    station.stop().await;
+}
