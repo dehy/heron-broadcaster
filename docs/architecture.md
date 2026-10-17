@@ -47,6 +47,7 @@ heron-broadcaster/
 │   ├── dsp/        heron-dsp        EQ, compressor, expander, limiter, crossovers, AGC chain
 │   ├── outputs/    heron-outputs    encoders, OutputSink trait + Icecast (later Shoutcast, HLS, file, pipe)
 │   ├── rotation/   heron-rotation   categories, separation rules, clock slots, selection
+│   ├── service/    heron-service    process plumbing: logging, /healthz, /metrics, shutdown, DB connect
 │   ├── engine/     heron-engine     binary: decks, mixer, pacing clock, buffering, recovery
 │   ├── api/        heron-api        binary: axum, auth, queue manager, webhooks, scanner
 │   └── analyzer/   heron-analyzer   binary: analysis worker pool, job queue consumer

@@ -1,0 +1,6 @@
+/target
+/data
+.env
+node_modules/
+/web/dist
+.DS_Store

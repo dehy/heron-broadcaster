@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Heron Broadcaster: one service per process. See docs/architecture.md.
+# Copy .env.example to .env first.
+
+name: heron
+
+x-rust-env: &rust-env
+  RUST_LOG: ${RUST_LOG:-info}
+  HERON_LOG_FORMAT: json
+
+x-database-url: &database-url mysql://heron:${HERON_DB_PASSWORD:?set HERON_DB_PASSWORD in .env}@mariadb:3306/heron
+
+services:
+  mariadb:
+    image: mariadb:11.8
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_uca1400_ai_ci
+    environment:
+      MARIADB_DATABASE: heron
+      MARIADB_USER: heron
+      MARIADB_PASSWORD: ${HERON_DB_PASSWORD:?set HERON_DB_PASSWORD in .env}
+      MARIADB_ROOT_PASSWORD: ${HERON_DB_ROOT_PASSWORD:?set HERON_DB_ROOT_PASSWORD in .env}
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Applies the database migrations on startup.
+  heron-api:
+    build:
+      context: .
+      dockerfile: docker/rust.Dockerfile
+      target: heron-api
+    image: heron-api:${HERON_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      <<: *rust-env
+      HERON_DATABASE_URL: *database-url
+    volumes:
+      - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  heron-analyzer:
+    build:
+      context: .
+      dockerfile: docker/rust.Dockerfile
+      target: heron-analyzer
+    image: heron-analyzer:${HERON_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      <<: *rust-env
+      HERON_DATABASE_URL: *database-url
+    volumes:
+      - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
+    depends_on:
+      # Waits for the API so the schema is migrated first.
+      heron-api:
+        condition: service_healthy
+
+  # Deliberately depends on nothing: the air must stay on when everything else is down.
+  heron-engine:
+    build:
+      context: .
+      dockerfile: docker/rust.Dockerfile
+      target: heron-engine
+    image: heron-engine:${HERON_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      <<: *rust-env
+    volumes:
+      - ${HERON_FALLBACK_DIR:-./data/fallback}:/var/lib/heron/fallback:ro
+      - engine-state:/var/lib/heron/engine
+
+  heron-web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+      target: heron-web
+    image: heron-web:${HERON_VERSION:-dev}
+    restart: unless-stopped
+    ports:
+      - "${HERON_HTTP_PORT:-8000}:80"
+
+volumes:
+  mariadb-data:
+  engine-state:

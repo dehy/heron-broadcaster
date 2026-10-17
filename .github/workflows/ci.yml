@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, tests)
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: heron_test
+          MARIADB_USER: heron
+          MARIADB_PASSWORD: heron
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      HERON_TEST_DATABASE_URL: mysql://heron:heron@127.0.0.1:3306/heron_test
+    steps:
+      - uses: actions/checkout@v5
+      # rustup installs the toolchain pinned in rust-toolchain.toml.
+      - run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  web:
+    name: Web (typecheck, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  spdx:
+    name: SPDX headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: scripts/check-spdx.sh
+
+  compose:
+    name: Docker Compose (build, start, migrate)
+    runs-on: ubuntu-latest
+    needs: [rust, web]
+    steps:
+      - uses: actions/checkout@v5
+      - run: cp .env.example .env && mkdir -p data/music data/fallback
+      - run: docker compose build
+      - run: docker compose up -d --wait --wait-timeout 300
+      - name: Migrations were applied
+        run: |
+          docker compose exec -T mariadb \
+            mariadb -uheron -pchange-me heron -N -e \
+            "SELECT COUNT(*) FROM _sqlx_migrations WHERE success = 1" | grep -qv '^0$'
+      - name: Web app reaches the API
+        run: curl -fsS http://localhost:8000/api/v1/status | grep -q '"database":"ok"'
+      - if: failure()
+        run: docker compose ps && docker compose logs
+      - if: always()
+        run: docker compose down -v

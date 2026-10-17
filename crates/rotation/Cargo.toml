@@ -1,0 +1,13 @@
+[package]
+name = "heron-rotation"
+description = "Rotation and clockwheels for Heron Broadcaster"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[lints]
+workspace = true
