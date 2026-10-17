@@ -12,7 +12,7 @@ use std::time::Duration;
 use heron_core::{AnalysisSettings, FileStamp, LibraryPath};
 use sqlx::{MySql, MySqlPool, Row};
 
-use crate::{ALGORITHM_VERSION, Analysis, Error};
+use crate::{ALGORITHM_VERSION, Analysis, Chromaprint, Error};
 
 /// A job is failed for good after this many attempts.
 pub const MAX_ATTEMPTS: u32 = 3;
@@ -165,12 +165,14 @@ fn stamp_from_row(row: &sqlx::mysql::MySqlRow) -> Result<Option<FileStamp>, Erro
         .map(|(size, mtime_us)| FileStamp { size, mtime_us }))
 }
 
-/// Saves the analysis of `job`, made from a file with stamp `analyzed`.
+/// Saves the analysis and fingerprint of `job`, made from a file with stamp
+/// `analyzed`.
 pub async fn complete(
     pool: &MySqlPool,
     job: &Job,
     analyzed: FileStamp,
     analysis: &Analysis,
+    chromaprint: Option<&Chromaprint>,
     settings: &AnalysisSettings,
 ) -> Result<Completion, Error> {
     let mut tx = pool.begin().await?;
@@ -226,6 +228,16 @@ pub async fn complete(
     .bind(analysis.has_internal_silence)
     .execute(&mut *tx)
     .await?;
+    if let Some(chromaprint) = chromaprint {
+        sqlx::query(
+            "INSERT INTO track_fingerprints (track_id, chromaprint) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE chromaprint = VALUES(chromaprint), created_at = NOW(6)",
+        )
+        .bind(job.track_id)
+        .bind(chromaprint.as_bytes())
+        .execute(&mut *tx)
+        .await?;
+    }
     sqlx::query("UPDATE analysis_jobs SET status = 'done', error = NULL WHERE id = ?")
         .bind(job.id)
         .execute(&mut *tx)
@@ -365,6 +377,10 @@ mod tests {
             .last_insert_id()
     }
 
+    fn chromaprint() -> Chromaprint {
+        Chromaprint::from_compressed(vec![1, 0, 0, 2, 42])
+    }
+
     fn analysis() -> Analysis {
         Analysis {
             duration_ms: 180_000,
@@ -398,9 +414,16 @@ mod tests {
         assert_eq!(job.track_id, track_id);
         assert_eq!(job.path.as_str(), "a.flac");
         assert_eq!(job.stamp, Some(STAMP));
-        let completion = complete(pool, &job, STAMP, &analysis(), &settings)
-            .await
-            .unwrap();
+        let completion = complete(
+            pool,
+            &job,
+            STAMP,
+            &analysis(),
+            Some(&chromaprint()),
+            &settings,
+        )
+        .await
+        .unwrap();
         assert_eq!(completion, Completion::Saved);
 
         let saved: (u32, u32) =
@@ -410,6 +433,13 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(saved, (120, 178_500));
+        let stored: Vec<u8> =
+            sqlx::query_scalar("SELECT chromaprint FROM track_fingerprints WHERE track_id = ?")
+                .bind(track_id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, chromaprint().as_bytes());
         assert_eq!(enqueue_stale(pool, &settings).await.unwrap(), 0);
 
         let changed = AnalysisSettings {
@@ -439,7 +469,7 @@ mod tests {
             size: 2_000,
             ..STAMP
         };
-        let completion = complete(pool, &job, other, &analysis(), &settings)
+        let completion = complete(pool, &job, other, &analysis(), None, &settings)
             .await
             .unwrap();
         assert_eq!(completion, Completion::FileChanged);

@@ -14,8 +14,10 @@ publish = false
 mysql = ["dep:sqlx", "dep:serde_json"]
 
 [dependencies]
+base64.workspace = true
 ebur128.workspace = true
 heron-core.workspace = true
+rusty-chromaprint.workspace = true
 serde_json = { workspace = true, optional = true }
 sqlx = { workspace = true, optional = true }
 symphonia.workspace = true

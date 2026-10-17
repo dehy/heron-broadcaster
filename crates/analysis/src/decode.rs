@@ -17,20 +17,50 @@ use symphonia::core::formats::{FormatOptions, FormatReader, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 
+use crate::fingerprint::{Chromaprint, Fingerprinter};
 use crate::{Analysis, Analyzer, Error};
 
 /// Decodes `path` and analyzes it. CPU-bound: run it on a blocking thread.
 pub fn analyze_file(path: &Path, settings: &AnalysisSettings) -> Result<Analysis, Error> {
+    Ok(analyze(path, settings, false)?.0)
+}
+
+/// Like [`analyze_file`], and fingerprints the track in the same decode.
+/// The fingerprint is `None` when the track is too short to get one.
+pub fn analyze_and_fingerprint(
+    path: &Path,
+    settings: &AnalysisSettings,
+) -> Result<(Analysis, Option<Chromaprint>), Error> {
+    analyze(path, settings, true)
+}
+
+fn analyze(
+    path: &Path,
+    settings: &AnalysisSettings,
+    fingerprint: bool,
+) -> Result<(Analysis, Option<Chromaprint>), Error> {
     let mut decoder = Decoder::open(path)?;
-    let mut analyzer: Option<Analyzer> = None;
+    let mut state: Option<(Analyzer, Option<Fingerprinter>)> = None;
     while let Some(block) = decoder.next_block()? {
-        let analyzer = match &mut analyzer {
-            Some(analyzer) => analyzer,
-            None => analyzer.insert(Analyzer::new(block.rate, block.channels)?),
+        let (analyzer, fingerprinter) = match &mut state {
+            Some(state) => state,
+            None => state.insert((
+                Analyzer::new(block.rate, block.channels)?,
+                fingerprint
+                    .then(|| Fingerprinter::new(block.rate, block.channels))
+                    .transpose()?,
+            )),
         };
         analyzer.push(block.samples)?;
+        if let Some(fingerprinter) = fingerprinter {
+            fingerprinter.push(block.samples);
+        }
     }
-    analyzer.ok_or(Error::Empty)?.finish(settings)
+    let (analyzer, fingerprinter) = state.ok_or(Error::Empty)?;
+    Ok((
+        analyzer.finish(settings)?,
+        fingerprinter.and_then(Fingerprinter::finish),
+    ))
 }
 
 /// A block of decoded audio.

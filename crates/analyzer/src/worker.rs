@@ -115,8 +115,8 @@ async fn analyze(
     let started = Instant::now();
     let task_settings = settings.clone();
     let task_path = path.clone();
-    let analysis = tokio::task::spawn_blocking(move || {
-        heron_analysis::analyze_file(&task_path, &task_settings)
+    let (analysis, chromaprint) = tokio::task::spawn_blocking(move || {
+        heron_analysis::analyze_and_fingerprint(&task_path, &task_settings)
     })
     .await
     .map_err(|error| std::io::Error::other(format!("analysis task failed: {error}")))??;
@@ -135,7 +135,8 @@ async fn analyze(
         return Ok(Completion::FileChanged);
     }
 
-    let completion = jobs::complete(pool, job, stamp, &analysis, &settings).await?;
+    let completion =
+        jobs::complete(pool, job, stamp, &analysis, chromaprint.as_ref(), &settings).await?;
     metrics::histogram!("heron_analysis_seconds").record(elapsed.as_secs_f64());
     metrics::counter!("heron_analysis_audio_ms_total").increment(u64::from(analysis.duration_ms));
     tracing::debug!(
