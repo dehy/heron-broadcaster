@@ -79,7 +79,7 @@ All sinks implement the `OutputSink` trait: they receive encoded frames and now-
 
 - Encoders and outputs run **outside the audio thread**. The mixer writes to a lock-free ring buffer per encoder; a slow or failed encoder or output never blocks the mixer or other outputs.
 - Each network output reconnects on its own with exponential backoff.
-- An output's state (connected, reconnecting, error, bytes sent, listeners when the server reports them) is exposed through gRPC, the API and `/metrics`.
+- An output's state (connected, reconnecting, error, bytes sent) is exposed through gRPC, the API and `/metrics`. Listener counts come from the stream servers' statistics, collected by `heron-api` ([M7b](roadmap/m7b-listener-statistics.md)).
 
 ## Configuration flow
 
