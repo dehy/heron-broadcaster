@@ -19,4 +19,4 @@
 
 - [Rotation](../rotation.md)
 - [Data model – Clockwheels](../data-model.md#clockwheels)
-- Open question: exact relaxation order ([Open questions](../open-questions.md))
+- [Rotation – Rule relaxation](../rotation.md#rule-relaxation)

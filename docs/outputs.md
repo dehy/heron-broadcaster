@@ -45,6 +45,24 @@ Plain AAC-LC without HE (SBR/PS) is sufficient for current players and bitrates,
 - Heron checks at configuration time that the binary exists and supports the chosen codec (`ffmpeg -encoders`), and reports a clear error otherwise.
 - If the process dies, it is restarted with backoff; other encoders and outputs are not affected.
 
+### Default profiles
+
+A fresh install creates two encoder profiles, so a new station only has to enter its server details:
+
+| Profile | Encoder | Mode | Bitrate | Sample rate | Channels | Default for |
+|---|---|---|---|---|---|---|
+| `MP3 128k` | MP3 (LAME) | CBR | 128 kbps | 44.1 kHz | stereo | new Icecast / Shoutcast outputs |
+| `AAC 96k` | AAC-LC | CBR | 96 kbps | 48 kHz | stereo | new HLS outputs |
+
+Why these:
+
+- **MP3 128 kbps** plays everywhere, including hardware internet radios, smart speakers and stream directories. CBR keeps the bitrate shown in directories accurate. 44.1 kHz is the rate these devices expect for MP3; resampling from the internal 48 kHz is cheap.
+- **AAC-LC 96 kbps** sounds about as good as MP3 128 kbps with 25 % less bandwidth, and is the codec HLS players expect. It stays at the internal 48 kHz.
+- **Opus** is not created by default: it is the most efficient codec, but some hardware players and stream directories still do not support it. Stations can add an Opus profile in one click.
+- No outputs are created by default: they need the station's own server address and credentials.
+
+The default profiles are seeded by a migration in [M2](roadmap/m2-engine-core.md); AAC arrives in [M10](roadmap/m10-sinks-live-dj.md), so `AAC 96k` is seeded with it.
+
 ## Outputs (sinks)
 
 All sinks implement the `OutputSink` trait: they receive encoded frames and now-playing metadata.
