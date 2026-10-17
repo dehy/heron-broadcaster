@@ -7,7 +7,7 @@ A modern, self-hosted **radio automation system** for Linux, replacing dated Win
 - plays music 24/7 to a streaming server (Icecast first);
 - schedules tracks with category-based clockwheels;
 - crossfades between tracks and removes silences;
-- processes audio (EQ, AGC, multiband compression);
+- processes audio through DSP plugins (Stereo Tool first);
 - is fully operated from a web interface.
 
 ## Identity

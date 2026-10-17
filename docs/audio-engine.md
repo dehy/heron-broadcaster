@@ -71,7 +71,7 @@ Fade curves (shape of a fade-in; a fade-out is its mirror):
 
 ### Loudness
 
-Each track gets a constant gain bringing its integrated loudness (EBU R128, from the analysis) to the target. Boosts stop at `max_gain_db`, and never push the track's true peak above `peak_ceiling_dbtp`: there is no limiter before [M9](roadmap/m9-agc-multiband.md). Tracks without a measured loudness play at their own level. The master bus is hard-clipped at full scale as a last safety.
+Each track gets a constant gain bringing its integrated loudness (EBU R128, from the analysis) to the target. Boosts stop at `max_gain_db`, and never push the track's true peak above `peak_ceiling_dbtp`: Heron has no limiter of its own (a [DSP plugin](roadmap/m8-dsp-plugins.md) can provide one). Tracks without a measured loudness play at their own level. The master bus is hard-clipped at full scale as a last safety.
 
 ## Playout settings
 
@@ -110,7 +110,7 @@ docker compose exec heron-engine heron-engine ctl skip
 ## Signal quality
 
 - Gain changes are ramps (fades, skip, pause), never steps, to avoid clicks.
-- Parameter changes of later DSP (EQ, AGC) are **smoothed** too.
+- Switching a DSP plugin in or out is **crossfaded** too.
 
 ## Failure handling
 

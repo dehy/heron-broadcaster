@@ -61,15 +61,25 @@ Delivered in [M2 – Engine core](roadmap/m2-engine-core.md). The real-time rule
 
 ## 3. Audio processing
 
-### Deck EQ
+### DSP plugins
+
+- Process the master bus with a DSP plugin, **Stereo Tool** first (its generic plugin library, libStereoTool, provided by the station with its own license key).
+- Runs in its own service: a crash or hang never interrupts the stream, the engine falls back to the unprocessed audio without skipping or repeating any of it.
+- Now-playing metadata delayed by the processing latency.
+
+Delivered in [M8 – DSP plugins (Stereo Tool)](roadmap/m8-dsp-plugins.md).
+
+### Deferred
+
+Built-in processing is dropped for now, in favour of DSP plugins. Kept here for later; not on the roadmap.
+
+#### Deck EQ
 
 - 10 bands per deck at 60, 170, 310, 600, 1k, 3k, 6k, 12k, 14k, 16k Hz.
 - ±12 dB per band.
 - Presets, enable/bypass.
 
-Delivered in [M8 – Deck EQ](roadmap/m8-deck-eq.md).
-
-### Master AGC chain
+#### Master AGC chain
 
 Modeled on SAM Broadcaster's AGC tab, in this order:
 
@@ -83,8 +93,6 @@ Modeled on SAM Broadcaster's AGC tab, in this order:
 Also required: presets, "bypass all", in/out meters and per-band meters in the UI.
 
 Out of scope: pre-emphasis (50/75 µs). It only matters for FM transmitters.
-
-Delivered in [M9 – AGC & multiband processing](roadmap/m9-agc-multiband.md).
 
 ## 4. Outputs and integrations
 

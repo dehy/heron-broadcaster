@@ -1,6 +1,6 @@
 # Heron Broadcaster documentation
 
-Heron Broadcaster ("Heron" for short) is a modern, self-hosted **radio automation system** for Linux. It plays music 24/7 to a streaming server (Icecast first), schedules tracks with category-based clockwheels, crossfades between tracks, removes silences, processes audio (EQ, AGC, multiband compression) and is fully operated from a web interface.
+Heron Broadcaster ("Heron" for short) is a modern, self-hosted **radio automation system** for Linux. It plays music 24/7 to a streaming server (Icecast first), schedules tracks with category-based clockwheels, crossfades between tracks, removes silences, processes audio through DSP plugins (Stereo Tool first) and is fully operated from a web interface.
 
 The name comes from "air on" sounding like *héron* (French for heron): keeping the air on, 24/7.
 
