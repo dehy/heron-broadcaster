@@ -13,4 +13,4 @@ pub use playout::{
     CrossfadeSettings, FadeCurve, LoudnessSettings, PlayoutSettings, TrackOverrides, TrackPlayout,
     Transition, plan_transition,
 };
-pub use settings::AnalysisSettings;
+pub use settings::{AnalysisSettings, LibrarySettings};

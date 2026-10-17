@@ -85,6 +85,8 @@ CREATE TABLE track_tag_changes (
     applied         JSON NOT NULL,
     cover_embedded  BOOLEAN NOT NULL DEFAULT FALSE,
     created_at      DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    -- Set when a later batch wrote the previous tags back.
+    undone_at       DATETIME(6) NULL,
     PRIMARY KEY (id),
     UNIQUE KEY track_tag_changes_move (move_id),
     KEY track_tag_changes_track (track_id),
