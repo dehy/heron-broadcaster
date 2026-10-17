@@ -1,0 +1,10 @@
+{
+  "name": "heron-openapi-tools",
+  "private": true,
+  "description": "Generates web/src/api/schema.ts from web/openapi.json. Kept apart because openapi-typescript needs the TypeScript 5 compiler API, which TypeScript 7 no longer has.",
+  "license": "AGPL-3.0-or-later",
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

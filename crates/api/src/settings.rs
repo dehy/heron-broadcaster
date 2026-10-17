@@ -156,7 +156,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_playout, put_playout))
         .routes(routes!(get_analysis, put_analysis))
         .routes(routes!(get_library, patch_library))
-        .routes(routes!(get_queue, put_queue))
+        .routes(routes!(get_queue_settings, put_queue_settings))
 }
 
 /// Crossfades and loudness normalization.
@@ -305,7 +305,7 @@ async fn patch_library(
 
 #[utoipa::path(get, path = "/settings/queue", tag = "settings",
     responses((status = 200, body = QueueSettings), (status = "4XX", body = ErrorBody)))]
-async fn get_queue(
+async fn get_queue_settings(
     _user: CurrentUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<QueueSettings>> {
@@ -316,7 +316,7 @@ async fn get_queue(
 #[utoipa::path(put, path = "/settings/queue", tag = "settings",
     request_body = QueueSettings,
     responses((status = 200, body = QueueSettings), (status = "4XX", body = ErrorBody)))]
-async fn put_queue(
+async fn put_queue_settings(
     user: CurrentUser,
     State(state): State<AppState>,
     Json(settings): Json<QueueSettings>,

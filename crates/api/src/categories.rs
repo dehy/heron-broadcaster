@@ -17,8 +17,8 @@ use crate::error::{ApiError, ApiResult, ErrorBody, is_duplicate, is_still_used};
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list, create))
-        .routes(routes!(get_one, update, delete))
+        .routes(routes!(list_categories, create_category))
+        .routes(routes!(get_category, update_category, delete_category))
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema, sqlx::FromRow)]
@@ -75,7 +75,10 @@ fn conflict(error: sqlx::Error) -> ApiError {
 
 #[utoipa::path(get, path = "/categories", tag = "categories",
     responses((status = 200, body = Vec<Category>), (status = "4XX", body = ErrorBody)))]
-async fn list(_user: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<Vec<Category>>> {
+async fn list_categories(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<Category>>> {
     let categories = sqlx::query_as(sqlx::AssertSqlSafe(format!("{SELECT} ORDER BY c.name")))
         .fetch_all(&state.pool)
         .await?;
@@ -85,7 +88,7 @@ async fn list(_user: CurrentUser, State(state): State<AppState>) -> ApiResult<Js
 #[utoipa::path(get, path = "/categories/{id}", tag = "categories",
     params(("id" = u64, Path)),
     responses((status = 200, body = Category), (status = "4XX", body = ErrorBody)))]
-async fn get_one(
+async fn get_category(
     _user: CurrentUser,
     State(state): State<AppState>,
     Path(id): Path<u64>,
@@ -102,7 +105,7 @@ async fn get_one(
 #[utoipa::path(post, path = "/categories", tag = "categories",
     request_body = CategoryInput,
     responses((status = 201, body = Category), (status = "4XX", body = ErrorBody)))]
-async fn create(
+async fn create_category(
     user: CurrentUser,
     State(state): State<AppState>,
     Json(input): Json<CategoryInput>,
@@ -116,7 +119,7 @@ async fn create(
         .await
         .map_err(conflict)?
         .last_insert_id();
-    let Json(category) = get_one(user, State(state), Path(id)).await?;
+    let Json(category) = get_category(user, State(state), Path(id)).await?;
     Ok((StatusCode::CREATED, Json(category)))
 }
 
@@ -124,7 +127,7 @@ async fn create(
 #[utoipa::path(put, path = "/categories/{id}", tag = "categories",
     params(("id" = u64, Path)), request_body = CategoryInput,
     responses((status = 200, body = Category), (status = "4XX", body = ErrorBody)))]
-async fn update(
+async fn update_category(
     user: CurrentUser,
     State(state): State<AppState>,
     Path(id): Path<u64>,
@@ -139,7 +142,7 @@ async fn update(
         .execute(&state.pool)
         .await
         .map_err(conflict)?;
-    get_one(user, State(state), Path(id)).await
+    get_category(user, State(state), Path(id)).await
 }
 
 /// Deletes a category; its tracks stay in the library. Refused while a
@@ -147,7 +150,7 @@ async fn update(
 #[utoipa::path(delete, path = "/categories/{id}", tag = "categories",
     params(("id" = u64, Path)),
     responses((status = 204), (status = "4XX", body = ErrorBody)))]
-async fn delete(
+async fn delete_category(
     user: CurrentUser,
     State(state): State<AppState>,
     Path(id): Path<u64>,

@@ -242,14 +242,14 @@ pub struct HistoryQuery {
 }
 
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(list))
+    OpenApiRouter::new().routes(routes!(list_history))
 }
 
 /// Plays, most recent first.
 #[utoipa::path(get, path = "/history", tag = "history",
     params(HistoryQuery),
     responses((status = 200, body = Vec<Play>), (status = "4XX", body = ErrorBody)))]
-async fn list(
+async fn list_history(
     _user: CurrentUser,
     State(state): State<AppState>,
     Query(query): Query<HistoryQuery>,

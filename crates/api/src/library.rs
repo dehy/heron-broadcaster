@@ -122,6 +122,7 @@ pub struct LibraryStatus {
 }
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+#[schema(as = AnalysisQueueStatus)]
 pub struct QueueStatus {
     pub pending: u64,
     pub running: u64,

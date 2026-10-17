@@ -66,6 +66,8 @@ function StatusView({ state }: { state: Loaded<ApiStatus> }) {
           </dd>
           <dt>Database</dt>
           <dd className={state.value.database === "ok" ? "good" : "bad"}>{state.value.database}</dd>
+          <dt>Engine</dt>
+          <dd className={state.value.engine === "ok" ? "good" : "bad"}>{state.value.engine}</dd>
         </dl>
       );
   }

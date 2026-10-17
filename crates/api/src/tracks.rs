@@ -65,7 +65,9 @@ pub struct TrackQuery {
     /// Words found in the title, artist, album or path.
     pub q: Option<String>,
     pub category_id: Option<u64>,
+    #[param(inline)]
     pub filter: Option<TrackFilter>,
+    #[param(inline)]
     pub sort: Option<TrackSort>,
     /// 1 to 500, 50 by default.
     pub limit: Option<u32>,

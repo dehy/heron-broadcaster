@@ -163,3 +163,44 @@ async fn library_status(State(state): State<AppState>) -> ApiResult<Json<Library
         ApiError::Internal(error.to_string())
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every `$ref` points at a schema of the document: clients are
+    /// generated from it.
+    #[test]
+    fn the_openapi_document_is_complete() {
+        let document = serde_json::to_value(openapi()).unwrap();
+        let schemas = document["components"]["schemas"].as_object().unwrap();
+        let mut stack = vec![&document];
+        let mut refs = 0;
+        while let Some(value) = stack.pop() {
+            match value {
+                serde_json::Value::Object(object) => {
+                    if let Some(serde_json::Value::String(target)) = object.get("$ref") {
+                        refs += 1;
+                        let name = target.trim_start_matches("#/components/schemas/");
+                        assert!(schemas.contains_key(name), "dangling {target}");
+                    }
+                    stack.extend(object.values());
+                }
+                serde_json::Value::Array(values) => stack.extend(values),
+                _ => {}
+            }
+        }
+        assert!(refs > 50);
+        let mut operations = std::collections::HashSet::new();
+        for path in document["paths"].as_object().unwrap().values() {
+            for operation in path.as_object().unwrap().values() {
+                let id = operation["operationId"].as_str().unwrap();
+                assert!(
+                    operations.insert(id.to_owned()),
+                    "operationId {id} used twice"
+                );
+            }
+        }
+        assert!(document["paths"]["/api/v1/live"]["get"].is_object());
+    }
+}

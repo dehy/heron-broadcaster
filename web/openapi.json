@@ -1,0 +1,4593 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Heron Broadcaster API",
+    "description": "Control plane of Heron Broadcaster. Sign in with `POST /api/v1/auth/login` (session cookie, plus an `X-Requested-With` header on requests that change something) or send an API token as `Authorization: Bearer heron_…`.",
+    "license": {
+      "name": "AGPL-3.0-or-later",
+      "identifier": "AGPL-3.0-or-later"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Signs in: answers with the user and sets the `heron_session` cookie.",
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many failures for this username",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Signs out: ends the session and clears the cookie.",
+        "operationId": "logout",
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "The signed-in user.",
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password": {
+      "put": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Changes your password. Your other sessions are signed out.",
+        "operationId": "change_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/categories": {
+      "get": {
+        "tags": [
+          "categories"
+        ],
+        "operationId": "list_categories",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Category"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Operators and admins.",
+        "operationId": "create_category",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/categories/{id}": {
+      "get": {
+        "tags": [
+          "categories"
+        ],
+        "operationId": "get_category",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Renames or recolors a category. Operators and admins.",
+        "operationId": "update_category",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Deletes a category; its tracks stay in the library. Refused while a\nclock uses it. Operators and admins.",
+        "operationId": "delete_category",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/encoder-profiles": {
+      "get": {
+        "tags": [
+          "outputs"
+        ],
+        "operationId": "list_profiles",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EncoderProfileView"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "outputs"
+        ],
+        "summary": "Adds an encoder profile. Admins only.",
+        "operationId": "create_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EncoderProfileInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EncoderProfileView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/encoder-profiles/{id}": {
+      "get": {
+        "tags": [
+          "outputs"
+        ],
+        "operationId": "get_profile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EncoderProfileView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "outputs"
+        ],
+        "summary": "Replaces an encoder profile. Outputs using it restart with the new\nencoding. Admins only.",
+        "operationId": "update_profile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EncoderProfileInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EncoderProfileView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "outputs"
+        ],
+        "summary": "Deletes an encoder profile no output uses. Admins only.",
+        "operationId": "delete_profile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/engine": {
+      "get": {
+        "tags": [
+          "player"
+        ],
+        "operationId": "engine_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/history": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Plays, most recent first.",
+        "operationId": "list_history",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Plays started before this time (Unix ms), for the next page.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Plays started at or after this time (Unix ms).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "track_id",
+            "in": "query",
+            "description": "Only this track.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "exclude_fx",
+            "in": "query",
+            "description": "Leave out the FX player (jingles played over the music).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1 to 500, 50 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Play"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library/status": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Import and analysis progress. No sign-in needed.",
+        "operationId": "library_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryStatus"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/api/v1/live": {
+      "get": {
+        "tags": [
+          "live"
+        ],
+        "summary": "Opens the live WebSocket. Messages are [`LiveMessage`]s.",
+        "operationId": "live",
+        "parameters": [
+          {
+            "name": "levels",
+            "in": "query",
+            "description": "Send levels ten times a second (default true).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "WebSocket of LiveMessage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveMessage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/outputs": {
+      "get": {
+        "tags": [
+          "outputs"
+        ],
+        "summary": "Outputs with their live state.",
+        "operationId": "list_outputs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OutputView"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "outputs"
+        ],
+        "summary": "Adds an output; the engine starts streaming to it if it is enabled.\nAdmins only.",
+        "operationId": "create_output",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutputInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutputView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/outputs/{id}": {
+      "get": {
+        "tags": [
+          "outputs"
+        ],
+        "operationId": "get_output",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutputView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "outputs"
+        ],
+        "summary": "Replaces an output. Credentials left out of `config` are kept. Admins only.",
+        "operationId": "update_output",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutputInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutputView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "outputs"
+        ],
+        "summary": "Deletes an output; the engine stops streaming to it. Admins only.",
+        "operationId": "delete_output",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/player": {
+      "get": {
+        "tags": [
+          "player"
+        ],
+        "summary": "Decks, queue and outputs, read from the engine now.",
+        "operationId": "get_player",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Engine unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/player/fx": {
+      "post": {
+        "tags": [
+          "player"
+        ],
+        "summary": "Plays a library track on the FX player, over the music. Replaces the\nFX playing, if any.",
+        "operationId": "play_fx",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayFxRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayFxResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "player"
+        ],
+        "summary": "Fades out the FX player.",
+        "operationId": "stop_fx",
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/player/levels": {
+      "get": {
+        "tags": [
+          "player"
+        ],
+        "summary": "Peak and RMS levels (dBFS) of the master bus and each deck.",
+        "operationId": "get_levels",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Levels"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Engine unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/player/pause": {
+      "post": {
+        "tags": [
+          "player"
+        ],
+        "summary": "Fades out and holds the decks; the stream goes on with silence.",
+        "operationId": "pause",
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/player/resume": {
+      "post": {
+        "tags": [
+          "player"
+        ],
+        "operationId": "resume",
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/player/skip": {
+      "post": {
+        "tags": [
+          "player"
+        ],
+        "summary": "Fades out the track on air and starts the next one.",
+        "operationId": "skip",
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/playout/transition": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Plans the transition between two tracks the way the engine would, for\npreviews. Nothing is played.",
+        "operationId": "preview_transition",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransitionPreview"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queue": {
+      "get": {
+        "tags": [
+          "queue"
+        ],
+        "summary": "The tracks waiting to play, in order: the cued one first.",
+        "operationId": "get_queue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/QueueEntry"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "queue"
+        ],
+        "summary": "Queues library tracks. Missing files and tracks with nothing audible are\nrefused.",
+        "operationId": "enqueue",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnqueueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnqueueResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "queue"
+        ],
+        "summary": "Empties the queue, cued track included. The track on air plays on (and\nautofill, when on, queues new tracks).",
+        "operationId": "clear_queue",
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queue/{entry_id}": {
+      "delete": {
+        "tags": [
+          "queue"
+        ],
+        "summary": "Takes an entry out of the queue. The track on air cannot be removed: skip it.",
+        "operationId": "remove_entry",
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queue/{entry_id}/position": {
+      "put": {
+        "tags": [
+          "queue"
+        ],
+        "summary": "Moves a waiting entry.",
+        "operationId": "move_entry",
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/analysis": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Gap Killer and crossfade point detection, used at import.",
+        "operationId": "get_analysis",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Replaces the analysis settings. Every track is analyzed again with the\nnew settings, in the background. Admins only.",
+        "operationId": "put_analysis",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalysisSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/library": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Identification and folder layout, used by `heron-librarian`.",
+        "operationId": "get_library",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibrarySettingsView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Changes some library settings; the others are kept. Admins only.",
+        "operationId": "patch_library",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibrarySettingsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibrarySettingsView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/playout": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Crossfades and loudness normalization.",
+        "operationId": "get_playout",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayoutSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Replaces the playout settings (missing fields take the defaults) and\npushes them to the engine. Admins only.",
+        "operationId": "put_playout",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayoutSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayoutSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/queue": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "get_queue_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Replaces the queue manager settings. Operators and admins.",
+        "operationId": "put_queue_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Whether the API, its database and the engine are up. No sign-in needed.",
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/api/v1/tokens": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Your API tokens (not revoked). The tokens themselves are never shown again.",
+        "operationId": "list_tokens",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApiToken"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Creates an API token acting as you, with your role.",
+        "operationId": "create_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewToken"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedToken"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tokens/{id}": {
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Revokes one of your API tokens (admins: anyone's).",
+        "operationId": "revoke_token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Library tracks, searched, filtered and sorted, a page at a time.",
+        "operationId": "list_tracks",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Words found in the title, artist, album or path.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "playable",
+                "missing",
+                "unanalyzed",
+                "silent",
+                "disabled",
+                "needs_review"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "artist",
+                "title",
+                "album",
+                "added",
+                "last_played"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1 to 500, 50 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks/{id}": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "A track with its analysis, overrides, categories and identification.",
+        "operationId": "get_track",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackDetail"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Enables or disables a track. Operators and admins.",
+        "operationId": "patch_track",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackDetail"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks/{id}/categories": {
+      "put": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Replaces the track's categories. Operators and admins.",
+        "operationId": "put_categories",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CategoryAssignment"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrackCategory"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks/{id}/overrides": {
+      "put": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Replaces the track's overrides: cue points, Gap Killer, crossfade.\nMissing fields use the analysis and station settings. Queued entries of\nthe track are updated within seconds. Operators and admins.",
+        "operationId": "put_overrides",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackOverrides"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackOverrides"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Removes the track's overrides. Operators and admins.",
+        "operationId": "delete_overrides",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Every user. Admins only.",
+        "operationId": "list_users",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/User"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Admins only.",
+        "operationId": "create_user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewUser"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{id}": {
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Deletes a user with their sessions and tokens. Admins only.",
+        "operationId": "delete_user",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Changes a user's role, enables or disables them, or resets their\npassword. Admins only.",
+        "operationId": "update_user",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnalysisQueueStatus": {
+        "type": "object",
+        "required": [
+          "pending",
+          "running",
+          "failed"
+        ],
+        "properties": {
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "running": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "AnalysisSettings": {
+        "type": "object",
+        "description": "Parameters of the import-time analysis (Gap Killer and crossfade point\ndetection). Stored under the `analysis` settings name.\n\nLevels are in dB **relative to the track's integrated loudness**, so the\nsame thresholds work for quiet and loud masters. See `docs/analysis.md`.",
+        "properties": {
+          "blip_max_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Bursts of sound this short, surrounded by silence, are ignored.",
+            "default": 10,
+            "minimum": 0
+          },
+          "end_threshold_db": {
+            "type": "number",
+            "format": "double",
+            "description": "Audio quieter than this at the end of a track is trimmed.",
+            "default": -24.0
+          },
+          "fade_max_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Longest distance between the crossfade point and the end of the track.",
+            "default": 2500,
+            "minimum": 0
+          },
+          "fade_min_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Shortest distance between the crossfade point and the end of the track.",
+            "default": 150,
+            "minimum": 0
+          },
+          "fade_trigger_db": {
+            "type": "number",
+            "format": "double",
+            "description": "The crossfade starts after the last moment the track is louder than this.",
+            "default": -15.0
+          },
+          "max_internal_silence_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Silence longer than this inside a track ends the track there.",
+            "default": 15000,
+            "minimum": 0
+          },
+          "silence_ceiling_dbfs": {
+            "type": "number",
+            "format": "double",
+            "description": "Absolute ceiling (dBFS) for what counts as silence: quiet but audible\npassages above it are never trimmed, whatever the track's loudness.",
+            "default": -50.0
+          },
+          "start_threshold_db": {
+            "type": "number",
+            "format": "double",
+            "description": "Audio quieter than this at the start of a track is trimmed.",
+            "default": -20.0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ApiToken": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "created_at_unix_ms"
+        ],
+        "properties": {
+          "created_at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "expires_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "last_used_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "Category": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "tracks"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "CategoryAssignment": {
+        "type": "object",
+        "required": [
+          "category_id"
+        ],
+        "properties": {
+          "category_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "weight": {
+            "type": "number",
+            "format": "double",
+            "description": "Relative chance of being picked within the category, 1 by default."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CategoryInput": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`, or none."
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChannelLevels": {
+        "type": "object",
+        "description": "dBFS, −120 for silence.",
+        "required": [
+          "peak_left",
+          "peak_right",
+          "rms_left",
+          "rms_right"
+        ],
+        "properties": {
+          "peak_left": {
+            "type": "number",
+            "format": "float"
+          },
+          "peak_right": {
+            "type": "number",
+            "format": "float"
+          },
+          "rms_left": {
+            "type": "number",
+            "format": "float"
+          },
+          "rms_right": {
+            "type": "number",
+            "format": "float"
+          }
+        }
+      },
+      "CreatedToken": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "token"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string",
+            "description": "Send it as `Authorization: Bearer <token>`. Shown only once."
+          }
+        }
+      },
+      "CrossfadeMode": {
+        "type": "string",
+        "description": "Where the next track starts.",
+        "enum": [
+          "auto",
+          "fixed"
+        ]
+      },
+      "CrossfadeOverrides": {
+        "type": "object",
+        "description": "Per-track crossfade overrides (`track_overrides.crossfade`). Missing fields\nuse the station settings. The fade-out, mode and fixed time apply to the\ntransition out of the track; the fade-in to the transition into it.",
+        "properties": {
+          "crossfade": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`false` plays the transition out of this track back to back, without overlap.",
+            "default": null
+          },
+          "fade_in": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Fade"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "fade_out": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Fade"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "fixed_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "default": null,
+            "minimum": 0
+          },
+          "mode": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CrossfadeMode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "CrossfadeSettings": {
+        "type": "object",
+        "description": "Station-wide crossfade settings, modeled on SAM Broadcaster's\n\"Cross-Fading\" screen. Stored under `playout` in the `settings` table.",
+        "properties": {
+          "fade_in": {
+            "$ref": "#/components/schemas/Fade",
+            "description": "Fade-in of the incoming track.",
+            "default": {
+              "curve": "linear",
+              "enabled": false,
+              "level_pct": 0,
+              "time_ms": 1000
+            }
+          },
+          "fade_out": {
+            "$ref": "#/components/schemas/Fade",
+            "description": "Fade-out of the outgoing track, from the moment the next one starts.",
+            "default": {
+              "curve": "linear",
+              "enabled": true,
+              "level_pct": 0,
+              "time_ms": 2500
+            }
+          },
+          "fixed_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "With [`CrossfadeMode::Fixed`], how long before the cue-out the next track starts.",
+            "default": 2000,
+            "minimum": 0
+          },
+          "min_track_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Tracks this long or shorter (jingles, IDs) are never crossfaded: they\nstart right after the previous track and the next starts right after them.",
+            "default": 20000,
+            "minimum": 0
+          },
+          "mode": {
+            "$ref": "#/components/schemas/CrossfadeMode",
+            "default": "auto"
+          },
+          "skip_fade_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Fade-out of the current track when it is skipped.",
+            "default": 1000,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "DeckName": {
+        "type": "string",
+        "enum": [
+          "a",
+          "b",
+          "fx"
+        ]
+      },
+      "DeckPosition": {
+        "type": "object",
+        "required": [
+          "deck",
+          "position_ms",
+          "length_ms"
+        ],
+        "properties": {
+          "deck": {
+            "$ref": "#/components/schemas/DeckName"
+          },
+          "length_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "position_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeckState": {
+        "type": "object",
+        "required": [
+          "deck",
+          "position_ms",
+          "length_ms",
+          "on_air"
+        ],
+        "properties": {
+          "deck": {
+            "$ref": "#/components/schemas/DeckName"
+          },
+          "entry": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QueueEntry",
+                "description": "Missing when the deck is empty."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "length_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "on_air": {
+            "type": "boolean",
+            "description": "The track listeners hear as \"now playing\"."
+          },
+          "position_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "From the cue-in.",
+            "minimum": 0
+          }
+        }
+      },
+      "EffectivePlayout": {
+        "type": "object",
+        "description": "How the engine will play the track: analysis and overrides combined.",
+        "required": [
+          "cue_in_ms",
+          "cue_out_ms",
+          "gain_db"
+        ],
+        "properties": {
+          "cue_in_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "cue_out_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "gain_db": {
+            "type": "number",
+            "format": "double",
+            "description": "Loudness normalization gain with the current playout settings."
+          },
+          "mix_point_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "EncoderKind": {
+        "type": "string",
+        "enum": [
+          "mp3",
+          "aac",
+          "opus",
+          "vorbis",
+          "external_ffmpeg"
+        ]
+      },
+      "EncoderProfileInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "encoder",
+          "sample_rate",
+          "channels"
+        ],
+        "properties": {
+          "bitrate_kbps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "channels": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "encoder": {
+            "$ref": "#/components/schemas/EncoderKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "options": {
+            "type": "object"
+          },
+          "sample_rate": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "EncoderProfileView": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "encoder",
+          "sample_rate",
+          "channels",
+          "options",
+          "outputs"
+        ],
+        "properties": {
+          "bitrate_kbps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "channels": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "encoder": {
+            "$ref": "#/components/schemas/EncoderKind"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "options": {
+            "type": "object",
+            "description": "Encoder-specific options, e.g. MP3: `{\"mode\": \"cbr\", \"quality\": 3}`."
+          },
+          "outputs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Outputs using this profile.",
+            "minimum": 0
+          },
+          "sample_rate": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "EndReason": {
+        "type": "string",
+        "enum": [
+          "finished",
+          "skipped",
+          "stopped",
+          "replaced"
+        ]
+      },
+      "EngineStatus": {
+        "type": "object",
+        "description": "Whether the engine is reachable and runs the stored configuration.",
+        "required": [
+          "connected",
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/SyncStatus",
+            "description": "Playout settings and outputs."
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "started_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "EnqueueRequest": {
+        "type": "object",
+        "required": [
+          "track_ids"
+        ],
+        "properties": {
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Where among the waiting tracks, 0 being next. At the end when missing.",
+            "minimum": 0
+          },
+          "track_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Library tracks, played in this order."
+          }
+        },
+        "additionalProperties": false
+      },
+      "EnqueueResponse": {
+        "type": "object",
+        "required": [
+          "entry_ids"
+        ],
+        "properties": {
+          "entry_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "ErrorBody": {
+        "type": "object",
+        "description": "Body of every error response.",
+        "required": [
+          "error",
+          "message"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Machine-readable code: `invalid_request`, `unauthorized`, `forbidden`,\n`not_found`, `conflict`, `invalid`, `too_many_requests`,\n`engine_unavailable` or `internal`."
+          },
+          "message": {
+            "type": "string",
+            "description": "For people."
+          }
+        }
+      },
+      "Fade": {
+        "type": "object",
+        "description": "One side of a crossfade.",
+        "properties": {
+          "curve": {
+            "$ref": "#/components/schemas/FadeCurve",
+            "default": "linear"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "level_pct": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Level the fade-out goes down to, or the fade-in starts from, in percent.",
+            "default": 0,
+            "minimum": 0
+          },
+          "time_ms": {
+            "type": "integer",
+            "format": "int32",
+            "default": 2500,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "FadeCurve": {
+        "type": "string",
+        "description": "Shape of a fade.",
+        "enum": [
+          "linear",
+          "s_curve",
+          "logarithmic",
+          "exponential"
+        ]
+      },
+      "Levels": {
+        "type": "object",
+        "required": [
+          "master",
+          "deck_a",
+          "deck_b",
+          "fx"
+        ],
+        "properties": {
+          "deck_a": {
+            "$ref": "#/components/schemas/ChannelLevels"
+          },
+          "deck_b": {
+            "$ref": "#/components/schemas/ChannelLevels"
+          },
+          "fx": {
+            "$ref": "#/components/schemas/ChannelLevels"
+          },
+          "master": {
+            "$ref": "#/components/schemas/ChannelLevels"
+          }
+        }
+      },
+      "LibrarySettingsPatch": {
+        "type": "object",
+        "description": "Changes to the library settings: missing fields are kept.",
+        "properties": {
+          "acoustid_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The station's AcoustID application key; `null` removes it."
+          },
+          "embed_cover": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "layout": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "See `docs/library.md#layout`."
+          },
+          "min_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Lowest AcoustID score (0 to 1) accepted as a match."
+          },
+          "save_cover": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "LibrarySettingsView": {
+        "type": "object",
+        "description": "Library settings as shown: the AcoustID key is never sent back.",
+        "required": [
+          "acoustid_key_set",
+          "layout",
+          "min_score",
+          "save_cover",
+          "embed_cover"
+        ],
+        "properties": {
+          "acoustid_key_set": {
+            "type": "boolean",
+            "description": "Whether the station has set its AcoustID key (identification is off without one)."
+          },
+          "embed_cover": {
+            "type": "boolean"
+          },
+          "layout": {
+            "type": "string"
+          },
+          "min_score": {
+            "type": "number",
+            "format": "double"
+          },
+          "save_cover": {
+            "type": "boolean"
+          }
+        }
+      },
+      "LibraryStatus": {
+        "type": "object",
+        "description": "Library and analysis progress, served by `/api/v1/library/status`.",
+        "required": [
+          "tracks",
+          "missing",
+          "analyzed",
+          "silent",
+          "analysis_queue"
+        ],
+        "properties": {
+          "analysis_queue": {
+            "$ref": "#/components/schemas/AnalysisQueueStatus"
+          },
+          "analyzed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Present tracks with an up-to-date analysis.",
+            "minimum": 0
+          },
+          "last_scan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScanReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "missing": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "silent": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Analyzed tracks with nothing audible.",
+            "minimum": 0
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tracks whose file is present.",
+            "minimum": 0
+          }
+        }
+      },
+      "LiveMessage": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "player": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/PlayerState",
+                    "description": "Missing while the engine is unreachable."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "state"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "at_unix_ms",
+              "decks",
+              "type"
+            ],
+            "properties": {
+              "at_unix_ms": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "decks": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DeckPosition"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "positions"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "levels",
+              "type"
+            ],
+            "properties": {
+              "levels": {
+                "$ref": "#/components/schemas/Levels"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "levels"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "event",
+              "type"
+            ],
+            "properties": {
+              "event": {
+                "$ref": "#/components/schemas/TrackEvent"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "track"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "A message on the live WebSocket."
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LoudnessSettings": {
+        "type": "object",
+        "description": "Loudness normalization from the analyzed integrated loudness (EBU R128).",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "max_gain_db": {
+            "type": "number",
+            "format": "double",
+            "description": "Quiet tracks are boosted by at most this much.",
+            "default": 12.0
+          },
+          "peak_ceiling_dbtp": {
+            "type": "number",
+            "format": "double",
+            "description": "Boosts never push the track's true peak above this. There is no\nlimiter before M9, so a boost that clips would distort.",
+            "default": -1.0
+          },
+          "target_lufs": {
+            "type": "number",
+            "format": "double",
+            "default": -16.0
+          }
+        },
+        "additionalProperties": false
+      },
+      "MoveRequest": {
+        "type": "object",
+        "required": [
+          "position"
+        ],
+        "properties": {
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "description": "New place among the waiting tracks, 0 being next.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "NewToken": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "expires_in_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Never expires when missing.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "What the token is for."
+          }
+        },
+        "additionalProperties": false
+      },
+      "NewUser": {
+        "type": "object",
+        "required": [
+          "username",
+          "password",
+          "role"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "description": "At least 8 characters."
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OutputConnection": {
+        "type": "string",
+        "enum": [
+          "stopped",
+          "connecting",
+          "connected",
+          "reconnecting"
+        ]
+      },
+      "OutputInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "encoder_profile_id",
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "type": "object",
+            "description": "Sink settings. Credentials left out keep their stored value."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "encoder_profile_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OutputKind"
+          },
+          "metadata_enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OutputKind": {
+        "type": "string",
+        "enum": [
+          "icecast",
+          "shoutcast_v1",
+          "shoutcast_v2",
+          "hls",
+          "file",
+          "pipe"
+        ]
+      },
+      "OutputStatus": {
+        "type": "object",
+        "description": "The live state of an output, as the engine reports it.",
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "state",
+          "bytes_sent",
+          "dropped_chunks"
+        ],
+        "properties": {
+          "bytes_sent": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "connected_since_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "dropped_chunks": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last connection failed, while reconnecting."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OutputConnection"
+          }
+        }
+      },
+      "OutputView": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "encoder_profile_id",
+          "config",
+          "secrets_set",
+          "metadata_enabled",
+          "enabled"
+        ],
+        "properties": {
+          "config": {
+            "type": "object",
+            "description": "Sink settings (Icecast: host, port, mount…), without credentials."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "encoder_profile_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OutputKind"
+          },
+          "metadata_enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "secrets_set": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Credentials set in the settings (e.g. `password`), never sent back."
+          },
+          "status": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OutputStatus",
+                "description": "Live state from the engine; missing while it is unreachable or\nbefore the output reaches it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "PasswordChange": {
+        "type": "object",
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "properties": {
+          "current_password": {
+            "type": "string"
+          },
+          "new_password": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Play": {
+        "type": "object",
+        "description": "One play.",
+        "required": [
+          "id",
+          "started_at_unix_ms",
+          "deck",
+          "source"
+        ],
+        "properties": {
+          "album": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deck": {
+            "$ref": "#/components/schemas/DeckName"
+          },
+          "end_reason": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EndReason",
+                "description": "`finished`, `skipped`, `stopped` or `replaced`; missing while the\ntrack plays, or when the API missed the end."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ended_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Missing while the track plays."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "played_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "source": {
+            "$ref": "#/components/schemas/PlaySource"
+          },
+          "started_at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "track_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Missing for files outside the library, and tracks deleted since.",
+            "minimum": 0
+          }
+        }
+      },
+      "PlayFxRequest": {
+        "type": "object",
+        "required": [
+          "track_id"
+        ],
+        "properties": {
+          "track_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "PlayFxResponse": {
+        "type": "object",
+        "required": [
+          "entry_id"
+        ],
+        "properties": {
+          "entry_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "PlaySource": {
+        "type": "string",
+        "description": "Why a track is played (`play_history.source`).",
+        "enum": [
+          "rotation",
+          "request",
+          "fallback",
+          "manual"
+        ]
+      },
+      "PlayerState": {
+        "type": "object",
+        "description": "Decks, queue and outputs of the engine.",
+        "required": [
+          "paused",
+          "decks",
+          "queue",
+          "outputs",
+          "rendered_ms",
+          "underruns",
+          "engine_started_at_unix_ms"
+        ],
+        "properties": {
+          "cued": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QueueEntry",
+                "description": "Loaded and waiting for its transition."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeckState"
+            }
+          },
+          "engine_started_at_unix_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OutputStatus"
+            }
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "queue": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueEntry"
+            },
+            "description": "After the cued track."
+          },
+          "rendered_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Audio rendered since the engine started.",
+            "minimum": 0
+          },
+          "underruns": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "PlayoutSettings": {
+        "type": "object",
+        "description": "Playout settings, stored under `playout` in the `settings` table and\npushed to the engine.",
+        "properties": {
+          "crossfade": {
+            "$ref": "#/components/schemas/CrossfadeSettings",
+            "default": {
+              "fade_in": {
+                "curve": "linear",
+                "enabled": false,
+                "level_pct": 0,
+                "time_ms": 1000
+              },
+              "fade_out": {
+                "curve": "linear",
+                "enabled": true,
+                "level_pct": 0,
+                "time_ms": 2500
+              },
+              "fixed_ms": 2000,
+              "min_track_ms": 20000,
+              "mode": "auto",
+              "skip_fade_ms": 1000
+            }
+          },
+          "loudness": {
+            "$ref": "#/components/schemas/LoudnessSettings",
+            "default": {
+              "enabled": true,
+              "max_gain_db": 12.0,
+              "peak_ceiling_dbtp": -1.0,
+              "target_lufs": -16.0
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "QueueEntry": {
+        "type": "object",
+        "required": [
+          "entry_id",
+          "track"
+        ],
+        "properties": {
+          "entry_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Assigned by the engine, unique until it restarts.",
+            "minimum": 0
+          },
+          "track": {
+            "$ref": "#/components/schemas/QueuedTrack"
+          }
+        }
+      },
+      "QueueSettings": {
+        "type": "object",
+        "description": "The queue manager. Until rotation and clockwheels (M6), it keeps the\nengine's queue filled with the least recently played tracks.",
+        "properties": {
+          "autofill": {
+            "type": "boolean",
+            "description": "Add tracks when the queue runs low. Off, the station plays silence\nonce the queue is empty.",
+            "default": true
+          },
+          "min_queued": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Tracks kept waiting (cued and queued), 1 to 50.",
+            "default": 3,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "QueuedTrack": {
+        "type": "object",
+        "description": "A track as the engine holds it.",
+        "required": [
+          "path",
+          "duration_ms",
+          "cue_in_ms",
+          "cue_out_ms",
+          "source"
+        ],
+        "properties": {
+          "album": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cue_in_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Cue points the engine plays between, overrides applied.",
+            "minimum": 0
+          },
+          "cue_out_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "duration_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "path": {
+            "type": "string",
+            "description": "Relative to the library root."
+          },
+          "source": {
+            "$ref": "#/components/schemas/PlaySource"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "track_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Library track, when the track comes from the library.",
+            "minimum": 0
+          }
+        }
+      },
+      "RampView": {
+        "type": "object",
+        "description": "A gain ramp, in ms on its track's own timeline.",
+        "required": [
+          "start_ms",
+          "length_ms",
+          "curve",
+          "level"
+        ],
+        "properties": {
+          "curve": {
+            "$ref": "#/components/schemas/FadeCurve"
+          },
+          "length_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "level": {
+            "type": "number",
+            "format": "float",
+            "description": "Level at the quiet end of the ramp, 0 to 1."
+          },
+          "start_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "Role": {
+        "type": "string",
+        "description": "What a user may do. Each role can do everything the previous one can.",
+        "enum": [
+          "viewer",
+          "operator",
+          "admin"
+        ]
+      },
+      "ScanReport": {
+        "type": "object",
+        "description": "Outcome of one scan, logged and served by `/api/v1/library/status`.",
+        "required": [
+          "finished_at_unix",
+          "duration_ms",
+          "files",
+          "added",
+          "updated",
+          "moved",
+          "unchanged",
+          "restored",
+          "missing",
+          "deferred",
+          "failed",
+          "enqueued"
+        ],
+        "properties": {
+          "added": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "deferred": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Files modified too recently (probably still being copied).",
+            "minimum": 0
+          },
+          "duration_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "enqueued": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Analysis jobs queued.",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Files that could not be read.",
+            "minimum": 0
+          },
+          "files": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Audio files found on disk.",
+            "minimum": 0
+          },
+          "finished_at_unix": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "missing": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tracks newly marked missing.",
+            "minimum": 0
+          },
+          "moved": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Files found under a new path (same content as a missing track).",
+            "minimum": 0
+          },
+          "restored": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Missing tracks whose file is back.",
+            "minimum": 0
+          },
+          "unchanged": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "updated": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "Status": {
+        "type": "object",
+        "required": [
+          "service",
+          "version",
+          "database",
+          "engine"
+        ],
+        "properties": {
+          "database": {
+            "type": "string",
+            "description": "`ok` or `unavailable`."
+          },
+          "engine": {
+            "type": "string",
+            "description": "`ok` or `unavailable`."
+          },
+          "service": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "SyncState": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "synced",
+          "pending",
+          "failed"
+        ]
+      },
+      "SyncStatus": {
+        "type": "object",
+        "description": "Whether the engine runs with the configuration stored in the database.",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "checked_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/SyncState"
+          }
+        }
+      },
+      "TrackAnalysis": {
+        "type": "object",
+        "required": [
+          "cue_in_ms",
+          "cue_out_ms",
+          "has_internal_silence",
+          "analyzed_at_unix_ms"
+        ],
+        "properties": {
+          "analyzed_at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "cue_in_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "cue_out_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "fade_out_start_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The crossfade point: where the next track starts.",
+            "minimum": 0
+          },
+          "has_internal_silence": {
+            "type": "boolean"
+          },
+          "integrated_lufs": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "true_peak_db": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "TrackCategory": {
+        "type": "object",
+        "required": [
+          "category_id",
+          "name",
+          "weight"
+        ],
+        "properties": {
+          "category_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "TrackDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/TrackSummary"
+          },
+          {
+            "type": "object",
+            "required": [
+              "added_at_unix_ms",
+              "overrides",
+              "playout",
+              "categories"
+            ],
+            "properties": {
+              "added_at_unix_ms": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "analysis": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/TrackAnalysis"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "categories": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TrackCategory"
+                }
+              },
+              "file_size": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "identification": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/TrackIdentification"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "missing_since_unix_ms": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64"
+              },
+              "overrides": {
+                "$ref": "#/components/schemas/TrackOverrides"
+              },
+              "playout": {
+                "$ref": "#/components/schemas/EffectivePlayout"
+              }
+            }
+          }
+        ]
+      },
+      "TrackEvent": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "deck",
+              "entry",
+              "at_unix_ms",
+              "kind"
+            ],
+            "properties": {
+              "at_unix_ms": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "deck": {
+                "$ref": "#/components/schemas/DeckName"
+              },
+              "entry": {
+                "$ref": "#/components/schemas/QueueEntry"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "started"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "deck",
+              "entry",
+              "at_unix_ms",
+              "played_ms",
+              "reason",
+              "kind"
+            ],
+            "properties": {
+              "at_unix_ms": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "deck": {
+                "$ref": "#/components/schemas/DeckName"
+              },
+              "entry": {
+                "$ref": "#/components/schemas/QueueEntry"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "ended"
+                ]
+              },
+              "played_ms": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "reason": {
+                "$ref": "#/components/schemas/EndReason"
+              }
+            }
+          }
+        ],
+        "description": "A track change reported by the engine."
+      },
+      "TrackIdentification": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the track needs review."
+          },
+          "recording_mbid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release_mbid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "status": {
+            "type": "string",
+            "description": "`identified` or `needs_review`."
+          }
+        }
+      },
+      "TrackOverrides": {
+        "type": "object",
+        "description": "Per-track overrides (`track_overrides`). Missing fields use the analysis\nand station settings.",
+        "properties": {
+          "crossfade": {
+            "$ref": "#/components/schemas/CrossfadeOverrides",
+            "default": {
+              "crossfade": null,
+              "fade_in": null,
+              "fade_out": null,
+              "fixed_ms": null,
+              "mode": null
+            }
+          },
+          "cue_in_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "default": null,
+            "minimum": 0
+          },
+          "cue_out_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "default": null,
+            "minimum": 0
+          },
+          "gap_killer_enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "TrackPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrackSummary"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Matching tracks in all pages.",
+            "minimum": 0
+          }
+        }
+      },
+      "TrackPatch": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "TrackSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "path",
+          "enabled",
+          "missing",
+          "analyzed",
+          "silent"
+        ],
+        "properties": {
+          "album": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "analyzed": {
+            "type": "boolean"
+          },
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Disabled tracks are never picked by autofill or rotation."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "last_played_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "missing": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string",
+            "description": "Relative to the library root."
+          },
+          "silent": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "TransitionPreview": {
+        "type": "object",
+        "required": [
+          "next_start_ms",
+          "overlap_ms",
+          "outgoing",
+          "incoming"
+        ],
+        "properties": {
+          "fade_in": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RampView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fade_out": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RampView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "incoming": {
+            "$ref": "#/components/schemas/EffectivePlayout"
+          },
+          "next_start_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "When the incoming track starts, on the outgoing track's timeline.",
+            "minimum": 0
+          },
+          "outgoing": {
+            "$ref": "#/components/schemas/EffectivePlayout"
+          },
+          "overlap_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How long both tracks play at once (0: back to back).",
+            "minimum": 0
+          }
+        }
+      },
+      "TransitionRequest": {
+        "type": "object",
+        "required": [
+          "from_track_id",
+          "to_track_id"
+        ],
+        "properties": {
+          "from_track_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "settings": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayoutSettings",
+                "description": "Settings to try; the stored ones when missing."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to_track_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "role",
+          "enabled",
+          "created_at_unix_ms"
+        ],
+        "properties": {
+          "created_at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "last_login_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "UserPatch": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Disabled users cannot sign in, and their tokens stop working."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Signs the user out everywhere."
+          },
+          "role": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "heron_session"
+      },
+      "token": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "security": [
+    {
+      "session": []
+    },
+    {
+      "token": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "system",
+      "description": "Status and the OpenAPI document"
+    },
+    {
+      "name": "auth",
+      "description": "Signing in, your account and your API tokens"
+    },
+    {
+      "name": "users",
+      "description": "User management (admins)"
+    },
+    {
+      "name": "player",
+      "description": "Decks, transport, FX player and the engine"
+    },
+    {
+      "name": "queue",
+      "description": "The tracks waiting to play"
+    },
+    {
+      "name": "library",
+      "description": "Tracks, their analysis and overrides"
+    },
+    {
+      "name": "categories",
+      "description": "Groups of tracks"
+    },
+    {
+      "name": "history",
+      "description": "What was played"
+    },
+    {
+      "name": "settings",
+      "description": "Station settings"
+    },
+    {
+      "name": "outputs",
+      "description": "Encoder profiles and outputs"
+    },
+    {
+      "name": "live",
+      "description": "Live state over a WebSocket"
+    }
+  ]
+}
