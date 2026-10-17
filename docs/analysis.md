@@ -31,9 +31,9 @@ After (and during) a scan, every present track whose analysis is missing, made b
 
 | Situation | What happens |
 |---|---|
-| Transient error (file unreadable, database down) | Retried, up to 3 attempts in total |
-| Broken file (cannot be decoded) | Failed at once, not retried while the file is unchanged |
-| File changed during analysis | Result dropped, job queued again |
+| Transient error (file unreadable, database down) | Retried after 30 s, then 60 s; 3 attempts in total |
+| Broken file (cannot be decoded) | Failed at once, and any older analysis of the track is removed. Not retried while the file is unchanged |
+| File changed during analysis, or differs from what the scanner recorded | Result dropped, job postponed by 30 s without counting an attempt. Network shares report modification times lazily, so a file can still be copying after it looked settled |
 | Worker crashed | Its jobs are reclaimed after a 5 min lease, or immediately when the same instance restarts |
 | Analyzer shut down | Running jobs are put back without counting the attempt |
 
@@ -79,7 +79,9 @@ A frame is silent when it is below **both**:
 - the relative threshold: `start_threshold_db` (−20 dB) at the start, `end_threshold_db` (−24 dB) at the end, measured from the track's integrated loudness;
 - the absolute ceiling `silence_ceiling_dbfs` (−50 dBFS).
 
-The ceiling exists because relative thresholds alone cut real music. On a test library of about 1,800 real tracks (progressive rock, metal), thresholds relative to loudness alone trimmed more than 3 s from 171 tracks: soft intros of loud masters were taken for silence (for example 55 s of *Matmos* by Amplifier, 20 s of *Perfume River* by Fish). With the ceiling, those intros are kept and only what is inaudible on air is trimmed (the first 33 s of *Matmos*, a fade-in from −85 dBFS).
+The ceiling exists because relative thresholds alone cut real music. On a test library of about 1,800 real tracks (progressive rock, metal), thresholds relative to loudness alone trimmed more than 3 s from 171 tracks: soft intros of loud masters were taken for silence (for example 55 s of *Matmos* by Amplifier, 20 s of *Perfume River* by Fish). With the ceiling, those intros are kept.
+
+On the full test library (4,364 tracks), 120 tracks (2.8 %) still start more than 3 s in. Some are inaudible fade-ins (the first 33 s of *Matmos* rise from −85 dBFS), but others are deliberate quiet intros between −60 and −50 dBFS: the wind of *One Of These Days* (Pink Floyd, 27 s trimmed), the nature sounds of *Close To The Edge* (Yes, 23 s). A −60 dBFS ceiling would keep most of them; see the [open questions](open-questions.md).
 
 **Blips** (isolated sounds of `blip_max_ms` or less, 10 ms by default, such as clicks) are treated as silence.
 
