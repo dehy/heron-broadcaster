@@ -1,6 +1,6 @@
 # Requirements
 
-Rotation rules and clockwheels have their own document: [Rotation](rotation.md).
+Rotation rules and clockwheels have their own document: [Rotation](rotation.md). They are the heart of a good programme: clock construction, how slots call their categories, restrictions, separation between plays of a title or an artist, and artists known under several names.
 
 ## 1. Library and categories
 

@@ -10,6 +10,8 @@ Raise these when they become relevant instead of guessing.
 | AcoustID terms: its free application keys are for non-commercial use. Confirm stations bring their own key, and how commercial stations are handled. | [M1b](roadmap/m1b-library-management.md) |
 | Default folder layout and whether cover art is embedded in files or only stored next to them. | [M1b](roadmap/m1b-library-management.md) |
 | Opus and HE-AAC decoding, not supported by Symphonia: add libopus (BSD) and an HE-AAC-capable decoder, or report them as unsupported. | [M2](roadmap/m2-engine-core.md) |
+| Restrictions: which kinds are needed first (dayparting, date ranges, category sequences, others such as "no two tracks over 8 min in an hour")? | [M6](roadmap/m6-rotation-clockwheels.md) |
+| Artist names: should "featuring" tags be split automatically into several artists, and how are ambiguous names handled (`Simon & Garfunkel` is one artist)? | [M6](roadmap/m6-rotation-clockwheels.md) |
 
 ## Resolved
 

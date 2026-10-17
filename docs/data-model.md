@@ -15,15 +15,34 @@ The schema lives in `migrations/`; this page summarizes it. Tables not used yet 
 
 | Table | Columns |
 |---|---|
-| `categories` | id, name, color |
+| `categories` | id, name, color, separation overrides (JSON) |
 | `track_categories` | track_id, category_id, weight |
+
+## Artists
+
+See [Rotation – Artists with several names](rotation.md#artists-with-several-names). Sketch, defined in [M6](roadmap/m6-rotation-clockwheels.md).
+
+| Table | Columns |
+|---|---|
+| `artists` | id, name (display), musicbrainz_id, group_id |
+| `artist_names` | artist_id, name, normalized name (unique) |
+| `artist_groups` | id, name, counts_as_one_artist |
+| `track_artists` | track_id, artist_id, position |
+
+## Restrictions
+
+See [Rotation – Restrictions](rotation.md#restrictions). Sketch, defined in [M6](roadmap/m6-rotation-clockwheels.md).
+
+| Table | Columns |
+|---|---|
+| `restrictions` | id, target (track, artist, category), target_id, kind (dayparting, date range, sequence), rule (JSON: days and hours, dates, category it may not follow), enabled, note |
 
 ## Clockwheels
 
 | Table | Columns |
 |---|---|
 | `clocks` | id, name |
-| `clock_slots` | clock_id, position, category_id, selection_method, enforce_rules |
+| `clock_slots` | clock_id, position, category_id, selection_method, enforce_rules, separation overrides (JSON) |
 | `clock_schedule` | day_of_week, hour, clock_id |
 
 ## History
@@ -63,6 +82,10 @@ tracks 1──1 track_analysis
 tracks 1──0..1 track_overrides
 tracks 1──* analysis_jobs
 tracks *──* categories        (through track_categories, with weight)
+tracks *──* artists           (through track_artists)
+artists 1──* artist_names
+artist_groups 1──* artists
+restrictions *──1 tracks | artists | categories
 clocks 1──* clock_slots *──1 categories
 clock_schedule *──1 clocks
 play_history *──1 tracks
