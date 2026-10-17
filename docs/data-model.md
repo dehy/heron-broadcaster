@@ -6,10 +6,22 @@ The schema lives in `migrations/`; this page summarizes it. Tables not used yet 
 
 | Table | Columns |
 |---|---|
-| `tracks` | id, path (relative to the library root, `/` separators, unique through a hash), file_hash (fingerprint: size + first and last 64 KiB), file_size, file_mtime_us, title, artist, album, duration_ms, enabled, missing_since, created_at, updated_at |
+| `tracks` | id, path (relative to the library root, `/` separators, unique through a hash), file_hash (content hash: size + first and last 64 KiB), file_size, file_mtime_us, title, artist, album, duration_ms, enabled, missing_since, created_at, updated_at |
 | `track_analysis` | track_id, analysis_version, params_hash (fingerprint of the analysis settings), integrated_lufs, true_peak_db, cue_in_ms, cue_out_ms, fade_out_start_ms, has_internal_silence, analyzed_at |
 | `track_overrides` | track_id, cue_in_ms, cue_out_ms, crossfade settings, gap_killer_enabled (all nullable) |
 | `analysis_jobs` | id, track_id, analysis_version, status (pending, running, done, failed), attempts, claimed_by, claimed_at, error, created_at, updated_at — queue between the scanner and `heron-analyzer` (see [Import and analysis](analysis.md#job-queue)) |
+| `track_fingerprints` | track_id, chromaprint (compressed, first two minutes), created_at |
+| `track_identifications` | track_id, status (identified, needs_review), reason, score, recording_mbid, release_mbid, candidates (JSON, for the review screen), updated_at |
+
+## Library management
+
+See [Library management](library.md).
+
+| Table | Columns |
+|---|---|
+| `library_batches` | id, kind (import, organize, undo), undoes (the batch an undo reverts), created_at, finished_at |
+| `library_moves` | id, batch_id, track_id, from_root (incoming, library), from_path, to_path, method (rename, copy), temp_path, content_hash (copies), status (pending, moved, done, abandoned, undone), error — the journal, written before a file is touched |
+| `track_tag_changes` | id, track_id, move_id, previous and applied tags (JSON), cover_embedded, created_at, undone_at |
 
 ## Categories
 
@@ -55,7 +67,7 @@ See [Rotation – Restrictions](rotation.md#restrictions). Sketch, defined in [M
 
 | Table | Columns |
 |---|---|
-| `settings` | name, JSON value. `analysis`: Gap Killer and crossfade point detection ([Import and analysis](analysis.md#settings)); `playout`: crossfade and loudness ([Audio engine](audio-engine.md#playout-settings)); later separation rules |
+| `settings` | name, JSON value. `analysis`: Gap Killer and crossfade point detection ([Import and analysis](analysis.md#settings)); `library`: AcoustID key, layout, covers ([Library management](library.md#settings)); `playout`: crossfade and loudness ([Audio engine](audio-engine.md#playout-settings)); later separation rules |
 
 ## Encoders and outputs
 
@@ -91,6 +103,8 @@ See [M7b](roadmap/m7b-listener-statistics.md). Sketch, defined with that milesto
 tracks 1──1 track_analysis
 tracks 1──0..1 track_overrides
 tracks 1──* analysis_jobs
+tracks 1──0..1 track_fingerprints, track_identifications
+library_batches 1──* library_moves 1──0..1 track_tag_changes *──1 tracks
 tracks *──* categories        (through track_categories, with weight)
 tracks *──* artists           (through track_artists)
 artists 1──* artist_names

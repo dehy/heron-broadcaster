@@ -45,13 +45,30 @@ Like iTunes' "Keep Music folder organized" and "Copy files to the Music folder w
 
 ## Acceptance criteria
 
-- [ ] Dropping 100 files (tagged, badly tagged, untagged) into the incoming folder:
+- [x] Dropping 100 files (tagged, badly tagged, untagged) into the incoming folder:
   - confidently identified files end up tagged and filed;
   - the others are imported and flagged for review.
-- [ ] Interrupting the service during moves (chaos test) loses no file, overwrites none, and leaves no track pointing at a missing path.
-- [ ] A dry run of organizing an existing library lists every move and touches nothing. Applying it and then undoing it restores the original paths and files byte for byte.
-- [ ] Re-tagging or moving a file keeps its analysis, categories and history.
-- [ ] Rate limits of AcoustID and MusicBrainz are respected (tested against a mock server).
+
+  `crates/librarian/tests/import.rs`: 40 well-tagged and 24 badly tagged album tracks plus a 16-track compilation are identified, tagged from MusicBrainz and filed (badly tagged ones fixed by their siblings, the compilation under `Compilations/`); 10 unknown files, 6 lone files on two releases and 4 doubtful matches are imported with their own tags and flagged, each with its reason.
+- [x] Interrupting the service during moves (chaos test) loses no file, overwrites none, and leaves no track pointing at a missing path.
+
+  `crates/librarian/tests/chaos.rs`: the binary is aborted at every step of an operation and killed at random while importing (copies and renames), organizing and undoing, then restarted. After every crash, every file is still there and a file at a colliding path is untouched; at the end, every file exists exactly once, every track's path exists with its recorded stamp, and no operation or temporary file is left.
+- [x] A dry run of organizing an existing library lists every move and touches nothing. Applying it and then undoing it restores the original paths and files byte for byte.
+
+  `crates/librarian/tests/organize.rs`, also after crashes in `chaos.rs`.
+- [x] Re-tagging or moving a file keeps its analysis, categories and history.
+
+  The track keeps its ID: `organize.rs` (moves) and `import.rs` (undoing an import re-tags 80 files in place, the analysis stays).
+- [x] Rate limits of AcoustID and MusicBrainz are respected (tested against a mock server).
+
+  `import.rs`: MusicBrainz requests at least 1 s apart, one per release rather than per file; any 4 AcoustID requests span at least 1 s; every request identifies Heron in its User-Agent.
+
+## Results
+
+- Design: [Library management](../library.md). A new service, `heron-librarian`, holds the only read-write mount of the library; it and the scanner share a MariaDB named lock.
+- Each station sets its own AcoustID key; without one, files are filed by their own tags. Covers go to `cover.jpg` (embedding optional). See the resolved [open questions](../open-questions.md).
+- The analyzer now fingerprints every track (`ALGORITHM_VERSION` 2): upgrading from M1 re-analyzes the library once.
+- Deferred: identifying tracks already in the library (they are fingerprinted, ready for it), the review screen ([M5](m5-web-ui.md)), following moves of queued tracks in the engine ([M4](m4-api-control-plane.md)). Until then, settings and review use `heron-librarian settings` and `heron-librarian review`.
 
 ## References
 

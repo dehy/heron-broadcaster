@@ -47,7 +47,7 @@ services:
       HERON_SCAN_INTERVAL: ${HERON_SCAN_INTERVAL:-3600}
       HERON_LIBRARY_WATCH: ${HERON_LIBRARY_WATCH:-true}
     volumes:
-      # Read-only: Heron never modifies your files.
+      # Read-only: only heron-librarian writes to the library.
       - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
     depends_on:
       mariadb:
@@ -66,6 +66,33 @@ services:
       HERON_LIBRARY_DIR: /music
     volumes:
       - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
+    depends_on:
+      # Waits for the API so the schema is migrated first.
+      heron-api:
+        condition: service_healthy
+
+  # Files dropped into the incoming folder are identified, tagged and filed
+  # into the library. The only service with write access to the library.
+  # It runs as the owner of your music folder: set HERON_LIBRARIAN_USER to
+  # `$(id -u):$(id -g)` of that owner. Reorganize and undo with
+  # `docker compose exec heron-librarian heron-librarian --help`.
+  heron-librarian:
+    build:
+      context: .
+      dockerfile: docker/rust.Dockerfile
+      target: heron-librarian
+    image: heron-librarian:${HERON_VERSION:-dev}
+    restart: unless-stopped
+    user: ${HERON_LIBRARIAN_USER:-10001:10001}
+    environment:
+      <<: *rust-env
+      HERON_DATABASE_URL: *database-url
+      HERON_LIBRARY_DIR: /music
+      HERON_INCOMING_DIR: /incoming
+      HERON_INCOMING_WATCH: ${HERON_LIBRARY_WATCH:-true}
+    volumes:
+      - ${HERON_MUSIC_DIR:-./data/music}:/music
+      - ${HERON_INCOMING_FOLDER:-./data/incoming}:/incoming
     depends_on:
       # Waits for the API so the schema is migrated first.
       heron-api:

@@ -84,9 +84,14 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
-      - run: cp .env.example .env && mkdir -p data/fallback
+      - run: |
+          cp .env.example .env && mkdir -p data/fallback data/incoming
+          sed -i "s/^HERON_LIBRARIAN_USER=.*/HERON_LIBRARIAN_USER=$(id -u):$(id -g)/" .env
       - name: Generate a test library
-        run: scripts/generate-test-library.sh data/music 60
+        # The generator runs as root in Docker; the librarian runs as us.
+        run: |
+          scripts/generate-test-library.sh data/music 60
+          sudo chown -R "$(id -u):$(id -g)" data/music
       - run: docker compose build
       # The icecast profile adds a local Icecast server for the streaming check.
       - run: docker compose --profile icecast up -d --wait --wait-timeout 300
@@ -101,6 +106,13 @@ jobs:
         run: scripts/wait-for-analysis.sh http://localhost:8000 60 300
       - name: The engine streams to Icecast
         run: scripts/check-streaming.sh data/music
+      - name: Files dropped into the incoming folder are filed and analyzed
+        run: |
+          scripts/generate-test-library.sh "$RUNNER_TEMP/drop" 3
+          cp -R "$RUNNER_TEMP/drop/." data/incoming/
+          scripts/wait-for-analysis.sh http://localhost:8000 63 300
+          test -z "$(find data/incoming -type f)"
+          ls "data/music/Artist 1/Album 1/" | grep -F "01 Track 1 (2).m4a"
       - if: failure()
         run: docker compose --profile icecast ps && docker compose --profile icecast logs
       - if: always()

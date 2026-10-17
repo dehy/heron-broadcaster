@@ -4,10 +4,11 @@ How tracks get from the music library into the database, ready to air. Delivered
 
 ```
 music library ──► scanner (heron-api) ──► tracks ──► analysis_jobs ──► heron-analyzer ──► track_analysis
-  (read-only)       tags, fingerprint                  (queue)          decode, measure
+  (read-only)       tags, content hash                 (queue)          decode, measure,   track_fingerprints
+                                                                        fingerprint
 ```
 
-Heron **never modifies your files**: the library is mounted read-only.
+The scanner and the analyzer only read the library: `heron-librarian` is the only service that writes to it, when files are dropped into the incoming folder or you ask it to reorganize the library. See [Library management](library.md).
 
 ## Scanner
 
@@ -16,12 +17,13 @@ The scanner runs inside `heron-api`:
 - **When:** at startup, after file system events (debounced 5 s), and every `HERON_SCAN_INTERVAL` seconds (default 3600) as a safety net for file systems that do not report changes (NFS, SMB). Set `HERON_LIBRARY_WATCH=false` where watching does not work.
 - **What it picks up:** `mp3 m4a mp4 aac flac ogg oga opus wav aif aiff`, case-insensitive. Hidden files and folders are skipped, including macOS `._` resource forks.
 - **Change detection:** each track stores the file's size and mtime. An unchanged file is not opened again, so rescanning 1,000 unchanged tracks takes under 100 ms locally.
-- **New or changed files:** the scanner reads the tags (title, artist, album, duration, via `lofty`) and a **fingerprint**: BLAKE3 of the size plus the first and last 64 KiB. Reading whole files would double the I/O of an import, which hurts on network shares.
+- **New or changed files:** the scanner reads the tags (title, artist, album, duration, via `lofty`) and a **content hash**: BLAKE3 of the size plus the first and last 64 KiB. Reading whole files would double the I/O of an import, which hurts on network shares.
 - **Files still being copied:** files modified less than `HERON_IMPORT_SETTLE` seconds ago (default 5) are left for the next scan.
-- **Moves and renames:** a new path whose fingerprint matches a track that vanished is treated as a move. The track keeps its ID, categories, history and analysis.
+- **Moves and renames:** a new path whose content hash matches a track that vanished is treated as a move. The track keeps its ID, categories, history and analysis.
 - **Deleted files:** the track is marked `missing_since` and keeps its categories and history. It comes back if the file reappears. If the library directory is empty while tracks are known, nothing is marked missing: an unmounted volume must not "lose" the library.
 - **Paths** are stored relative to the library root with `/` separators, so every service can mount the library wherever it likes.
 - **Changed files** lose their analysis and are analyzed again.
+- **Files written by the librarian** (moved or re-tagged) are found unchanged: it records their new path and stamp itself. A scan holds the library lock, so it never runs in the middle of a move, and it skips files of a move a crashed librarian has not finished. See [Library management](library.md#coordination-with-the-scanner).
 
 After (and during) a scan, every present track whose analysis is missing, made by another algorithm version, or made with other settings, is queued.
 
@@ -37,7 +39,7 @@ After (and during) a scan, every present track whose analysis is missing, made b
 | Worker crashed | Its jobs are reclaimed after a 5 min lease, or immediately when the same instance restarts |
 | Analyzer shut down | Running jobs are put back without counting the attempt |
 
-Re-analysis happens automatically when `ALGORITHM_VERSION` in `heron-analysis` is bumped (algorithm or decoder changes) or when the analysis settings change (their fingerprint is stored as `params_hash`).
+Re-analysis happens automatically when `ALGORITHM_VERSION` in `heron-analysis` is bumped (algorithm or decoder changes) or when the analysis settings change (their fingerprint is stored as `params_hash`). Version 2 (M1b) adds the Chromaprint fingerprint, so upgrading from M1 analyzes every track once more.
 
 ## Analyzer
 
