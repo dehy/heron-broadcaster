@@ -386,3 +386,28 @@ fn waiting_entries_take_a_new_track() {
         .count();
     assert_eq!(ended, 3, "each entry plays once: {events:?}");
 }
+
+#[test]
+fn positions_count_the_cued_track() {
+    let mut station = Station::new();
+    let tracks = vec![
+        station.file("one.wav", 1.0),
+        station.file("two.wav", 0.5),
+        station.file("three.wav", 0.5),
+    ];
+    station.player.enqueue(tracks, None).unwrap();
+    station.play(0.2);
+    // Waiting: two (cued), three. Position 1 is right after the cued track.
+    let inserted = station.file("inserted.wav", 0.5);
+    station.player.enqueue(vec![inserted], Some(1)).unwrap();
+    let waiting: Vec<String> = {
+        let snapshot = station.player.snapshot();
+        snapshot
+            .cued
+            .into_iter()
+            .chain(snapshot.queue)
+            .map(|entry| entry.track.path)
+            .collect()
+    };
+    assert_eq!(waiting, ["two.wav", "inserted.wav", "three.wav"]);
+}

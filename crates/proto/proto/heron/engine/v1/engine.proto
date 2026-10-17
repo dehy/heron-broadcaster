@@ -78,7 +78,8 @@ message QueueEntry {
 
 message EnqueueRequest {
   repeated Track tracks = 1;
-  // Where to insert, 0 being next. Appended when missing.
+  // Where to insert among the waiting tracks (the cued one, then the
+  // queue), 0 being next. Appended when missing.
   optional uint32 position = 2;
 }
 
@@ -98,7 +99,7 @@ message ClearQueueResponse {}
 
 message MoveQueueEntryRequest {
   uint64 entry_id = 1;
-  // New place in the queue, 0 being next (before the cued track).
+  // New place among the waiting tracks, 0 being next.
   uint32 position = 2;
 }
 

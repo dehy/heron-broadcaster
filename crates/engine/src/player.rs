@@ -162,7 +162,8 @@ impl Player {
         &self.mixer.status
     }
 
-    /// Adds tracks to the queue at `position` (0 is next), or at the end.
+    /// Adds tracks at `position` among the waiting tracks (0 is next, before
+    /// the cued one), or at the end.
     pub fn enqueue(
         &mut self,
         tracks: Vec<TrackRequest>,
@@ -185,7 +186,7 @@ impl Player {
             // The new tracks go before the one already cued.
             self.uncue()?;
         }
-        let at = position.min(self.queue.len());
+        let at = self.queue_index(position);
         for (offset, entry) in entries.into_iter().enumerate() {
             self.queue.insert(at + offset, entry);
         }
@@ -226,7 +227,7 @@ impl Player {
             return Err(PlayerError::NotFound(entry_id));
         };
         if let Some(entry) = self.queue.remove(from) {
-            let at = position.min(self.queue.len());
+            let at = self.queue_index(position);
             self.queue.insert(at, entry);
         }
         self.ensure_cued();
@@ -249,6 +250,13 @@ impl Player {
         entry.track = track;
         self.ensure_cued();
         Ok(())
+    }
+
+    /// Where `position` in the waiting tracks (the cued one, then the queue)
+    /// falls in the queue.
+    fn queue_index(&self, position: usize) -> usize {
+        let cued = usize::from(self.cued.is_some());
+        position.saturating_sub(cued).min(self.queue.len())
     }
 
     /// Whether the entry is on a deck (on air, fading out or on the FX player).
