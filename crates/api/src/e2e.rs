@@ -906,7 +906,9 @@ async fn web_ui_routes() {
         roots,
         heron_librarian::identify::Endpoints::default(),
     );
-    let (status, _) = viewer.request(Method::POST, "/library/organize", None).await;
+    let (status, _) = viewer
+        .request(Method::POST, "/library/organize", None)
+        .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, plan) = admin.request(Method::POST, "/library/organize", None).await;
     assert_eq!(status, StatusCode::ACCEPTED, "{plan}");
@@ -945,16 +947,27 @@ async fn web_ui_routes() {
     assert_eq!(batches[0]["files"], 5);
     let batch = batches[0]["id"].as_u64().unwrap();
     let (status, undo) = admin
-        .request(Method::POST, &format!("/library/batches/{batch}/undo"), None)
+        .request(
+            Method::POST,
+            &format!("/library/batches/{batch}/undo"),
+            None,
+        )
         .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{undo}");
     assert!(librarian.run_next().await.unwrap());
     assert!(station.library.path().join("Artist 1/Track 1.wav").exists());
     let (status, _) = admin
-        .request(Method::POST, &format!("/library/batches/{batch}/undo"), None)
+        .request(
+            Method::POST,
+            &format!("/library/batches/{batch}/undo"),
+            None,
+        )
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "undone once");
-    assert_eq!(viewer.get("/library/tasks").await.as_array().unwrap().len(), 3);
+    assert_eq!(
+        viewer.get("/library/tasks").await.as_array().unwrap().len(),
+        3
+    );
 
     // Review: a candidate release, or the file's own tags.
     let candidates = json!([{"score": 0.7, "recording_id": "rec", "release_id": "rel",
