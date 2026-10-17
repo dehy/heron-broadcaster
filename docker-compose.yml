@@ -32,7 +32,9 @@ services:
       retries: 5
       start_period: 30s
 
-  # Applies the database migrations on startup.
+  # Applies the database migrations on startup, and feeds the engine.
+  # Create the first admin with
+  # `docker compose exec heron-api heron-api user add admin --role admin`.
   heron-api:
     build:
       context: .
@@ -43,6 +45,7 @@ services:
     environment:
       <<: *rust-env
       HERON_DATABASE_URL: *database-url
+      HERON_ENGINE_URL: http://heron-engine:50051
       HERON_LIBRARY_DIR: /music
       HERON_SCAN_INTERVAL: ${HERON_SCAN_INTERVAL:-3600}
       HERON_LIBRARY_WATCH: ${HERON_LIBRARY_WATCH:-true}
@@ -99,8 +102,9 @@ services:
         condition: service_healthy
 
   # Deliberately depends on nothing: the air must stay on when everything else is down.
-  # gRPC control on port 50051, inside the network only. Operators can use
-  # `docker compose exec heron-engine heron-engine ctl --help`.
+  # gRPC control on port 50051, inside the network only, used by heron-api.
+  # `docker compose exec heron-engine heron-engine ctl --help` inspects it;
+  # outputs and settings belong to the API, which replaces what ctl sets.
   heron-engine:
     build:
       context: .
