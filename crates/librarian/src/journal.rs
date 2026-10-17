@@ -169,6 +169,8 @@ pub enum BatchKind {
     Import,
     Organize,
     Undo,
+    /// A release picked on the review screen.
+    Review,
 }
 
 impl BatchKind {
@@ -177,6 +179,7 @@ impl BatchKind {
             Self::Import => "import",
             Self::Organize => "organize",
             Self::Undo => "undo",
+            Self::Review => "review",
         }
     }
 }

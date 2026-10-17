@@ -297,6 +297,22 @@ impl Identifier {
         }
     }
 
+    /// The tags of `recording_id` on a release picked by hand (on the review
+    /// screen). `None` if MusicBrainz does not know the release, or the
+    /// release does not list the recording.
+    pub async fn release_tags(
+        &self,
+        release_id: &str,
+        recording_id: &str,
+        disc: Option<u32>,
+        track: Option<u32>,
+    ) -> Result<Option<Tags>, IdentifyError> {
+        Ok(self
+            .release(release_id)
+            .await?
+            .and_then(|release| release.tags(recording_id, disc, track)))
+    }
+
     /// The release's front cover (500 px JPEG), if it has one.
     pub async fn cover(&self, release_id: &str) -> Result<Option<Vec<u8>>, IdentifyError> {
         let url = format!(

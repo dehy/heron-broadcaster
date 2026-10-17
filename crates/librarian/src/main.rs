@@ -5,7 +5,8 @@
 //! Without a subcommand, it finishes operations interrupted by a crash,
 //! then imports files dropped into the incoming folder until stopped. The
 //! subcommands reorganize the library (after a dry run), undo a batch and
-//! show what needs review. It never applies migrations: `heron-api` owns
+//! show what needs review; the same work asked through the API (the web
+//! UI) runs as library tasks. It never applies migrations: `heron-api` owns
 //! the schema.
 
 use std::net::SocketAddr;
@@ -20,6 +21,7 @@ use heron_librarian::import::{self, Importer};
 use heron_librarian::journal::{self, Roots};
 use heron_librarian::layout::Layout;
 use heron_librarian::organize;
+use heron_librarian::tasks::TaskRunner;
 use heron_library::LibraryLock;
 use heron_service::LogArgs;
 use heron_service::db::{self, DatabaseHealth};
@@ -196,6 +198,8 @@ async fn serve(cli: &Cli, pool: MySqlPool, roots: Roots) -> anyhow::Result<()> {
     );
 
     let (stop, stopped) = tokio::sync::watch::channel(false);
+    let tasks = TaskRunner::new(pool.clone(), roots.clone(), endpoints.clone());
+    let running_tasks = tokio::spawn(tasks.run(stopped.clone()));
     let importer = Importer::new(
         pool.clone(),
         roots,
@@ -217,6 +221,12 @@ async fn serve(cli: &Cli, pool: MySqlPool, roots: Roots) -> anyhow::Result<()> {
         .is_err()
     {
         tracing::warn!("import still running at shutdown, recovery will finish it");
+    }
+    if tokio::time::timeout(Duration::from_secs(30), running_tasks)
+        .await
+        .is_err()
+    {
+        tracing::warn!("a library task is still running at shutdown, recovery will finish it");
     }
     Ok(served?)
 }
@@ -253,8 +263,8 @@ async fn organize_library(
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        for (path, reason) in &report.skipped {
-            println!("skipped {path}: {reason}");
+        for skipped in &report.skipped {
+            println!("skipped {}: {}", skipped.path, skipped.reason);
         }
         println!(
             "Batch {}: {} files moved, {} skipped. Undo with `{SERVICE} undo {}`.",

@@ -475,7 +475,7 @@ async fn fetch_covers(
 }
 
 /// Saves `cover.jpg` in an album folder, unless there is one already.
-fn save_cover(dir: &Path, jpeg: &[u8]) {
+pub(crate) fn save_cover(dir: &Path, jpeg: &[u8]) {
     let target = dir.join(COVER_FILE);
     if target.exists() {
         return;
@@ -492,7 +492,7 @@ fn save_cover(dir: &Path, jpeg: &[u8]) {
 
 /// The identified tags, keeping the file's own values for fields
 /// MusicBrainz left empty.
-fn merge(identified: Tags, own: &Tags) -> Tags {
+pub(crate) fn merge(identified: Tags, own: &Tags) -> Tags {
     Tags {
         title: identified.title.or_else(|| own.title.clone()),
         artist: identified.artist.or_else(|| own.artist.clone()),

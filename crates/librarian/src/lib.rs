@@ -13,6 +13,8 @@ pub mod identify;
 pub mod import;
 pub mod journal;
 pub mod organize;
+pub mod review;
+pub mod tasks;
 
 /// Where files go in the library, shared with `heron-api`, which checks the settings.
 pub use heron_library::layout;

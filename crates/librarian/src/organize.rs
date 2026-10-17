@@ -8,9 +8,9 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use heron_core::LibraryPath;
+use heron_core::library::{BatchReport, OrganizePlan, PlannedMove, SkippedFile};
 use heron_library::tags;
 use heron_library::{LibraryLock, Tags};
-use serde::Serialize;
 use sqlx::{MySqlPool, Row};
 
 use crate::journal::{
@@ -35,22 +35,10 @@ pub enum Error {
     Task(#[from] tokio::task::JoinError),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct PlannedMove {
-    pub track_id: u64,
-    pub from: String,
-    pub to: String,
-}
-
 /// The dry run of an organization.
-#[derive(Clone, Debug, Default, Serialize)]
-pub struct Plan {
-    pub moves: Vec<PlannedMove>,
-    /// Tracks already where the layout puts them.
-    pub unchanged: u64,
-    /// Tracks whose file cannot be read (left where they are).
-    pub unreadable: Vec<String>,
-}
+pub type Plan = OrganizePlan;
+/// What a batch did.
+pub type Report = BatchReport;
 
 /// Lists the moves that would put every present track where `layout` says.
 /// Reads tags, touches nothing.
@@ -150,14 +138,6 @@ pub fn stem_and_extension(path: &Path) -> (String, String) {
     (stem, extension)
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
-pub struct Report {
-    pub batch_id: u64,
-    pub done: u64,
-    /// Operations not done, with the reason.
-    pub skipped: Vec<(String, String)>,
-}
-
 /// Carries out a plan as one batch, which [`undo`] can revert.
 pub async fn apply(pool: &MySqlPool, roots: &Roots, plan: &Plan) -> Result<Report, Error> {
     let batch_id = journal::create_batch(pool, BatchKind::Organize, None).await?;
@@ -174,10 +154,10 @@ pub async fn apply(pool: &MySqlPool, roots: &Roots, plan: &Plan) -> Result<Repor
                     .fetch_optional(pool)
                     .await?;
             if current.as_deref() != Some(planned.from.as_str()) {
-                report.skipped.push((
-                    planned.from.clone(),
-                    "the track moved since the plan".into(),
-                ));
+                report.skipped.push(SkippedFile {
+                    path: planned.from.clone(),
+                    reason: "the track moved since the plan".into(),
+                });
                 continue;
             }
             let operation = Operation {
@@ -217,7 +197,10 @@ fn record_outcome(
         Err(OpError::Database(error)) => return Err(error.into()),
         Err(error) => {
             tracing::warn!(path, %error, "file operation skipped");
-            report.skipped.push((path.to_owned(), error.to_string()));
+            report.skipped.push(SkippedFile {
+                path: path.to_owned(),
+                reason: error.to_string(),
+            });
         }
     }
     Ok(())
@@ -339,6 +322,17 @@ pub async fn undo(pool: &MySqlPool, roots: &Roots, batch: u64) -> Result<Report,
         }
         lock.release().await?;
     }
+    // A release picked on the review screen is taken back: the track
+    // needs review again.
+    sqlx::query(
+        "UPDATE track_identifications i
+         JOIN library_moves m ON m.track_id = i.track_id AND m.batch_id = ? AND m.status <> 'abandoned'
+         JOIN library_batches b ON b.id = m.batch_id AND b.kind = 'review'
+         SET i.status = 'needs_review', i.recording_mbid = NULL, i.release_mbid = NULL",
+    )
+    .bind(batch)
+    .execute(pool)
+    .await?;
     journal::finish_batch(pool, undo_batch).await?;
     tracing::info!(
         batch,
