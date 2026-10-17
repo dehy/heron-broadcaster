@@ -113,21 +113,18 @@ Encoder profiles and outputs are edited in the web UI and stored by `heron-api` 
 
 A new configuration is validated as a whole: an invalid one changes nothing. Outputs whose settings and encoder profile are unchanged keep streaming without a reconnection; an encoder runs only while an enabled output uses it.
 
-Until the web UI and the API manage outputs ([M4](roadmap/m4-api-control-plane.md), [M5](roadmap/m5-web-ui.md)), set them with `heron-engine ctl set-outputs`, for example to the local Icecast of the `icecast` Compose profile:
+Manage them through the API (`/api/v1/encoder-profiles`, `/api/v1/outputs`, admins only; [API and control plane](api.md#engine-configuration)) until the web UI's editor ([M5](roadmap/m5-web-ui.md)). For example, to the local Icecast of the `icecast` Compose profile:
 
 ```json
-{
-  "encoder_profiles": [
-    {"id": 1, "name": "MP3 128k", "encoder": "mp3", "bitrate_kbps": 128, "sample_rate": 44100, "channels": 2}
-  ],
-  "outputs": [
-    {"id": 1, "name": "Local Icecast", "kind": "icecast", "encoder_profile_id": 1,
-     "config": {"host": "icecast", "port": 8000, "mount": "/live", "password": "hackme", "name": "My station"}}
-  ]
-}
+POST /api/v1/outputs
+{"name": "Local Icecast", "kind": "icecast", "encoder_profile_id": 1,
+ "config": {"host": "icecast", "port": 8000, "mount": "/live", "password": "hackme", "name": "My station"}}
 ```
+
+The API never sends passwords back; an update without one keeps the stored password. Each output in `GET /api/v1/outputs` carries its live state from the engine.
 
 ## Delivery
 
 - [M2 – Engine core](roadmap/m2-engine-core.md): encoder/output model, multiple outputs, MP3 encoder, Icecast sink.
+- [M4 – API & control plane](roadmap/m4-api-control-plane.md): profiles and outputs stored in MariaDB, edited through the API and pushed to the engine.
 - [M10 – More encoders, sinks & live DJ](roadmap/m10-sinks-live-dj.md): AAC-LC, Opus, Vorbis, external FFmpeg encoder, HLS, Shoutcast, file recording, pipe.

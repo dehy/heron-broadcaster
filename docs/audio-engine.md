@@ -93,20 +93,19 @@ The crossfade point itself (dB trigger, minimum and maximum fade time) is found 
 
 ## Control interface
 
-gRPC service `heron.engine.v1.Engine` ([engine.proto](../crates/proto/proto/heron/engine/v1/engine.proto)), on `HERON_GRPC_ADDR` (port 50051, inside the Docker network only): queue (enqueue, remove, clear), skip, pause, resume, FX player, state, levels, a stream of track changes, playout settings and outputs. Tracks carry everything needed to play them: library path, tags, cue points, crossfade point, loudness and overrides.
+gRPC service `heron.engine.v1.Engine` ([engine.proto](../crates/proto/proto/heron/engine/v1/engine.proto)), on `HERON_GRPC_ADDR` (port 50051, inside the Docker network only): queue (enqueue, remove, clear, move, replace), skip, pause, resume, FX player, state, levels, a stream of track changes, playout settings and outputs. Tracks carry everything needed to play them: library path, tags, cue points, crossfade point, loudness, overrides, and the reason they play (rotation, manual…), carried back in the track changes for the play history. Queue positions count the waiting tracks: 0 is before the cued track.
 
 The engine keeps its playout settings and outputs in `HERON_STATE_DIR/config.json`, so it restarts streaming even when the API and the database are down. The queue lives in memory; keeping it across restarts comes with [M3](roadmap/m3-reliability.md).
 
-`heron-engine ctl` is a command-line client:
+`heron-api` feeds the engine and keeps its configuration ([API and control plane](api.md)). `heron-engine ctl` is a command-line client, to inspect the engine or drive it without the API (the soak test does):
 
 ```sh
 docker compose exec heron-engine heron-engine ctl state
-docker compose exec heron-engine heron-engine ctl enqueue "Artist/Album/01 Track.mp3"
+docker compose exec heron-engine heron-engine ctl watch
 docker compose exec heron-engine heron-engine ctl skip
-docker compose exec -T heron-engine heron-engine ctl set-outputs /dev/stdin < outputs.json
 ```
 
-Until the queue manager arrives with [M4](roadmap/m4-api-control-plane.md), `ctl enqueue` and `ctl autofill` (keeps the queue from running dry with random library tracks) analyze files themselves to send their cue points.
+`ctl enqueue` and `ctl autofill` analyze files themselves to send their cue points. With the API running, outputs and settings set with `ctl set-outputs` and `ctl set-settings` are replaced by the API's within a minute.
 
 ## Signal quality
 
@@ -142,4 +141,4 @@ In M2, a queued file that cannot be decoded is skipped before it starts; a file 
 
 - Crossfades are rendered offline by the same mixer code and compared, sample by sample, with references computed independently (`crates/engine/src/mixer/tests.rs`).
 - The player is tested against real files with the mixer rendered offline.
-- `scripts/soak-test.sh` plays the library to two Icecast servers for a given time and checks the clock kept time and nothing was lost; `scripts/check-streaming.sh` checks a Compose stack streams (run in CI on amd64 and arm64).
+- `scripts/soak-test.sh` plays the library to two Icecast servers for a given time and checks the clock kept time and nothing was lost; `scripts/check-streaming.sh` checks a Compose stack goes on air through the API (run in CI on amd64 and arm64).

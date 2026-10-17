@@ -4,7 +4,7 @@ A modern, self-hosted **radio automation system** for Linux. Heron plays music 2
 
 The name comes from "air on" sounding like *héron*: keeping the air on, 24/7.
 
-> **Status:** early development. Heron imports and analyzes a music library (M1) and plays a queue with crossfades to Icecast servers (M2). The queue is fed by hand until the queue manager and rotation arrive (M4, M6). See the [roadmap](docs/roadmap/README.md).
+> **Status:** early development. Heron imports and analyzes a music library (M1, M1b), plays a queue with crossfades to Icecast servers (M2), and is driven through its API (M4), which keeps the queue filled with the least recently played tracks until rotation and clockwheels arrive (M6). The web interface comes with M5. See the [roadmap](docs/roadmap/README.md).
 
 Heron runs on Linux, amd64 and arm64, down to a Raspberry Pi.
 
@@ -32,25 +32,26 @@ scripts/generate-test-library.sh data/music 100
 
 ### Going on air
 
-Until the web interface manages outputs and the queue, drive the engine with `heron-engine ctl`. With the local Icecast server of the `icecast` profile:
+Create the first admin, then use the API (the web interface comes with M5). With the local Icecast server of the `icecast` profile:
 
 ```sh
 docker compose --profile icecast up -d --wait
-docker compose exec -T heron-engine heron-engine ctl set-outputs /dev/stdin <<'EOF'
-{"encoder_profiles": [{"id": 1, "name": "MP3 128k", "encoder": "mp3", "bitrate_kbps": 128, "sample_rate": 44100, "channels": 2}],
- "outputs": [{"id": 1, "name": "Local", "kind": "icecast", "encoder_profile_id": 1,
-              "config": {"host": "icecast", "port": 8000, "mount": "/live", "password": "hackme"}}]}
-EOF
-# Keep three random library tracks queued (Ctrl+C to stop):
-docker compose exec heron-engine heron-engine ctl autofill --min 3
+docker compose exec heron-api heron-api user add admin --role admin   # asks for a password
+
+api=http://localhost:8000/api/v1
+curl -c cookies -H 'Content-Type: application/json' -d '{"username": "admin", "password": "…"}' $api/auth/login
+curl -b cookies -H 'X-Requested-With: curl' -H 'Content-Type: application/json' $api/outputs -d \
+  '{"name": "Local", "kind": "icecast", "encoder_profile_id": 1,
+    "config": {"host": "icecast", "port": 8000, "mount": "/live", "password": "hackme"}}'
 ```
 
-Listen on http://localhost:8010/live. `ctl state`, `ctl skip`, `ctl watch` and `ctl --help` show the rest; see [Audio engine](docs/audio-engine.md#control-interface) and [Encoders and outputs](docs/outputs.md).
+Listen on http://localhost:8010/live: the queue manager keeps three tracks queued. `GET /api/v1/player`, `POST /api/v1/player/skip`, `GET /api/v1/history` and the rest are in [API and control plane](docs/api.md) and in the OpenAPI document at http://localhost:8000/api/v1/openapi.json.
 
 | Service | Role | Port (inside the network) |
 |---|---|---|
 | `heron-web` | Web interface, proxies `/api` to `heron-api` | 80, published on `HERON_HTTP_PORT` (8000) |
-| `heron-api` | HTTP API, migrations, library scanner, queue manager | 8080 |
+| `heron-api` | HTTP and WebSocket API, migrations, library scanner, queue manager | 8080 |
+| `heron-librarian` | Incoming folder, identification, tags, library layout | 8083 |
 | `heron-analyzer` | Track analysis workers | 8082 |
 | `heron-engine` | Real-time playout, encoders, outputs | 8081, gRPC control on 50051 |
 | `mariadb` | Database | 3306 |
