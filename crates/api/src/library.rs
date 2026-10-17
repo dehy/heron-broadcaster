@@ -8,33 +8,24 @@
 //! run at startup, after file system events (debounced) and periodically,
 //! as a safety net for file systems that do not report events (NFS, SMB).
 //! The scanner never modifies files.
+//!
+//! `heron-librarian` moves files and rewrites tags, and records each change
+//! in `tracks` itself. A scan holds the library lock, so it never sees a
+//! change half done, and finds the files the librarian touched unchanged.
 
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use heron_core::{FileStamp, LibraryPath};
-use lofty::file::{AudioFile, TaggedFileExt};
-use lofty::tag::Accessor;
+use heron_library::{LibraryLock, is_audio, is_hidden};
 use serde::Serialize;
 use sqlx::{MySqlPool, Row};
 use tokio::sync::mpsc;
 
-/// Extensions the scanner picks up, compared case-insensitively.
-const AUDIO_EXTENSIONS: &[&str] = &[
-    "mp3", "m4a", "mp4", "aac", "flac", "ogg", "oga", "opus", "wav", "aif", "aiff",
-];
-
-/// Longest tag value stored (the column width).
-const MAX_TAG_CHARS: usize = 512;
-
 /// Analysis jobs are queued every this many imported files during a scan.
 const ENQUEUE_BATCH: u32 = 50;
-
-/// Bytes read from each end of a file for its fingerprint.
-const FINGERPRINT_CHUNK: u64 = 64 * 1024;
 
 /// Quiet time after the last file system event before rescanning.
 const EVENT_DEBOUNCE: Duration = Duration::from_secs(5);
@@ -244,12 +235,19 @@ impl Library {
         }
     }
 
-    /// One full scan.
+    /// One full scan, holding the library lock.
     pub async fn scan(&self, settle: Duration) -> Result<ScanReport, ScanError> {
+        let lock = LibraryLock::acquire(&self.pool, "scanner").await?;
+        let report = self.scan_locked(settle).await;
+        lock.release().await?;
+        report
+    }
+
+    async fn scan_locked(&self, settle: Duration) -> Result<ScanReport, ScanError> {
         let started = Instant::now();
+        let mut known = self.known_tracks().await?;
         let root = self.root.clone();
         let files = tokio::task::spawn_blocking(move || walk(&root)).await??;
-        let mut known = self.known_tracks().await?;
         let mut report = ScanReport {
             files: files.len() as u64,
             ..ScanReport::default()
@@ -271,11 +269,8 @@ impl Library {
         let settle_before = now_us().saturating_sub(i64::try_from(settle.as_micros()).unwrap_or(0));
 
         for file in &files {
-            if file.stamp.mtime_us > settle_before {
-                report.deferred += 1;
-                continue;
-            }
             match known.get(file.path.as_str()) {
+                // Including files the librarian just wrote: it recorded their stamp.
                 Some(track) if track.stamp == Some(file.stamp) => {
                     if track.missing {
                         self.set_missing(track.id, false).await?;
@@ -284,6 +279,7 @@ impl Library {
                         report.unchanged += 1;
                     }
                 }
+                _ if file.stamp.mtime_us > settle_before => report.deferred += 1,
                 existing => {
                     let existing = existing.map(|track| track.id);
                     let Some(info) = self.read(&file.path).await? else {
@@ -527,74 +523,20 @@ fn walk(root: &Path) -> Result<Vec<DiskFile>, ScanError> {
     Ok(files)
 }
 
-fn is_hidden(name: &std::ffi::OsStr) -> bool {
-    name.to_str().is_some_and(|name| name.starts_with('.'))
-}
-
-fn is_audio(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            AUDIO_EXTENSIONS
-                .iter()
-                .any(|known| known.eq_ignore_ascii_case(extension))
-        })
-}
-
 fn read_file(path: &Path) -> std::io::Result<FileInfo> {
-    let hash = fingerprint(path)?;
-
-    let mut info = FileInfo {
-        hash,
-        title: None,
-        artist: None,
-        album: None,
-        duration_ms: None,
-    };
+    let hash = heron_library::content_hash(path)?;
     // Unreadable tags are not fatal: the track is still imported and analyzed.
-    match lofty::read_from_path(path) {
-        Ok(tagged) => {
-            let duration = tagged.properties().duration();
-            info.duration_ms = u32::try_from(duration.as_millis())
-                .ok()
-                .filter(|&ms| ms > 0);
-            if let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) {
-                info.title = tag.title().and_then(|value| clean_tag(&value));
-                info.artist = tag.artist().and_then(|value| clean_tag(&value));
-                info.album = tag.album().and_then(|value| clean_tag(&value));
-            }
-        }
-        Err(error) => {
-            tracing::warn!(path = %path.display(), %error, "cannot read tags");
-        }
-    }
-    Ok(info)
-}
-
-/// Identifies a file's content cheaply, to recognize it under a new path:
-/// BLAKE3 of the size and the first and last 64 KiB. Reading whole files
-/// would double the I/O of an import, which hurts on network shares.
-fn fingerprint(path: &Path) -> std::io::Result<[u8; 32]> {
-    use std::io::{Read, Seek, SeekFrom};
-    let mut file = File::open(path)?;
-    let size = file.metadata()?.len();
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(&size.to_le_bytes());
-    let mut buffer = Vec::new();
-    file.by_ref()
-        .take(FINGERPRINT_CHUNK)
-        .read_to_end(&mut buffer)?;
-    if size > 2 * FINGERPRINT_CHUNK {
-        file.seek(SeekFrom::End(-(FINGERPRINT_CHUNK as i64)))?;
-    }
-    file.read_to_end(&mut buffer)?;
-    hasher.update(&buffer);
-    Ok(*hasher.finalize().as_bytes())
-}
-
-fn clean_tag(value: &str) -> Option<String> {
-    let value = value.trim().trim_matches('\0').trim();
-    (!value.is_empty()).then(|| value.chars().take(MAX_TAG_CHARS).collect())
+    let read = heron_library::tags::read(path).unwrap_or_else(|error| {
+        tracing::warn!(path = %path.display(), %error, "cannot read tags");
+        heron_library::tags::FileTags::default()
+    });
+    Ok(FileInfo {
+        hash,
+        title: read.tags.title,
+        artist: read.tags.artist,
+        album: read.tags.album,
+        duration_ms: read.duration_ms,
+    })
 }
 
 fn now_us() -> i64 {
@@ -726,13 +668,5 @@ mod tests {
             Err(ScanError::Root { .. })
         ));
         db.drop().await;
-    }
-
-    #[test]
-    fn recognizes_audio_extensions_in_any_case() {
-        assert!(is_audio(Path::new("a/b.MP3")));
-        assert!(is_audio(Path::new("a/b.m4a")));
-        assert!(!is_audio(Path::new("a/b.jpg")));
-        assert!(!is_audio(Path::new("a/mp3")));
     }
 }

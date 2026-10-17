@@ -1,0 +1,28 @@
+[package]
+name = "heron-library"
+description = "Library files shared by the Heron Broadcaster scanner and librarian"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+blake3.workspace = true
+heron-core.workspace = true
+lofty.workspace = true
+serde.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+heron-service = { workspace = true, features = ["test-util"] }
+hound.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

@@ -15,6 +15,7 @@ heron-core = { path = "crates/core" }
 heron-proto = { path = "crates/proto" }
 heron-analysis = { path = "crates/analysis" }
 heron-dsp = { path = "crates/dsp" }
+heron-library = { path = "crates/library" }
 heron-outputs = { path = "crates/outputs" }
 heron-rotation = { path = "crates/rotation" }
 heron-service = { path = "crates/service" }
