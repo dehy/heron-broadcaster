@@ -4,7 +4,9 @@ A modern, self-hosted **radio automation system** for Linux. Heron plays music 2
 
 The name comes from "air on" sounding like *héron*: keeping the air on, 24/7.
 
-> **Status:** early development. Milestone M0 (foundations) provides the services, the database schema and CI; playout arrives in M2. See the [roadmap](docs/roadmap/README.md).
+> **Status:** early development. Heron imports and analyzes a music library (M1); playout arrives in M2. See the [roadmap](docs/roadmap/README.md).
+
+Heron runs on Linux, amd64 and arm64, down to a Raspberry Pi.
 
 ## Quick start
 
@@ -16,7 +18,15 @@ mkdir -p data/music data/fallback # or point HERON_MUSIC_DIR / HERON_FALLBACK_DI
 docker compose up -d --build --wait
 ```
 
-Open http://localhost:8000. The page shows the API and database status. Database migrations run automatically when `heron-api` starts.
+Open http://localhost:8000. The page shows the service status and the import progress. Database migrations run automatically when `heron-api` starts.
+
+Point `HERON_MUSIC_DIR` at your music. Heron mounts it read-only and never modifies your files; new and changed files are picked up automatically. See [Import and analysis](docs/analysis.md).
+
+To try it without your own music, generate a synthetic library (uses ffmpeg in Docker):
+
+```sh
+scripts/generate-test-library.sh data/music 100
+```
 
 | Service | Role | Port (inside the network) |
 |---|---|---|
@@ -37,11 +47,14 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 
-# Migration test against a throwaway MariaDB:
+# Database tests create and drop scratch databases, so they need an admin URL:
 docker run -d --rm --name heron-test-db -p 127.0.0.1:33306:3306 \
-  -e MARIADB_ROOT_PASSWORD=root -e MARIADB_DATABASE=heron_test \
-  -e MARIADB_USER=heron -e MARIADB_PASSWORD=heron mariadb:11.8
-HERON_TEST_DATABASE_URL=mysql://heron:heron@127.0.0.1:33306/heron_test cargo test --workspace
+  -e MARIADB_ROOT_PASSWORD=root mariadb:11.8
+HERON_TEST_DATABASE_URL=mysql://root:root@127.0.0.1:33306 cargo test --workspace
+
+# Analyze files with given settings, without a database:
+HERON_ANALYSIS_SETTINGS='{"silence_ceiling_dbfs": -60}' \
+  cargo run --release -p heron-analysis --example analyze -- path/to/*.mp3
 
 # Web app, with /api proxied to a local heron-api on :8080:
 cd web && npm install && npm run dev

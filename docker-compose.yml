@@ -43,7 +43,11 @@ services:
     environment:
       <<: *rust-env
       HERON_DATABASE_URL: *database-url
+      HERON_LIBRARY_DIR: /music
+      HERON_SCAN_INTERVAL: ${HERON_SCAN_INTERVAL:-3600}
+      HERON_LIBRARY_WATCH: ${HERON_LIBRARY_WATCH:-true}
     volumes:
+      # Read-only: Heron never modifies your files.
       - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
     depends_on:
       mariadb:
@@ -59,6 +63,7 @@ services:
     environment:
       <<: *rust-env
       HERON_DATABASE_URL: *database-url
+      HERON_LIBRARY_DIR: /music
     volumes:
       - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
     depends_on:

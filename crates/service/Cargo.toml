@@ -11,6 +11,8 @@ publish = false
 
 [features]
 mysql = ["dep:sqlx"]
+# Scratch databases for integration tests.
+test-util = ["mysql"]
 
 [dependencies]
 axum.workspace = true

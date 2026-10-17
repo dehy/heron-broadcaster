@@ -53,3 +53,13 @@ dd {
 .bad {
   color: var(--bad);
 }
+
+.muted {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+progress {
+  width: 100%;
+  accent-color: var(--good);
+}

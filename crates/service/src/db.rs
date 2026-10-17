@@ -71,3 +71,71 @@ impl HealthCheck for DatabaseHealth {
             .map_err(|error| format!("database: {error}"))
     }
 }
+
+/// The schema migrations in `migrations/`, applied by `heron-api` on startup.
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+
+/// A throwaway database for integration tests, created from an admin URL
+/// (one allowed to create databases, without a database name) and migrated.
+#[cfg(feature = "test-util")]
+pub struct ScratchDatabase {
+    pub pool: MySqlPool,
+    admin_url: String,
+    name: String,
+}
+
+#[cfg(feature = "test-util")]
+impl ScratchDatabase {
+    /// Uses `HERON_TEST_DATABASE_URL`, e.g. `mysql://root:root@127.0.0.1:3306`.
+    /// Returns `None` (and the test should return early) when it is not set,
+    /// and panics when it is set but unusable, so CI cannot skip silently.
+    #[allow(clippy::expect_used)]
+    pub async fn create() -> Option<Self> {
+        let Ok(admin_url) = std::env::var("HERON_TEST_DATABASE_URL") else {
+            eprintln!("HERON_TEST_DATABASE_URL not set, skipping");
+            return None;
+        };
+        let admin_url = admin_url.trim_end_matches('/').to_owned();
+        let name = format!(
+            "heron_test_{}_{}",
+            std::process::id(),
+            SCRATCH_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        let admin = MySqlPool::connect(&admin_url)
+            .await
+            .expect("cannot connect to HERON_TEST_DATABASE_URL");
+        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE `{name}`")))
+            .execute(&admin)
+            .await
+            .expect("cannot create the scratch database");
+        admin.close().await;
+        let pool = MySqlPool::connect(&format!("{admin_url}/{name}"))
+            .await
+            .expect("cannot connect to the scratch database");
+        MIGRATOR
+            .run(&pool)
+            .await
+            .expect("cannot migrate the scratch database");
+        Some(Self {
+            pool,
+            admin_url,
+            name,
+        })
+    }
+
+    /// Drops the database. Call it at the end of the test.
+    pub async fn drop(self) {
+        self.pool.close().await;
+        if let Ok(admin) = MySqlPool::connect(&self.admin_url).await {
+            let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DROP DATABASE `{}`",
+                self.name
+            )))
+            .execute(&admin)
+            .await;
+        }
+    }
+}
+
+#[cfg(feature = "test-util")]
+static SCRATCH_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);

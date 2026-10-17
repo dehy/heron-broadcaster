@@ -1,15 +1,15 @@
-# Data model (initial sketch)
+# Data model
 
-To be refined in [M0 – Foundations](roadmap/m0-foundations.md). Names are indicative. Database: MariaDB through `sqlx`, with migrations in `migrations/` that run automatically on startup.
+The schema lives in `migrations/`; this page summarizes it. Tables not used yet are sketches and will change with their milestone. Database: MariaDB through `sqlx`, with migrations in `migrations/` that run automatically on startup.
 
 ## Library
 
 | Table | Columns |
 |---|---|
-| `tracks` | id, path, file hash, mtime, title, artist, album, duration_ms, enabled, created_at |
-| `track_analysis` | track_id, analysis_version, integrated_lufs, true_peak_db, cue_in_ms, cue_out_ms, fade_out_start_ms, has_internal_silence, analyzed_at |
+| `tracks` | id, path (relative to the library root, `/` separators, unique through a hash), file_hash (fingerprint: size + first and last 64 KiB), file_size, file_mtime_us, title, artist, album, duration_ms, enabled, missing_since, created_at, updated_at |
+| `track_analysis` | track_id, analysis_version, params_hash (fingerprint of the analysis settings), integrated_lufs, true_peak_db, cue_in_ms, cue_out_ms, fade_out_start_ms, has_internal_silence, analyzed_at |
 | `track_overrides` | track_id, cue_in_ms, cue_out_ms, crossfade settings, gap_killer_enabled (all nullable) |
-| `analysis_jobs` | id, track_id, analysis_version, status (pending, running, done, failed), attempts, claimed_by, claimed_at, error, created_at — proposed queue between the scanner and `heron-analyzer` (see [Architecture](architecture.md#scanner-and-analyzer-split)) |
+| `analysis_jobs` | id, track_id, analysis_version, status (pending, running, done, failed), attempts, claimed_by, claimed_at, error, created_at, updated_at — queue between the scanner and `heron-analyzer` (see [Import and analysis](analysis.md#job-queue)) |
 
 ## Categories
 
