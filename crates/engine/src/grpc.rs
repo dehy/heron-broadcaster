@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use heron_core::playout::TrackPlayout;
-use heron_core::{OutputsConfig, PlayoutSettings};
+use heron_core::{OutputsConfig, PlaySource, PlayoutSettings};
 use heron_outputs::OutputState;
 use heron_proto::engine as pb;
 use heron_proto::engine::engine_server::{Engine as EngineRpc, EngineServer};
@@ -65,6 +65,33 @@ impl EngineRpc for EngineService {
     ) -> Reply<pb::ClearQueueResponse> {
         self.engine.player().clear().map_err(player_status)?;
         Ok(Response::new(pb::ClearQueueResponse {}))
+    }
+
+    async fn move_queue_entry(
+        &self,
+        request: Request<pb::MoveQueueEntryRequest>,
+    ) -> Reply<pb::MoveQueueEntryResponse> {
+        let request = request.into_inner();
+        self.engine
+            .player()
+            .move_entry(request.entry_id, request.position as usize)
+            .map_err(player_status)?;
+        Ok(Response::new(pb::MoveQueueEntryResponse {}))
+    }
+
+    async fn replace_queue_entry(
+        &self,
+        request: Request<pb::ReplaceQueueEntryRequest>,
+    ) -> Reply<pb::ReplaceQueueEntryResponse> {
+        let request = request.into_inner();
+        let track = request
+            .track
+            .ok_or_else(|| Status::invalid_argument("missing track"))?;
+        self.engine
+            .player()
+            .replace(request.entry_id, track_from_proto(track)?)
+            .map_err(player_status)?;
+        Ok(Response::new(pb::ReplaceQueueEntryResponse {}))
     }
 
     async fn skip(&self, _: Request<pb::SkipRequest>) -> Reply<pb::SkipResponse> {
@@ -150,6 +177,7 @@ impl EngineRpc for EngineService {
             outputs,
             rendered_ms: snapshot.rendered_ms,
             underruns: snapshot.underruns,
+            started_unix_ms: unix_ms(self.engine.started_at()),
         }))
     }
 
@@ -244,6 +272,7 @@ pub fn track_from_proto(track: pb::Track) -> Result<TrackRequest, Status> {
             Status::invalid_argument(format!("invalid crossfade overrides: {error}"))
         })?
     };
+    let source = source_from_proto(track.source());
     let mut playout = TrackPlayout {
         duration_ms: track.duration_ms,
         cue_in_ms: track.cue_in_ms,
@@ -273,6 +302,7 @@ pub fn track_from_proto(track: pb::Track) -> Result<TrackRequest, Status> {
         artist: track.artist,
         album: track.album,
         playout,
+        source,
     })
 }
 
@@ -295,6 +325,26 @@ fn track_to_proto(track: TrackRequest) -> pb::Track {
         } else {
             serde_json::to_string(&playout.crossfade).unwrap_or_default()
         },
+        source: source_to_proto(track.source).into(),
+    }
+}
+
+/// Tracks from older clients count as queued by hand.
+fn source_from_proto(source: pb::PlaySource) -> PlaySource {
+    match source {
+        pb::PlaySource::Rotation => PlaySource::Rotation,
+        pb::PlaySource::Request => PlaySource::Request,
+        pb::PlaySource::Fallback => PlaySource::Fallback,
+        pb::PlaySource::Manual | pb::PlaySource::Unspecified => PlaySource::Manual,
+    }
+}
+
+fn source_to_proto(source: PlaySource) -> pb::PlaySource {
+    match source {
+        PlaySource::Rotation => pb::PlaySource::Rotation,
+        PlaySource::Request => pb::PlaySource::Request,
+        PlaySource::Fallback => pb::PlaySource::Fallback,
+        PlaySource::Manual => pb::PlaySource::Manual,
     }
 }
 
@@ -427,6 +477,7 @@ mod tests {
             integrated_lufs: Some(-18.5),
             true_peak_db: Some(-1.2),
             crossfade_overrides_json: r#"{"fade_out":null,"fade_in":null,"mode":"fixed","fixed_ms":3000,"crossfade":null}"#.into(),
+            source: pb::PlaySource::Rotation.into(),
         };
         let back = track_to_proto(track_from_proto(original.clone()).unwrap());
         assert_eq!(back, original);

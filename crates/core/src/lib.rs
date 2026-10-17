@@ -10,7 +10,7 @@ pub mod settings;
 pub use file::{FileStamp, LibraryPath};
 pub use output::{EncoderKind, EncoderProfile, OutputConfig, OutputKind, OutputsConfig};
 pub use playout::{
-    CrossfadeSettings, FadeCurve, LoudnessSettings, PlayoutSettings, TrackOverrides, TrackPlayout,
-    Transition, plan_transition,
+    CrossfadeSettings, FadeCurve, LoudnessSettings, PlaySource, PlayoutSettings, TrackOverrides,
+    TrackPlayout, Transition, plan_transition,
 };
 pub use settings::{AnalysisSettings, LibrarySettings};

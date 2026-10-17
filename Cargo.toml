@@ -20,8 +20,10 @@ heron-librarian = { path = "crates/librarian" }
 heron-outputs = { path = "crates/outputs" }
 heron-rotation = { path = "crates/rotation" }
 heron-service = { path = "crates/service" }
+heron-engine = { path = "crates/engine" }
 
 anyhow = "1.0.104"
+argon2 = "0.6.0"
 audioadapter-buffers = "5.2.0"
 axum = "0.8.9"
 base64 = "0.23.1"
@@ -30,6 +32,7 @@ bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 cpal = "0.18.2"
 ebur128 = "0.1.10"
+getrandom = "0.4.3"
 hound = "3.5.1"
 lofty = "0.25.4"
 metrics = "0.24.6"
@@ -52,11 +55,14 @@ tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread", "signal", "net", "time"] }
 tokio-stream = "0.1.19"
+tokio-tungstenite = "0.29.0"
 tonic = "0.14.6"
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+utoipa = "6.0.0"
+utoipa-axum = "0.3.0"
 walkdir = "2.5.0"
 
 [workspace.lints.rust]

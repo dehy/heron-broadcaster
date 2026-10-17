@@ -5,6 +5,7 @@
 //! Files are decoded in memory, synchronously, so the tests do not depend on
 //! how fast decode threads run on the test machine (they have tests of their own).
 
+use heron_core::PlaySource;
 use heron_core::playout::CrossfadeOverrides;
 use tempfile::TempDir;
 
@@ -71,6 +72,7 @@ impl Station {
             artist: Some("Tester".to_owned()),
             album: None,
             playout: TrackPlayout::unanalyzed(duration_ms),
+            source: PlaySource::Manual,
         }
     }
 
@@ -306,4 +308,106 @@ fn fx_plays_over_the_music() {
         station.now_playing.borrow().title.as_deref(),
         Some("music.wav")
     );
+}
+
+#[test]
+fn queue_entries_move() {
+    let mut station = Station::new();
+    let tracks = vec![
+        station.file("one.wav", 1.0),
+        station.file("two.wav", 0.5),
+        station.file("three.wav", 0.5),
+        station.file("four.wav", 0.5),
+    ];
+    let ids = station.player.enqueue(tracks, None).unwrap();
+    station.play(0.2);
+    assert!(matches!(
+        station.player.move_entry(ids[0], 1),
+        Err(PlayerError::OnAir(_))
+    ));
+    // The cued track goes last, and the last one is played next.
+    station.player.move_entry(ids[1], 9).unwrap();
+    station.player.move_entry(ids[3], 0).unwrap();
+    // Moving the cued track to the front changes nothing.
+    station.play(0.1);
+    station.player.move_entry(ids[3], 0).unwrap();
+    assert!(matches!(
+        station.player.move_entry(999, 0),
+        Err(PlayerError::NotFound(999))
+    ));
+    station.play(3.0);
+    let order: Vec<String> = started(&station.events())
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect();
+    assert_eq!(order, ["one.wav", "four.wav", "three.wav", "two.wav"]);
+}
+
+#[test]
+fn waiting_entries_take_a_new_track() {
+    let mut station = Station::new();
+    let tracks = vec![
+        station.file("one.wav", 1.0),
+        station.file("two.wav", 0.5),
+        station.file("three.wav", 0.5),
+    ];
+    let ids = station.player.enqueue(tracks, None).unwrap();
+    station.play(0.2);
+    // The cued entry and a queued one, as if their files had moved.
+    let moved = station.file("moved two.wav", 0.5);
+    station.player.replace(ids[1], moved).unwrap();
+    let moved = station.file("moved three.wav", 0.5);
+    station.player.replace(ids[2], moved).unwrap();
+    let on_air = station.file("unused.wav", 0.5);
+    assert!(matches!(
+        station.player.replace(ids[0], on_air),
+        Err(PlayerError::OnAir(_))
+    ));
+    station.play(3.0);
+    let events = station.events();
+    let order: Vec<(u64, String)> = events
+        .iter()
+        .filter_map(|event| match event {
+            PlayerEvent::Started { entry, .. } => Some((entry.entry_id, entry.track.path.clone())),
+            PlayerEvent::Ended { .. } => None,
+        })
+        .collect();
+    assert_eq!(
+        order,
+        [
+            (ids[0], "one.wav".to_owned()),
+            (ids[1], "moved two.wav".to_owned()),
+            (ids[2], "moved three.wav".to_owned()),
+        ]
+    );
+    let ended = events
+        .iter()
+        .filter(|event| matches!(event, PlayerEvent::Ended { .. }))
+        .count();
+    assert_eq!(ended, 3, "each entry plays once: {events:?}");
+}
+
+#[test]
+fn positions_count_the_cued_track() {
+    let mut station = Station::new();
+    let tracks = vec![
+        station.file("one.wav", 1.0),
+        station.file("two.wav", 0.5),
+        station.file("three.wav", 0.5),
+    ];
+    station.player.enqueue(tracks, None).unwrap();
+    station.play(0.2);
+    // Waiting: two (cued), three. Position 1 is right after the cued track.
+    let inserted = station.file("inserted.wav", 0.5);
+    station.player.enqueue(vec![inserted], Some(1)).unwrap();
+    let waiting: Vec<String> = {
+        let snapshot = station.player.snapshot();
+        snapshot
+            .cued
+            .into_iter()
+            .chain(snapshot.queue)
+            .map(|entry| entry.track.path)
+            .collect()
+    };
+    assert_eq!(waiting, ["two.wav", "inserted.wav", "three.wav"]);
 }

@@ -68,7 +68,7 @@ Like iTunes' "Keep Music folder organized" and "Copy files to the Music folder w
 - Design: [Library management](../library.md). A new service, `heron-librarian`, holds the only read-write mount of the library; it and the scanner share a MariaDB named lock.
 - Each station sets its own AcoustID key; without one, files are filed by their own tags. Covers go to `cover.jpg` (embedding optional). See the resolved [open questions](../open-questions.md).
 - The analyzer now fingerprints every track (`ALGORITHM_VERSION` 2): upgrading from M1 re-analyzes the library once.
-- Deferred: identifying tracks already in the library (they are fingerprinted, ready for it), the review screen ([M5](m5-web-ui.md)), following moves of queued tracks in the engine ([M4](m4-api-control-plane.md)). Until then, settings and review use `heron-librarian settings` and `heron-librarian review`.
+- Deferred: identifying tracks already in the library (they are fingerprinted, ready for it), the review screen ([M5](m5-web-ui.md)). Until then, review uses `heron-librarian review`. Following moves of queued tracks came with [M4](m4-api-control-plane.md).
 
 ## References
 

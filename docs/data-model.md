@@ -61,13 +61,13 @@ See [Rotation – Restrictions](rotation.md#restrictions). Sketch, defined in [M
 
 | Table | Columns |
 |---|---|
-| `play_history` | id, track_id, started_at, ended_at, deck, source (rotation, request, fallback, manual), relaxation_applied |
+| `play_history` | id, track_id (NULL for files outside the library and deleted tracks), artist, title, started_at, ended_at, played_ms, end_reason (finished, skipped, stopped, replaced; NULL while playing or when the API missed the end), deck (a, b, fx), source (rotation, request, fallback, manual), relaxation_applied — recorded by `heron-api` from the engine's track changes (see [API and control plane](api.md#play-history)) |
 
 ## Settings
 
 | Table | Columns |
 |---|---|
-| `settings` | name, JSON value. `analysis`: Gap Killer and crossfade point detection ([Import and analysis](analysis.md#settings)); `library`: AcoustID key, layout, covers ([Library management](library.md#settings)); `playout`: crossfade and loudness ([Audio engine](audio-engine.md#playout-settings)); later separation rules |
+| `settings` | name, JSON value. `analysis`: Gap Killer and crossfade point detection ([Import and analysis](analysis.md#settings)); `library`: AcoustID key, layout, covers ([Library management](library.md#settings)); `playout`: crossfade and loudness ([Audio engine](audio-engine.md#playout-settings)); `queue`: autofill and how many tracks wait ([API](api.md#queue-manager)); `engine`: whether the API manages the engine's configuration yet ([API](api.md#engine-configuration)); later separation rules |
 
 ## Encoders and outputs
 
@@ -94,8 +94,11 @@ See [M7b](roadmap/m7b-listener-statistics.md). Sketch, defined with that milesto
 |---|---|
 | `webhooks` | to be defined |
 | `webhook_deliveries` | to be defined |
-| `users` | local accounts: to be defined (username, password hash, role, …) |
-| `sessions` or API tokens | to be defined. Authentication is local only for now ([Decisions](decisions.md#decisions-made-after-the-handoff)) |
+| `users` | id, username, password_hash (Argon2id), role (viewer, operator, admin), enabled, last_login_at, created_at, updated_at |
+| `sessions` | token_hash (BLAKE3 of the cookie's token), user_id, created_at, last_seen_at, expires_at (30 days after the last use) |
+| `api_tokens` | id, user_id, name, token_hash, created_at, last_used_at, expires_at, revoked_at |
+
+Authentication is local only for now ([Decisions](decisions.md#decisions-made-after-the-handoff), [API](api.md#authentication)).
 
 ## Relationships
 
@@ -114,5 +117,6 @@ clocks 1──* clock_slots *──1 categories
 clock_schedule *──1 clocks
 play_history *──1 tracks
 webhooks 1──* webhook_deliveries
+users 1──* sessions, api_tokens
 encoder_profiles 1──* outputs
 ```

@@ -46,7 +46,7 @@ pub enum ScanError {
 }
 
 /// Outcome of one scan, logged and served by `/api/v1/library/status`.
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, utoipa::ToSchema)]
 pub struct ScanReport {
     pub finished_at_unix: u64,
     pub duration_ms: u64,
@@ -108,7 +108,7 @@ struct FileInfo {
 }
 
 /// Library and analysis progress, served by `/api/v1/library/status`.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct LibraryStatus {
     /// Tracks whose file is present.
     pub tracks: u64,
@@ -121,7 +121,8 @@ pub struct LibraryStatus {
     pub last_scan: Option<ScanReport>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+#[schema(as = AnalysisQueueStatus)]
 pub struct QueueStatus {
     pub pending: u64,
     pub running: u64,

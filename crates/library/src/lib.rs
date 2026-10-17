@@ -5,10 +5,12 @@
 //!
 //! - [`files`]: which files are audio, and how their content is identified.
 //! - [`tags`]: the tags Heron reads and writes.
+//! - [`layout`]: where files go in the library (`{album_artist}/{album}/…`).
 //! - [`lock`]: the lock that keeps the scanner and the librarian from
 //!   working on the library at the same time.
 
 pub mod files;
+pub mod layout;
 pub mod lock;
 pub mod tags;
 

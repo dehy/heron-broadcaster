@@ -44,6 +44,10 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev
       - run: cargo clippy -p heron-engine --features monitor --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - name: The OpenAPI document is up to date
+        run: |
+          cargo run -q -p heron-api --locked -- openapi > web/openapi.json
+          git diff --exit-code web/openapi.json
 
   web:
     name: Web (typecheck, build)
@@ -57,8 +61,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            web/tools/openapi/package-lock.json
       - run: npm ci
+      - name: Client types match the OpenAPI document
+        run: npm run generate-api && git diff --exit-code src/api/schema.ts
       - run: npm run typecheck
       - run: npm run build
 
@@ -104,8 +112,8 @@ jobs:
         run: curl -fsS http://localhost:8000/api/v1/status | grep -q '"database":"ok"'
       - name: Every track is imported and analyzed
         run: scripts/wait-for-analysis.sh http://localhost:8000 60 300
-      - name: The engine streams to Icecast
-        run: scripts/check-streaming.sh data/music
+      - name: The API puts the station on air
+        run: scripts/check-streaming.sh
       - name: Files dropped into the incoming folder are filed and analyzed
         run: |
           scripts/generate-test-library.sh "$RUNNER_TEMP/drop" 3

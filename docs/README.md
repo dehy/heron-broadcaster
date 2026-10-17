@@ -28,6 +28,7 @@ The name comes from "air on" sounding like *héron* (French for heron): keeping 
 |---|---|
 | [Architecture](architecture.md) | Processes, repository layout, suggested libraries |
 | [Audio engine](audio-engine.md) | How `heron-engine` plays: threads, transitions, playout settings, control interface, real-time rules |
+| [API and control plane](api.md) | `heron-api`: authentication, routes, live WebSocket, queue manager, play history, engine configuration, OpenAPI |
 | [Data model](data-model.md) | Initial database schema sketch |
 | [Conventions](conventions.md) | Code style, errors, logging, testing, commits |
 

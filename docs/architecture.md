@@ -1,5 +1,87 @@
 # Architecture
 
+## C4 model
+
+The first two levels of the [C4 model](https://c4model.com/): Heron in its environment, then the containers it runs as (one Docker Compose service each). Elements marked *planned* come with later milestones.
+
+### Level 1: system context
+
+```mermaid
+flowchart TB
+    staff(["<b>Station staff</b><br/>[Person]<br/>Admins, operators and viewers,<br/>in a browser"]):::person
+    scripts["<b>Scripts and integrations</b><br/>[External system]<br/>Automation with API tokens"]:::external
+    listener(["<b>Listener</b><br/>[Person]<br/>Web player, app, smart speaker,<br/>hardware radio"]):::person
+
+    heron["<b>Heron Broadcaster</b><br/>[Software system]<br/>Self-hosted radio automation: library, analysis,<br/>queue and rotation, crossfading playout,<br/>encoding and streaming, 24/7"]:::system
+
+    storage["<b>Music storage</b><br/>[External system]<br/>Host folders: music library,<br/>incoming folder, fallback directory"]:::external
+    musicdb["<b>AcoustID, MusicBrainz,<br/>Cover Art Archive</b><br/>[External systems]<br/>Fingerprints, releases, covers"]:::external
+    streamers["<b>Stream servers</b><br/>[External system]<br/>Icecast; Shoutcast and HLS planned.<br/>Several at once"]:::external
+    receivers["<b>Webhook receivers</b><br/>[External system, planned M7]<br/>Websites, bots, displays"]:::planned
+
+    staff -- "Operates<br/>[HTTPS]" --> heron
+    scripts -- "Controls<br/>[REST, WebSocket]" --> heron
+    heron -- "Reads music,<br/>files incoming tracks" --> storage
+    heron -- "Identifies incoming files<br/>[HTTPS]" --> musicdb
+    heron -- "Streams audio and now playing<br/>[HTTP source]" --> streamers
+    heron -. "Notifies track changes<br/>[HTTPS webhooks]" .-> receivers
+    listener -- "Listens<br/>[HTTP]" --> streamers
+
+    classDef person fill:#08427b,stroke:#052e56,color:#fff
+    classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+    classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+    classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+    classDef planned fill:#ffffff,stroke:#999999,color:#666666,stroke-dasharray:5 5
+```
+
+### Level 2: containers
+
+```mermaid
+flowchart TB
+    staff(["<b>Station staff</b><br/>[Person]<br/>Browser"]):::person
+    scripts["<b>Scripts and integrations</b><br/>[External system]<br/>API tokens"]:::external
+
+    subgraph heron ["Heron Broadcaster (Docker Compose)"]
+        web["<b>heron-web</b><br/>[Container: nginx, React, TypeScript]<br/>Static web app; proxies /api,<br/>WebSocket included"]:::container
+        api["<b>heron-api</b><br/>[Container: Rust, axum]<br/>REST and WebSocket API, auth, library scanner,<br/>queue manager, play history,<br/>engine configuration, OpenAPI"]:::container
+        analyzer["<b>heron-analyzer</b><br/>[Container: Rust, worker pool]<br/>Loudness, cue and crossfade points,<br/>Chromaprint fingerprints"]:::container
+        librarian["<b>heron-librarian</b><br/>[Container: Rust]<br/>Identifies, tags and files incoming files;<br/>organizes and undoes; journaled moves"]:::container
+        engine["<b>heron-engine</b><br/>[Container: Rust, real time]<br/>Decks, mixer, crossfades, loudness,<br/>encoders, outputs. Plays on when<br/>everything else is down"]:::container
+        db[("<b>mariadb</b><br/>[Container: MariaDB 11]<br/>Tracks, analysis, jobs, users,<br/>settings, outputs, history,<br/>move journal")]:::container
+        state[("<b>engine-state</b><br/>[Volume: JSON]<br/>The engine's copy of its<br/>outputs and playout settings")]:::container
+    end
+
+    storage["<b>Music storage</b><br/>[External system]<br/>Library, incoming folder,<br/>fallback directory"]:::external
+    musicdb["<b>AcoustID, MusicBrainz,<br/>Cover Art Archive</b><br/>[External systems]"]:::external
+    streamers["<b>Stream servers</b><br/>[External system]<br/>Icecast"]:::external
+
+    staff -- "Uses<br/>[HTTPS]" --> web
+    scripts -- "Calls /api<br/>[HTTPS]" --> web
+    web -- "Proxies /api<br/>[HTTP, WebSocket]" --> api
+    api -- "Queue, transport, configuration;<br/>track changes back<br/>[gRPC :50051]" --> engine
+    api -- "[SQL]" --> db
+    analyzer -- "Jobs, results<br/>[SQL, SKIP LOCKED]" --> db
+    librarian -- "Move journal, tracks<br/>[SQL, named lock]" --> db
+    engine -- "Configuration" --> state
+    engine -- "Streams audio, now playing<br/>[HTTP PUT]" --> streamers
+    librarian -- "Fingerprints<br/>[HTTPS, rate limited]" --> musicdb
+    api -. "scans<br/>[ro]" .-> storage
+    analyzer -. "decodes<br/>[ro]" .-> storage
+    engine -. "plays<br/>[ro]" .-> storage
+    librarian == "files, tags<br/>[read-write]" ==> storage
+
+    classDef person fill:#08427b,stroke:#052e56,color:#fff
+    classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+    classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+    classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+    classDef planned fill:#ffffff,stroke:#999999,color:#666666,stroke-dasharray:5 5
+    style heron fill:none,stroke:#444444,stroke-dasharray:6 4
+```
+
+Notation: dark blue for people, blue for Heron and its containers, grey for external systems, dashed for planned ones. In the containers view, dotted arrows are read-only access to the music storage; only `heron-librarian` writes to it (thick arrow).
+
+The engine never connects to the database ([Locked decisions](decisions.md)): it gets everything it plays, and its configuration, from `heron-api` over gRPC.
+
 ## Processes
 
 ```
@@ -27,7 +109,7 @@
 | Service | Role |
 |---|---|
 | **heron-engine** | Real-time playout: decks, mixer, crossfades, DSP, encoders and output sinks (several outputs at once, see [Encoders and outputs](outputs.md)). Reads the music library and the fallback directory, both mounted read-only. Exposes a gRPC control interface (`heron-engine ctl` is its command-line client). Holds the upcoming tracks in memory and keeps its outputs and settings on disk. **Must keep playing if every other service is down.** See [Audio engine](audio-engine.md). |
-| **heron-api** | HTTP + WebSocket server: auth (local users), library, categories, rotation, queue manager, webhooks and the library scanner. Feeds the engine over gRPC. |
+| **heron-api** | HTTP + WebSocket server: auth (local users), library, categories, rotation, queue manager, play history, webhooks and the library scanner. Feeds the engine over gRPC and pushes it its playout settings and outputs. See [API and control plane](api.md). |
 | **heron-analyzer** | Analysis worker pool, as its own modular service. Reads files from the music library volume, runs `heron-analysis` and stores results in MariaDB. Can be scaled independently (several replicas) and restarted without affecting the API or the air. Uses CPUs − 1 workers by default. |
 | **heron-librarian** | Library management, as its own service: identifies files dropped into the incoming folder (Chromaprint, AcoustID, MusicBrainz, Cover Art Archive), tags them and files them into the library; reorganizes the library on request and undoes changes. **The only service with write access to the library**, so `heron-api` (which faces the network) keeps a read-only mount. Every move is journaled in MariaDB and finished or rolled back after a crash. See [Library management](library.md). |
 | **heron-web** | Static React build. |
@@ -43,7 +125,7 @@ Built in [M1](roadmap/m1-import-analysis.md); details in [Import and analysis](a
 
 ### Scanner and librarian
 
-Built in [M1b](roadmap/m1b-library-management.md). The librarian records every file it moves or re-tags in `tracks` (new path, new stamp) in the same step, so the read-only scanner finds those files unchanged. They share a MariaDB named lock (`GET_LOCK`): a scan never runs in the middle of a move. Shared code (audio file detection, content hash, tags, the lock) lives in `heron-library`.
+Built in [M1b](roadmap/m1b-library-management.md). The librarian records every file it moves or re-tags in `tracks` (new path, new stamp) in the same step, so the read-only scanner finds those files unchanged. They share a MariaDB named lock (`GET_LOCK`): a scan never runs in the middle of a move. Shared code (audio file detection, content hash, tags, folder layout, the lock) lives in `heron-library`.
 
 ## Repository layout
 
@@ -53,13 +135,13 @@ heron-broadcaster/
 │   ├── core/       heron-core       shared types: track, cue points, fade curves, settings
 │   ├── proto/      heron-proto      gRPC definitions between api and engine
 │   ├── analysis/   heron-analysis   loudness, silence, cue and fade point detection, Chromaprint fingerprints
-│   ├── library/    heron-library    library files shared by scanner and librarian: tags, content hash, lock
+│   ├── library/    heron-library    library files shared by scanner and librarian: tags, content hash, layout, lock
 │   ├── dsp/        heron-dsp        resampling; later EQ, compressor, expander, limiter, crossovers, AGC chain
 │   ├── outputs/    heron-outputs    encoders, OutputSink trait + Icecast (later Shoutcast, HLS, file, pipe)
 │   ├── rotation/   heron-rotation   categories, separation rules, clock slots, selection
 │   ├── service/    heron-service    process plumbing: logging, /healthz, /metrics, shutdown, DB connect
 │   ├── engine/     heron-engine     binary: decks, mixer, pacing clock, decoding, player, gRPC server, ctl
-│   ├── api/        heron-api        binary: axum, auth, queue manager, webhooks, scanner
+│   ├── api/        heron-api        binary: axum, auth, queue manager, history, OpenAPI, webhooks, scanner
 │   ├── analyzer/   heron-analyzer   binary: analysis worker pool, job queue consumer
 │   └── librarian/  heron-librarian  binary: incoming folder, identification, layout, journaled moves, organize, undo
 ├── web/                             React + Vite + TypeScript
@@ -87,6 +169,8 @@ heron-broadcaster/
 | AAC-LC encoding | FFmpeg's native `aac` encoder via libavcodec (no `--enable-nonfree`, e.g. `ffmpeg-next` bindings) |
 | HLS segmenting | Hand-written segmenter, or libavformat's `hls` muxer |
 | HTTP / WebSocket | `axum`, `tokio` |
+| OpenAPI | `utoipa`, `utoipa-axum` (generated from the handlers); `openapi-typescript` and `openapi-fetch` on the web side |
+| Passwords | `argon2` (Argon2id) |
 | gRPC | `tonic`, `prost`; `protox` compiles the `.proto` files in Rust, so builds need no `protoc` |
 | Database | `sqlx` (MySQL/MariaDB) |
 | Logging / metrics | `tracing`, `metrics` + Prometheus exporter |

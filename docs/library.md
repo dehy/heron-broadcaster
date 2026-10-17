@@ -123,7 +123,7 @@ Organizing uses the files' current tags (it does not identify them). Files that 
 
 ## Settings
 
-Stored as JSON under the `library` name in the `settings` table; missing fields take the defaults. Until the web UI ([M5](roadmap/m5-web-ui.md)):
+Stored as JSON under the `library` name in the `settings` table; missing fields take the defaults. Change them through the API (`PATCH /api/v1/settings/library` with the fields to change, admins only; the AcoustID key is never sent back, see [API](api.md)), or on the command line:
 
 ```sh
 docker compose exec heron-librarian heron-librarian settings
@@ -144,7 +144,7 @@ The scanner (in `heron-api`, read-only) and the librarian share a MariaDB named 
 
 ## Limitations
 
-- The engine holds its upcoming tracks by path: moving a track that is queued makes the engine skip it. Reorganize when the queue is short, until the queue manager ([M4](roadmap/m4-api-control-plane.md)) follows moves.
+- The engine holds its upcoming tracks by path. The queue manager follows moves within 5 seconds ([API](api.md#queue-manager)), so only a track due to start in those seconds can be skipped.
 - Existing tracks are fingerprinted but not identified yet: identification runs on incoming files only.
 - Identical files dropped twice are imported twice (with a ` (2)` suffix).
 

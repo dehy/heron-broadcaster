@@ -16,7 +16,7 @@
 //! Missing artists and albums give `Unknown Artist` and `Unknown Album`.
 //! Every path component is made safe on every file system.
 
-use heron_library::Tags;
+use crate::Tags;
 
 const UNKNOWN_ARTIST: &str = "Unknown Artist";
 const UNKNOWN_ALBUM: &str = "Unknown Album";

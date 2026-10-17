@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use heron_core::{OutputsConfig, PlayoutSettings};
 use heron_outputs::{ConfigError, NowPlaying, Outputs};
@@ -38,6 +38,7 @@ pub struct Engine {
     status: Arc<MixerStatus>,
     clock: Arc<ClockStatus>,
     started: Instant,
+    started_at: SystemTime,
     #[cfg(feature = "monitor")]
     _monitor: Option<crate::monitor::Monitor>,
     _audio: AudioThread,
@@ -114,6 +115,7 @@ impl Engine {
             status,
             clock,
             started: Instant::now(),
+            started_at: SystemTime::now(),
             #[cfg(feature = "monitor")]
             _monitor: monitor,
             _audio: audio,
@@ -132,6 +134,11 @@ impl Engine {
         self.outputs
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// When the engine started.
+    pub fn started_at(&self) -> SystemTime {
+        self.started_at
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<PlayerEvent> {

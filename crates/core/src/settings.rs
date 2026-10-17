@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Levels are in dB **relative to the track's integrated loudness**, so the
 /// same thresholds work for quiet and loud masters. See `docs/analysis.md`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct AnalysisSettings {
     /// Audio quieter than this at the start of a track is trimmed.

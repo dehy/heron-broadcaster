@@ -1,40 +1,47 @@
 #!/usr/bin/env sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Checks that the engine of a running Compose stack streams to Icecast:
-# configures an output to the `icecast` service, queues three tracks of the
-# library and listens to the stream.
+# Checks that a running Compose stack goes on air through the API: creates
+# an admin, signs in, adds an output to the `icecast` service, lets the
+# queue manager fill the queue, listens to the stream and reads the play
+# history.
 #
 #   docker compose --profile icecast up -d --wait
-#   scripts/check-streaming.sh <music dir> [icecast url]
+#   scripts/check-streaming.sh [web url] [icecast url]
 
 set -eu
 
-music=${1:?usage: check-streaming.sh <music dir> [icecast url]}
+web=${1:-http://localhost:${HERON_HTTP_PORT:-8000}}
 icecast=${2:-http://localhost:${HERON_ICECAST_PORT:-8010}}
-ctl="docker compose exec -T heron-engine heron-engine ctl"
+api="$web/api/v1"
+password=check-streaming-password
+jar=$(mktemp)
+trap 'rm -f "$jar"' EXIT
 
-$ctl set-outputs /dev/stdin <<'EOF'
-{
-  "encoder_profiles": [
-    {"id": 1, "name": "MP3 128k", "encoder": "mp3", "bitrate_kbps": 128, "sample_rate": 44100, "channels": 2}
-  ],
-  "outputs": [
-    {"id": 1, "name": "local", "kind": "icecast", "encoder_profile_id": 1,
-     "config": {"host": "icecast", "port": 8000, "mount": "/live", "password": "hackme"}}
-  ]
+call() {
+    method=$1
+    path=$2
+    shift 2
+    curl -fsS -b "$jar" -c "$jar" -X "$method" -H 'X-Requested-With: check-streaming' \
+        -H 'Content-Type: application/json' "$@" "$api$path"
 }
-EOF
 
-# Paths relative to the library, as the engine sees it.
-(cd "$music" && find . -type f \( -name '*.mp3' -o -name '*.m4a' -o -name '*.flac' \) | sort | head -3 | sed 's|^\./||') |
-    tr '\n' '\0' | xargs -0 $ctl enqueue
+# The user may exist from an earlier run.
+echo "$password" | docker compose exec -T heron-api heron-api user add check-streaming --role admin ||
+    echo "$password" | docker compose exec -T heron-api heron-api user passwd check-streaming
+call POST /auth/login -d "{\"username\": \"check-streaming\", \"password\": \"$password\"}" >/dev/null
+
+profile=$(call GET /encoder-profiles | tr '{' '\n' | grep '"name":"MP3 128k"' | sed 's/.*"id":\([0-9]*\).*/\1/')
+call POST /outputs -d "{\"name\": \"check-streaming\", \"kind\": \"icecast\", \"encoder_profile_id\": $profile,
+    \"config\": {\"host\": \"icecast\", \"port\": 8000, \"mount\": \"/live\", \"password\": \"hackme\"}}" >/dev/null ||
+    echo "output already configured"
 
 start=$(date +%s)
 until curl -fsS "$icecast/status-json.xsl" | grep -q '"title"'; do
-    if [ $(( $(date +%s) - start )) -ge 30 ]; then
-        echo "no stream with a title on $icecast after 30 s" >&2
-        $ctl state >&2 || true
+    if [ $(( $(date +%s) - start )) -ge 60 ]; then
+        echo "no stream with a title on $icecast after 60 s" >&2
+        call GET /engine >&2 || true
+        call GET /player >&2 || true
         exit 1
     fi
     sleep 1
@@ -45,4 +52,7 @@ curl -fsS "$icecast/status-json.xsl" | tr ',' '\n' | grep -E '"(title|audio_info
 bytes=$(curl -s -m 5 "$icecast/live" | wc -c)
 echo "received $bytes bytes in 5 s"
 [ "$bytes" -ge 70000 ]
-$ctl state
+
+call GET /queue | grep -q '"source":"rotation"'
+call GET /history | grep -q '"started_at_unix_ms"'
+echo "queue filled by autofill, plays recorded"
