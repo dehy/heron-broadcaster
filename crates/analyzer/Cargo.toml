@@ -13,9 +13,13 @@ publish = false
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
+heron-analysis = { workspace = true, features = ["mysql"] }
+heron-core.workspace = true
+heron-service = { workspace = true, features = ["mysql"] }
+metrics.workspace = true
+sqlx.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-heron-service = { workspace = true, features = ["mysql"] }
 
 [lints]
 workspace = true
