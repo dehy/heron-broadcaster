@@ -22,15 +22,20 @@ library=$(cd "$library" && pwd)
 mkdir -p "$work/state"
 csv="$work/metrics.csv"
 
+# Container names unique to this run, so two runs never touch each other's.
+server_a=heron-soak-$$-a
+server_b=heron-soak-$$-b
+autofill_pid=
+engine_pid=
 cleanup() {
-    kill "$autofill_pid" "$engine_pid" 2>/dev/null || true
-    docker rm -f heron-soak-a heron-soak-b >/dev/null 2>&1 || true
+    kill $autofill_pid $engine_pid 2>/dev/null || true
+    docker rm -f "$server_a" "$server_b" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
-docker rm -f heron-soak-a heron-soak-b >/dev/null 2>&1 || true
-docker run -d --name heron-soak-a -p 18000:8000 -e ICECAST_SOURCE_PASSWORD=hackme "$image" >/dev/null
-docker run -d --name heron-soak-b -p 18001:8000 -e ICECAST_SOURCE_PASSWORD=hackme "$image" >/dev/null
+docker run -d --name "$server_a" -p 18000:8000 -e ICECAST_SOURCE_PASSWORD=hackme "$image" >/dev/null
+docker run -d --name "$server_b" -p 18001:8000 -e ICECAST_SOURCE_PASSWORD=hackme "$image" >/dev/null
 
 cat > "$work/outputs.json" <<'EOF'
 {
@@ -63,7 +68,9 @@ metric() {
 echo "elapsed_s,rendered_s,drift_s,max_late_s,underruns,dropped_blocks,clock_resets,bytes_a,bytes_b,reconnects_a,reconnects_b" > "$csv"
 start=$(date +%s)
 while :; do
-    sleep 60
+    # In the background, so a signal interrupts the wait at once.
+    sleep 60 &
+    wait $!
     elapsed=$(( $(date +%s) - start ))
     m=$(curl -fsS http://127.0.0.1:18081/metrics)
     echo "$elapsed,$(metric "$m" heron_engine_rendered_seconds),$(metric "$m" heron_engine_clock_drift_seconds),$(metric "$m" heron_engine_clock_max_late_seconds),$(metric "$m" heron_engine_underruns_total),$(metric "$m" heron_engine_dropped_blocks_total),$(metric "$m" heron_engine_clock_resets_total),$(metric "$m" 'heron_output_bytes_total{output="soak-a"}'),$(metric "$m" 'heron_output_bytes_total{output="soak-b"}'),$(metric "$m" 'heron_output_reconnects_total{output="soak-a"}'),$(metric "$m" 'heron_output_reconnects_total{output="soak-b"}')" >> "$csv"
