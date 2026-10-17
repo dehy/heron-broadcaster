@@ -55,7 +55,7 @@ See [Rotation – Restrictions](rotation.md#restrictions). Sketch, defined in [M
 
 | Table | Columns |
 |---|---|
-| `settings` | key, JSON value (separation rules, crossfade defaults, Gap Killer defaults) |
+| `settings` | name, JSON value. `analysis`: Gap Killer and crossfade point detection ([Import and analysis](analysis.md#settings)); `playout`: crossfade and loudness ([Audio engine](audio-engine.md#playout-settings)); later separation rules |
 
 ## Encoders and outputs
 
@@ -63,7 +63,7 @@ See [Encoders and outputs](outputs.md). The engine never reads these tables: the
 
 | Table | Columns |
 |---|---|
-| `encoder_profiles` | id, name, encoder (mp3, aac, opus, vorbis, external_ffmpeg), bitrate_kbps, sample_rate, channels, options (JSON: VBR/CBR, ffmpeg binary path and arguments, …) |
+| `encoder_profiles` | id, name, encoder (mp3, aac, opus, vorbis, external_ffmpeg), bitrate_kbps, sample_rate, channels, options (JSON: VBR/CBR, ffmpeg binary path and arguments, …). A fresh install has `MP3 128k` |
 | `outputs` | id, name, kind (icecast, shoutcast_v1, shoutcast_v2, hls, file, pipe), encoder_profile_id, config (JSON: host, port, mount, credentials, HLS directory and segment settings, …), metadata_enabled, enabled |
 
 ## Listener statistics

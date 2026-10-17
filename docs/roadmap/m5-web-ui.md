@@ -11,6 +11,7 @@
 - Review screen for identifications that were not confident enough to apply automatically, and for library reorganization dry runs ([M1b](m1b-library-management.md)).
 - Waveform view showing cue-in, cue-out and fade points.
 - Crossfade settings with a live preview graph.
+- Encoder profiles and outputs editor, with each output's state (connected, reconnecting, error).
 - Light and dark themes that **follow the system setting** (`prefers-color-scheme`) by default, with a System / Light / Dark override remembered per user.
 - Responsive layout.
 

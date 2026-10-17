@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Audio processing: EQ, compressor, expander, limiter, crossovers and the AGC chain.
-//!
-//! Implemented in M8 (deck EQ) and M9 (AGC and multiband processing).
+//! Audio processing: resampling, and later EQ, compressor, expander, limiter,
+//! crossovers and the AGC chain (M8, M9).
+
+pub mod resample;
+
+pub use resample::StreamResampler;

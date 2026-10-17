@@ -22,7 +22,7 @@
 
 | Service | Role |
 |---|---|
-| **heron-engine** | Real-time playout: decks, mixer, crossfades, DSP, encoders and output sinks (several outputs at once, see [Encoders and outputs](outputs.md)). Exposes a gRPC control interface. Holds the upcoming tracks in memory. **Must keep playing if every other service is down.** See [Audio engine](audio-engine.md). |
+| **heron-engine** | Real-time playout: decks, mixer, crossfades, DSP, encoders and output sinks (several outputs at once, see [Encoders and outputs](outputs.md)). Reads the music library and the fallback directory, both mounted read-only. Exposes a gRPC control interface (`heron-engine ctl` is its command-line client). Holds the upcoming tracks in memory and keeps its outputs and settings on disk. **Must keep playing if every other service is down.** See [Audio engine](audio-engine.md). |
 | **heron-api** | HTTP + WebSocket server: auth (local users), library, categories, rotation, queue manager, webhooks and the library scanner. Feeds the engine over gRPC. |
 | **heron-analyzer** | Analysis worker pool, as its own modular service. Reads files from the music library volume, runs `heron-analysis` and stores results in MariaDB. Can be scaled independently (several replicas) and restarted without affecting the API or the air. Uses CPUs − 1 workers by default. |
 | **heron-web** | Static React build. |
@@ -44,11 +44,11 @@ heron-broadcaster/
 │   ├── core/       heron-core       shared types: track, cue points, fade curves, settings
 │   ├── proto/      heron-proto      gRPC definitions between api and engine
 │   ├── analysis/   heron-analysis   loudness, silence, cue and fade point detection
-│   ├── dsp/        heron-dsp        EQ, compressor, expander, limiter, crossovers, AGC chain
+│   ├── dsp/        heron-dsp        resampling; later EQ, compressor, expander, limiter, crossovers, AGC chain
 │   ├── outputs/    heron-outputs    encoders, OutputSink trait + Icecast (later Shoutcast, HLS, file, pipe)
 │   ├── rotation/   heron-rotation   categories, separation rules, clock slots, selection
 │   ├── service/    heron-service    process plumbing: logging, /healthz, /metrics, shutdown, DB connect
-│   ├── engine/     heron-engine     binary: decks, mixer, pacing clock, buffering, recovery
+│   ├── engine/     heron-engine     binary: decks, mixer, pacing clock, decoding, player, gRPC server, ctl
 │   ├── api/        heron-api        binary: axum, auth, queue manager, webhooks, scanner
 │   └── analyzer/   heron-analyzer   binary: analysis worker pool, job queue consumer
 ├── web/                             React + Vite + TypeScript
@@ -69,11 +69,11 @@ heron-broadcaster/
 | Tags | `lofty` |
 | Lock-free ring buffers | `rtrb` |
 | Filters | `biquad` or hand-written biquads |
-| MP3 / Opus / Vorbis encoding | LAME, libopus, libvorbis bindings |
+| MP3 / Opus / Vorbis encoding | LAME (`mp3lame-encoder`, built from source and linked statically), libopus, libvorbis bindings |
 | AAC-LC encoding | FFmpeg's native `aac` encoder via libavcodec (no `--enable-nonfree`, e.g. `ffmpeg-next` bindings) |
 | HLS segmenting | Hand-written segmenter, or libavformat's `hls` muxer |
 | HTTP / WebSocket | `axum`, `tokio` |
-| gRPC | `tonic`, `prost` |
+| gRPC | `tonic`, `prost`; `protox` compiles the `.proto` files in Rust, so builds need no `protoc` |
 | Database | `sqlx` (MySQL/MariaDB) |
 | Logging / metrics | `tracing`, `metrics` + Prometheus exporter |
 | Optional monitor output | `cpal` |

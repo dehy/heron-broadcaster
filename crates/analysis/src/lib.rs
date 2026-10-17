@@ -6,12 +6,12 @@
 //! The algorithm is described in `docs/analysis.md`.
 
 mod analyzer;
-mod decode;
+pub mod decode;
 #[cfg(feature = "mysql")]
 pub mod jobs;
 
 pub use analyzer::{Analysis, Analyzer, FRAME_MS};
-pub use decode::analyze_file;
+pub use decode::{Decoder, analyze_file};
 
 /// Version of the analysis algorithm. Bump it when a change to this crate
 /// alters results, or lets files that failed before decode now: every track

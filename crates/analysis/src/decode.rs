@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Decoding files with Symphonia and streaming them into the [`Analyzer`].
+//! Decoding files with Symphonia.
+//!
+//! [`Decoder`] is shared by the analysis and the engine, so the engine plays
+//! exactly the samples the analysis measured and cue points line up.
 
 use std::fs::File;
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use heron_core::AnalysisSettings;
-use symphonia::core::codecs::audio::AudioDecoderOptions;
+use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::probe::Hint;
-use symphonia::core::formats::{FormatOptions, TrackType};
+use symphonia::core::formats::{FormatOptions, FormatReader, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 
@@ -18,98 +21,166 @@ use crate::{Analysis, Analyzer, Error};
 
 /// Decodes `path` and analyzes it. CPU-bound: run it on a blocking thread.
 pub fn analyze_file(path: &Path, settings: &AnalysisSettings) -> Result<Analysis, Error> {
-    match decode_and_analyze(path, settings, true) {
-        // Some MP3s carry a broken Xing/LAME header whose frame count makes
-        // gapless trimming drop every sample. Decode them as they are.
-        Err(Error::Empty) => {
-            tracing::warn!(path = %path.display(), "no audio with gapless decoding, retrying without");
-            decode_and_analyze(path, settings, false)
-        }
-        result => result,
-    }
-}
-
-fn decode_and_analyze(
-    path: &Path,
-    settings: &AnalysisSettings,
-    gapless: bool,
-) -> Result<Analysis, Error> {
-    let file = File::open(path)?;
-    let stream = MediaSourceStream::new(Box::new(file), Default::default());
-    let mut hint = Hint::new();
-    if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(extension);
-    }
-    let mut format = symphonia::default::get_probe().probe(
-        &hint,
-        stream,
-        FormatOptions::default(),
-        MetadataOptions::default(),
-    )?;
-
-    let track = format
-        .default_track(TrackType::Audio)
-        .ok_or(Error::NoAudioTrack)?;
-    let track_id = track.id;
-    let codec_params = track
-        .codec_params
-        .as_ref()
-        .and_then(|params| params.audio())
-        .ok_or(Error::NoAudioTrack)?;
-    // Gapless: drop encoder delay and padding (LAME headers, AAC edit lists),
-    // so cue points line up with what the engine plays.
-    let decoder_options = AudioDecoderOptions::default().gapless(gapless);
-    let mut decoder =
-        symphonia::default::get_codecs().make_audio_decoder(codec_params, &decoder_options)?;
-
+    let mut decoder = Decoder::open(path)?;
     let mut analyzer: Option<Analyzer> = None;
-    let mut samples: Vec<f32> = Vec::new();
-    let mut skipped_packets = 0_u64;
-    loop {
-        let packet = match format.next_packet() {
-            Ok(Some(packet)) => packet,
-            Ok(None) => break,
-            // Truncated files: analyze what could be read.
-            Err(SymphoniaError::IoError(error)) if error.kind() == ErrorKind::UnexpectedEof => {
-                break;
-            }
-            Err(error) => return Err(error.into()),
+    while let Some(block) = decoder.next_block()? {
+        let analyzer = match &mut analyzer {
+            Some(analyzer) => analyzer,
+            None => analyzer.insert(Analyzer::new(block.rate, block.channels)?),
         };
-        if packet.track_id != track_id {
-            continue;
-        }
-        let buffer = match decoder.decode(&packet) {
-            Ok(buffer) => buffer,
-            Err(SymphoniaError::DecodeError(reason)) => {
-                if skipped_packets == 0 {
-                    tracing::debug!(path = %path.display(), reason, "undecodable packet");
-                }
-                skipped_packets += 1;
-                continue;
-            }
-            Err(error) => return Err(error.into()),
-        };
-
-        let rate = buffer.spec().rate();
-        let channels = buffer.spec().channels().count();
-        if analyzer.is_none() {
-            analyzer = Some(Analyzer::new(rate, channels)?);
-        }
-        let Some(analyzer) = analyzer.as_mut() else {
-            continue;
-        };
-        if analyzer.rate() != rate || analyzer.channels() != channels {
-            return Err(Error::FormatChanged);
-        }
-        samples.resize(buffer.samples_interleaved(), 0.0);
-        buffer.copy_to_slice_interleaved(&mut samples);
-        analyzer.push(&samples)?;
-    }
-
-    if skipped_packets > 0 {
-        tracing::warn!(path = %path.display(), skipped_packets, "skipped undecodable packets");
+        analyzer.push(block.samples)?;
     }
     analyzer.ok_or(Error::Empty)?.finish(settings)
+}
+
+/// A block of decoded audio.
+#[derive(Debug)]
+pub struct Block<'a> {
+    pub rate: u32,
+    pub channels: usize,
+    /// Interleaved samples. Never NaN or infinite, but not clamped: real
+    /// masters go a little over full scale.
+    pub samples: &'a [f32],
+}
+
+/// Streams the decoded audio of a file, block by block.
+///
+/// Decoding is gapless: encoder delay and padding (LAME headers, AAC edit
+/// lists) are dropped. Some MP3s carry a broken Xing/LAME header whose frame
+/// count makes gapless trimming drop every sample: when a file ends without
+/// producing any audio, it is decoded again without gapless trimming.
+pub struct Decoder {
+    path: PathBuf,
+    format: Box<dyn FormatReader>,
+    decoder: Box<dyn AudioDecoder>,
+    track_id: u32,
+    gapless: bool,
+    /// Sample rate and channel count of the first block.
+    spec: Option<(u32, usize)>,
+    samples: Vec<f32>,
+    frames: u64,
+    skipped_packets: u64,
+}
+
+impl Decoder {
+    pub fn open(path: &Path) -> Result<Self, Error> {
+        Self::open_with(path, true)
+    }
+
+    fn open_with(path: &Path, gapless: bool) -> Result<Self, Error> {
+        let file = File::open(path)?;
+        let stream = MediaSourceStream::new(Box::new(file), Default::default());
+        let mut hint = Hint::new();
+        if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
+            hint.with_extension(extension);
+        }
+        let format = symphonia::default::get_probe().probe(
+            &hint,
+            stream,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )?;
+
+        let track = format
+            .default_track(TrackType::Audio)
+            .ok_or(Error::NoAudioTrack)?;
+        let track_id = track.id;
+        let codec_params = track
+            .codec_params
+            .as_ref()
+            .and_then(|params| params.audio())
+            .ok_or(Error::NoAudioTrack)?;
+        let decoder_options = AudioDecoderOptions::default().gapless(gapless);
+        let decoder =
+            symphonia::default::get_codecs().make_audio_decoder(codec_params, &decoder_options)?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            format,
+            decoder,
+            track_id,
+            gapless,
+            spec: None,
+            samples: Vec::new(),
+            frames: 0,
+            skipped_packets: 0,
+        })
+    }
+
+    /// Frames (samples per channel) returned so far.
+    pub fn frames(&self) -> u64 {
+        self.frames
+    }
+
+    /// The next block of audio, or `None` at the end of the file.
+    pub fn next_block(&mut self) -> Result<Option<Block<'_>>, Error> {
+        loop {
+            let packet = match self.format.next_packet() {
+                Ok(Some(packet)) => packet,
+                Ok(None) => return self.end(),
+                // Truncated files: play what could be read.
+                Err(SymphoniaError::IoError(error)) if error.kind() == ErrorKind::UnexpectedEof => {
+                    return self.end();
+                }
+                Err(error) => return Err(error.into()),
+            };
+            if packet.track_id != self.track_id {
+                continue;
+            }
+            let buffer = match self.decoder.decode(&packet) {
+                Ok(buffer) => buffer,
+                Err(SymphoniaError::DecodeError(reason)) => {
+                    if self.skipped_packets == 0 {
+                        tracing::debug!(path = %self.path.display(), reason, "undecodable packet");
+                    }
+                    self.skipped_packets += 1;
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
+
+            let rate = buffer.spec().rate();
+            let channels = buffer.spec().channels().count();
+            match self.spec {
+                None => self.spec = Some((rate, channels)),
+                Some(spec) if spec != (rate, channels) => return Err(Error::FormatChanged),
+                Some(_) => {}
+            }
+            let len = buffer.samples_interleaved();
+            if len == 0 || channels == 0 {
+                continue;
+            }
+            self.samples.resize(len, 0.0);
+            buffer.copy_to_slice_interleaved(&mut self.samples);
+            for sample in &mut self.samples {
+                if !sample.is_finite() {
+                    *sample = 0.0;
+                }
+            }
+            self.frames += (len / channels) as u64;
+            return Ok(Some(Block {
+                rate,
+                channels,
+                samples: &self.samples,
+            }));
+        }
+    }
+
+    fn end(&mut self) -> Result<Option<Block<'_>>, Error> {
+        if self.skipped_packets > 0 {
+            tracing::warn!(
+                path = %self.path.display(),
+                skipped_packets = self.skipped_packets,
+                "skipped undecodable packets"
+            );
+            self.skipped_packets = 0;
+        }
+        if self.frames == 0 && self.gapless {
+            tracing::warn!(path = %self.path.display(), "no audio with gapless decoding, retrying without");
+            *self = Self::open_with(&self.path.clone(), false)?;
+            return self.next_block();
+        }
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
@@ -149,6 +220,22 @@ mod tests {
         assert!(analysis.cue_in_ms.abs_diff(1_500) <= 6, "{analysis:?}");
         assert!(analysis.cue_out_ms.abs_diff(7_500) <= 6, "{analysis:?}");
         assert!(analysis.integrated_lufs.is_some());
+    }
+
+    #[test]
+    fn streams_every_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("track.wav");
+        write_wav(&path, 48_000, &[(0.5, 0.0), (1.0, 0.5)]);
+
+        let mut decoder = Decoder::open(&path).unwrap();
+        let mut samples = 0;
+        while let Some(block) = decoder.next_block().unwrap() {
+            assert_eq!((block.rate, block.channels), (48_000, 2));
+            samples += block.samples.len();
+        }
+        assert_eq!(samples, 2 * 72_000);
+        assert_eq!(decoder.frames(), 72_000);
     }
 
     const MP3_FIXTURE: &str = concat!(

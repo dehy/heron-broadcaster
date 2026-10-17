@@ -9,5 +9,10 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 
+[dependencies]
+audioadapter-buffers.workspace = true
+rubato.workspace = true
+thiserror.workspace = true
+
 [lints]
 workspace = true

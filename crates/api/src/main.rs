@@ -211,6 +211,27 @@ mod tests {
             assert!(tables.iter().any(|t| t == expected), "missing {expected}");
         }
 
+        // The default encoder profile (docs/outputs.md#default-profiles).
+        let (name, encoder, bitrate, rate, channels, mode): (String, String, u16, u32, u8, String) =
+            sqlx::query_as(
+                "SELECT name, CAST(encoder AS CHAR), bitrate_kbps, sample_rate, channels, \
+                 JSON_UNQUOTE(JSON_EXTRACT(options, '$.mode')) FROM encoder_profiles",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                name.as_str(),
+                encoder.as_str(),
+                bitrate,
+                rate,
+                channels,
+                mode.as_str()
+            ),
+            ("MP3 128k", "mp3", 128, 44_100, 2, "cbr")
+        );
+
         // Long paths stay unique through the generated hash column.
         let mut tx = pool.begin().await.unwrap();
         let long_path = format!("/music/{}.flac", "a".repeat(3000));

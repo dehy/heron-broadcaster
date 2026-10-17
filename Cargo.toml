@@ -20,15 +20,25 @@ heron-rotation = { path = "crates/rotation" }
 heron-service = { path = "crates/service" }
 
 anyhow = "1.0.104"
+audioadapter-buffers = "5.2.0"
 axum = "0.8.9"
+base64 = "0.23.1"
 blake3 = "1.8.7"
+bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive", "env"] }
+cpal = "0.18.2"
 ebur128 = "0.1.10"
 hound = "3.5.1"
 lofty = "0.25.4"
 metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
+mp3lame-encoder = "0.2.5"
 notify = "8.2.0"
+percent-encoding = "2.3.2"
+prost = "0.14.4"
+protox = "0.10.0"
+rtrb = "0.4.0"
+rubato = "5.0.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 symphonia = { version = "0.6.1", default-features = false, features = ["opt-simd", "all-meta", "mp1", "mp2", "mp3", "aac", "isomp4", "alac", "aiff", "flac", "ogg", "vorbis", "wav", "pcm", "adpcm"] }
@@ -36,6 +46,10 @@ sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread", "signal", "net", "time"] }
+tokio-stream = "0.1.19"
+tonic = "0.14.6"
+tonic-prost = "0.14.6"
+tonic-prost-build = "0.14.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 walkdir = "2.5.0"
@@ -50,3 +64,8 @@ expect_used = "warn"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# Decoding, resampling and encoding are far too slow unoptimized, even in
+# tests: optimize dependencies in dev builds (Heron's own crates stay fast to build).
+[profile.dev.package."*"]
+opt-level = 2

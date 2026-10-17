@@ -4,10 +4,11 @@
 
 ## Scope
 
-- In-memory buffer of upcoming tracks; no database access in the audio path.
-- Fallback directory, silence watchdog, skip on missing or corrupt files.
-- Icecast reconnect with exponential backoff.
-- Persisted engine state and resume on restart.
+Already delivered in [M2](m2-engine-core.md): the queue lives in the engine's memory and tracks are decoded 10 s ahead, the engine never touches the database, outputs reconnect with exponential backoff, a cued file that cannot be decoded is skipped, and outputs and settings survive a restart. Left for this milestone:
+
+- Fallback directory when the queue runs dry or the API is unreachable; silence watchdog on the output.
+- Keeping more of the upcoming tracks ready (decoded or read into memory), so a slow or unreachable library does not cause underruns.
+- Persist the queue and resume playback on restart.
 - Docker restart policies and health checks.
 - Clock sync monitoring in `heron-engine`: `heron_clock_synchronized` and `heron_clock_offset_seconds` in `/metrics`, and a warning in `/healthz` when the clock is not synced or is off by more than about 1 s (see [Requirements – Reliability](../requirements.md#5-reliability-247)).
 

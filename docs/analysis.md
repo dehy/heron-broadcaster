@@ -51,7 +51,7 @@ Decoding uses Symphonia:
 | M4A / MP4: AAC-LC, ALAC | Supported |
 | FLAC, Ogg Vorbis, WAV, AIFF | Supported |
 | HE-AAC (AAC+) in M4A | Not supported by Symphonia's AAC decoder |
-| Opus | Not supported by Symphonia; needs libopus (BSD), planned with the engine |
+| Opus | Not supported by Symphonia; needs libopus (BSD), see the [open questions](open-questions.md) |
 | MP3 inside a WAV (RIFF) container | Not supported, reported as failed |
 
 Decoding is gapless (encoder delay and padding removed). MP3s with a broken Xing/LAME header, whose frame count makes gapless trimming drop everything, are decoded again without gapless trimming. Decoded audio peaking above +12 dBTP is rejected as corrupt: playing it would be dangerous.

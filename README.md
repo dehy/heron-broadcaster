@@ -4,7 +4,7 @@ A modern, self-hosted **radio automation system** for Linux. Heron plays music 2
 
 The name comes from "air on" sounding like *héron*: keeping the air on, 24/7.
 
-> **Status:** early development. Heron imports and analyzes a music library (M1); playout arrives in M2. See the [roadmap](docs/roadmap/README.md).
+> **Status:** early development. Heron imports and analyzes a music library (M1) and plays a queue with crossfades to Icecast servers (M2). The queue is fed by hand until the queue manager and rotation arrive (M4, M6). See the [roadmap](docs/roadmap/README.md).
 
 Heron runs on Linux, amd64 and arm64, down to a Raspberry Pi.
 
@@ -28,13 +28,31 @@ To try it without your own music, generate a synthetic library (uses ffmpeg in D
 scripts/generate-test-library.sh data/music 100
 ```
 
+### Going on air
+
+Until the web interface manages outputs and the queue, drive the engine with `heron-engine ctl`. With the local Icecast server of the `icecast` profile:
+
+```sh
+docker compose --profile icecast up -d --wait
+docker compose exec -T heron-engine heron-engine ctl set-outputs /dev/stdin <<'EOF'
+{"encoder_profiles": [{"id": 1, "name": "MP3 128k", "encoder": "mp3", "bitrate_kbps": 128, "sample_rate": 44100, "channels": 2}],
+ "outputs": [{"id": 1, "name": "Local", "kind": "icecast", "encoder_profile_id": 1,
+              "config": {"host": "icecast", "port": 8000, "mount": "/live", "password": "hackme"}}]}
+EOF
+# Keep three random library tracks queued (Ctrl+C to stop):
+docker compose exec heron-engine heron-engine ctl autofill --min 3
+```
+
+Listen on http://localhost:8010/live. `ctl state`, `ctl skip`, `ctl watch` and `ctl --help` show the rest; see [Audio engine](docs/audio-engine.md#control-interface) and [Encoders and outputs](docs/outputs.md).
+
 | Service | Role | Port (inside the network) |
 |---|---|---|
 | `heron-web` | Web interface, proxies `/api` to `heron-api` | 80, published on `HERON_HTTP_PORT` (8000) |
 | `heron-api` | HTTP API, migrations, library scanner, queue manager | 8080 |
 | `heron-analyzer` | Track analysis workers | 8082 |
-| `heron-engine` | Real-time playout, encoders, outputs | 8081 |
+| `heron-engine` | Real-time playout, encoders, outputs | 8081, gRPC control on 50051 |
 | `mariadb` | Database | 3306 |
+| `icecast` | Optional local Icecast server (`--profile icecast`) | 8000, published on `HERON_ICECAST_PORT` (8010) |
 
 Every Rust service serves `/healthz` and `/metrics` (Prometheus) on its port.
 
@@ -51,6 +69,10 @@ cargo test --workspace
 docker run -d --rm --name heron-test-db -p 127.0.0.1:33306:3306 \
   -e MARIADB_ROOT_PASSWORD=root mariadb:11.8
 HERON_TEST_DATABASE_URL=mysql://root:root@127.0.0.1:33306 cargo test --workspace
+
+# Soak test of the engine: two Icecast servers, the library for an hour:
+cargo build --release -p heron-engine
+scripts/soak-test.sh data/music 3600
 
 # Analyze files with given settings, without a database:
 HERON_ANALYSIS_SETTINGS='{"silence_ceiling_dbfs": -60}' \

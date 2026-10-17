@@ -72,6 +72,8 @@ services:
         condition: service_healthy
 
   # Deliberately depends on nothing: the air must stay on when everything else is down.
+  # gRPC control on port 50051, inside the network only. Operators can use
+  # `docker compose exec heron-engine heron-engine ctl --help`.
   heron-engine:
     build:
       context: .
@@ -81,9 +83,24 @@ services:
     restart: unless-stopped
     environment:
       <<: *rust-env
+      HERON_LIBRARY_DIR: /music
     volumes:
+      - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
       - ${HERON_FALLBACK_DIR:-./data/fallback}:/var/lib/heron/fallback:ro
+      # Configuration (outputs, playout settings) kept across restarts.
       - engine-state:/var/lib/heron/engine
+
+  # A local Icecast server to try outputs: `docker compose --profile icecast up -d`.
+  # Source password `hackme`; listen on http://localhost:${HERON_ICECAST_PORT:-8010}/.
+  icecast:
+    profiles: [icecast]
+    image: libretime/icecast:2.4.4
+    restart: unless-stopped
+    environment:
+      ICECAST_SOURCE_PASSWORD: hackme
+      ICECAST_ADMIN_PASSWORD: ${HERON_ICECAST_ADMIN_PASSWORD:-change-me}
+    ports:
+      - "${HERON_ICECAST_PORT:-8010}:8000"
 
   heron-web:
     build:
