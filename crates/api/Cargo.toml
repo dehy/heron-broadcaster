@@ -23,7 +23,7 @@ heron-library.workspace = true
 # Checks encoder profiles and outputs before they are saved.
 heron-outputs.workspace = true
 heron-proto.workspace = true
-heron-service = { workspace = true, features = ["mysql"] }
+heron-service = { workspace = true, features = ["mysql", "openapi"] }
 metrics.workspace = true
 notify.workspace = true
 # Reads passwords without echoing them.
@@ -35,6 +35,9 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream = { workspace = true, features = ["net"] }
 tonic.workspace = true
+# Track audio for previews, with range requests.
+tower.workspace = true
+tower-http.workspace = true
 tracing.workspace = true
 utoipa.workspace = true
 utoipa-axum.workspace = true
@@ -43,6 +46,8 @@ walkdir.workspace = true
 [dev-dependencies]
 # End-to-end tests drive a real engine, in process.
 heron-engine.workspace = true
+# Runs the library tasks the API queues.
+heron-librarian.workspace = true
 heron-service = { workspace = true, features = ["test-util"] }
 hound.workspace = true
 reqwest.workspace = true

@@ -11,7 +11,8 @@ The schema lives in `migrations/`; this page summarizes it. Tables not used yet 
 | `track_overrides` | track_id, cue_in_ms, cue_out_ms, crossfade settings, gap_killer_enabled (all nullable) |
 | `analysis_jobs` | id, track_id, analysis_version, status (pending, running, done, failed), attempts, claimed_by, claimed_at, error, created_at, updated_at — queue between the scanner and `heron-analyzer` (see [Import and analysis](analysis.md#job-queue)) |
 | `track_fingerprints` | track_id, chromaprint (compressed, first two minutes), created_at |
-| `track_identifications` | track_id, status (identified, needs_review), reason, score, recording_mbid, release_mbid, candidates (JSON, for the review screen), updated_at |
+| `track_waveforms` | track_id, interval_ms (50), peaks (one byte per interval: the highest sample peak on a dB scale, 0 for −72 dBFS or below, 255 for full scale) — drawn by the web UI, computed with the analysis |
+| `track_identifications` | track_id, status (identified, needs_review, kept: reviewed, the file keeps its own tags), reason, score, recording_mbid, release_mbid, candidates (JSON, for the review screen), updated_at |
 
 ## Library management
 
@@ -19,9 +20,10 @@ See [Library management](library.md).
 
 | Table | Columns |
 |---|---|
-| `library_batches` | id, kind (import, organize, undo), undoes (the batch an undo reverts), created_at, finished_at |
+| `library_batches` | id, kind (import, organize, undo, review: a release picked on the review screen), undoes (the batch an undo reverts), created_at, finished_at |
 | `library_moves` | id, batch_id, track_id, from_root (incoming, library), from_path, to_path, method (rename, copy), temp_path, content_hash (copies), status (pending, moved, done, abandoned, undone), error — the journal, written before a file is touched |
 | `track_tag_changes` | id, track_id, move_id, previous and applied tags (JSON), cover_embedded, created_at, undone_at |
+| `library_tasks` | id, kind (organize_plan, organize_apply, undo, review_apply), params (JSON, the request), status (pending, running, done, failed), result (JSON: the dry run's moves or the batch report), error, requested_by, created_at, started_at, finished_at — work the API asks of `heron-librarian` |
 
 ## Categories
 
@@ -94,7 +96,7 @@ See [M7b](roadmap/m7b-listener-statistics.md). Sketch, defined with that milesto
 |---|---|
 | `webhooks` | to be defined |
 | `webhook_deliveries` | to be defined |
-| `users` | id, username, password_hash (Argon2id), role (viewer, operator, admin), enabled, last_login_at, created_at, updated_at |
+| `users` | id, username, password_hash (Argon2id), role (viewer, operator, admin), enabled, theme (system, light, dark: the web UI's), last_login_at, created_at, updated_at |
 | `sessions` | token_hash (BLAKE3 of the cookie's token), user_id, created_at, last_seen_at, expires_at (30 days after the last use) |
 | `api_tokens` | id, user_id, name, token_hash, created_at, last_used_at, expires_at, revoked_at |
 
@@ -106,7 +108,7 @@ Authentication is local only for now ([Decisions](decisions.md#decisions-made-af
 tracks 1──1 track_analysis
 tracks 1──0..1 track_overrides
 tracks 1──* analysis_jobs
-tracks 1──0..1 track_fingerprints, track_identifications
+tracks 1──0..1 track_fingerprints, track_identifications, track_waveforms
 library_batches 1──* library_moves 1──0..1 track_tag_changes *──1 tracks
 tracks *──* categories        (through track_categories, with weight)
 tracks *──* artists           (through track_artists)

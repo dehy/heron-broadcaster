@@ -17,6 +17,11 @@ const MAX_TRUE_PEAK_DB: f64 = 12.0;
 /// Level used for digital silence, instead of minus infinity.
 const SILENT_DB: f32 = -200.0;
 
+/// Length of one waveform point.
+pub const WAVEFORM_INTERVAL_MS: u16 = 50;
+/// Level of waveform point 0; 255 is full scale.
+pub const WAVEFORM_FLOOR_DB: f32 = -72.0;
+
 /// What the analysis stores for a track. Times are in milliseconds from the
 /// start of the decoded audio.
 #[derive(Clone, Debug, PartialEq)]
@@ -35,6 +40,26 @@ pub struct Analysis {
     /// A silence longer than the configured maximum was found and the track
     /// is cut there (`cue_out_ms` is the start of that silence).
     pub has_internal_silence: bool,
+    pub waveform: Waveform,
+}
+
+/// Overview of a track's level, for display: the highest sample peak of
+/// each [`WAVEFORM_INTERVAL_MS`], on a dB scale from 0
+/// ([`WAVEFORM_FLOOR_DB`] or below) to 255 (full scale).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Waveform {
+    pub interval_ms: u16,
+    pub peaks: Vec<u8>,
+}
+
+/// A sample peak (linear, 0 to 1 and above) as a waveform point.
+fn waveform_point(peak: f32) -> u8 {
+    if peak <= 0.0 {
+        return 0;
+    }
+    let db = 20.0 * peak.log10();
+    let scaled = (1.0 - db / WAVEFORM_FLOOR_DB) * 255.0;
+    scaled.round().clamp(0.0, 255.0) as u8
 }
 
 impl Analysis {
@@ -58,6 +83,11 @@ pub struct Analyzer {
     frame_fill: usize,
     levels: Vec<f32>,
     total_frames: u64,
+    /// Samples per channel in one waveform point.
+    waveform_len: usize,
+    waveform_fill: usize,
+    waveform_peak: f32,
+    waveform: Vec<u8>,
 }
 
 impl Analyzer {
@@ -69,6 +99,8 @@ impl Analyzer {
         let channel_count = u32::try_from(channels).map_err(|_| unsupported)?;
         let loudness = EbuR128::new(channel_count, rate, Mode::I | Mode::TRUE_PEAK)?;
         let frame_len = (f64::from(rate) * FRAME_MS / 1000.0).round() as usize;
+        let waveform_len =
+            (f64::from(rate) * f64::from(WAVEFORM_INTERVAL_MS) / 1000.0).round() as usize;
         Ok(Self {
             rate,
             channels,
@@ -78,6 +110,10 @@ impl Analyzer {
             frame_fill: 0,
             levels: Vec::new(),
             total_frames: 0,
+            waveform_len,
+            waveform_fill: 0,
+            waveform_peak: 0.0,
+            waveform: Vec::new(),
         })
     }
 
@@ -102,6 +138,13 @@ impl Analyzer {
             if self.frame_fill == self.frame_len {
                 self.close_level_frame();
             }
+            for &sample in frame {
+                self.waveform_peak = self.waveform_peak.max(sample.abs());
+            }
+            self.waveform_fill += 1;
+            if self.waveform_fill == self.waveform_len {
+                self.close_waveform_point();
+            }
         }
         self.total_frames += (whole / self.channels) as u64;
         Ok(())
@@ -119,12 +162,21 @@ impl Analyzer {
         self.frame_fill = 0;
     }
 
+    fn close_waveform_point(&mut self) {
+        self.waveform.push(waveform_point(self.waveform_peak));
+        self.waveform_peak = 0.0;
+        self.waveform_fill = 0;
+    }
+
     pub fn finish(mut self, settings: &AnalysisSettings) -> Result<Analysis, Error> {
         if self.total_frames == 0 {
             return Err(Error::Empty);
         }
         if self.frame_fill > 0 {
             self.close_level_frame();
+        }
+        if self.waveform_fill > 0 {
+            self.close_waveform_point();
         }
         let duration_ms = to_ms(self.total_frames, self.rate);
 
@@ -154,6 +206,10 @@ impl Analyzer {
             cue_out_ms: points.cue_out_ms,
             fade_out_start_ms: points.fade_out_start_ms,
             has_internal_silence: points.has_internal_silence,
+            waveform: Waveform {
+                interval_ms: WAVEFORM_INTERVAL_MS,
+                peaks: self.waveform,
+            },
         })
     }
 }
@@ -325,6 +381,35 @@ mod tests {
         let peak = analysis.true_peak_db.unwrap();
         assert!((peak + 23.0).abs() < 0.3, "true peak {peak}");
         assert_eq!(analysis.duration_ms, 20_000);
+    }
+
+    #[test]
+    fn draws_a_waveform_overview() {
+        let analysis = Signal::default()
+            .silence(1.0)
+            .tone(2.0, -6.0)
+            .tone(1.0, -36.0)
+            .silence(0.03)
+            .analyze();
+        let waveform = &analysis.waveform;
+        assert_eq!(waveform.interval_ms, WAVEFORM_INTERVAL_MS);
+        // 4.03 s in 50 ms points, the last one partial.
+        assert_eq!(waveform.peaks.len(), 81);
+        assert!(waveform.peaks[..20].iter().all(|&point| point == 0));
+        // -6 dBFS: 255 × (1 - 6/72) ≈ 234.
+        assert!(
+            waveform.peaks[21..59]
+                .iter()
+                .all(|&point| point.abs_diff(234) <= 1)
+        );
+        // -36 dBFS: half way.
+        assert!(
+            waveform.peaks[61..79]
+                .iter()
+                .all(|&point| point.abs_diff(128) <= 1)
+        );
+        assert_eq!(waveform_point(1.5), 255);
+        assert_eq!(waveform_point(1e-5), 0);
     }
 
     #[test]

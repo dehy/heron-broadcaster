@@ -26,7 +26,7 @@ use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::library::{Library, LibraryStatus};
 use crate::queue::QueueManager;
 use crate::sync::ConfigSync;
-use crate::{categories, history, live, outputs, player, settings, tracks, users};
+use crate::{categories, history, librarian, live, outputs, player, settings, tracks, users};
 
 pub const SERVICE: &str = "heron-api";
 
@@ -59,7 +59,7 @@ pub struct AppState {
         (name = "users", description = "User management (admins)"),
         (name = "player", description = "Decks, transport, FX player and the engine"),
         (name = "queue", description = "The tracks waiting to play"),
-        (name = "library", description = "Tracks, their analysis and overrides"),
+        (name = "library", description = "Tracks, their analysis and overrides; review, organization and undo through heron-librarian"),
         (name = "categories", description = "Groups of tracks"),
         (name = "history", description = "What was played"),
         (name = "settings", description = "Station settings"),
@@ -92,6 +92,7 @@ fn api() -> OpenApiRouter<AppState> {
         .merge(users::router())
         .merge(player::router())
         .merge(tracks::router())
+        .merge(librarian::router())
         .merge(categories::router())
         .merge(history::router())
         .merge(settings::router())
@@ -132,9 +133,14 @@ pub struct Status {
     pub database: &'static str,
     /// `ok` or `unavailable`.
     pub engine: &'static str,
+    /// The server clock's synchronization (the host's: containers share it).
+    pub clock: heron_service::clock::ClockStatus,
+    /// The server's time, to compare with the browser's.
+    pub server_time_unix_ms: i64,
 }
 
-/// Whether the API, its database and the engine are up. No sign-in needed.
+/// Whether the API, its database and the engine are up, and whether the
+/// server clock can be trusted. No sign-in needed.
 #[utoipa::path(get, path = "/status", tag = "system", security(()),
     responses((status = 200, body = Status)))]
 async fn status(State(state): State<AppState>) -> Json<Status> {
@@ -151,6 +157,12 @@ async fn status(State(state): State<AppState>) -> Json<Status> {
         } else {
             "unavailable"
         },
+        clock: heron_service::clock::status(),
+        server_time_unix_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| {
+                i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+            }),
     })
 }
 

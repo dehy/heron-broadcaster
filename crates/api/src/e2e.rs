@@ -840,3 +840,183 @@ async fn adopts_outputs_configured_on_the_engine() {
     assert_eq!(outputs.outputs, engine_config.outputs.outputs);
     station.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn web_ui_routes() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let pool = &station.state.pool;
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+    let track = station.tracks[0];
+
+    // The theme each user picked.
+    assert_eq!(admin.get("/auth/me").await["theme"], "system");
+    let (status, me) = admin
+        .send(Method::PUT, "/auth/preferences", json!({"theme": "dark"}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["theme"], "dark");
+    assert_eq!(admin.get("/auth/me").await["theme"], "dark");
+    assert_eq!(viewer.get("/auth/me").await["theme"], "system");
+
+    // The server clock, for the dashboard.
+    let status = station.client().get("/status").await;
+    assert!(status["clock"].is_object());
+    assert!(status["server_time_unix_ms"].as_i64().unwrap() > 0);
+
+    // Waveforms come with the analysis.
+    let (status, _) = viewer
+        .request(Method::GET, &format!("/tracks/{track}/waveform"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    sqlx::query("INSERT INTO track_waveforms (track_id, interval_ms, peaks) VALUES (?, 50, ?)")
+        .bind(track)
+        .bind([0u8, 128, 255].as_slice())
+        .execute(pool)
+        .await
+        .unwrap();
+    let waveform = viewer.get(&format!("/tracks/{track}/waveform")).await;
+    assert_eq!(waveform["interval_ms"], 50);
+    assert_eq!(waveform["peaks"], "AID/");
+
+    // Audio for previews, with range requests.
+    let audio = format!("{}/tracks/{track}/audio", viewer.base);
+    let response = viewer
+        .http
+        .get(&audio)
+        .header("cookie", viewer.cookie.as_deref().unwrap())
+        .header("range", "bytes=0-3")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(&response.bytes().await.unwrap()[..], b"RIFF");
+    let response = reqwest::get(&audio).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    // Organizing goes through heron-librarian, after a dry run.
+    let roots = heron_librarian::journal::Roots {
+        library: station.library.path().to_path_buf(),
+        incoming: station.library.path().join(".incoming"),
+    };
+    let librarian = heron_librarian::tasks::TaskRunner::new(
+        pool.clone(),
+        roots,
+        heron_librarian::identify::Endpoints::default(),
+    );
+    let (status, _) = viewer
+        .request(Method::POST, "/library/organize", None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, plan) = admin.request(Method::POST, "/library/organize", None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{plan}");
+    assert_eq!(plan["status"], "pending");
+    assert_eq!(plan["request"]["kind"], "organize_plan");
+    let plan_id = plan["id"].as_u64().unwrap();
+    let apply = format!("/library/organize/{plan_id}/apply");
+    let (status, _) = admin.request(Method::POST, &apply, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "not finished yet");
+    assert!(librarian.run_next().await.unwrap());
+    let plan = admin.get(&format!("/library/tasks/{plan_id}")).await;
+    assert_eq!(plan["status"], "done", "{plan}");
+    assert_eq!(plan["plan"]["moves"].as_array().unwrap().len(), 5);
+    assert_eq!(
+        plan["plan"]["moves"][0]["to"],
+        "Unknown Artist/Unknown Album/Track 1.wav"
+    );
+    let (status, applying) = admin.request(Method::POST, &apply, None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{applying}");
+    let (status, _) = admin.request(Method::POST, &apply, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "applied once");
+    assert!(librarian.run_next().await.unwrap());
+    let applied = admin
+        .get(&format!("/library/tasks/{}", applying["id"]))
+        .await;
+    assert_eq!(applied["report"]["done"], 5, "{applied}");
+    assert!(
+        station
+            .library
+            .path()
+            .join("Unknown Artist/Unknown Album/Track 1.wav")
+            .exists()
+    );
+    let batches = viewer.get("/library/batches").await;
+    assert_eq!(batches[0]["kind"], "organize");
+    assert_eq!(batches[0]["files"], 5);
+    let batch = batches[0]["id"].as_u64().unwrap();
+    let (status, undo) = admin
+        .request(
+            Method::POST,
+            &format!("/library/batches/{batch}/undo"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{undo}");
+    assert!(librarian.run_next().await.unwrap());
+    assert!(station.library.path().join("Artist 1/Track 1.wav").exists());
+    let (status, _) = admin
+        .request(
+            Method::POST,
+            &format!("/library/batches/{batch}/undo"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "undone once");
+    assert_eq!(
+        viewer.get("/library/tasks").await.as_array().unwrap().len(),
+        3
+    );
+
+    // Review: a candidate release, or the file's own tags.
+    let candidates = json!([{"score": 0.7, "recording_id": "rec", "release_id": "rel",
+                             "release_title": "Album", "disc": 1, "track": 1}]);
+    sqlx::query(
+        "INSERT INTO track_identifications (track_id, status, reason, score, candidates)
+         VALUES (?, 'needs_review', 'doubtful', 0.7, ?)",
+    )
+    .bind(track)
+    .bind(candidates.to_string())
+    .execute(pool)
+    .await
+    .unwrap();
+    let review = viewer.get("/library/review").await;
+    assert_eq!(review["total"], 1);
+    assert_eq!(review["items"][0]["track"]["id"], track);
+    assert_eq!(review["items"][0]["candidates"][0]["release_id"], "rel");
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            &format!("/tracks/{track}/review/apply"),
+            json!({"release_id": "other", "recording_id": "rec"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, picked) = admin
+        .send(
+            Method::POST,
+            &format!("/tracks/{track}/review/apply"),
+            json!({"release_id": "rel", "recording_id": "rec"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{picked}");
+    assert_eq!(picked["request"]["track"], 1);
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            &format!("/tracks/{track}/review/apply"),
+            json!({"release_id": "rel", "recording_id": "rec"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "already being applied");
+    let keep = format!("/tracks/{track}/review/keep");
+    let (status, _) = viewer.request(Method::POST, &keep, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = admin.request(Method::POST, &keep, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = admin.request(Method::POST, &keep, None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(viewer.get("/library/review").await["total"], 0);
+    station.stop().await;
+}

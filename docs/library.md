@@ -50,7 +50,7 @@ A match is **applied automatically** when its AcoustID score is at least `min_sc
 | `the audio could not be fingerprinted` | Undecodable, or too short |
 | `identification failed: …` | AcoustID or MusicBrainz unreachable three times (the folder waits 1, then 2 minutes between tries) |
 
-The review screen comes with the web UI ([M5](roadmap/m5-web-ui.md)); until then, `heron-librarian review` lists these tracks.
+They wait on the **review screen** of the web UI (*Review & organize*; `heron-librarian review` lists them too). For each track, pick one of its candidate releases, or keep the file's own tags (`kept`). A picked release is applied by the librarian like an import: MusicBrainz tags written into the file, filed where the layout says, cover saved, as a `review` batch that can be undone (the track then needs review again).
 
 **Rate limits:** one request per second to MusicBrainz and to the Cover Art Archive, three per second to AcoustID, with a User-Agent that identifies Heron (`HeronBroadcaster/<version> ( https://heronbroadcaster.org )`). Each request waits a full interval after the previous response, so requests never arrive closer than the limit, even when one was delayed on the way. A `503` or `429` answer slows down and retries.
 
@@ -108,7 +108,7 @@ The one replacement Heron makes is re-tagging a file in place: the re-tagged cop
 
 ## Reorganizing an existing library
 
-Only on request, after a dry run:
+Only on request, after a dry run: from the web UI (*Review & organize*, admins), or on the command line:
 
 ```sh
 docker compose exec heron-librarian heron-librarian organize           # dry run: lists every move, changes nothing
@@ -137,6 +137,10 @@ docker compose exec heron-librarian heron-librarian settings --set '{"acoustid_k
 | `min_score` | 0.9 |
 | `save_cover` | true |
 | `embed_cover` | false |
+
+## Work asked through the API
+
+The web UI's review, organize and undo go through the API, which cannot write files: it queues **library tasks** (`library_tasks`) that the librarian runs one at a time, in order, next to its imports (both take the library lock for each group of file operations). Results (the dry run's moves, the batch report) are stored with the task for the web UI to show. A task running when the librarian stops is marked failed: ask again (an undo resumes where it stopped; an organization is applied once more for the rest). See [API – Library management](api.md#library-management).
 
 ## Coordination with the scanner
 

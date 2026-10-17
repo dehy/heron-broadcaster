@@ -59,6 +59,8 @@ tokio-tungstenite = "0.29.0"
 tonic = "0.14.6"
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
+tower = "0.5.3"
+tower-http = { version = "0.6.11", features = ["fs"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 utoipa = "6.0.0"
