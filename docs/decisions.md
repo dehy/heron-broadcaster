@@ -28,3 +28,6 @@ These decisions are fixed. If one looks wrong, stop and ask instead of working a
 | Rotation relaxation | Album → artist → title → track separation, each halved before being dropped (track only reduced to a quarter, never dropped), then the fallback category. See [Rotation](rotation.md#rule-relaxation). |
 | Default encoder profiles | `MP3 128k` (CBR, 44.1 kHz, stereo) and `AAC 96k` (AAC-LC, 48 kHz, stereo). Opus is optional. See [Encoders and outputs](outputs.md#default-profiles). |
 | UI theme | The web UI has light and dark themes and **follows the system setting** by default. |
+| Platforms | Heron must **run on a Raspberry Pi**. Every image is built for **amd64 and arm64**, and CI tests both natively. Defaults leave CPU headroom for the engine (the analyzer uses CPUs − 1 workers). |
+| Library files | Heron **never modifies library files** during import: the library is mounted read-only. Track paths are stored relative to the library root. |
+| Silence detection | Gap Killer silence must be below the relative thresholds **and** below an absolute ceiling of −50 dBFS, so soft intros are kept. See [Import and analysis](analysis.md#what-counts-as-silence). |

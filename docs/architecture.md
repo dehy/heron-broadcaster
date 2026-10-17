@@ -24,13 +24,13 @@
 |---|---|
 | **heron-engine** | Real-time playout: decks, mixer, crossfades, DSP, encoders and output sinks (several outputs at once, see [Encoders and outputs](outputs.md)). Exposes a gRPC control interface. Holds the upcoming tracks in memory. **Must keep playing if every other service is down.** See [Audio engine](audio-engine.md). |
 | **heron-api** | HTTP + WebSocket server: auth (local users), library, categories, rotation, queue manager, webhooks and the library scanner. Feeds the engine over gRPC. |
-| **heron-analyzer** | Analysis worker pool, as its own modular service. Reads files from the music library volume, runs `heron-analysis` and stores results in MariaDB. Can be scaled independently (several replicas) and restarted without affecting the API or the air. |
+| **heron-analyzer** | Analysis worker pool, as its own modular service. Reads files from the music library volume, runs `heron-analysis` and stores results in MariaDB. Can be scaled independently (several replicas) and restarted without affecting the API or the air. Uses CPUs − 1 workers by default. |
 | **heron-web** | Static React build. |
 | **mariadb** | Database. Used by `heron-api` and `heron-analyzer`, never by `heron-engine`. |
 
 ### Scanner and analyzer split
 
-Proposed for [M1](roadmap/m1-import-analysis.md), to be confirmed when it is built:
+Built in [M1](roadmap/m1-import-analysis.md); details in [Import and analysis](analysis.md):
 
 - The **scanner** stays in `heron-api`: it walks and watches the library, reads tags, upserts `tracks` and enqueues analysis jobs when a file is new, changed, or analyzed with an older `analysis_version`.
 - **`heron-analyzer`** claims jobs from a MariaDB-backed queue (`analysis_jobs`, using `SELECT … FOR UPDATE SKIP LOCKED`), analyzes the file and writes `track_analysis`.

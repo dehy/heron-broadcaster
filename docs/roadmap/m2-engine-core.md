@@ -11,6 +11,7 @@
   - no crossfade under N seconds;
   - per-track overrides.
 - Apply cue-in / cue-out (Gap Killer) and loudness normalization from analysis.
+- Use the same decoding path as the analysis (gapless, with the Xing fallback), so cue points line up, and never let out-of-range decoded samples reach the output (seen on real corrupt MP3s, see [Import and analysis](../analysis.md#analyzer)).
 - Real-time pacing clock; optional monitor output.
 - Encoder/output model from [Encoders and outputs](../outputs.md): encoder profiles, `OutputSink` trait, encoder fan-out, **multiple outputs at once**, each isolated from the audio thread and from each other.
 - MP3 encoder (LAME) and Icecast sink, metadata updates.

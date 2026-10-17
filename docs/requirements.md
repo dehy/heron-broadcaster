@@ -44,6 +44,7 @@ Modeled on SAM Broadcaster's "Gap Killer" screen, applied from analysis data.
 - Detect and skip blips of 10 ms or less.
 - End the track if more than N seconds of silence is detected.
 - Enabled by default, overridable per track.
+- Thresholds are measured from the track's integrated loudness, and silence must also be below an absolute ceiling (−50 dBFS), so soft intros are never trimmed. See [Import and analysis](analysis.md#what-counts-as-silence).
 
 | Setting | Default |
 |---|---|
