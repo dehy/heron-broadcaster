@@ -69,11 +69,11 @@ heron-broadcaster/
 | Tags | `lofty` |
 | Lock-free ring buffers | `rtrb` |
 | Filters | `biquad` or hand-written biquads |
-| MP3 / Opus / Vorbis encoding | LAME, libopus, libvorbis bindings |
+| MP3 / Opus / Vorbis encoding | LAME (`mp3lame-encoder`, built from source and linked statically), libopus, libvorbis bindings |
 | AAC-LC encoding | FFmpeg's native `aac` encoder via libavcodec (no `--enable-nonfree`, e.g. `ffmpeg-next` bindings) |
 | HLS segmenting | Hand-written segmenter, or libavformat's `hls` muxer |
 | HTTP / WebSocket | `axum`, `tokio` |
-| gRPC | `tonic`, `prost` |
+| gRPC | `tonic`, `prost`; `protox` compiles the `.proto` files in Rust, so builds need no `protoc` |
 | Database | `sqlx` (MySQL/MariaDB) |
 | Logging / metrics | `tracing`, `metrics` + Prometheus exporter |
 | Optional monitor output | `cpal` |

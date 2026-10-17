@@ -34,6 +34,16 @@ The user picks the encoder for each profile.
 | **Vorbis** | Vorbis (Ogg) | Built in, libvorbis | BSD |
 | **External FFmpeg** | Anything the provided binary supports, e.g. HE-AAC v1/v2 with `libfdk_aac` | User-provided `ffmpeg` binary, run as a child process | User's responsibility |
 
+### MP3
+
+Built in with LAME, compiled from source with Heron (LGPL, linked statically). Profile fields: `bitrate_kbps` (8 to 320, MP3 bitrates only), `sample_rate` (8 to 48 kHz, MP3 rates only; the master bus is resampled from 48 kHz), `channels` (1 or 2). Options (`encoder_profiles.options`):
+
+| Option | Values | Default |
+|---|---|---|
+| `mode` | `cbr`, `vbr` | `cbr` |
+| `quality` | LAME's algorithm quality, 0 (best, slowest) to 9 | 3 |
+| `vbr_quality` | With `vbr`, 0 (best) to 9 | 4 |
+
 ### Built-in AAC
 
 Plain AAC-LC without HE (SBR/PS) is sufficient for current players and bitrates, so HE-AAC is not a built-in feature.
@@ -75,15 +85,47 @@ All sinks implement the `OutputSink` trait: they receive encoded frames and now-
 | **File recording** | Writes the encoded stream to files, with rotation. |
 | **Pipe** | Sends an encoded stream to an external process. |
 
+### Icecast
+
+Source client for Icecast 2.4 and later (HTTP `PUT`). Metadata goes through `/admin/metadata` as `Artist - Title`, with the source credentials. Settings (`outputs.config`):
+
+| Setting | Default |
+|---|---|
+| `host` | required |
+| `port` | 8000 |
+| `mount` | required, starts with `/` |
+| `username` | `source` |
+| `password` | required |
+| `name`, `description`, `genre`, `url` | none (shown in stream directories) |
+| `public` | `false` (list in public directories) |
+
+TLS is not supported yet.
+
 ## Isolation and reliability
 
 - Encoders and outputs run **outside the audio thread**. The mixer writes to a lock-free ring buffer per encoder; a slow or failed encoder or output never blocks the mixer or other outputs.
-- Each network output reconnects on its own with exponential backoff.
+- Each network output reconnects on its own with exponential backoff (1 s, doubling up to 60 s). After a reconnection the stream starts with fresh audio, not a backlog.
 - An output's state (connected, reconnecting, error, bytes sent, listeners when the server reports them) is exposed through gRPC, the API and `/metrics`.
 
 ## Configuration flow
 
-Encoder profiles and outputs are edited in the web UI and stored by `heron-api` in MariaDB. The API pushes the configuration to the engine over gRPC; the engine keeps a local copy so it restarts with its outputs even when the API or database is down (the engine never reads the database, see [Locked decisions](decisions.md)).
+Encoder profiles and outputs are edited in the web UI and stored by `heron-api` in MariaDB. The API pushes the configuration to the engine over gRPC (`SetOutputs`, JSON with `encoder_profiles` and `outputs` in the shape of the tables); the engine keeps a local copy so it restarts with its outputs even when the API or database is down (the engine never reads the database, see [Locked decisions](decisions.md)).
+
+A new configuration is validated as a whole: an invalid one changes nothing. Outputs whose settings and encoder profile are unchanged keep streaming without a reconnection; an encoder runs only while an enabled output uses it.
+
+Until the web UI and the API manage outputs ([M4](roadmap/m4-api-control-plane.md), [M5](roadmap/m5-web-ui.md)), set them with `heron-engine ctl set-outputs`, for example to the local Icecast of the `icecast` Compose profile:
+
+```json
+{
+  "encoder_profiles": [
+    {"id": 1, "name": "MP3 128k", "encoder": "mp3", "bitrate_kbps": 128, "sample_rate": 44100, "channels": 2}
+  ],
+  "outputs": [
+    {"id": 1, "name": "Local Icecast", "kind": "icecast", "encoder_profile_id": 1,
+     "config": {"host": "icecast", "port": 8000, "mount": "/live", "password": "hackme", "name": "My station"}}
+  ]
+}
+```
 
 ## Delivery
 
