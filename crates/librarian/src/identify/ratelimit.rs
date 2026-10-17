@@ -2,6 +2,12 @@
 
 //! Spacing requests to a web service: MusicBrainz allows one request per
 //! second, AcoustID three.
+//!
+//! The services count requests as they arrive, and a request can leave late
+//! (a stall, a reconnection) while the next one leaves on time. So the
+//! interval also restarts when a response comes back ([`RateLimiter::done`]):
+//! requests made one after the other then always arrive at least one
+//! interval apart, whatever the network does.
 
 use std::time::Duration;
 
@@ -29,6 +35,16 @@ impl RateLimiter {
         let slot = next.map_or(now, |next| next.max(now));
         *next = Some(slot + self.interval);
         tokio::time::sleep_until(slot).await;
+    }
+
+    /// Records that a response came back: the next request waits a full
+    /// interval from now.
+    pub async fn done(&self) {
+        let mut next = self.next.lock().await;
+        let after = Instant::now() + self.interval;
+        if next.is_none_or(|next| next < after) {
+            *next = Some(after);
+        }
     }
 
     /// Pushes the next slot back (the service asked us to slow down).
@@ -66,6 +82,15 @@ mod tests {
             times,
             [0, 1, 2, 3].map(Duration::from_secs).to_vec(),
             "one per second"
+        );
+
+        limiter.done().await;
+        let before = Instant::now();
+        limiter.wait().await;
+        assert_eq!(
+            Instant::now() - before,
+            Duration::from_secs(1),
+            "a full interval after a response"
         );
 
         limiter.back_off(Duration::from_secs(10)).await;

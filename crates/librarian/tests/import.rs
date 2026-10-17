@@ -260,10 +260,14 @@ async fn a_hundred_dropped_files() {
     }
     let acoustid = mock.requests(Service::AcoustId);
     assert_eq!(acoustid.len(), 100);
+    let gaps: Vec<u128> = acoustid
+        .windows(2)
+        .map(|p| (p[1] - p[0]).as_millis())
+        .collect();
     for window in acoustid.windows(4) {
         assert!(
             window[3] - window[0] >= Duration::from_millis(990),
-            "{:?}",
+            "{:?} (gaps in ms: {gaps:?})",
             window[3] - window[0]
         );
     }

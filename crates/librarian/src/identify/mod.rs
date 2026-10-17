@@ -324,7 +324,9 @@ impl Identifier {
         let mut attempt = 1;
         loop {
             limiter.wait().await;
-            let response = request().send().await?;
+            let response = request().send().await;
+            limiter.done().await;
+            let response = response?;
             let status = response.status();
             if status.is_success() {
                 return Ok(response);
