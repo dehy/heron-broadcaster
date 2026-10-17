@@ -25,3 +25,4 @@ These decisions are fixed. If one looks wrong, stop and ask instead of working a
 | Encoder selection | The user **selects the encoder** per profile: MP3, AAC-LC, Opus, Vorbis (built in) or external FFmpeg. This replaces the generic "pipe to ffmpeg" approach for encoding. |
 | AAC | **Built-in AAC-LC without HE is sufficient.** fdk-aac (HE-AAC) is only available when the user provides their own fdk-aac-enabled `ffmpeg` binary; Heron does not ship it. |
 | HLS | Heron has an **HLS output** (segments + playlist). |
+| UI theme | The web UI has light and dark themes and **follows the system setting** by default. |

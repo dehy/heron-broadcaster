@@ -6,7 +6,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 
 | # | Milestone | Depends on | Status |
 |---|---|---|---|
-| M0 | [Foundations](m0-foundations.md) | — | In review ([#1](https://github.com/dehy/heron-broadcaster/pull/1)) |
+| M0 | [Foundations](m0-foundations.md) | — | Done ([#1](https://github.com/dehy/heron-broadcaster/pull/1)) |
 | M1 | [Import & analysis](m1-import-analysis.md) | M0 | Not started |
 | M2 | [Engine core](m2-engine-core.md) | M1 | Not started |
 | M3 | [24/7 reliability](m3-reliability.md) | M2 | Not started |
