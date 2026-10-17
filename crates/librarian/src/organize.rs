@@ -8,8 +8,8 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use heron_core::LibraryPath;
-use heron_library::LibraryLock;
 use heron_library::tags;
+use heron_library::{LibraryLock, Tags};
 use serde::Serialize;
 use sqlx::{MySqlPool, Row};
 
@@ -235,14 +235,17 @@ pub async fn undo(pool: &MySqlPool, roots: &Roots, batch: u64) -> Result<Report,
     if exists.is_none() {
         return Err(Error::NoSuchBatch(batch));
     }
-    let undone_by: Option<u64> =
-        sqlx::query_scalar("SELECT id FROM library_batches WHERE undoes = ?")
+    let undone_by: Option<(u64, bool)> =
+        sqlx::query_as("SELECT id, finished_at IS NOT NULL FROM library_batches WHERE undoes = ?")
             .bind(batch)
             .fetch_optional(pool)
             .await?;
-    if let Some(by) = undone_by {
-        return Err(Error::AlreadyUndone { batch, by });
-    }
+    // An undo that was interrupted is resumed.
+    let resumed = match undone_by {
+        Some((by, true)) => return Err(Error::AlreadyUndone { batch, by }),
+        Some((by, false)) => Some(by),
+        None => None,
+    };
 
     let rows = sqlx::query(
         "SELECT m.id, m.track_id, CAST(m.from_root AS CHAR) AS from_root, m.from_path,
@@ -258,7 +261,10 @@ pub async fn undo(pool: &MySqlPool, roots: &Roots, batch: u64) -> Result<Report,
     .fetch_all(pool)
     .await?;
 
-    let undo_batch = journal::create_batch(pool, BatchKind::Undo, Some(batch)).await?;
+    let undo_batch = match resumed {
+        Some(id) => id,
+        None => journal::create_batch(pool, BatchKind::Undo, Some(batch)).await?,
+    };
     let mut report = Report {
         batch_id: undo_batch,
         ..Report::default()
@@ -288,9 +294,11 @@ pub async fn undo(pool: &MySqlPool, roots: &Roots, batch: u64) -> Result<Report,
                     let now = tags::read(&current.resolve(&roots.library))
                         .map(|read| read.tags)
                         .unwrap_or_default();
-                    Some(Retag {
+                    let previous: Tags = serde_json::from_str(&previous).unwrap_or_default();
+                    // Done already, by an undo interrupted before recording it.
+                    (now != previous).then_some(Retag {
                         previous: now,
-                        applied: serde_json::from_str(&previous).unwrap_or_default(),
+                        applied: previous,
                         cover: if cover_embedded {
                             RetagCover::Remove
                         } else {
@@ -299,15 +307,19 @@ pub async fn undo(pool: &MySqlPool, roots: &Roots, batch: u64) -> Result<Report,
                     })
                 }
             };
-            let operation = Operation {
-                batch_id: undo_batch,
-                subject: Subject::Existing(track_id),
-                from: Origin::Library(current.clone()),
-                to,
-                retag,
-                expected_stamp: None,
+            let outcome = if to == current && retag.is_none() {
+                Ok(track_id)
+            } else {
+                let operation = Operation {
+                    batch_id: undo_batch,
+                    subject: Subject::Existing(track_id),
+                    from: Origin::Library(current.clone()),
+                    to,
+                    retag,
+                    expected_stamp: None,
+                };
+                journal::execute(pool, roots, operation).await
             };
-            let outcome = journal::execute(pool, roots, operation).await;
             let succeeded = outcome.is_ok();
             record_outcome(&mut report, current.as_str(), outcome)?;
             if succeeded {

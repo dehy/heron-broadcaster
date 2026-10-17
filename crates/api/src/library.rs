@@ -246,6 +246,7 @@ impl Library {
     async fn scan_locked(&self, settle: Duration) -> Result<ScanReport, ScanError> {
         let started = Instant::now();
         let mut known = self.known_tracks().await?;
+        let in_flight = self.in_flight().await?;
         let root = self.root.clone();
         let files = tokio::task::spawn_blocking(move || walk(&root)).await??;
         let mut report = ScanReport {
@@ -269,6 +270,12 @@ impl Library {
         let settle_before = now_us().saturating_sub(i64::try_from(settle.as_micros()).unwrap_or(0));
 
         for file in &files {
+            // A move the librarian has not finished (it crashed): recovery
+            // decides which of the two files is the track's.
+            if in_flight.contains(file.path.as_str()) {
+                tracing::debug!(path = %file.path, "being moved by the librarian, skipped");
+                continue;
+            }
             match known.get(file.path.as_str()) {
                 // Including files the librarian just wrote: it recorded their stamp.
                 Some(track) if track.stamp == Some(file.stamp) => {
@@ -385,6 +392,19 @@ impl Library {
             );
         }
         Ok(tracks)
+    }
+
+    /// Paths of moves the librarian has not finished: the target of a move
+    /// in progress, and the original of a copy not removed yet.
+    async fn in_flight(&self) -> Result<HashSet<String>, sqlx::Error> {
+        let paths: Vec<String> = sqlx::query_scalar(
+            "SELECT to_path FROM library_moves WHERE status = 'pending'
+             UNION SELECT from_path FROM library_moves
+             WHERE status = 'moved' AND from_root = 'library'",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(paths.into_iter().collect())
     }
 
     /// Hashes the file and reads its tags. `None` if it cannot be read.
@@ -638,6 +658,37 @@ mod tests {
         let restored = scan(&library).await;
         assert_eq!(restored.restored + restored.updated, 1, "{restored:?}");
         assert_eq!(track_count(&db.pool, "missing_since IS NOT NULL").await, 0);
+        db.drop().await;
+    }
+
+    #[tokio::test]
+    async fn files_the_librarian_is_moving_are_left_alone() {
+        let Some(db) = ScratchDatabase::create().await else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_wav(&root.join("old/a.wav"), 1.0, 440.0);
+        let library = Library::new(db.pool.clone(), root.to_path_buf());
+        scan(&library).await;
+
+        // A copy landed at the new path, then the librarian crashed.
+        std::fs::create_dir_all(root.join("new")).unwrap();
+        std::fs::copy(root.join("old/a.wav"), root.join("new/a.wav")).unwrap();
+        sqlx::query("INSERT INTO library_batches (id, kind) VALUES (1, 'organize')")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO library_moves (batch_id, track_id, from_root, from_path, to_path, method)
+             SELECT 1, id, 'library', path, 'new/a.wav', 'copy' FROM tracks",
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        let report = scan(&library).await;
+        assert_eq!((report.added, report.unchanged), (0, 1), "{report:?}");
+        assert_eq!(track_count(&db.pool, "1").await, 1, "not imported twice");
         db.drop().await;
     }
 

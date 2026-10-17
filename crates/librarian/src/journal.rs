@@ -240,12 +240,16 @@ pub async fn execute(pool: &MySqlPool, roots: &Roots, op: Operation) -> Result<u
     let copy = op.retag.is_some();
     let (move_id, track_id) = record(pool, &op, copy).await?;
     let temp = temp_path(&op.to, move_id);
+    crash_point("recorded");
 
-    match transfer(
+    let transferred = transfer(
         pool, roots, &op, move_id, &from, &to, &temp, source, in_place,
     )
-    .await
-    {
+    .await;
+    if transferred.is_ok() {
+        crash_point("transferred");
+    }
+    match transferred {
         Ok(Transfer::Renamed) => {
             finish(pool, move_id, track_id, &op.to, &to, applied(&op), "done").await?;
         }
@@ -254,7 +258,9 @@ pub async fn execute(pool: &MySqlPool, roots: &Roots, op: Operation) -> Result<u
                 finish(pool, move_id, track_id, &op.to, &to, applied(&op), "done").await?;
             } else {
                 finish(pool, move_id, track_id, &op.to, &to, applied(&op), "moved").await?;
+                crash_point("finished");
                 remove_original(&from)?;
+                crash_point("removed");
                 set_status(pool, move_id, "done", None).await?;
             }
         }
@@ -607,6 +613,28 @@ async fn abandon(pool: &MySqlPool, move_id: u64, reason: &str) -> Result<(), sql
         .execute(&mut *tx)
         .await?;
     tx.commit().await
+}
+
+/// Fault injection for the chaos tests: with `HERON_LIBRARIAN_CRASH_AT` set
+/// to `step:n`, the process aborts the `n`th time it reaches `step`, as a
+/// power cut would stop it. Never set outside tests.
+fn crash_point(step: &str) {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static PLAN: OnceLock<Option<(String, u64)>> = OnceLock::new();
+    static REACHED: AtomicU64 = AtomicU64::new(0);
+    let plan = PLAN.get_or_init(|| {
+        let value = std::env::var("HERON_LIBRARIAN_CRASH_AT").ok()?;
+        let (step, n) = value.split_once(':')?;
+        Some((step.to_owned(), n.parse().ok()?))
+    });
+    if let Some((crash_step, n)) = plan
+        && crash_step == step
+        && REACHED.fetch_add(1, Ordering::SeqCst) + 1 == *n
+    {
+        eprintln!("HERON_LIBRARIAN_CRASH_AT: crashing at {step}");
+        std::process::abort();
+    }
 }
 
 /// What [`recover`] did.
