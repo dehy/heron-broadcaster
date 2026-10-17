@@ -21,16 +21,24 @@ heron-service = { path = "crates/service" }
 
 anyhow = "1.0.104"
 axum = "0.8.9"
+blake3 = "1.8.7"
 clap = { version = "4.6.7", features = ["derive", "env"] }
+ebur128 = "0.1.10"
+hound = "3.5.1"
+lofty = "0.25.4"
 metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
+notify = "8.2.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+symphonia = { version = "0.6.1", default-features = false, features = ["opt-simd", "all-meta", "mp1", "mp2", "mp3", "aac", "isomp4", "alac", "aiff", "flac", "ogg", "vorbis", "wav", "pcm", "adpcm"] }
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "mysql", "migrate", "macros"] }
+tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread", "signal", "net", "time"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+walkdir = "2.5.0"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
