@@ -15,6 +15,8 @@ heron-core = { path = "crates/core" }
 heron-proto = { path = "crates/proto" }
 heron-analysis = { path = "crates/analysis" }
 heron-dsp = { path = "crates/dsp" }
+heron-library = { path = "crates/library" }
+heron-librarian = { path = "crates/librarian" }
 heron-outputs = { path = "crates/outputs" }
 heron-rotation = { path = "crates/rotation" }
 heron-service = { path = "crates/service" }
@@ -36,9 +38,12 @@ mp3lame-encoder = "0.2.5"
 notify = "8.2.0"
 percent-encoding = "2.3.2"
 prost = "0.14.4"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "form", "query"] }
 protox = "0.10.0"
 rtrb = "0.4.0"
 rubato = "5.0.1"
+rusty-chromaprint = "0.3.0"
+rustix = { version = "1.1.5", features = ["fs"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 symphonia = { version = "0.6.1", default-features = false, features = ["opt-simd", "all-meta", "mp1", "mp2", "mp3", "aac", "isomp4", "alac", "aiff", "flac", "ogg", "vorbis", "wav", "pcm", "adpcm"] }

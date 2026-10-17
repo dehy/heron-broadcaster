@@ -14,13 +14,15 @@ Requirements: Docker with Compose v2.
 
 ```sh
 cp .env.example .env              # then change the passwords
-mkdir -p data/music data/fallback # or point HERON_MUSIC_DIR / HERON_FALLBACK_DIR elsewhere
+mkdir -p data/music data/fallback data/incoming # or point HERON_MUSIC_DIR, … elsewhere
 docker compose up -d --build --wait
 ```
 
 Open http://localhost:8000. The page shows the service status and the import progress. Database migrations run automatically when `heron-api` starts.
 
-Point `HERON_MUSIC_DIR` at your music. Heron mounts it read-only and never modifies your files; new and changed files are picked up automatically. See [Import and analysis](docs/analysis.md).
+Point `HERON_MUSIC_DIR` at your music: new and changed files are picked up automatically. See [Import and analysis](docs/analysis.md).
+
+Drop new files into `HERON_INCOMING_FOLDER` (`data/incoming`): `heron-librarian` identifies them (with your station's AcoustID key), tags them and files them into the library as `Artist/Album/01 Title.ext`. It never overwrites a file, and reorganizes your existing library only when you ask, after a dry run. Set `HERON_LIBRARIAN_USER` to the owner of your music (`id -u`:`id -g`), the only user Heron writes as. See [Library management](docs/library.md).
 
 To try it without your own music, generate a synthetic library (uses ffmpeg in Docker):
 

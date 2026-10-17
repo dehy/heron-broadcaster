@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Builds every Rust binary once, then one small image per service.
-# Targets: heron-engine, heron-api, heron-analyzer.
+# Targets: heron-engine, heron-api, heron-analyzer, heron-librarian.
 
 FROM rust:1.99.1-slim-trixie AS builder
 # LAME (MP3 encoding) is compiled from source by its build script (configure, make).
@@ -16,9 +16,10 @@ COPY migrations ./migrations
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked \
-        --bin heron-engine --bin heron-api --bin heron-analyzer \
+        --bin heron-engine --bin heron-api --bin heron-analyzer --bin heron-librarian \
     && mkdir -p /out \
-    && cp target/release/heron-engine target/release/heron-api target/release/heron-analyzer /out/
+    && cp target/release/heron-engine target/release/heron-api target/release/heron-analyzer \
+        target/release/heron-librarian /out/
 
 FROM debian:trixie-slim AS runtime
 RUN useradd --system --uid 10001 --user-group --no-create-home heron
@@ -51,3 +52,17 @@ EXPOSE 8082
 HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=3 \
     CMD ["heron-analyzer", "healthcheck"]
 ENTRYPOINT ["heron-analyzer"]
+
+FROM runtime AS heron-librarian
+# CA certificates for AcoustID, MusicBrainz and the Cover Art Archive (HTTPS).
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+USER heron
+COPY --from=builder /out/heron-librarian /usr/local/bin/heron-librarian
+ENV HERON_HTTP_ADDR=0.0.0.0:8083
+EXPOSE 8083
+HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=3 \
+    CMD ["heron-librarian", "healthcheck"]
+ENTRYPOINT ["heron-librarian"]

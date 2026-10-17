@@ -19,6 +19,7 @@ The name comes from "air on" sounding like *héron* (French for heron): keeping 
 | [Requirements](requirements.md) | Library, playout, audio processing, outputs, reliability |
 | [Rotation](rotation.md) | Separation rules, clockwheels, relaxation, rotation model |
 | [Import and analysis](analysis.md) | Library scanner, job queue, silence and crossfade detection |
+| [Library management](library.md) | Incoming folder, identification, tags, layout, journaled moves, organize and undo |
 | [Encoders and outputs](outputs.md) | Encoder selection, multiple outputs, Icecast, Shoutcast, HLS |
 
 ## Technical design

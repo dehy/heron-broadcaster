@@ -1,0 +1,47 @@
+[package]
+name = "heron-librarian"
+description = "Heron Broadcaster library management: incoming folder, identification, tags and moves"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "heron-librarian"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+blake3.workspace = true
+clap.workspace = true
+heron-analysis = { workspace = true, features = ["mysql"] }
+heron-core.workspace = true
+heron-library.workspace = true
+heron-service = { workspace = true, features = ["mysql"] }
+metrics.workspace = true
+notify.workspace = true
+reqwest.workspace = true
+rustix.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "fs"] }
+tracing.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+heron-service = { workspace = true, features = ["test-util"] }
+hound.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

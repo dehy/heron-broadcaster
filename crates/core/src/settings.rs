@@ -60,6 +60,56 @@ impl Default for AnalysisSettings {
     }
 }
 
+/// Library management: identification and folder layout. Stored under the
+/// `library` settings name. See `docs/library.md`.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LibrarySettings {
+    /// The station's AcoustID application key. Identification is off
+    /// without one: incoming files are filed using their own tags.
+    pub acoustid_key: Option<String>,
+    /// Where files go, relative to the library root. See `docs/library.md`.
+    pub layout: String,
+    /// Lowest AcoustID score (0 to 1) accepted as a match.
+    pub min_score: f64,
+    /// Save the release's front cover as `cover.jpg` in the album folder.
+    pub save_cover: bool,
+    /// Also embed the front cover in the files.
+    pub embed_cover: bool,
+}
+
+impl LibrarySettings {
+    /// Name of the row in the `settings` table.
+    pub const SETTINGS_NAME: &'static str = "library";
+    pub const DEFAULT_LAYOUT: &'static str =
+        "{album_artist}/{album}/{disc-}{track:02} {title}.{ext}";
+}
+
+impl Default for LibrarySettings {
+    fn default() -> Self {
+        Self {
+            acoustid_key: None,
+            layout: Self::DEFAULT_LAYOUT.to_owned(),
+            min_score: 0.9,
+            save_cover: true,
+            embed_cover: false,
+        }
+    }
+}
+
+// Keeps the AcoustID key out of logs.
+impl std::fmt::Debug for LibrarySettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LibrarySettings")
+            .field("acoustid_key", &self.acoustid_key.as_ref().map(|_| "<set>"))
+            .field("layout", &self.layout)
+            .field("min_score", &self.min_score)
+            .field("save_cover", &self.save_cover)
+            .field("embed_cover", &self.embed_cover)
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +133,14 @@ mod tests {
             AnalysisSettings::default().fingerprint()
         );
         assert_ne!(default.fingerprint(), changed.fingerprint());
+    }
+
+    #[test]
+    fn the_acoustid_key_is_not_logged() {
+        let settings: LibrarySettings =
+            serde_json::from_str(r#"{"acoustid_key": "s3cret"}"#).unwrap();
+        assert_eq!(settings.acoustid_key.as_deref(), Some("s3cret"));
+        assert_eq!(settings.layout, LibrarySettings::DEFAULT_LAYOUT);
+        assert!(!format!("{settings:?}").contains("s3cret"));
     }
 }

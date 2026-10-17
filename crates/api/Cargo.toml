@@ -12,12 +12,11 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
-blake3.workspace = true
 clap.workspace = true
 heron-analysis = { workspace = true, features = ["mysql"] }
 heron-core.workspace = true
+heron-library.workspace = true
 heron-service = { workspace = true, features = ["mysql"] }
-lofty.workspace = true
 metrics.workspace = true
 notify.workspace = true
 serde.workspace = true

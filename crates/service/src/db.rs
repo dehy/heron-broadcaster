@@ -123,6 +123,11 @@ impl ScratchDatabase {
         })
     }
 
+    /// URL of the scratch database, for child processes.
+    pub fn url(&self) -> String {
+        format!("{}/{}", self.admin_url, self.name)
+    }
+
     /// Drops the database. Call it at the end of the test.
     pub async fn drop(self) {
         self.pool.close().await;

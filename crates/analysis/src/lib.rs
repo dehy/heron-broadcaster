@@ -7,16 +7,21 @@
 
 mod analyzer;
 pub mod decode;
+pub mod fingerprint;
 #[cfg(feature = "mysql")]
 pub mod jobs;
 
 pub use analyzer::{Analysis, Analyzer, FRAME_MS};
-pub use decode::{Decoder, analyze_file};
+pub use decode::{Decoder, analyze_and_fingerprint, analyze_file};
+pub use fingerprint::{Chromaprint, fingerprint_file};
 
 /// Version of the analysis algorithm. Bump it when a change to this crate
 /// alters results, or lets files that failed before decode now: every track
 /// is then re-analyzed, including those whose analysis failed.
-pub const ALGORITHM_VERSION: u32 = 1;
+///
+/// - 1: M1.
+/// - 2: adds the Chromaprint fingerprint (M1b).
+pub const ALGORITHM_VERSION: u32 = 2;
 
 /// Errors raised while analyzing a file.
 #[derive(Debug, thiserror::Error)]
