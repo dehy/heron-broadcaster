@@ -6,7 +6,7 @@ The schema lives in `migrations/`; this page summarizes it. Tables not used yet 
 
 | Table | Columns |
 |---|---|
-| `tracks` | id, path (relative to the library root, `/` separators, unique through a hash), file_hash (content hash: size + first and last 64 KiB), file_size, file_mtime_us, title, artist, album, duration_ms, enabled, missing_since, created_at, updated_at |
+| `tracks` | id, path (relative to the library root, `/` separators, unique through a hash), file_hash (content hash: size + first and last 64 KiB), file_size, file_mtime_us, title, artist, album, musicbrainz_artist_id (the first of the tag), artists_key (hash of the artist and title tags the track's artists were linked from), duration_ms, enabled, missing_since, created_at, updated_at |
 | `track_analysis` | track_id, analysis_version, params_hash (fingerprint of the analysis settings), integrated_lufs, true_peak_db, cue_in_ms, cue_out_ms, fade_out_start_ms, has_internal_silence, analyzed_at |
 | `track_overrides` | track_id, cue_in_ms, cue_out_ms, crossfade settings, gap_killer_enabled (all nullable) |
 | `analysis_jobs` | id, track_id, analysis_version, status (pending, running, done, failed), attempts, claimed_by, claimed_at, error, created_at, updated_at — queue between the scanner and `heron-analyzer` (see [Import and analysis](analysis.md#job-queue)) |
@@ -23,53 +23,59 @@ See [Library management](library.md).
 | `library_batches` | id, kind (import, organize, undo, review: a release picked on the review screen), undoes (the batch an undo reverts), created_at, finished_at |
 | `library_moves` | id, batch_id, track_id, from_root (incoming, library), from_path, to_path, method (rename, copy), temp_path, content_hash (copies), status (pending, moved, done, abandoned, undone), error — the journal, written before a file is touched |
 | `track_tag_changes` | id, track_id, move_id, previous and applied tags (JSON), cover_embedded, created_at, undone_at |
-| `library_tasks` | id, kind (organize_plan, organize_apply, undo, review_apply), params (JSON, the request), status (pending, running, done, failed), result (JSON: the dry run's moves or the batch report), error, requested_by, created_at, started_at, finished_at — work the API asks of `heron-librarian` |
+| `library_tasks` | id, kind (organize_plan, organize_apply, undo, review_apply, artist_relations), params (JSON, the request), status (pending, running, done, failed), result (JSON: the dry run's moves or the batch report), error, requested_by, created_at, started_at, finished_at — work the API asks of `heron-librarian` |
 
 ## Categories
 
 | Table | Columns |
 |---|---|
-| `categories` | id, name, color, separation overrides (JSON) |
+| `categories` | id, name, color, separation (JSON: the windows it overrides, `NULL` for none) |
 | `track_categories` | track_id, category_id, weight |
 
 ## Artists
 
-See [Rotation – Artists with several names](rotation.md#artists-with-several-names). Sketch, defined in [M6](roadmap/m6-rotation-clockwheels.md).
+See [Rotation – Artists with several names](rotation.md#artists-with-several-names).
 
 | Table | Columns |
 |---|---|
-| `artists` | id, name (display), musicbrainz_id, group_id |
-| `artist_names` | artist_id, name, normalized name (unique) |
-| `artist_groups` | id, name, counts_as_one_artist |
-| `track_artists` | track_id, artist_id, position |
+| `artists` | id, name (shown), musicbrainz_id (unique) |
+| `artist_names` | id, artist_id, name (as first seen), normalized (lowercase, no accents, spaces collapsed; unique through a hash), by_hand (moved to its artist by hand) |
+| `artist_similar` | artist_id, similar_id (one row per pair, the smaller ID first) — separation treats them as one artist |
+| `artist_suggestions` | id, artist_id, other_id (the smaller ID first), source (names, musicbrainz), reason, status (pending, accepted, dismissed) |
+| `track_artists` | track_id, artist_id, position — linked from the tags by `heron-api` |
+
+The artist groups sketched before M6 became similar links.
 
 ## Restrictions
 
-See [Rotation – Restrictions](rotation.md#restrictions). Sketch, defined in [M6](roadmap/m6-rotation-clockwheels.md).
+See [Rotation – Restrictions](rotation.md#restrictions).
 
 | Table | Columns |
 |---|---|
-| `restrictions` | id, target (track, artist, category), target_id, kind (dayparting, date range, sequence), rule (JSON: days and hours, dates, category it may not follow), enabled, note |
+| `restrictions` | id, target (track, artist, category), target_id, rule (JSON, tagged by `kind`: `daypart` with mode, days, start_hour, end_hour; `date_range` with mode, start, end, every_year; `not_after` with category_id), enabled, note, created_at, updated_at |
+
+Targets are not foreign keys: restrictions on a deleted category go with it, merged artists hand theirs over, others are ignored.
 
 ## Clockwheels
 
 | Table | Columns |
 |---|---|
 | `clocks` | id, name |
-| `clock_slots` | clock_id, position, category_id, selection_method, enforce_rules, separation overrides (JSON) |
-| `clock_schedule` | day_of_week, hour, clock_id |
+| `clock_slots` | clock_id, position, category_id, selection_method (least_recently_played, random, weighted), enforce_rules, separation (JSON: the windows it overrides) |
+| `clock_schedule` | day_of_week (ISO: 1 = Monday), hour (station time), clock_id |
+| `rotation_picks` | id, track_id, planned_at, clock_id, slot, hour_start, category_id, step, explanation (JSON, see [Rotation](rotation.md#rotation-model)), engine_started_at and entry_id (the engine's queue entry), play_id — the selection log |
 
 ## History
 
 | Table | Columns |
 |---|---|
-| `play_history` | id, track_id (NULL for files outside the library and deleted tracks), artist, title, started_at, ended_at, played_ms, end_reason (finished, skipped, stopped, replaced; NULL while playing or when the API missed the end), deck (a, b, fx), source (rotation, request, fallback, manual), relaxation_applied — recorded by `heron-api` from the engine's track changes (see [API and control plane](api.md#play-history)) |
+| `play_history` | id, track_id (NULL for files outside the library and deleted tracks), artist, title, started_at, ended_at, played_ms, end_reason (finished, skipped, stopped, replaced; NULL while playing or when the API missed the end), deck (a, b, fx), source (rotation, request, fallback, manual), relaxation_applied (JSON: pick_id, step, description, for relaxed rotation picks) — recorded by `heron-api` from the engine's track changes (see [API and control plane](api.md#play-history)) |
 
 ## Settings
 
 | Table | Columns |
 |---|---|
-| `settings` | name, JSON value. `analysis`: Gap Killer and crossfade point detection ([Import and analysis](analysis.md#settings)); `library`: AcoustID key, layout, covers ([Library management](library.md#settings)); `playout`: crossfade and loudness ([Audio engine](audio-engine.md#playout-settings)); `queue`: autofill and how many tracks wait ([API](api.md#queue-manager)); `engine`: whether the API manages the engine's configuration yet ([API](api.md#engine-configuration)); later separation rules |
+| `settings` | name, JSON value. `analysis`: Gap Killer and crossfade point detection ([Import and analysis](analysis.md#settings)); `library`: AcoustID key, layout, covers ([Library management](library.md#settings)); `playout`: crossfade and loudness ([Audio engine](audio-engine.md#playout-settings)); `queue`: autofill and how many tracks wait ([API](api.md#queue-manager)); `engine`: whether the API manages the engine's configuration yet ([API](api.md#engine-configuration)); `rotation`: separation windows, fallback category, weight factors; `station`: time zone ([Rotation](rotation.md#scheduling)) |
 
 ## Encoders and outputs
 
@@ -113,10 +119,11 @@ library_batches 1──* library_moves 1──0..1 track_tag_changes *──1 tr
 tracks *──* categories        (through track_categories, with weight)
 tracks *──* artists           (through track_artists)
 artists 1──* artist_names
-artist_groups 1──* artists
+artists *──* artists          (through artist_similar, artist_suggestions)
 restrictions *──1 tracks | artists | categories
 clocks 1──* clock_slots *──1 categories
 clock_schedule *──1 clocks
+rotation_picks *──1 tracks, 0..1 play_history
 play_history *──1 tracks
 webhooks 1──* webhook_deliveries
 users 1──* sessions, api_tokens

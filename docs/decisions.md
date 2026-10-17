@@ -34,3 +34,6 @@ These decisions are fixed. If one looks wrong, stop and ask instead of working a
 | Cover art and layout | Cover art is saved as `cover.jpg` in the album folder (embedding is optional, off by default). Default layout `{album_artist}/{album}/{disc-}{track:02} {title}.{ext}`. |
 | Librarian | Files are moved and tags written by **`heron-librarian`, its own service**, so the API keeps a read-only mount. |
 | Silence detection | Gap Killer silence must be below the relative thresholds **and** below an absolute ceiling of −50 dBFS, so soft intros are kept. See [Import and analysis](analysis.md#what-counts-as-silence). |
+| Artist names | Artist tags are split into several artists **on "featuring" only**; names are matched ignoring case, accents and spaces; anything else is linked by hand. Artists can be marked **similar** (separation treats them as one), replacing artist groups. See [Rotation](rotation.md#artists-with-several-names). |
+| Restrictions | M6 ships **dayparting, date ranges and category sequences**, on tracks, artists and categories. Quotas ("no two tracks over 8 min in an hour") may come later. |
+| Station time | Clocks and restrictions follow the **station's time zone**, a setting (IANA name) defaulting to the server's. |

@@ -109,9 +109,9 @@ The engine never connects to the database ([Locked decisions](decisions.md)): it
 | Service | Role |
 |---|---|
 | **heron-engine** | Real-time playout: decks, mixer, crossfades, DSP, encoders and output sinks (several outputs at once, see [Encoders and outputs](outputs.md)). Reads the music library and the fallback directory, both mounted read-only. Exposes a gRPC control interface (`heron-engine ctl` is its command-line client). Holds the upcoming tracks in memory and keeps its outputs and settings on disk. **Must keep playing if every other service is down.** See [Audio engine](audio-engine.md). |
-| **heron-api** | HTTP + WebSocket server: auth (local users), library, categories, rotation, queue manager, play history, webhooks and the library scanner. Feeds the engine over gRPC and pushes it its playout settings and outputs. See [API and control plane](api.md). |
+| **heron-api** | HTTP + WebSocket server: auth (local users), library, categories, artists, clocks and rotation (with `heron-rotation`), queue manager, selection log, play history, webhooks and the library scanner. Feeds the engine over gRPC and pushes it its playout settings and outputs. See [API and control plane](api.md). |
 | **heron-analyzer** | Analysis worker pool, as its own modular service. Reads files from the music library volume, runs `heron-analysis` and stores results in MariaDB. Can be scaled independently (several replicas) and restarted without affecting the API or the air. Uses CPUs − 1 workers by default. |
-| **heron-librarian** | Library management, as its own service: identifies files dropped into the incoming folder (Chromaprint, AcoustID, MusicBrainz, Cover Art Archive), tags them and files them into the library; reorganizes the library on request and undoes changes. **The only service with write access to the library**, so `heron-api` (which faces the network) keeps a read-only mount. Every move is journaled in MariaDB and finished or rolled back after a crash. See [Library management](library.md). |
+| **heron-librarian** | Library management, as its own service: identifies files dropped into the incoming folder (Chromaprint, AcoustID, MusicBrainz, Cover Art Archive), tags them and files them into the library; reorganizes the library on request and undoes changes; looks up MusicBrainz relationships between artists on request. **The only service with write access to the library**, so `heron-api` (which faces the network) keeps a read-only mount. Every move is journaled in MariaDB and finished or rolled back after a crash. See [Library management](library.md). |
 | **heron-web** | Static React build. |
 | **mariadb** | Database. Used by `heron-api`, `heron-analyzer` and `heron-librarian`, never by `heron-engine`. |
 
@@ -138,7 +138,7 @@ heron-broadcaster/
 │   ├── library/    heron-library    library files shared by scanner and librarian: tags, content hash, layout, lock
 │   ├── dsp/        heron-dsp        resampling; later EQ, compressor, expander, limiter, crossovers, AGC chain
 │   ├── outputs/    heron-outputs    encoders, OutputSink trait + Icecast (later Shoutcast, HLS, file, pipe)
-│   ├── rotation/   heron-rotation   categories, separation rules, clock slots, selection
+│   ├── rotation/   heron-rotation   pure rotation: separation, restrictions, relaxation, clocks, selection, simulation
 │   ├── service/    heron-service    process plumbing: logging, /healthz, /metrics, shutdown, DB connect
 │   ├── engine/     heron-engine     binary: decks, mixer, pacing clock, decoding, player, gRPC server, ctl
 │   ├── api/        heron-api        binary: axum, auth, queue manager, history, OpenAPI, webhooks, scanner
@@ -174,6 +174,8 @@ heron-broadcaster/
 | gRPC | `tonic`, `prost`; `protox` compiles the `.proto` files in Rust, so builds need no `protoc` |
 | Database | `sqlx` (MySQL/MariaDB) |
 | Logging / metrics | `tracing`, `metrics` + Prometheus exporter |
+| Station time, time zones | `jiff` (time zone database bundled: the images have none) |
+| Name matching | `unicode-normalization` |
 | Optional monitor output | `cpal` |
 
 These are suggestions: replace one if there is a good reason, and say why. Codec choices are constrained by the license: Heron never ships or links fdk-aac, and any FFmpeg libraries it links must be built without `--enable-nonfree` (see [Locked decisions](decisions.md)).

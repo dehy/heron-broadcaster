@@ -1,6 +1,6 @@
 # API and control plane
 
-`heron-api` is the station's control plane: the REST API and live WebSocket the [web UI](web.md) uses, the queue manager feeding the engine, the play history, and the configuration it pushes to the engine. Built in [M4](roadmap/m4-api-control-plane.md), completed for the web UI in [M5](roadmap/m5-web-ui.md).
+`heron-api` is the station's control plane: the REST API and live WebSocket the [web UI](web.md) uses, the queue manager feeding the engine, the play history, and the configuration it pushes to the engine. Built in [M4](roadmap/m4-api-control-plane.md), completed for the web UI in [M5](roadmap/m5-web-ui.md); rotation came with [M6](roadmap/m6-rotation-clockwheels.md).
 
 The engine never depends on it: when the API is down, the engine plays what it has queued with the configuration it last received ([Audio engine](audio-engine.md)).
 
@@ -18,8 +18,8 @@ Local users only for now ([Decisions](decisions.md#decisions-made-after-the-hand
 | Role | Can |
 |---|---|
 | `viewer` | See everything except users and secrets (output passwords, the AcoustID key are never sent back to anyone) |
-| `operator` | Also run the station: queue, skip, pause, FX, track overrides and categories, queue settings, the review of identifications |
-| `admin` | Also playout, analysis and library settings, organizing the library and undoing batches, encoder profiles, outputs and users |
+| `operator` | Also run the station: queue, skip, pause, FX, track overrides and categories, queue and rotation settings, clocks, the schedule, restrictions, artists, simulations, the review of identifications |
+| `admin` | Also playout, analysis, library and station (time zone) settings, organizing the library and undoing batches, encoder profiles, outputs and users |
 
 Create the first admin on the command line (the password is read without echo; from stdin when it is not a terminal):
 
@@ -46,9 +46,11 @@ Then:
 | Queue | `GET /queue` (the cued track first), `POST /queue` (`{"track_ids", "position"}`), `DELETE /queue`, `DELETE /queue/{entry_id}`, `PUT /queue/{entry_id}/position` |
 | Library | `GET /library/status`; `GET /tracks` (`q`, `category_id`, `filter`: playable, missing, unanalyzed, silent, disabled, needs_review; `sort`; `limit`, `offset`); `GET`, `PATCH /tracks/{id}` (`enabled`); `PUT`, `DELETE /tracks/{id}/overrides`; `PUT /tracks/{id}/categories`; `GET /tracks/{id}/waveform`; `GET /tracks/{id}/audio` (the file, with range requests, for previews); `POST /playout/transition` (preview a transition between two tracks, optionally with unsaved settings) |
 | Library management | `GET /library/review`; `POST /tracks/{id}/review/apply` (`{"release_id", "recording_id"}`, one of its candidates), `POST /tracks/{id}/review/keep`; `POST /library/organize` (dry run), `POST /library/organize/{plan_task_id}/apply`; `GET /library/batches`, `POST /library/batches/{id}/undo`; `GET /library/tasks`, `GET /library/tasks/{id}` — see [below](#library-management) |
-| Categories | `GET`, `POST /categories`; `GET`, `PUT`, `DELETE /categories/{id}` |
+| Categories | `GET`, `POST /categories`; `GET`, `PUT`, `DELETE /categories/{id}` (with the separation windows a category overrides) |
+| Artists | `GET /artists` (`q` matches any name, `limit`, `offset`); `GET`, `PATCH /artists/{id}` (`name`, `musicbrainz_id`); `POST /artists/{id}/merge` (`{"artist_id"}`, merged into this one); `PUT /artist-names/{id}` (`{"artist_id"}` moves the name, `{}` splits it off); `PUT`, `DELETE /artists/{id}/similar/{other}`; `GET /artist-suggestions`, `POST /artist-suggestions/{id}` (`{"accept"}`); `POST /artist-suggestions/musicbrainz` (a library task) |
+| Rotation | `GET`, `POST /clocks`; `GET`, `PUT`, `DELETE /clocks/{id}` (name and slots, replaced as a whole); `POST /clocks/preview` (`{"slots"}`, saved or not: expected starts, categories running short); `GET`, `PUT /schedule` (the whole week); `GET /restrictions` (`target`, `target_id`), `POST /restrictions`, `PUT`, `DELETE /restrictions/{id}`; `GET /rotation/picks` (the selection log: `before`, `track_id`, `limit`); `POST /rotation/simulate` (`hours`, `start_unix_ms`, `seed`, `clock_id`) |
 | History | `GET /history` (`before`, `after`, `track_id`, `exclude_fx`, `limit`) |
-| Settings | `GET`, `PUT /settings/playout`, `/settings/analysis`, `/settings/queue`; `GET`, `PATCH /settings/library` |
+| Settings | `GET`, `PUT /settings/playout`, `/settings/analysis`, `/settings/queue`, `/settings/rotation`, `/settings/station`; `GET`, `PATCH /settings/library` |
 | Outputs | `GET`, `POST /encoder-profiles`; `GET`, `PUT`, `DELETE /encoder-profiles/{id}`; `GET`, `POST /outputs`; `GET`, `PUT`, `DELETE /outputs/{id}` (with each output's live state) |
 | Live | `GET /live` (WebSocket) |
 
@@ -72,10 +74,22 @@ The API polls the engine's state twice a second and its levels ten times a secon
 The engine holds the queue; the API feeds it and edits it.
 
 - Tracks are sent with everything the engine needs, from the database: path, tags, cue points and crossfade point from the analysis, loudness, and the per-track overrides (cue points, Gap Killer, crossfade). Tracks whose file is missing, or analyzed with nothing audible, are refused. Tracks not analyzed yet play whole.
-- **Autofill** (`queue` settings, on by default): when fewer than `min_queued` tracks wait (3), it queues enabled, analyzed, audible tracks, never played first, then the least recently played, never one already waiting or on air. It stands in for the rotation until [M6](roadmap/m6-rotation-clockwheels.md). Turned off, the station plays silence once the queue is empty.
+- **Autofill** (`queue` settings, on by default): when fewer than `min_queued` tracks wait (3), it queues the tracks [rotation](#rotation) picks among the enabled, analyzed, audible tracks. Turned off, the station plays silence once the queue is empty.
 - **Positions** count the waiting tracks: 0 is next (before the cued track), 1 right after it, and so on.
 - **Following the library:** every 5 seconds, waiting tracks are checked against the database. A track the librarian moved, or whose cue points changed, is updated in place (same entry and position); a track whose file disappeared or was deleted leaves the queue. The track on air plays on (its file is already open).
 - Each track carries its source (`rotation` for autofill, `manual` when queued by hand), recorded in the history.
+
+## Rotation
+
+Autofill asks `heron-rotation` for each track it adds ([Rotation](rotation.md)):
+
+- The station is loaded from the database each time: playable tracks, their artists and categories, clocks, the schedule, enabled restrictions, similar artists, the `rotation` and `station` settings.
+- The history is what played on decks A and B as far back as separation looks, and when each track last played; the waiting tracks are added at their **planned start**: now, plus what the decks still have to play, plus the waiting tracks' lengths (crossfades not counted).
+- The clock carries on from the last pick made from a clock. Each pick goes to the **selection log** with its explanation and the engine's queue entry; when the entry starts, its play is linked to the pick and carries its relaxation step. Relaxed picks are logged at `info`.
+- When restrictions leave nothing to pick, autofill waits 30 seconds before trying again (any change to rotation wakes it): the engine's fallback directory plays meanwhile.
+- **Simulations** (`POST /rotation/simulate`) run on the same station, from now (or `start_unix_ms`) after the real history, without touching the queue, and are audited: `violations` must be empty, `steps` counts the picks per relaxation step. `clock_id` runs one clock at every hour.
+
+The **artist linker** runs every 10 seconds: tracks whose artist or title tag changed are linked to artists again ([Rotation – Artists with several names](rotation.md#artists-with-several-names)), names made of other artists' names become suggestions, and artists nothing refers to any more are forgotten. `POST /artist-suggestions/musicbrainz` queues an `artist_relations` [library task](#library-management): `heron-librarian` looks up every artist with a MusicBrainz ID (one request a second) and suggests the links between the station's artists.
 
 ## Library management
 
@@ -114,10 +128,11 @@ CI fails when either file is out of date. The generator (`openapi-typescript`) l
 
 ## Metrics
 
-On top of the scanner's: `heron_api_engine_connected` (0 or 1), `heron_api_engine_disconnections_total`, `heron_api_autofill_tracks_total`, `heron_api_logins_total{result}` and `heron_api_live_clients`.
+On top of the scanner's: `heron_api_engine_connected` (0 or 1), `heron_api_engine_disconnections_total`, `heron_api_autofill_tracks_total`, `heron_api_rotation_relaxed_total`, `heron_api_logins_total{result}` and `heron_api_live_clients`.
 
 ## Limitations
 
-- Autofill is not a rotation: no separation between artists or titles, no categories or clocks before [M6](roadmap/m6-rotation-clockwheels.md).
+- Planned starts ignore crossfades, and a skip or a track queued by hand moves the tracks after it: their dayparting and clock slot were decided for the planned time.
+- The clock follows its slots in order; the top of the hour is not hit exactly (no hard sync).
 - Plays made while the API is away are not recorded (the engine keeps no event history).
 - HTTPS is left to a reverse proxy in front of `heron-web`.
