@@ -329,13 +329,15 @@ async fn record(pool: &MySqlPool, op: &Operation, copy: bool) -> Result<(u64, u6
         Subject::New(track) => {
             // Missing until the file is in place: never played, never analyzed.
             let id = sqlx::query(
-                "INSERT INTO tracks (path, title, artist, album, duration_ms, missing_since)
-                 VALUES (?, ?, ?, ?, ?, NOW(6))",
+                "INSERT INTO tracks
+                     (path, title, artist, album, musicbrainz_artist_id, duration_ms, missing_since)
+                 VALUES (?, ?, ?, ?, ?, ?, NOW(6))",
             )
             .bind(op.to.as_str())
             .bind(&track.tags.title)
             .bind(&track.tags.artist)
             .bind(&track.tags.album)
+            .bind(track.tags.musicbrainz.first_artist())
             .bind(track.duration_ms)
             .execute(&mut *tx)
             .await?
@@ -535,13 +537,17 @@ async fn finish(
     .execute(&mut *tx)
     .await?;
     if let Some(tags) = applied {
-        sqlx::query("UPDATE tracks SET title = ?, artist = ?, album = ? WHERE id = ?")
-            .bind(&tags.title)
-            .bind(&tags.artist)
-            .bind(&tags.album)
-            .bind(track_id)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "UPDATE tracks SET title = ?, artist = ?, album = ?, musicbrainz_artist_id = ?
+             WHERE id = ?",
+        )
+        .bind(&tags.title)
+        .bind(&tags.artist)
+        .bind(&tags.album)
+        .bind(tags.musicbrainz.first_artist())
+        .bind(track_id)
+        .execute(&mut *tx)
+        .await?;
     }
     sqlx::query("UPDATE library_moves SET status = ?, error = NULL WHERE id = ?")
         .bind(status)

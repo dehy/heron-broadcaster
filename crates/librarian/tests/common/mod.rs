@@ -131,6 +131,8 @@ pub struct MockState {
     pub releases: HashMap<String, Value>,
     /// Release MBIDs with a front cover.
     pub covers: HashMap<String, Vec<u8>>,
+    /// Artist MBID → MusicBrainz artist with its relationships.
+    pub artists: HashMap<String, Value>,
     pub requests: Vec<(Service, Instant)>,
     /// User-Agent of every request.
     pub user_agents: Vec<String>,
@@ -147,6 +149,7 @@ impl Mock {
         let router = Router::new()
             .route("/v2/lookup", post(acoustid))
             .route("/ws/2/release/{id}", get(release))
+            .route("/ws/2/artist/{id}", get(artist))
             .route("/caa/release/{id}/front-500", get(cover))
             .with_state(state.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -215,6 +218,18 @@ async fn release(
     log(&state, Service::MusicBrainz, &headers);
     match state.lock().unwrap().releases.get(&id) {
         Some(release) => axum::Json(release.clone()).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn artist(
+    state: Shared,
+    headers: axum::http::HeaderMap,
+    UrlPath(id): UrlPath<String>,
+) -> Response {
+    log(&state, Service::MusicBrainz, &headers);
+    match state.lock().unwrap().artists.get(&id) {
+        Some(artist) => axum::Json(artist.clone()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }

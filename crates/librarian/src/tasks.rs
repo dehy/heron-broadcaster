@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Work asked through the API (`library_tasks`), which cannot write files:
-//! organize dry runs and applies, undos, and releases picked on the review
-//! screen. Tasks run one at a time, in order; their results are stored as
+//! organize dry runs and applies, undos, releases picked on the review
+//! screen, and MusicBrainz relationships between artists. Tasks run one at a time, in order; their results are stored as
 //! JSON for the API to show.
 
 use std::time::Duration;
@@ -15,7 +15,7 @@ use crate::identify::{Endpoints, Identifier};
 use crate::journal::Roots;
 use crate::layout::Layout;
 use crate::review::{self, Choice};
-use crate::{import, organize};
+use crate::{import, organize, relations};
 
 /// Wait between looks at the table when there is nothing to do.
 const POLL: Duration = Duration::from_secs(1);
@@ -149,6 +149,12 @@ impl TaskRunner {
                     track: *track,
                 };
                 json(review::apply(&self.pool, &self.roots, &identifier, &settings, &choice).await)
+            }
+            TaskRequest::ArtistRelations => {
+                // MusicBrainz needs no AcoustID key.
+                let identifier = Identifier::new(self.endpoints.clone(), String::new(), 1.0)
+                    .map_err(|error| error.to_string())?;
+                json(relations::look_up(&self.pool, &identifier).await)
             }
         }
     }

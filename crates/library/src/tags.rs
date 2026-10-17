@@ -57,6 +57,20 @@ pub struct MusicBrainzIds {
     pub album_artist: Option<String>,
 }
 
+impl MusicBrainzIds {
+    /// The first artist ID: the tag may hold several (`id1; id2`, `id1/id2`).
+    pub fn first_artist(&self) -> Option<String> {
+        let first = self
+            .artist
+            .as_deref()?
+            .split([';', '/', ','])
+            .next()?
+            .trim()
+            .to_ascii_lowercase();
+        (first.len() == 36).then_some(first)
+    }
+}
+
 impl Tags {
     /// The year of [`Tags::date`], when it starts with one.
     pub fn year(&self) -> Option<u16> {
@@ -210,6 +224,23 @@ pub fn clean(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_artist_id() {
+        let ids = |artist: &str| MusicBrainzIds {
+            artist: Some(artist.to_owned()),
+            ..MusicBrainzIds::default()
+        };
+        let id = "83d91898-7763-47d7-b03b-b92132375c47";
+        assert_eq!(ids(id).first_artist().as_deref(), Some(id));
+        let two = format!(
+            "{}; 7a3b1c2d-0000-4000-8000-000000000005",
+            id.to_uppercase()
+        );
+        assert_eq!(ids(&two).first_artist().as_deref(), Some(id));
+        assert_eq!(ids("not an id").first_artist(), None);
+        assert_eq!(MusicBrainzIds::default().first_artist(), None);
+    }
 
     fn write_wav(path: &Path) {
         let spec = hound::WavSpec {
