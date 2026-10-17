@@ -303,21 +303,44 @@ pub struct ClockPreview {
     pub runs_per_hour: f64,
 }
 
-/// The clock as it will sound: expected starts and lengths, and the
-/// categories running short.
-#[utoipa::path(get, path = "/clocks/{id}/preview", tag = "rotation",
-    params(("id" = u64, Path)),
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewRequest {
+    /// The slots as edited, saved or not.
+    pub slots: Vec<ClockSlot>,
+}
+
+/// A clock as it will sound, from its slots (saved or not): expected
+/// starts and lengths, and the categories running short.
+#[utoipa::path(post, path = "/clocks/preview", tag = "rotation",
+    request_body = PreviewRequest,
     responses((status = 200, body = ClockPreview), (status = "4XX", body = ErrorBody)))]
 async fn preview_clock(
     _user: CurrentUser,
     State(state): State<AppState>,
-    Path(id): Path<u64>,
+    Json(request): Json<PreviewRequest>,
 ) -> ApiResult<Json<ClockPreview>> {
+    if request.slots.len() > MAX_SLOTS {
+        return Err(ApiError::Invalid(format!(
+            "a clock has at most {MAX_SLOTS} slots"
+        )));
+    }
     let library = rotation::load_library(&state.pool).await?;
-    let clock = library
-        .clocks
-        .get(&id)
-        .ok_or_else(|| ApiError::not_found("clock"))?;
+    let clock = heron_rotation::Clock {
+        id: 0,
+        name: String::new(),
+        slots: request
+            .slots
+            .iter()
+            .map(|slot| heron_rotation::Slot {
+                category: slot.category_id,
+                method: slot.method,
+                enforce_rules: slot.enforce_rules,
+                separation: slot.separation,
+            })
+            .collect(),
+    };
+    let clock = &clock;
     let colors: HashMap<u64, Option<String>> =
         sqlx::query_as::<_, (u64, Option<String>)>("SELECT id, color FROM categories")
             .fetch_all(&state.pool)

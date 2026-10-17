@@ -33,6 +33,21 @@ export type OutputStatus = Schemas["OutputStatus"];
 export type EncoderProfileView = Schemas["EncoderProfileView"];
 export type LibraryTask = Schemas["LibraryTask"];
 export type Play = Schemas["Play"];
+export type Artist = Schemas["Artist"];
+export type ArtistRef = Schemas["ArtistRef"];
+export type ClockView = Schemas["ClockView"];
+export type ClockSlot = Schemas["ClockSlot"];
+export type ClockPreview = Schemas["ClockPreview"];
+export type ScheduledHour = Schemas["ScheduledHour"];
+export type Method = Schemas["Method"];
+export type Rule = Schemas["Rule"];
+export type Target = Schemas["Target"];
+export type RestrictionView = Schemas["RestrictionView"];
+export type RotationPick = Schemas["RotationPick"];
+export type Explanation = Schemas["Explanation"];
+export type SeparationOverrides = Schemas["SeparationOverrides"];
+export type Windows = Schemas["Windows"];
+export type SimulationReport = Schemas["SimulationReport"];
 
 export type TrackFilter = NonNullable<
   NonNullable<paths["/api/v1/tracks"]["get"]["parameters"]["query"]>["filter"]

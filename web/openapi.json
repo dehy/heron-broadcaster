@@ -878,6 +878,45 @@
         }
       }
     },
+    "/api/v1/clocks/preview": {
+      "post": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "A clock as it will sound, from its slots (saved or not): expected\nstarts and lengths, and the categories running short.",
+        "operationId": "preview_clock",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClockPreview"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/clocks/{id}": {
       "get": {
         "tags": [
@@ -986,47 +1025,6 @@
         ],
         "responses": {
           "204": {},
-          "4XX": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/clocks/{id}/preview": {
-      "get": {
-        "tags": [
-          "rotation"
-        ],
-        "summary": "The clock as it will sound: expected starts and lengths, and the\ncategories running short.",
-        "operationId": "preview_clock",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClockPreview"
-                }
-              }
-            }
-          },
           "4XX": {
             "content": {
               "application/json": {
@@ -6098,6 +6096,22 @@
         },
         "additionalProperties": false
       },
+      "PreviewRequest": {
+        "type": "object",
+        "required": [
+          "slots"
+        ],
+        "properties": {
+          "slots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClockSlot"
+            },
+            "description": "The slots as edited, saved or not."
+          }
+        },
+        "additionalProperties": false
+      },
       "QueueEntry": {
         "type": "object",
         "required": [
@@ -6779,7 +6793,6 @@
               "null"
             ],
             "format": "int32",
-            "default": null,
             "minimum": 0
           },
           "artist_min": {
@@ -6788,7 +6801,6 @@
               "null"
             ],
             "format": "int32",
-            "default": null,
             "minimum": 0
           },
           "title_min": {
@@ -6797,7 +6809,6 @@
               "null"
             ],
             "format": "int32",
-            "default": null,
             "minimum": 0
           },
           "track_min": {
@@ -6806,7 +6817,6 @@
               "null"
             ],
             "format": "int32",
-            "default": null,
             "minimum": 0
           }
         },

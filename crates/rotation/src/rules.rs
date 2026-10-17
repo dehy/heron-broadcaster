@@ -34,11 +34,15 @@ impl Default for Windows {
 /// ones are inherited.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct SeparationOverrides {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub album_min: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub artist_min: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title_min: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub track_min: Option<u32>,
 }
 

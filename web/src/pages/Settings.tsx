@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Station settings: autofill, analysis and library management.
+// Station settings: autofill, rotation, time zone, analysis and library
+// management.
 
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { type Schemas, api, unwrap } from "../api";
 import { Card, ErrorView, Field, Loading, NumberInput, PageHead } from "../components/ui";
+import { WINDOW_FIELDS } from "../lib/rotation";
+import { Link } from "../lib/router";
+import { useCategories } from "./Clocks";
 import { useAction, useCan } from "../lib/session";
 
 export function Settings() {
@@ -13,6 +17,8 @@ export function Settings() {
     <>
       <PageHead title="Settings" description="How the station fills its queue, analyzes and files its music." />
       <QueueCard />
+      <RotationCard />
+      <StationCard />
       <LibraryCard />
       <AnalysisCard />
     </>
@@ -94,7 +100,12 @@ function QueueCard() {
   return (
     <SettingsCard
       title="Queue"
-      description="Autofill keeps the queue going with enabled, analyzed tracks, the least recently played first, until the rotation and clockwheels arrive."
+      description={
+        <>
+          Autofill queues the tracks rotation picks, following the <Link to="/schedule">schedule</Link> and its{" "}
+          <Link to="/clocks">clocks</Link>. Every pick goes to the <Link to="/rotation">selection log</Link>.
+        </>
+      }
       value={settings.data}
       save={(value) => save.mutate(value)}
       saving={save.isPending}
@@ -122,6 +133,152 @@ function QueueCard() {
             />
           </Field>
         </div>
+      )}
+    </SettingsCard>
+  );
+}
+
+const WINDOW_LABELS: Record<string, string> = {
+  album_min: "Same album within",
+  artist_min: "Same artist within",
+  title_min: "Same title within",
+  track_min: "Same track within",
+};
+
+function RotationCard() {
+  const canEdit = useCan("operator");
+  const categories = useCategories();
+  const settings = useQuery({
+    queryKey: ["settings", "rotation"],
+    queryFn: () => unwrap(api.GET("/api/v1/settings/rotation")),
+  });
+  const save = useAction(
+    (body: Schemas["RotationSettings"]) => unwrap(api.PUT("/api/v1/settings/rotation", { body })),
+    { success: "Saved", invalidate: [["settings", "rotation"]] },
+  );
+  if (settings.isPending) {
+    return <Loading />;
+  }
+  if (settings.isError) {
+    return <ErrorView error={settings.error} />;
+  }
+  return (
+    <SettingsCard
+      title="Rotation"
+      description="Separation windows, in minutes (0 turns a rule off); categories and clock slots can override them. When no track fits, rules are relaxed step by step: album, artist, title, then track separation, each halved before being dropped, then the fallback category."
+      value={settings.data}
+      save={(value) => save.mutate(value)}
+      saving={save.isPending}
+      canEdit={canEdit}
+    >
+      {(draft, set) => (
+        <>
+          <div className="form-grid">
+            {WINDOW_FIELDS.map(([key]) => (
+              <Field key={key} label={WINDOW_LABELS[key]}>
+                <NumberInput
+                  value={draft.separation[key]}
+                  min={0}
+                  max={10_080}
+                  step={1}
+                  suffix="min"
+                  disabled={!canEdit}
+                  onChange={(minutes) => set({ separation: { ...draft.separation, [key]: Math.round(minutes) } })}
+                />
+              </Field>
+            ))}
+          </div>
+          <div className="form-grid">
+            <Field label="Fallback category" hint="Where relaxation ends: a large, safe category">
+              <select
+                className="input"
+                value={draft.fallback_category_id ?? ""}
+                disabled={!canEdit}
+                onChange={(e) => set({ fallback_category_id: e.target.value ? Number(e.target.value) : null })}
+              >
+                <option value="">The whole library</option>
+                {categories.data?.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Weight after a play" hint="Multiplies the track's weights, 0.5 to 1 (1: unchanged)">
+              <NumberInput
+                value={draft.weights.play_factor}
+                min={0.5}
+                max={1}
+                step={0.05}
+                disabled={!canEdit}
+                onChange={(play_factor) => set({ weights: { ...draft.weights, play_factor } })}
+              />
+            </Field>
+            <Field label="Weight after a request" hint="1 to 2 (1: unchanged)">
+              <NumberInput
+                value={draft.weights.request_factor}
+                min={1}
+                max={2}
+                step={0.05}
+                disabled={!canEdit}
+                onChange={(request_factor) => set({ weights: { ...draft.weights, request_factor } })}
+              />
+            </Field>
+          </div>
+        </>
+      )}
+    </SettingsCard>
+  );
+}
+
+function timeZones(): string[] {
+  try {
+    return Intl.supportedValuesOf("timeZone");
+  } catch {
+    return [];
+  }
+}
+
+function StationCard() {
+  const isAdmin = useCan("admin");
+  const settings = useQuery({
+    queryKey: ["settings", "station"],
+    queryFn: () => unwrap(api.GET("/api/v1/settings/station")),
+  });
+  const save = useAction(
+    (body: Schemas["StationSettings"]) => unwrap(api.PUT("/api/v1/settings/station", { body })),
+    { success: "Saved", invalidate: [["settings", "station"]] },
+  );
+  if (settings.isPending) {
+    return <Loading />;
+  }
+  if (settings.isError) {
+    return <ErrorView error={settings.error} />;
+  }
+  return (
+    <SettingsCard
+      title="Station"
+      description="The schedule and restrictions follow the station's time zone. When the clocks go back, the repeated hour runs its clock again; when they go forward, the skipped hour is skipped."
+      value={settings.data}
+      save={(value) => save.mutate(value)}
+      saving={save.isPending}
+      canEdit={isAdmin}
+    >
+      {(draft, set) => (
+        <Field label="Time zone" hint="An IANA name, such as Europe/Paris">
+          <input
+            className="input"
+            list="time-zones"
+            value={draft.timezone}
+            disabled={!isAdmin}
+            onChange={(e) => set({ timezone: e.target.value })}
+          />
+          <datalist id="time-zones">
+            {timeZones().map((zone) => (
+              <option key={zone} value={zone} />
+            ))}
+          </datalist>
+        </Field>
       )}
     </SettingsCard>
   );

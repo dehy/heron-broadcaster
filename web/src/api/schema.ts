@@ -296,6 +296,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clocks/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A clock as it will sound, from its slots (saved or not): expected
+         *     starts and lengths, and the categories running short.
+         */
+        post: operations["preview_clock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clocks/{id}": {
         parameters: {
             query?: never;
@@ -312,26 +332,6 @@ export interface paths {
          *     until another clock is scheduled. Operators and admins.
          */
         delete: operations["delete_clock"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/clocks/{id}/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * The clock as it will sound: expected starts and lengths, and the
-         *     categories running short.
-         */
-        get: operations["preview_clock"];
-        put?: never;
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2113,6 +2113,10 @@ export interface components {
         Preferences: {
             theme: components["schemas"]["Theme"];
         };
+        PreviewRequest: {
+            /** @description The slots as edited, saved or not. */
+            slots: components["schemas"]["ClockSlot"][];
+        };
         QueueEntry: {
             /**
              * Format: int64
@@ -2394,26 +2398,14 @@ export interface components {
          *     ones are inherited.
          */
         SeparationOverrides: {
-            /**
-             * Format: int32
-             * @default null
-             */
-            album_min: number | null;
-            /**
-             * Format: int32
-             * @default null
-             */
-            artist_min: number | null;
-            /**
-             * Format: int32
-             * @default null
-             */
-            title_min: number | null;
-            /**
-             * Format: int32
-             * @default null
-             */
-            track_min: number | null;
+            /** Format: int32 */
+            album_min?: number | null;
+            /** Format: int32 */
+            artist_min?: number | null;
+            /** Format: int32 */
+            title_min?: number | null;
+            /** Format: int32 */
+            track_min?: number | null;
         };
         /**
          * @description A separation rule.
@@ -3536,6 +3528,37 @@ export interface operations {
             };
         };
     };
+    preview_clock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClockPreview"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_clock: {
         parameters: {
             query?: never;
@@ -3614,35 +3637,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            "4XX": {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorBody"];
-                };
-            };
-        };
-    };
-    preview_clock: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ClockPreview"];
-                };
             };
             "4XX": {
                 headers: {
