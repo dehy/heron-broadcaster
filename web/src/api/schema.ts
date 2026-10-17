@@ -71,6 +71,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Saves your preferences: the web UI's theme. */
+        put: operations["set_preferences"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/categories": {
         parameters: {
             query?: never;
@@ -180,6 +197,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The most recent batches of file operations, newest first. */
+        get: operations["list_batches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/batches/{id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reverts a batch: files go back to their previous paths and get their
+         *     previous tags back. Nothing is overwritten: a file whose previous path
+         *     is taken stays where it is (see the task's report). Admins.
+         */
+        post: operations["undo_batch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/organize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Asks for a dry run of organizing the library with the layout in the
+         *     library settings: the task's `plan` lists every move, nothing changes.
+         *     Admins.
+         */
+        post: operations["plan_organization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/organize/{plan_task_id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Carries out the moves of a finished dry run, as one batch that can be
+         *     undone. Tracks moved since the dry run are skipped. Admins.
+         */
+        post: operations["apply_organization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tracks whose identification was not confident enough to apply, with the
+         *     releases they may be on.
+         */
+        get: operations["list_review"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/status": {
         parameters: {
             query?: never;
@@ -189,6 +305,40 @@ export interface paths {
         };
         /** Import and analysis progress. No sign-in needed. */
         get: operations["library_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The most recent library tasks, newest first. */
+        get: operations["list_tasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A library task, with its result once done. */
+        get: operations["get_task"];
         put?: never;
         post?: never;
         delete?: never;
@@ -521,7 +671,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Whether the API, its database and the engine are up. No sign-in needed. */
+        /**
+         * Whether the API, its database and the engine are up, and whether the
+         *     server clock can be trusted. No sign-in needed.
+         */
         get: operations["status"];
         put?: never;
         post?: never;
@@ -601,6 +754,26 @@ export interface paths {
         patch: operations["patch_track"];
         trace?: never;
     };
+    "/api/v1/tracks/{id}/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The track's audio file as it is in the library, for previews in the
+         *     browser. Supports range requests.
+         */
+        get: operations["get_audio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracks/{id}/categories": {
         parameters: {
             query?: never;
@@ -635,6 +808,67 @@ export interface paths {
         post?: never;
         /** Removes the track's overrides. Operators and admins. */
         delete: operations["delete_overrides"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracks/{id}/review/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Applies one of the track's candidate releases: heron-librarian writes
+         *     its tags into the file and files it where the layout says, as a batch
+         *     that can be undone. Operators and admins.
+         */
+        post: operations["apply_release"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracks/{id}/review/keep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Marks the track as reviewed: its file keeps its own tags. Operators and
+         *     admins.
+         */
+        post: operations["keep_tags"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracks/{id}/waveform": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The track's waveform overview, computed with its analysis. 404 until
+         *     the track is analyzed.
+         */
+        get: operations["get_waveform"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -760,6 +994,44 @@ export interface components {
             last_used_at_unix_ms?: number | null;
             name: string;
         };
+        Batch: {
+            /** Format: int64 */
+            created_at_unix_ms: number;
+            /**
+             * Format: int64
+             * @description Files moved or re-tagged.
+             */
+            files: number;
+            /**
+             * Format: int64
+             * @description `None` while it runs, or when it was interrupted.
+             */
+            finished_at_unix_ms?: number | null;
+            /** Format: int64 */
+            id: number;
+            kind: components["schemas"]["BatchKind"];
+            /**
+             * Format: int64
+             * @description For an undo, the batch it undoes.
+             */
+            undoes?: number | null;
+            /**
+             * Format: int64
+             * @description The undo of this batch.
+             */
+            undone_by?: number | null;
+        };
+        /** @enum {string} */
+        BatchKind: "import" | "organize" | "undo" | "review";
+        /** @description What a batch of file operations did. */
+        BatchReport: {
+            /** Format: int64 */
+            batch_id: number;
+            /** Format: int64 */
+            done: number;
+            /** @description Operations not done, with the reason. */
+            skipped: components["schemas"]["SkippedFile"][];
+        };
         Category: {
             /** @description `#rrggbb`. */
             color?: string | null;
@@ -793,6 +1065,25 @@ export interface components {
             rms_left: number;
             /** Format: float */
             rms_right: number;
+        };
+        ClockStatus: {
+            /**
+             * Format: double
+             * @description The kernel's estimate of the clock's error, in ms.
+             */
+            estimated_error_ms?: number | null;
+            /**
+             * Format: double
+             * @description The offset the kernel is correcting, in ms.
+             */
+            offset_ms?: number | null;
+            /** @description `None` where the kernel's state cannot be read (not Linux). */
+            synchronized?: boolean | null;
+            /**
+             * @description Why the clock cannot be trusted, for people. `None` when it is fine
+             *     or unknown.
+             */
+            warning?: string | null;
         };
         CreatedToken: {
             /** Format: int64 */
@@ -1052,6 +1343,23 @@ export interface components {
              */
             tracks: number;
         };
+        LibraryTask: {
+            /** Format: int64 */
+            created_at_unix_ms: number;
+            /** @description Why it failed. */
+            error?: string | null;
+            /** Format: int64 */
+            finished_at_unix_ms?: number | null;
+            /** Format: int64 */
+            id: number;
+            plan?: components["schemas"]["OrganizePlan"] | null;
+            report?: components["schemas"]["BatchReport"] | null;
+            request: components["schemas"]["TaskRequest"];
+            requested_by?: string | null;
+            /** Format: int64 */
+            started_at_unix_ms?: number | null;
+            status: components["schemas"]["TaskStatus"];
+        };
         /** @description A message on the live WebSocket. */
         LiveMessage: {
             player?: components["schemas"]["PlayerState"] | null;
@@ -1121,6 +1429,17 @@ export interface components {
             role: components["schemas"]["Role"];
             username: string;
         };
+        /** @description The dry run of an organization. */
+        OrganizePlan: {
+            moves: components["schemas"]["PlannedMove"][];
+            /**
+             * Format: int64
+             * @description Tracks already where the layout puts them.
+             */
+            unchanged: number;
+            /** @description Tracks whose file cannot be read (left where they are). */
+            unreadable: string[];
+        };
         /** @enum {string} */
         OutputConnection: "stopped" | "connecting" | "connected" | "reconnecting";
         OutputInput: {
@@ -1169,6 +1488,13 @@ export interface components {
         PasswordChange: {
             current_password: string;
             new_password: string;
+        };
+        PlannedMove: {
+            /** @description Relative to the library root. */
+            from: string;
+            to: string;
+            /** Format: int64 */
+            track_id: number;
         };
         /** @description One play. */
         Play: {
@@ -1262,6 +1588,9 @@ export interface components {
              */
             loudness: components["schemas"]["LoudnessSettings"];
         };
+        Preferences: {
+            theme: components["schemas"]["Theme"];
+        };
         QueueEntry: {
             /**
              * Format: int64
@@ -1324,6 +1653,41 @@ export interface components {
             /** Format: int32 */
             start_ms: number;
         };
+        ReleaseChoice: {
+            recording_id: string;
+            release_id: string;
+        };
+        /** @description A release a track may be on, from AcoustID. */
+        ReviewCandidate: {
+            country?: string | null;
+            /** @description `YYYY-MM-DD`, `YYYY-MM` or `YYYY`. */
+            date?: string | null;
+            /** Format: int32 */
+            disc?: number | null;
+            recording_id: string;
+            release_group_id?: string | null;
+            release_group_title?: string | null;
+            release_id: string;
+            release_title?: string | null;
+            /** Format: double */
+            score: number;
+            /** Format: int32 */
+            track?: number | null;
+        };
+        ReviewItem: {
+            /** @description Best first. */
+            candidates: components["schemas"]["ReviewCandidate"][];
+            /** @description Why the identification was not applied. */
+            reason?: string | null;
+            /** Format: double */
+            score?: number | null;
+            track: components["schemas"]["TrackSummary"];
+        };
+        ReviewPage: {
+            items: components["schemas"]["ReviewItem"][];
+            /** Format: int64 */
+            total: number;
+        };
         /**
          * @description What a user may do. Each role can do everything the previous one can.
          * @enum {string}
@@ -1377,11 +1741,22 @@ export interface components {
             /** Format: int64 */
             updated: number;
         };
+        SkippedFile: {
+            path: string;
+            reason: string;
+        };
         Status: {
+            /** @description The server clock's synchronization (the host's: containers share it). */
+            clock: components["schemas"]["ClockStatus"];
             /** @description `ok` or `unavailable`. */
             database: string;
             /** @description `ok` or `unavailable`. */
             engine: string;
+            /**
+             * Format: int64
+             * @description The server's time, to compare with the browser's.
+             */
+            server_time_unix_ms: number;
             service: string;
             version: string;
         };
@@ -1394,6 +1769,39 @@ export interface components {
             error?: string | null;
             state: components["schemas"]["SyncState"];
         };
+        /** @description A task, as stored in `library_tasks.params`. The tag is also its `kind`. */
+        TaskRequest: {
+            /** @enum {string} */
+            kind: "organize_plan";
+        } | {
+            /** @enum {string} */
+            kind: "organize_apply";
+            /** Format: int64 */
+            plan_task_id: number;
+        } | {
+            /** Format: int64 */
+            batch_id: number;
+            /** @enum {string} */
+            kind: "undo";
+        } | {
+            /** Format: int32 */
+            disc?: number | null;
+            /** @enum {string} */
+            kind: "review_apply";
+            recording_id: string;
+            release_id: string;
+            /** Format: int32 */
+            track?: number | null;
+            /** Format: int64 */
+            track_id: number;
+        };
+        /** @enum {string} */
+        TaskStatus: "pending" | "running" | "done" | "failed";
+        /**
+         * @description The web UI's theme.
+         * @enum {string}
+         */
+        Theme: "system" | "light" | "dark";
         TrackAnalysis: {
             /** Format: int64 */
             analyzed_at_unix_ms: number;
@@ -1551,6 +1959,7 @@ export interface components {
             /** Format: int64 */
             last_login_at_unix_ms?: number | null;
             role: components["schemas"]["Role"];
+            theme: components["schemas"]["Theme"];
             username: string;
         };
         UserPatch: {
@@ -1559,6 +1968,20 @@ export interface components {
             /** @description Signs the user out everywhere. */
             password?: string | null;
             role?: components["schemas"]["Role"] | null;
+        };
+        Waveform: {
+            /**
+             * Format: float
+             * @description Level of point 0; 255 is full scale (0 dBFS), on a dB scale.
+             */
+            floor_db: number;
+            /**
+             * Format: int32
+             * @description Length of one point.
+             */
+            interval_ms: number;
+            /** @description One byte per point, base64: the highest sample peak in the interval. */
+            peaks: string;
         };
     };
     responses: never;
@@ -1679,6 +2102,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    set_preferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Preferences"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
             };
             "4XX": {
                 headers: {
@@ -2049,6 +2503,152 @@ export interface operations {
             };
         };
     };
+    list_batches: {
+        parameters: {
+            query?: {
+                /** @description 1 to 200, 20 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Batch"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    undo_batch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    plan_organization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    apply_organization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plan_task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_review: {
+        parameters: {
+            query?: {
+                /** @description 1 to 200, 50 by default. */
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewPage"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     library_status: {
         parameters: {
             query?: never;
@@ -2067,6 +2667,65 @@ export interface operations {
                 };
             };
             "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_tasks: {
+        parameters: {
+            query?: {
+                /** @description 1 to 200, 20 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_task: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3143,6 +3802,43 @@ export interface operations {
             };
         };
     };
+    get_audio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Part of the file */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     put_categories: {
         parameters: {
             query?: never;
@@ -3225,6 +3921,95 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    apply_release: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseChoice"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    keep_tags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_waveform: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Waveform"];
+                };
             };
             "4XX": {
                 headers: {

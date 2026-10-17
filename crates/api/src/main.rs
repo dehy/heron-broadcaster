@@ -14,6 +14,7 @@ mod e2e;
 mod engine;
 mod error;
 mod history;
+mod librarian;
 mod library;
 mod live;
 mod outputs;

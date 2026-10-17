@@ -143,6 +143,45 @@
         }
       }
     },
+    "/api/v1/auth/preferences": {
+      "put": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Saves your preferences: the web UI's theme.",
+        "operationId": "set_preferences",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Preferences"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/categories": {
       "get": {
         "tags": [
@@ -632,6 +671,214 @@
         }
       }
     },
+    "/api/v1/library/batches": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "The most recent batches of file operations, newest first.",
+        "operationId": "list_batches",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1 to 200, 20 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Batch"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library/batches/{id}/undo": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Reverts a batch: files go back to their previous paths and get their\nprevious tags back. Nothing is overwritten: a file whose previous path\nis taken stays where it is (see the task's report). Admins.",
+        "operationId": "undo_batch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library/organize": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Asks for a dry run of organizing the library with the layout in the\nlibrary settings: the task's `plan` lists every move, nothing changes.\nAdmins.",
+        "operationId": "plan_organization",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library/organize/{plan_task_id}/apply": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Carries out the moves of a finished dry run, as one batch that can be\nundone. Tracks moved since the dry run are skipped. Admins.",
+        "operationId": "apply_organization",
+        "parameters": [
+          {
+            "name": "plan_task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library/review": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Tracks whose identification was not confident enough to apply, with the\nreleases they may be on.",
+        "operationId": "list_review",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1 to 200, 50 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/library/status": {
       "get": {
         "tags": [
@@ -662,6 +909,92 @@
         "security": [
           {}
         ]
+      }
+    },
+    "/api/v1/library/tasks": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "The most recent library tasks, newest first.",
+        "operationId": "list_tasks",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1 to 200, 20 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LibraryTask"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library/tasks/{id}": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "A library task, with its result once done.",
+        "operationId": "get_task",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/live": {
@@ -1653,7 +1986,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Whether the API, its database and the engine are up. No sign-in needed.",
+        "summary": "Whether the API, its database and the engine are up, and whether the\nserver clock can be trusted. No sign-in needed.",
         "operationId": "status",
         "responses": {
           "200": {
@@ -1965,6 +2298,47 @@
         }
       }
     },
+    "/api/v1/tracks/{id}/audio": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "The track's audio file as it is in the library, for previews in the\nbrowser. Supports range requests.",
+        "operationId": "get_audio",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "206": {
+            "description": "Part of the file"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tracks/{id}/categories": {
       "put": {
         "tags": [
@@ -2092,6 +2466,131 @@
         ],
         "responses": {
           "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks/{id}/review/apply": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Applies one of the track's candidate releases: heron-librarian writes\nits tags into the file and files it where the layout says, as a batch\nthat can be undone. Operators and admins.",
+        "operationId": "apply_release",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseChoice"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks/{id}/review/keep": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Marks the track as reviewed: its file keeps its own tags. Operators and\nadmins.",
+        "operationId": "keep_tags",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks/{id}/waveform": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "The track's waveform overview, computed with its analysis. 404 until\nthe track is analyzed.",
+        "operationId": "get_waveform",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Waveform"
+                }
+              }
+            }
+          },
           "4XX": {
             "content": {
               "application/json": {
@@ -2378,6 +2877,98 @@
           }
         }
       },
+      "Batch": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "files",
+          "created_at_unix_ms"
+        ],
+        "properties": {
+          "created_at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Files moved or re-tagged.",
+            "minimum": 0
+          },
+          "finished_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`None` while it runs, or when it was interrupted."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/BatchKind"
+          },
+          "undoes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "For an undo, the batch it undoes.",
+            "minimum": 0
+          },
+          "undone_by": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The undo of this batch.",
+            "minimum": 0
+          }
+        }
+      },
+      "BatchKind": {
+        "type": "string",
+        "enum": [
+          "import",
+          "organize",
+          "undo",
+          "review"
+        ]
+      },
+      "BatchReport": {
+        "type": "object",
+        "description": "What a batch of file operations did.",
+        "required": [
+          "batch_id",
+          "done",
+          "skipped"
+        ],
+        "properties": {
+          "batch_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "done": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkippedFile"
+            },
+            "description": "Operations not done, with the reason."
+          }
+        }
+      },
       "Category": {
         "type": "object",
         "required": [
@@ -2470,6 +3061,41 @@
           "rms_right": {
             "type": "number",
             "format": "float"
+          }
+        }
+      },
+      "ClockStatus": {
+        "type": "object",
+        "properties": {
+          "estimated_error_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The kernel's estimate of the clock's error, in ms."
+          },
+          "offset_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The offset the kernel is correcting, in ms."
+          },
+          "synchronized": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`None` where the kernel's state cannot be read (not Linux)."
+          },
+          "warning": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the clock cannot be trusted, for people. `None` when it is fine\nor unknown."
           }
         }
       },
@@ -3095,6 +3721,81 @@
           }
         }
       },
+      "LibraryTask": {
+        "type": "object",
+        "required": [
+          "id",
+          "request",
+          "status",
+          "created_at_unix_ms"
+        ],
+        "properties": {
+          "created_at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "finished_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "plan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrganizePlan",
+                "description": "The moves of a finished dry run (`organize_plan`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "report": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BatchReport",
+                "description": "What a finished apply, undo or review did."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request": {
+            "$ref": "#/components/schemas/TaskRequest"
+          },
+          "requested_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "started_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          }
+        }
+      },
       "LiveMessage": {
         "oneOf": [
           {
@@ -3290,6 +3991,36 @@
         },
         "additionalProperties": false
       },
+      "OrganizePlan": {
+        "type": "object",
+        "description": "The dry run of an organization.",
+        "required": [
+          "moves",
+          "unchanged",
+          "unreadable"
+        ],
+        "properties": {
+          "moves": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlannedMove"
+            }
+          },
+          "unchanged": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tracks already where the layout puts them.",
+            "minimum": 0
+          },
+          "unreadable": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tracks whose file cannot be read (left where they are)."
+          }
+        }
+      },
       "OutputConnection": {
         "type": "string",
         "enum": [
@@ -3470,6 +4201,28 @@
           }
         },
         "additionalProperties": false
+      },
+      "PlannedMove": {
+        "type": "object",
+        "required": [
+          "track_id",
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "Relative to the library root."
+          },
+          "to": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
       },
       "Play": {
         "type": "object",
@@ -3690,6 +4443,18 @@
         },
         "additionalProperties": false
       },
+      "Preferences": {
+        "type": "object",
+        "required": [
+          "theme"
+        ],
+        "properties": {
+          "theme": {
+            "$ref": "#/components/schemas/Theme"
+          }
+        },
+        "additionalProperties": false
+      },
       "QueueEntry": {
         "type": "object",
         "required": [
@@ -3820,6 +4585,143 @@
           }
         }
       },
+      "ReleaseChoice": {
+        "type": "object",
+        "required": [
+          "release_id",
+          "recording_id"
+        ],
+        "properties": {
+          "recording_id": {
+            "type": "string"
+          },
+          "release_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReviewCandidate": {
+        "type": "object",
+        "description": "A release a track may be on, from AcoustID.",
+        "required": [
+          "score",
+          "recording_id",
+          "release_id"
+        ],
+        "properties": {
+          "country": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`YYYY-MM-DD`, `YYYY-MM` or `YYYY`."
+          },
+          "disc": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "recording_id": {
+            "type": "string"
+          },
+          "release_group_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release_group_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release_id": {
+            "type": "string"
+          },
+          "release_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "score": {
+            "type": "number",
+            "format": "double"
+          },
+          "track": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "ReviewItem": {
+        "type": "object",
+        "required": [
+          "track",
+          "candidates"
+        ],
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewCandidate"
+            },
+            "description": "Best first."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the identification was not applied."
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "track": {
+            "$ref": "#/components/schemas/TrackSummary"
+          }
+        }
+      },
+      "ReviewPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewItem"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "Role": {
         "type": "string",
         "description": "What a user may do. Each role can do everything the previous one can.",
@@ -3916,15 +4818,36 @@
           }
         }
       },
+      "SkippedFile": {
+        "type": "object",
+        "required": [
+          "path",
+          "reason"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "Status": {
         "type": "object",
         "required": [
           "service",
           "version",
           "database",
-          "engine"
+          "engine",
+          "clock",
+          "server_time_unix_ms"
         ],
         "properties": {
+          "clock": {
+            "$ref": "#/components/schemas/ClockStatus",
+            "description": "The server clock's synchronization (the host's: containers share it)."
+          },
           "database": {
             "type": "string",
             "description": "`ok` or `unavailable`."
@@ -3932,6 +4855,11 @@
           "engine": {
             "type": "string",
             "description": "`ok` or `unavailable`."
+          },
+          "server_time_unix_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The server's time, to compare with the browser's."
           },
           "service": {
             "type": "string"
@@ -3975,6 +4903,131 @@
             "$ref": "#/components/schemas/SyncState"
           }
         }
+      },
+      "TaskRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Dry run of an organization: lists the moves, changes nothing.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "organize_plan"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Carries out the moves of a dry run, as one batch.",
+            "required": [
+              "plan_task_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "organize_apply"
+                ]
+              },
+              "plan_task_id": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Reverts a batch.",
+            "required": [
+              "batch_id",
+              "kind"
+            ],
+            "properties": {
+              "batch_id": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "undo"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Applies a release picked on the review screen to a track: its tags\nare written and it is filed where the layout says, as one batch.",
+            "required": [
+              "track_id",
+              "release_id",
+              "recording_id",
+              "kind"
+            ],
+            "properties": {
+              "disc": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "review_apply"
+                ]
+              },
+              "recording_id": {
+                "type": "string"
+              },
+              "release_id": {
+                "type": "string"
+              },
+              "track": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
+              },
+              "track_id": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "A task, as stored in `library_tasks.params`. The tag is also its `kind`."
+      },
+      "TaskStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "done",
+          "failed"
+        ]
+      },
+      "Theme": {
+        "type": "string",
+        "description": "The web UI's theme.",
+        "enum": [
+          "system",
+          "light",
+          "dark"
+        ]
       },
       "TrackAnalysis": {
         "type": "object",
@@ -4463,6 +5516,7 @@
           "username",
           "role",
           "enabled",
+          "theme",
           "created_at_unix_ms"
         ],
         "properties": {
@@ -4487,6 +5541,9 @@
           },
           "role": {
             "$ref": "#/components/schemas/Role"
+          },
+          "theme": {
+            "$ref": "#/components/schemas/Theme"
           },
           "username": {
             "type": "string"
@@ -4522,6 +5579,31 @@
           }
         },
         "additionalProperties": false
+      },
+      "Waveform": {
+        "type": "object",
+        "required": [
+          "interval_ms",
+          "floor_db",
+          "peaks"
+        ],
+        "properties": {
+          "floor_db": {
+            "type": "number",
+            "format": "float",
+            "description": "Level of point 0; 255 is full scale (0 dBFS), on a dB scale."
+          },
+          "interval_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Length of one point.",
+            "minimum": 0
+          },
+          "peaks": {
+            "type": "string",
+            "description": "One byte per point, base64: the highest sample peak in the interval."
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -4567,7 +5649,7 @@
     },
     {
       "name": "library",
-      "description": "Tracks, their analysis and overrides"
+      "description": "Tracks, their analysis and overrides; review, organization and undo through heron-librarian"
     },
     {
       "name": "categories",

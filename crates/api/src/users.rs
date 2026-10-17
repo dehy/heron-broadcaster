@@ -28,6 +28,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(logout))
         .routes(routes!(me))
         .routes(routes!(change_password))
+        .routes(routes!(set_preferences))
         .routes(routes!(list_users, create_user))
         .routes(routes!(update_user, delete_user))
         .routes(routes!(list_tokens, create_token))
@@ -40,22 +41,53 @@ pub struct User {
     pub username: String,
     pub role: Role,
     pub enabled: bool,
+    pub theme: Theme,
     pub last_login_at_unix_ms: Option<i64>,
     pub created_at_unix_ms: i64,
 }
 
-type UserRow = (u64, String, String, bool, Option<i64>, i64);
+/// The web UI's theme.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    /// Follows the browser's setting (`prefers-color-scheme`).
+    #[default]
+    System,
+    Light,
+    Dark,
+}
 
-const USER_COLUMNS: &str = "id, username, CAST(role AS CHAR), enabled,
+impl Theme {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    fn parse(theme: &str) -> Self {
+        match theme {
+            "light" => Self::Light,
+            "dark" => Self::Dark,
+            _ => Self::System,
+        }
+    }
+}
+
+type UserRow = (u64, String, String, bool, String, Option<i64>, i64);
+
+const USER_COLUMNS: &str = "id, username, CAST(role AS CHAR), enabled, CAST(theme AS CHAR),
     CAST(UNIX_TIMESTAMP(last_login_at) * 1000 AS SIGNED),
     CAST(UNIX_TIMESTAMP(created_at) * 1000 AS SIGNED)";
 
-fn user((id, username, role, enabled, last_login, created): UserRow) -> User {
+fn user((id, username, role, enabled, theme, last_login, created): UserRow) -> User {
     User {
         id,
         username,
         role: Role::parse(&role).unwrap_or(Role::Viewer),
         enabled,
+        theme: Theme::parse(&theme),
         last_login_at_unix_ms: last_login,
         created_at_unix_ms: created,
     }
@@ -205,6 +237,29 @@ async fn logout(
 #[utoipa::path(get, path = "/auth/me", tag = "auth",
     responses((status = 200, body = User), (status = "4XX", body = ErrorBody)))]
 async fn me(user: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<User>> {
+    Ok(Json(find_user(&state.pool, user.id).await?))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Preferences {
+    pub theme: Theme,
+}
+
+/// Saves your preferences: the web UI's theme.
+#[utoipa::path(put, path = "/auth/preferences", tag = "auth",
+    request_body = Preferences,
+    responses((status = 200, body = User), (status = "4XX", body = ErrorBody)))]
+async fn set_preferences(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(preferences): Json<Preferences>,
+) -> ApiResult<Json<User>> {
+    sqlx::query("UPDATE users SET theme = ? WHERE id = ?")
+        .bind(preferences.theme.as_str())
+        .bind(user.id)
+        .execute(&state.pool)
+        .await?;
     Ok(Json(find_user(&state.pool, user.id).await?))
 }
 

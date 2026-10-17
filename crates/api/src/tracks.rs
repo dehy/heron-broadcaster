@@ -6,10 +6,13 @@
 //! The API never writes files: tags and moves belong to `heron-librarian`.
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::body::Body;
+use axum::extract::{Path, Query, Request, State};
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use base64::Engine as _;
 use heron_core::playout::CrossfadeOverrides;
-use heron_core::{PlayoutSettings, TrackOverrides, plan_transition};
+use heron_core::{LibraryPath, PlayoutSettings, TrackOverrides, plan_transition};
 use serde::{Deserialize, Serialize};
 use sqlx::QueryBuilder;
 use utoipa::{IntoParams, ToSchema};
@@ -28,6 +31,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(put_overrides, delete_overrides))
         .routes(routes!(put_categories))
         .routes(routes!(preview_transition))
+        .routes(routes!(get_waveform))
+        .routes(routes!(get_audio))
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, ToSchema)]
@@ -98,14 +103,14 @@ pub struct TrackPage {
     pub total: u64,
 }
 
-const SUMMARY_COLUMNS: &str = "
+pub(crate) const SUMMARY_COLUMNS: &str = "
     t.id, t.path, t.title, t.artist, t.album, t.duration_ms, t.enabled,
     t.missing_since IS NOT NULL AS missing,
     a.track_id IS NOT NULL AS analyzed,
     COALESCE(a.cue_out_ms <= a.cue_in_ms, FALSE) AS silent,
     CAST(UNIX_TIMESTAMP(h.last_played) * 1000 AS SIGNED) AS last_played_at_unix_ms";
 
-const SUMMARY_JOINS: &str = "
+pub(crate) const SUMMARY_JOINS: &str = "
     FROM tracks t
     LEFT JOIN track_analysis a ON a.track_id = t.id
     LEFT JOIN (SELECT track_id, MAX(started_at) AS last_played FROM play_history
@@ -583,6 +588,82 @@ async fn preview_transition(
         outgoing: effective(&outgoing),
         incoming: effective(&incoming),
     }))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Waveform {
+    /// Length of one point.
+    pub interval_ms: u16,
+    /// Level of point 0; 255 is full scale (0 dBFS), on a dB scale.
+    pub floor_db: f32,
+    /// One byte per point, base64: the highest sample peak in the interval.
+    pub peaks: String,
+}
+
+/// The track's waveform overview, computed with its analysis. 404 until
+/// the track is analyzed.
+#[utoipa::path(get, path = "/tracks/{id}/waveform", tag = "library",
+    params(("id" = u64, Path)),
+    responses((status = 200, body = Waveform), (status = "4XX", body = ErrorBody)))]
+async fn get_waveform(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> ApiResult<Response> {
+    let row: Option<(u16, Vec<u8>)> =
+        sqlx::query_as("SELECT interval_ms, peaks FROM track_waveforms WHERE track_id = ?")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
+    let (interval_ms, peaks) = row.ok_or_else(|| ApiError::not_found("waveform"))?;
+    let mut response = Json(Waveform {
+        interval_ms,
+        floor_db: heron_analysis::WAVEFORM_FLOOR_DB,
+        peaks: base64::engine::general_purpose::STANDARD.encode(peaks),
+    })
+    .into_response();
+    // Changes only when the track is analyzed again.
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=60"),
+    );
+    Ok(response)
+}
+
+/// The track's audio file as it is in the library, for previews in the
+/// browser. Supports range requests.
+#[utoipa::path(get, path = "/tracks/{id}/audio", tag = "library",
+    params(("id" = u64, Path)),
+    responses(
+        (status = 200, description = "The file", content_type = "application/octet-stream"),
+        (status = 206, description = "Part of the file"),
+        (status = "4XX", body = ErrorBody)))]
+async fn get_audio(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    request: Request,
+) -> ApiResult<Response> {
+    let path: Option<(String, bool)> =
+        sqlx::query_as("SELECT path, missing_since IS NOT NULL FROM tracks WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
+    let (path, missing) = path.ok_or_else(|| ApiError::not_found("track"))?;
+    if missing {
+        return Err(ApiError::not_found("file"));
+    }
+    let file = LibraryPath::from_stored(path).resolve(state.library.root());
+    let service = tower_http::services::ServeFile::new(file);
+    let (parts, _) = request.into_parts();
+    let request = Request::from_parts(parts, Body::empty());
+    let response = tower::ServiceExt::oneshot(service, request)
+        .await
+        .map_err(|error| ApiError::Internal(error.to_string()))?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err(ApiError::not_found("file"));
+    }
+    Ok(response.map(Body::new))
 }
 
 #[cfg(test)]

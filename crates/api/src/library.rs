@@ -172,6 +172,11 @@ impl Library {
         }
     }
 
+    /// The library root, as mounted in this container (read-only).
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+
     pub fn last_scan(&self) -> Option<ScanReport> {
         self.last_scan.lock().ok().and_then(|report| report.clone())
     }

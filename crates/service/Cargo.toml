@@ -11,6 +11,7 @@ publish = false
 
 [features]
 mysql = ["dep:sqlx"]
+openapi = ["dep:utoipa"]
 # Scratch databases for integration tests.
 test-util = ["mysql"]
 
@@ -19,12 +20,18 @@ axum.workspace = true
 clap.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sqlx = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+utoipa = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Reads the clock's synchronization state (adjtimex).
+libc = "0.2.191"
 
 [lints]
 workspace = true
