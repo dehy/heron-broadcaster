@@ -11,7 +11,7 @@ These decisions are fixed. If one looks wrong, stop and ask instead of working a
 | Analysis | Loudness, cue points, silence trimming and crossfade points are computed **when a track is imported** and stored in the database. Never during playback. |
 | Clockwheels | Clockwheels are **data**: ordered slots stored in the database and edited in the UI. No scripting language for now. |
 | Audio path | **The engine never touches the database in the audio path.** |
-| Roadmap order | Audio processing (AGC, multiband) **comes last** in the roadmap. |
+| Roadmap order | Audio processing (AGC, multiband) **comes last** in the roadmap. *(Revised after the handoff, see below.)* |
 | Outputs | **Bring your own streamer:** outputs are pluggable sinks behind a trait. Icecast first. |
 | Codecs | **Heron never ships or links fdk-aac** (license incompatible with AGPL). LAME (LGPL), libopus and libvorbis (BSD) are fine. AAC-LC is built in using FFmpeg's native `aac` encoder (LGPL). fdk-aac / HE-AAC only through a user-provided `ffmpeg` binary. *(Revised after the handoff, see below.)* |
 
@@ -34,3 +34,5 @@ These decisions are fixed. If one looks wrong, stop and ask instead of working a
 | Cover art and layout | Cover art is saved as `cover.jpg` in the album folder (embedding is optional, off by default). Default layout `{album_artist}/{album}/{disc-}{track:02} {title}.{ext}`. |
 | Librarian | Files are moved and tags written by **`heron-librarian`, its own service**, so the API keeps a read-only mount. |
 | Silence detection | Gap Killer silence must be below the relative thresholds **and** below an absolute ceiling of −50 dBFS, so soft intros are kept. See [Import and analysis](analysis.md#what-counts-as-silence). |
+| Audio processing | **DSP plugins replace the built-in deck EQ and AGC chain**, which are dropped for now ([Requirements – Deferred](requirements.md#deferred)). Stereo Tool's libStereoTool is the first plugin. Plugins run in their own service (`heron-dsp-host`), never inside `heron-engine`. Heron never ships libStereoTool: the station provides it and its license key. See [M8](roadmap/m8-dsp-plugins.md). |
+| Unsafe code | `unsafe_code` stays denied in the workspace, except in `heron-dsp-host`, which loads native processor libraries. |

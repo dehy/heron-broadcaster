@@ -16,8 +16,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | M6 | [Rotation & clockwheels](m6-rotation-clockwheels.md) | M4 | Not started |
 | M7 | [Webhooks & output API](m7-webhooks-output-api.md) | M4 | Not started |
 | M7b | [Listener statistics](m7b-listener-statistics.md) | M4 | Not started |
-| M8 | [Deck EQ](m8-deck-eq.md) | M2 | Not started |
-| M9 | [AGC & multiband processing](m9-agc-multiband.md) | M8 | Not started |
+| M8 | [DSP plugins (Stereo Tool)](m8-dsp-plugins.md) | M2 | Not started |
 | M10 | [More encoders, sinks & live DJ](m10-sinks-live-dj.md) | M3 | Not started |
 
 ## Dependency graph
@@ -29,5 +28,5 @@ M0 ─► M1 ─┬─► M1b
                   │       ├─► M6
                   │       ├─► M7
                   │       └─► M7b
-                  └─► M8 ─► M9
+                  └─► M8
 ```
