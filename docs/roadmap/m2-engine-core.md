@@ -21,9 +21,17 @@
 ## Acceptance criteria
 
 - [ ] Plays a queue gaplessly with crossfades to Icecast for 24 h without drift or glitches.
-- [ ] No allocation or locking in the audio thread (code review plus an allocation-detecting allocator in tests).
-- [ ] Offline-rendered crossfades match reference renders within tolerance.
-- [ ] Streams simultaneously to at least two Icecast servers with different bitrates; disconnecting one does not affect the other.
+- [x] No allocation or locking in the audio thread (code review plus an allocation-detecting allocator in tests).
+- [x] Offline-rendered crossfades match reference renders within tolerance.
+- [x] Streams simultaneously to at least two Icecast servers with different bitrates; disconnecting one does not affect the other.
+
+## Results
+
+- **Audio thread:** `crates/engine/tests/no_alloc.rs` counts every allocation and free made on the audio thread while the mixer goes through crossfades, skips, pauses, the FX player, underruns, queue changes and decoded tracks: none. It only uses lock-free ring buffers and atomics.
+- **Crossfades:** offline renders match references computed independently, sample by sample, within 1e-5, with transitions falling in the middle of blocks (block sizes 1 to 1,000 frames). Back-to-back tracks are sample-exact (gapless).
+- **Two Icecast servers:** tested automatically with fake servers (`crates/outputs/tests/two_outputs.rs`) and live with two Icecast 2.4.4 servers at 128 and 64 kbps: with one server stopped, the other kept receiving 8,025 bytes/s (64 kbps), and the stopped one reconnected on its own with backoff when it came back.
+- **Listening:** a 75 s capture of the stream across three transitions has no silence (besides the MP3 encoder's 45 ms priming at the start); handovers land on the analyzed crossfade points. CI streams queued tracks to Icecast in Docker Compose on amd64 and arm64 (`scripts/check-streaming.sh`).
+- **24 h run:** pending. `scripts/soak-test.sh` runs it and checks drift, underruns, dropped audio, clock resets and reconnects.
 
 ## References
 
