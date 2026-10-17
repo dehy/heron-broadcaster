@@ -56,6 +56,10 @@ struct Cli {
     )]
     fallback_dir: PathBuf,
 
+    /// Play the master bus on the local sound card (builds with the `monitor` feature).
+    #[arg(long, env = "HERON_MONITOR")]
+    monitor: bool,
+
     /// Directory where the engine persists its state (configuration, queue) between restarts.
     #[arg(long, env = "HERON_STATE_DIR", default_value = "/var/lib/heron/engine")]
     state_dir: PathBuf,
@@ -101,6 +105,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         EngineOptions {
             library_dir: cli.library_dir.clone(),
             state_dir: cli.state_dir.clone(),
+            monitor: cli.monitor,
         },
         tokio::runtime::Handle::current(),
     )?;

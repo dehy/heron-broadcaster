@@ -12,4 +12,6 @@ pub mod decoder;
 pub mod engine;
 pub mod grpc;
 pub mod mixer;
+#[cfg(feature = "monitor")]
+pub mod monitor;
 pub mod player;

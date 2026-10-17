@@ -16,10 +16,16 @@ path = "src/lib.rs"
 name = "heron-engine"
 path = "src/main.rs"
 
+[features]
+# Local monitor output on the default sound card. Needs ALSA headers on Linux
+# (libasound2-dev); Docker images are built without it.
+monitor = ["dep:cpal"]
+
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
+cpal = { workspace = true, optional = true }
 heron-analysis.workspace = true
 heron-core.workspace = true
 heron-dsp.workspace = true

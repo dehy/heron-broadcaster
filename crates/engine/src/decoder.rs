@@ -22,6 +22,8 @@ const BUFFER_SECONDS: usize = 10;
 /// masters peak a few dB over full scale at most (the analysis rejects
 /// files above +12 dBTP).
 const MAX_SAMPLE: f32 = 4.0;
+/// Audio decoded before a track may start: 100 ms.
+const READY_SAMPLES: usize = SAMPLE_RATE as usize / 10 * CHANNELS;
 /// How long the decoder sleeps when the buffer is full.
 const FULL_WAIT: Duration = Duration::from_millis(5);
 
@@ -116,6 +118,10 @@ impl AudioSource for DecodedSource {
     fn is_finished(&self) -> bool {
         // Read `done` first: the decoder sets it after its last push.
         self.state.done.load(Ordering::Acquire) && self.consumer.is_empty()
+    }
+
+    fn is_ready(&self) -> bool {
+        self.state.done.load(Ordering::Acquire) || self.consumer.slots() >= READY_SAMPLES
     }
 }
 

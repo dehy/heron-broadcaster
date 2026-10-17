@@ -46,6 +46,11 @@ pub trait AudioSource: Send {
     fn read(&mut self, out: &mut [f32]) -> usize;
     /// No more audio will come: the track ended, early or not.
     fn is_finished(&self) -> bool;
+    /// Enough audio is decoded to start playing (or the source is finished).
+    /// A cued track waits for this, so it never starts with an underrun.
+    fn is_ready(&self) -> bool {
+        true
+    }
 }
 
 /// Audio held in memory. Used for offline rendering and tests.
@@ -553,8 +558,10 @@ impl Mixer {
     fn start_cued_if_due(&mut self) {
         let due = match (&self.cued, self.main_voice()) {
             (None, _) => false,
-            (Some(_), None) => true,
-            (Some((_, transition)), Some(voice)) => voice.position >= transition.next_start,
+            (Some((track, _)), None) => track.source.is_ready(),
+            (Some((track, transition)), Some(voice)) => {
+                voice.position >= transition.next_start && track.source.is_ready()
+            }
         };
         if due && let Some((track, transition)) = self.cued.take() {
             self.start_main(track, transition.fade_out);

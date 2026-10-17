@@ -26,6 +26,8 @@ const TICK: Duration = Duration::from_millis(10);
 pub struct EngineOptions {
     pub library_dir: PathBuf,
     pub state_dir: PathBuf,
+    /// Play the master bus on the local sound card (`monitor` feature).
+    pub monitor: bool,
 }
 
 pub struct Engine {
@@ -36,6 +38,8 @@ pub struct Engine {
     status: Arc<MixerStatus>,
     clock: Arc<ClockStatus>,
     started: Instant,
+    #[cfg(feature = "monitor")]
+    _monitor: Option<crate::monitor::Monitor>,
     _audio: AudioThread,
 }
 
@@ -76,6 +80,18 @@ impl Engine {
         if let Err(error) = outputs.apply(&config.outputs) {
             tracing::error!(%error, "cannot start the saved outputs");
         }
+        #[cfg(feature = "monitor")]
+        let monitor = if options.monitor {
+            crate::monitor::Monitor::start(outputs.tap())
+                .inspect_err(|error| tracing::error!(%error, "cannot start the monitor output"))
+                .ok()
+        } else {
+            None
+        };
+        #[cfg(not(feature = "monitor"))]
+        if options.monitor {
+            tracing::warn!("built without the monitor feature: no monitor output");
+        }
         let player = Player::new(
             options.library_dir,
             config.playout,
@@ -98,6 +114,8 @@ impl Engine {
             status,
             clock,
             started: Instant::now(),
+            #[cfg(feature = "monitor")]
+            _monitor: monitor,
             _audio: audio,
         });
         runtime.spawn(run_player(Arc::downgrade(&engine)));

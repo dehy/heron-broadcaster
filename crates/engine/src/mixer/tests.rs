@@ -433,3 +433,41 @@ fn finished_tracks_are_handed_back_to_be_dropped() {
     assert_eq!(returned, [1, 2]);
     assert_eq!(events(&mut handle)[0], Event::Uncued { entry_id: 1 });
 }
+
+/// A decoder that has not produced anything yet.
+struct NotReady;
+
+impl AudioSource for NotReady {
+    fn read(&mut self, _out: &mut [f32]) -> usize {
+        0
+    }
+
+    fn is_finished(&self) -> bool {
+        false
+    }
+
+    fn is_ready(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn cued_tracks_wait_for_their_audio() {
+    let (mut mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
+    cue(
+        &mut handle,
+        Box::new(LoadedTrack {
+            entry_id: 1,
+            source: Box::new(NotReady),
+            length: 48_000,
+            gain: 1.0,
+            fade_in: None,
+        }),
+        FrameTransition::back_to_back(),
+    );
+    render(&mut mixer, 4_800, BLOCK_FRAMES);
+    assert_eq!(handle.status.on_air.load(Ordering::Relaxed), 0);
+    assert_eq!(handle.status.cued.load(Ordering::Relaxed), 1);
+    assert_eq!(handle.status.underruns.load(Ordering::Relaxed), 0);
+    assert!(events(&mut handle).is_empty());
+}

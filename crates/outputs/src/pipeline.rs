@@ -360,6 +360,14 @@ impl Outputs {
         Ok(())
     }
 
+    /// A copy of the master bus (interleaved stereo at 48 kHz), for a local
+    /// monitor. Dropped when the receiver falls behind, like an encoder's.
+    pub fn tap(&self) -> Receiver<Arc<[f32]>> {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(ENCODER_QUEUE);
+        self.fanout.add(u64::MAX, sender);
+        receiver
+    }
+
     pub fn config(&self) -> &OutputsConfig {
         &self.config
     }
