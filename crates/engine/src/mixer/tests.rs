@@ -471,3 +471,12 @@ fn cued_tracks_wait_for_their_audio() {
     assert_eq!(handle.status.underruns.load(Ordering::Relaxed), 0);
     assert!(events(&mut handle).is_empty());
 }
+
+#[test]
+fn tracks_without_audio_never_go_on_air() {
+    let (mut mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
+    cue(&mut handle, track(1, &[]), FrameTransition::back_to_back());
+    render(&mut mixer, 480, BLOCK_FRAMES);
+    assert_eq!(events(&mut handle), [Event::Uncued { entry_id: 1 }]);
+    assert!(handle.trash.pop().is_ok());
+}

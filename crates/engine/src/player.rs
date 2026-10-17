@@ -18,7 +18,7 @@ use heron_core::{CrossfadeSettings, PlayoutSettings};
 use heron_outputs::NowPlaying;
 use tokio::sync::{broadcast, watch};
 
-use crate::decoder::{DecodeMonitor, DecodedSource};
+use crate::decoder::DecodedSource;
 use crate::mixer::{
     Command, Deck, EndReason, Event, FrameRamp, FrameTransition, LoadedTrack, MixerHandle,
     MixerStatus, frames_to_ms, ms_to_frames,
@@ -92,11 +92,6 @@ pub struct PlayerSnapshot {
     pub underruns: u64,
 }
 
-struct Cued {
-    entry_id: u64,
-    monitor: DecodeMonitor,
-}
-
 pub struct Player {
     library_dir: PathBuf,
     settings: PlayoutSettings,
@@ -104,7 +99,7 @@ pub struct Player {
     queue: VecDeque<QueueEntry>,
     /// Entries handed to the mixer (cued, on air, fading out, FX).
     loaded: HashMap<u64, QueueEntry>,
-    cued: Option<Cued>,
+    cued: Option<u64>,
     /// The track on air: the last one started on Deck A or B.
     on_air: Option<u64>,
     paused: bool,
@@ -175,11 +170,7 @@ impl Player {
         if self.on_air == Some(entry_id) {
             return Err(PlayerError::OnAir(entry_id));
         }
-        if self
-            .cued
-            .as_ref()
-            .is_some_and(|cued| cued.entry_id == entry_id)
-        {
+        if self.cued == Some(entry_id) {
             self.uncue()?;
         }
         let before = self.queue.len();
@@ -225,7 +216,7 @@ impl Player {
             track,
         };
         self.next_entry_id += 1;
-        let (loaded, _) = self.load(&entry, None)?;
+        let loaded = self.load(&entry, None)?;
         self.send(Command::PlayFx(loaded))?;
         let entry_id = entry.entry_id;
         self.loaded.insert(entry_id, entry);
@@ -255,18 +246,6 @@ impl Player {
         while let Ok(event) = self.mixer.events.pop() {
             self.handle(event);
         }
-        if let Some(cued) = &self.cued
-            && cued.monitor.is_unplayable()
-            && self.mixer.status.cued.load(Ordering::Relaxed) == cued.entry_id
-        {
-            let entry_id = cued.entry_id;
-            if self.send(Command::Uncue).is_ok() {
-                let path = self.loaded.get(&entry_id).map(|e| e.track.path.clone());
-                tracing::warn!(entry_id, ?path, "skipping a track that cannot be decoded");
-                self.loaded.remove(&entry_id);
-                self.cued = None;
-            }
-        }
         self.ensure_cued();
     }
 
@@ -275,11 +254,7 @@ impl Player {
             Event::Started { deck, entry_id, .. } => {
                 // The mixer may start a track the player just tried to uncue.
                 self.queue.retain(|entry| entry.entry_id != entry_id);
-                if self
-                    .cued
-                    .as_ref()
-                    .is_some_and(|cued| cued.entry_id == entry_id)
-                {
+                if self.cued == Some(entry_id) {
                     self.cued = None;
                 }
                 let Some(entry) = self.loaded.get(&entry_id).cloned() else {
@@ -327,6 +302,13 @@ impl Player {
                 }
             }
             Event::Uncued { entry_id } => {
+                // The player forgets the tracks it uncues itself: this one was
+                // dropped by the mixer, its audio having ended before it started.
+                if self.cued == Some(entry_id) {
+                    let path = self.loaded.get(&entry_id).map(|e| e.track.path.clone());
+                    tracing::warn!(entry_id, ?path, "skipping a track that cannot be decoded");
+                    self.cued = None;
+                }
                 self.loaded.remove(&entry_id);
             }
             Event::Underrun { deck, entry_id } => {
@@ -344,17 +326,14 @@ impl Player {
             };
             let transition = self.transition_into(&entry.track.playout);
             match self.load(&entry, transition.as_ref()) {
-                Ok((track, monitor)) => {
+                Ok(track) => {
                     let frame_transition = self.frame_transition(transition.as_ref());
                     match self.mixer.commands.push(Command::Cue {
                         track,
                         transition: frame_transition,
                     }) {
                         Ok(()) => {
-                            self.cued = Some(Cued {
-                                entry_id: entry.entry_id,
-                                monitor,
-                            });
+                            self.cued = Some(entry.entry_id);
                             self.loaded.insert(entry.entry_id, entry);
                         }
                         Err(_) => {
@@ -380,7 +359,7 @@ impl Player {
             self.cued = Some(cued);
             return Err(error);
         }
-        if let Some(entry) = self.loaded.get(&cued.entry_id).cloned() {
+        if let Some(entry) = self.loaded.get(&cued).cloned() {
             self.queue.push_front(entry);
         }
         Ok(())
@@ -388,10 +367,10 @@ impl Player {
 
     /// Replans the cued track's transition against the track now on air.
     fn retarget_cued(&mut self) {
-        let Some(cued) = &self.cued else {
+        let Some(cued) = self.cued else {
             return;
         };
-        let Some(entry) = self.loaded.get(&cued.entry_id) else {
+        let Some(entry) = self.loaded.get(&cued) else {
             return;
         };
         let transition = self.transition_into(&entry.track.playout);
@@ -438,19 +417,17 @@ impl Player {
         &self,
         entry: &QueueEntry,
         transition: Option<&Transition>,
-    ) -> Result<(Box<LoadedTrack>, DecodeMonitor), PlayerError> {
+    ) -> Result<Box<LoadedTrack>, PlayerError> {
         let playout = &entry.track.playout;
         let path = self.resolve(&entry.track.path)?;
         let source = DecodedSource::spawn(path, playout.cue_in_ms, playout.cue_out_ms)?;
-        let monitor = source.monitor();
-        let track = Box::new(LoadedTrack {
+        Ok(Box::new(LoadedTrack {
             entry_id: entry.entry_id,
             source: Box::new(source),
             length: ms_to_frames(playout.playable_ms()),
             gain: db_to_gain(playout.gain_db(&self.settings.loudness)),
             fade_in: self.fade_in(entry, transition),
-        });
-        Ok((track, monitor))
+        }))
     }
 
     fn send(&mut self, command: Command) -> Result<(), PlayerError> {
@@ -485,10 +462,7 @@ impl Player {
         PlayerSnapshot {
             paused: self.paused,
             decks,
-            cued: self
-                .cued
-                .as_ref()
-                .and_then(|cued| self.loaded.get(&cued.entry_id).cloned()),
+            cued: self.cued.and_then(|cued| self.loaded.get(&cued).cloned()),
             queue: self.queue.iter().cloned().collect(),
             rendered_ms: frames_to_ms(status.frame.load(Ordering::Relaxed)),
             underruns: status.underruns.load(Ordering::Relaxed),

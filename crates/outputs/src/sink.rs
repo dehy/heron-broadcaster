@@ -127,10 +127,10 @@ pub async fn run<S: OutputSink>(
     let mut attempt = 0_u32;
     loop {
         status.set(OutputState::Connecting);
-        // Subscribe before connecting: the stream starts with fresh audio.
-        let mut receiver = audio.subscribe();
         let error = match sink.connect().await {
             Ok(()) => {
+                // Subscribe once connected: the stream starts with fresh audio.
+                let mut receiver = audio.subscribe();
                 tracing::info!(output = %name, "output connected");
                 status.set(OutputState::Connected {
                     since: SystemTime::now(),
@@ -176,6 +176,8 @@ async fn stream<S: OutputSink>(
     bytes: &metrics::Counter,
     dropped: &metrics::Counter,
 ) -> SinkError {
+    // An output without metadata has no sender: stop watching once it is gone.
+    let mut watch_metadata = true;
     loop {
         tokio::select! {
             chunk = receiver.recv() => match chunk {
@@ -194,10 +196,12 @@ async fn stream<S: OutputSink>(
                     return SinkError::Io(std::io::Error::other("the encoder stopped"));
                 }
             },
-            changed = metadata.changed() => {
+            changed = metadata.changed(), if watch_metadata => {
                 if changed.is_ok() {
                     let current = metadata.borrow_and_update().clone();
                     push_metadata(sink, name, &current).await;
+                } else {
+                    watch_metadata = false;
                 }
             }
         }

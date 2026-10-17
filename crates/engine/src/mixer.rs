@@ -242,7 +242,8 @@ pub enum Event {
     },
     /// The track's audio was not decoded in time; silence was played.
     Underrun { deck: Deck, entry_id: u64 },
-    /// A cued track was removed before it started.
+    /// A cued track was removed before it started: uncued, replaced, or
+    /// its audio ended before it could start.
     Uncued { entry_id: u64 },
 }
 
@@ -556,6 +557,18 @@ impl Mixer {
     /// Starts the cued track when the track on air reaches the transition
     /// point or has ended.
     fn start_cued_if_due(&mut self) {
+        // Nothing to play (the file could not be decoded): never on air.
+        if self
+            .cued
+            .as_ref()
+            .is_some_and(|(track, _)| track.source.is_finished())
+            && let Some((track, _)) = self.cued.take()
+        {
+            self.emit(Event::Uncued {
+                entry_id: track.entry_id,
+            });
+            self.discard(track);
+        }
         let due = match (&self.cued, self.main_voice()) {
             (None, _) => false,
             (Some((track, _)), None) => track.source.is_ready(),
