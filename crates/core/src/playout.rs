@@ -169,6 +169,21 @@ pub struct TrackOverrides {
     pub crossfade: CrossfadeOverrides,
 }
 
+/// Why a track is played (`play_history.source`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaySource {
+    /// Picked by the rotation (the queue manager's autofill until M6).
+    Rotation,
+    /// A listener request.
+    Request,
+    /// From the fallback directory, when the queue ran dry.
+    Fallback,
+    /// Queued by hand.
+    #[default]
+    Manual,
+}
+
 /// What the engine needs to know about a track to play it. Times are in
 /// milliseconds from the start of the decoded audio.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

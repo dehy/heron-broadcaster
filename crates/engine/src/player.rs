@@ -8,13 +8,13 @@
 //! track changes for the outputs and the API. It runs outside the audio
 //! thread and may allocate, lock and log.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 
 use heron_core::playout::{TrackPlayout, Transition, db_to_gain, plan_transition};
-use heron_core::{CrossfadeSettings, PlayoutSettings};
+use heron_core::{CrossfadeSettings, PlaySource, PlayoutSettings};
 use heron_outputs::NowPlaying;
 use tokio::sync::{broadcast, watch};
 
@@ -46,6 +46,8 @@ pub struct TrackRequest {
     pub artist: Option<String>,
     pub album: Option<String>,
     pub playout: TrackPlayout,
+    /// Carried back in the events, for the play history.
+    pub source: PlaySource,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -112,6 +114,10 @@ pub struct Player {
     /// Entries handed to the mixer (cued, on air, fading out, FX).
     loaded: HashMap<u64, QueueEntry>,
     cued: Option<u64>,
+    /// Entries the player uncued whose `Uncued` event has not arrived yet.
+    /// They are not cued again before it does: the mixer may have started
+    /// them instead.
+    uncueing: HashSet<u64>,
     /// The track on air: the last one started on Deck A or B.
     on_air: Option<u64>,
     paused: bool,
@@ -136,6 +142,7 @@ impl Player {
             queue: VecDeque::new(),
             loaded: HashMap::new(),
             cued: None,
+            uncueing: HashSet::new(),
             on_air: None,
             paused: false,
             next_entry_id: 1,
@@ -200,6 +207,55 @@ impl Player {
         }
         self.ensure_cued();
         Ok(())
+    }
+
+    /// Moves a waiting entry (cued or queued) to `position` (0 is next).
+    pub fn move_entry(&mut self, entry_id: u64, position: usize) -> Result<(), PlayerError> {
+        if self.on_air == Some(entry_id) || self.is_playing(entry_id) {
+            return Err(PlayerError::OnAir(entry_id));
+        }
+        if self.cued == Some(entry_id) && position == 0 {
+            return Ok(());
+        }
+        if self.cued.is_some() && (self.cued == Some(entry_id) || position == 0) {
+            // The cued track goes back to the front of the queue.
+            self.uncue()?;
+        }
+        let Some(from) = self.queue.iter().position(|e| e.entry_id == entry_id) else {
+            self.ensure_cued();
+            return Err(PlayerError::NotFound(entry_id));
+        };
+        if let Some(entry) = self.queue.remove(from) {
+            let at = position.min(self.queue.len());
+            self.queue.insert(at, entry);
+        }
+        self.ensure_cued();
+        Ok(())
+    }
+
+    /// Replaces the track of a waiting entry (cued or queued), keeping its
+    /// place and ID. A cued entry is loaded again.
+    pub fn replace(&mut self, entry_id: u64, track: TrackRequest) -> Result<(), PlayerError> {
+        self.resolve(&track.path)?;
+        if self.on_air == Some(entry_id) || self.is_playing(entry_id) {
+            return Err(PlayerError::OnAir(entry_id));
+        }
+        if self.cued == Some(entry_id) {
+            self.uncue()?;
+        }
+        let Some(entry) = self.queue.iter_mut().find(|e| e.entry_id == entry_id) else {
+            return Err(PlayerError::NotFound(entry_id));
+        };
+        entry.track = track;
+        self.ensure_cued();
+        Ok(())
+    }
+
+    /// Whether the entry is on a deck (on air, fading out or on the FX player).
+    fn is_playing(&self, entry_id: u64) -> bool {
+        self.cued != Some(entry_id)
+            && self.loaded.contains_key(&entry_id)
+            && !self.queue.iter().any(|e| e.entry_id == entry_id)
     }
 
     /// Empties the queue, including the cued track. The track on air plays on.
@@ -273,6 +329,7 @@ impl Player {
         match event {
             Event::Started { deck, entry_id, .. } => {
                 // The mixer may start a track the player just tried to uncue.
+                self.uncueing.remove(&entry_id);
                 self.queue.retain(|entry| entry.entry_id != entry_id);
                 if self.cued == Some(entry_id) {
                     self.cued = None;
@@ -322,8 +379,14 @@ impl Player {
                 }
             }
             Event::Uncued { entry_id } => {
-                // The player forgets the tracks it uncues itself: this one was
-                // dropped by the mixer, its audio having ended before it started.
+                if self.uncueing.remove(&entry_id) {
+                    // Uncued by the player: back in the queue.
+                    if self.cued != Some(entry_id) {
+                        self.loaded.remove(&entry_id);
+                    }
+                    return;
+                }
+                // Dropped by the mixer, its audio having ended before it started.
                 if self.cued == Some(entry_id) {
                     let path = self.loaded.get(&entry_id).map(|e| e.track.path.clone());
                     tracing::warn!(entry_id, ?path, "skipping a track that cannot be decoded");
@@ -341,6 +404,13 @@ impl Player {
     /// Loads the next queue entry onto the mixer when nothing is cued.
     fn ensure_cued(&mut self) {
         while self.cued.is_none() {
+            if self
+                .queue
+                .front()
+                .is_none_or(|entry| self.uncueing.contains(&entry.entry_id))
+            {
+                return;
+            }
             let Some(entry) = self.queue.pop_front() else {
                 return;
             };
@@ -379,6 +449,7 @@ impl Player {
             self.cued = Some(cued);
             return Err(error);
         }
+        self.uncueing.insert(cued);
         if let Some(entry) = self.loaded.get(&cued).cloned() {
             self.queue.push_front(entry);
         }

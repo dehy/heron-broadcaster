@@ -15,6 +15,9 @@ service Engine {
   rpc Enqueue(EnqueueRequest) returns (EnqueueResponse);
   rpc RemoveFromQueue(RemoveFromQueueRequest) returns (RemoveFromQueueResponse);
   rpc ClearQueue(ClearQueueRequest) returns (ClearQueueResponse);
+  rpc MoveQueueEntry(MoveQueueEntryRequest) returns (MoveQueueEntryResponse);
+  // Swaps the track of a waiting entry, keeping its place (a file moved in the library).
+  rpc ReplaceQueueEntry(ReplaceQueueEntryRequest) returns (ReplaceQueueEntryResponse);
 
   // Transport.
   rpc Skip(SkipRequest) returns (SkipResponse);
@@ -33,6 +36,16 @@ service Engine {
   rpc GetConfig(GetConfigRequest) returns (EngineConfig);
   rpc SetPlayoutSettings(SetPlayoutSettingsRequest) returns (SetPlayoutSettingsResponse);
   rpc SetOutputs(SetOutputsRequest) returns (SetOutputsResponse);
+}
+
+// Why a track is played, recorded in the play history. The engine only
+// carries it back in its events.
+enum PlaySource {
+  PLAY_SOURCE_UNSPECIFIED = 0;
+  PLAY_SOURCE_ROTATION = 1;
+  PLAY_SOURCE_REQUEST = 2;
+  PLAY_SOURCE_FALLBACK = 3;
+  PLAY_SOURCE_MANUAL = 4;
 }
 
 // A track to play, with everything the engine needs: it never reads the database.
@@ -54,6 +67,7 @@ message Track {
   optional double true_peak_db = 11;
   // Per-track crossfade overrides (`track_overrides.crossfade`), JSON. Empty for none.
   string crossfade_overrides_json = 12;
+  PlaySource source = 13;
 }
 
 message QueueEntry {
@@ -81,6 +95,21 @@ message RemoveFromQueueResponse {}
 message ClearQueueRequest {}
 
 message ClearQueueResponse {}
+
+message MoveQueueEntryRequest {
+  uint64 entry_id = 1;
+  // New place in the queue, 0 being next (before the cued track).
+  uint32 position = 2;
+}
+
+message MoveQueueEntryResponse {}
+
+message ReplaceQueueEntryRequest {
+  uint64 entry_id = 1;
+  Track track = 2;
+}
+
+message ReplaceQueueEntryResponse {}
 
 message SkipRequest {}
 
@@ -148,6 +177,8 @@ message EngineState {
   // Audio rendered since the engine started.
   uint64 rendered_ms = 6;
   uint64 underruns = 7;
+  // When the engine started: entry IDs start again from 1 after a restart.
+  uint64 started_unix_ms = 8;
 }
 
 message GetLevelsRequest {}

@@ -57,6 +57,11 @@ enum CtlCommand {
     Remove {
         entry_id: u64,
     },
+    /// Move an entry of the queue to `position` (0 is next).
+    Move {
+        entry_id: u64,
+        position: u32,
+    },
     /// Empty the queue.
     Clear,
     Skip,
@@ -131,6 +136,11 @@ async fn execute(args: Args, library_dir: &Path) -> anyhow::Result<()> {
         CtlCommand::Remove { entry_id } => {
             client
                 .remove_from_queue(pb::RemoveFromQueueRequest { entry_id })
+                .await?;
+        }
+        CtlCommand::Move { entry_id, position } => {
+            client
+                .move_queue_entry(pb::MoveQueueEntryRequest { entry_id, position })
                 .await?;
         }
         CtlCommand::Clear => {
@@ -320,6 +330,7 @@ fn prepare(library_dir: &Path, file: &Path) -> anyhow::Result<pb::Track> {
         integrated_lufs: analysis.integrated_lufs,
         true_peak_db: analysis.true_peak_db,
         crossfade_overrides_json: String::new(),
+        source: pb::PlaySource::Manual.into(),
     })
 }
 
