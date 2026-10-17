@@ -34,6 +34,7 @@ cpal = "0.18.2"
 ebur128 = "0.1.10"
 getrandom = "0.4.3"
 hound = "3.5.1"
+jiff = { version = "0.2.38", default-features = false, features = ["std", "serde", "tzdb-bundle-always", "tzdb-zoneinfo", "tz-system"] }
 lofty = "0.25.4"
 metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
@@ -63,6 +64,7 @@ tower = "0.5.3"
 tower-http = { version = "0.6.11", features = ["fs"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+unicode-normalization = "0.1.25"
 utoipa = "6.0.0"
 utoipa-axum = "0.3.0"
 walkdir = "2.5.0"
