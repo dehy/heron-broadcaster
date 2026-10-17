@@ -8,7 +8,9 @@
 - WebSocket: now playing, deck positions, levels, queue changes.
 - Authentication (local users only for now) and roles.
 - OpenAPI spec generated from code.
-- Queue manager feeding the engine.
+- Queue manager feeding the engine: tracks sent with their analysis and overrides (replaces `heron-engine ctl enqueue` and `autofill`).
+- Play history recorded from the engine's track-change events (`play_history`).
+- Playout settings, encoder profiles and outputs stored in MariaDB and pushed to the engine (`SetPlayoutSettings`, `SetOutputs`), with the outputs' state.
 
 ## Acceptance criteria
 

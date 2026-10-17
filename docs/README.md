@@ -26,7 +26,7 @@ The name comes from "air on" sounding like *héron* (French for heron): keeping 
 | Document | Contents |
 |---|---|
 | [Architecture](architecture.md) | Processes, repository layout, suggested libraries |
-| [Audio engine](audio-engine.md) | Real-time audio rules for `heron-engine` |
+| [Audio engine](audio-engine.md) | How `heron-engine` plays: threads, transitions, playout settings, control interface, real-time rules |
 | [Data model](data-model.md) | Initial database schema sketch |
 | [Conventions](conventions.md) | Code style, errors, logging, testing, commits |
 
