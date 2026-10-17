@@ -31,7 +31,8 @@
 - **Crossfades:** offline renders match references computed independently, sample by sample, within 1e-5, with transitions falling in the middle of blocks (block sizes 1 to 1,000 frames). Back-to-back tracks are sample-exact (gapless).
 - **Two Icecast servers:** tested automatically with fake servers (`crates/outputs/tests/two_outputs.rs`) and live with two Icecast 2.4.4 servers at 128 and 64 kbps: with one server stopped, the other kept receiving 8,025 bytes/s (64 kbps), and the stopped one reconnected on its own with backoff when it came back.
 - **Listening:** a 75 s capture of the stream across three transitions has no silence (besides the MP3 encoder's 45 ms priming at the start); handovers land on the analyzed crossfade points. CI streams queued tracks to Icecast in Docker Compose on amd64 and arm64 (`scripts/check-streaming.sh`).
-- **24 h run:** pending. `scripts/soak-test.sh` runs it and checks drift, underruns, dropped audio, clock resets and reconnects.
+- **1 h soak** (`scripts/soak-test.sh`, 1,000-track test library, two Icecast servers at 128 and 64 kbps, 141 tracks played with crossfades): PASS. No underrun, no dropped audio, no clock reset, no reconnection; outputs at exactly 128.0 and 64.0 kbps; the render lead stayed between 46 and 58 ms (sampling jitter around 50 ms, no accumulation).
+- **24 h run:** pending, same script with `86400` seconds, ideally on a Raspberry Pi.
 
 ## References
 

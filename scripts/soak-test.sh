@@ -11,6 +11,8 @@
 # Uses ports 18000, 18001 (Icecast), 50051 (gRPC) and 18081 (metrics).
 
 set -eu
+# Metrics use `.` as decimal point: awk must not parse them with the user's locale.
+export LC_ALL=C
 
 library=${1:?usage: soak-test.sh <library dir> <seconds> [work dir]}
 duration=${2:?usage: soak-test.sh <library dir> <seconds> [work dir]}
