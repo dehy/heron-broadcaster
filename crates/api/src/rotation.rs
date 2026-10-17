@@ -136,15 +136,16 @@ pub async fn load_library(pool: &MySqlPool) -> ApiResult<Library> {
             separation: overrides(separation.as_deref()),
         });
     }
-    let rows: Vec<(u64, String)> = sqlx::query_as("SELECT id, name FROM clocks")
+    let rows: Vec<(u64, String, bool)> = sqlx::query_as("SELECT id, name, looping FROM clocks")
         .fetch_all(pool)
         .await?;
     let clocks = rows
         .into_iter()
-        .map(|(id, name)| Clock {
+        .map(|(id, name, looping)| Clock {
             id,
             name,
             slots: slots.remove(&id).unwrap_or_default(),
+            looping,
         })
         .collect();
     let rows: Vec<(u8, u8, u64)> =

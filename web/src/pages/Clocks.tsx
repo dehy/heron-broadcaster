@@ -106,6 +106,14 @@ export function Clocks() {
                   <tr key={clock.id}>
                     <td>
                       <Link to={`/clocks/${clock.id}`}>{clock.name}</Link>
+                      {clock.looping && (
+                        <>
+                          {" "}
+                          <span className="badge" title="Carries on across hours">
+                            Loops
+                          </span>
+                        </>
+                      )}
                     </td>
                     <td>
                       <span className="slot-strip" title={`${clock.slots.length} slots`}>
@@ -168,22 +176,26 @@ function Editor({ clock }: { clock: ClockView | null }) {
   const nextKey = useRef(1);
   const withKeys = (slots: ClockSlot[]): Draft[] => slots.map((slot) => ({ ...slot, key: nextKey.current++ }));
   const [name, setName] = useState(clock?.name ?? "");
+  const [looping, setLooping] = useState(clock?.looping ?? false);
   const [slots, setSlots] = useState<Draft[]>(() => withKeys(clock?.slots ?? []));
   const [separating, setSeparating] = useState<number | null>(null);
-  const saved = useMemo(() => JSON.stringify({ name: clock?.name ?? "", slots: clock?.slots ?? [] }), [clock]);
+  const saved = useMemo(
+    () => JSON.stringify({ name: clock?.name ?? "", looping: clock?.looping ?? false, slots: clock?.slots ?? [] }),
+    [clock],
+  );
   const plain = slots.map(({ key: _key, ...slot }) => slot);
-  const dirty = JSON.stringify({ name, slots: plain }) !== saved;
+  const dirty = JSON.stringify({ name, looping, slots: plain }) !== saved;
 
   const settled = useDebounced(plain, 300);
   const preview = useQuery({
-    queryKey: ["clock-preview", settled],
-    queryFn: () => unwrap(api.POST("/api/v1/clocks/preview", { body: { slots: settled } })),
+    queryKey: ["clock-preview", settled, looping],
+    queryFn: () => unwrap(api.POST("/api/v1/clocks/preview", { body: { slots: settled, looping } })),
     placeholderData: keepPreviousData,
   });
 
   const save = useAction(
     () => {
-      const body = { name, slots: plain };
+      const body = { name, looping, slots: plain };
       return clock
         ? unwrap(api.PUT("/api/v1/clocks/{id}", { params: { path: { id: clock.id } }, body }))
         : unwrap(api.POST("/api/v1/clocks", { body }));
@@ -274,6 +286,20 @@ function Editor({ clock }: { clock: ClockView | null }) {
                   onChange={(event) => setName(event.target.value)}
                 />
               </Field>
+              <label className="check" style={{ marginTop: "0.75rem" }}>
+                <input
+                  type="checkbox"
+                  checked={looping}
+                  disabled={!canEdit}
+                  onChange={(event) => setLooping(event.target.checked)}
+                />
+                Loop across hours
+              </label>
+              <p className="muted small" style={{ margin: "0.25rem 0 0" }}>
+                {looping
+                  ? "The clock carries on from its last slot whatever the hour, like a SAM Broadcaster clockwheel: it can be longer than an hour."
+                  : "Each hour starts the clock from its first slot; slots that do not fit in the hour are dropped."}
+              </p>
             </div>
             {categories.data?.length === 0 && (
               <Banner kind="warn">
@@ -330,7 +356,7 @@ function Editor({ clock }: { clock: ClockView | null }) {
           </Card>
         </div>
         <div className="stack">
-          <HourCard preview={shown} categories={byId} slots={plain} />
+          <HourCard preview={shown} categories={byId} slots={plain} looping={looping} />
           {clock && <SimulateCard clockId={clock.id} dirty={dirty} />}
         </div>
       </div>
@@ -489,62 +515,75 @@ function SlotRow({
   );
 }
 
-/** The hour, drawn: each slot as long as its category's average track. */
+/** Marks along the bar: quarters of the hour, or half hours of a long loop. */
+function ticks(span: number): { at: number; label: string }[] {
+  if (span <= HOUR_MS) {
+    return [0, 15, 30, 45, 60].map((minute) => ({ at: minute * 60_000, label: `:${String(minute).padStart(2, "0")}` }));
+  }
+  const marks = [];
+  for (let at = 0; at <= span; at += 30 * 60_000) {
+    marks.push({ at, label: duration(at).replace(/:00$/, "") });
+  }
+  return marks;
+}
+
+/** The hour (or the loop), drawn: each slot as long as its category's average track. */
 function HourCard({
   preview,
   categories,
   slots,
+  looping,
 }: {
   preview: ClockPreview | undefined;
   categories: Map<number, Category>;
   slots: ClockSlot[];
+  looping: boolean;
 }) {
   const short = preview?.slots.filter((slot) => slot.short) ?? [];
+  const span = looping && preview ? Math.max(HOUR_MS, preview.duration_ms) : HOUR_MS;
   return (
-    <Card title="The hour">
+    <Card title={looping ? "The loop" : "The hour"}>
       {!preview ? (
         <Loading />
       ) : slots.length === 0 ? (
         <Empty>Add slots to see the hour.</Empty>
       ) : (
         <div className="stack">
-          <div className="hour-bar" role="img" aria-label="Slots over the hour">
+          <div className="hour-bar" role="img" aria-label={looping ? "Slots over one round of the loop" : "Slots over the hour"}>
             {preview.slots.map((slot, index) => {
               const start = slot.expected_start_ms;
-              if (start >= HOUR_MS) {
+              if (start >= span) {
                 return null;
               }
-              const length = Math.min(slot.average_ms ?? 210_000, HOUR_MS - start);
+              const length = Math.min(slot.average_ms ?? 210_000, span - start);
               return (
                 <span
                   key={index}
                   className="segment"
                   title={`${index + 1}. ${categories.get(slot.category_id)?.name ?? "?"} at +${duration(start)}`}
                   style={{
-                    left: `${(start / HOUR_MS) * 100}%`,
-                    width: `${(length / HOUR_MS) * 100}%`,
+                    left: `${(start / span) * 100}%`,
+                    width: `${(length / span) * 100}%`,
                     background: slot.color ?? "var(--wave)",
                   }}
                 />
               );
             })}
-            {preview.duration_ms > 0 && preview.duration_ms < HOUR_MS && (
+            {preview.duration_ms > 0 && preview.duration_ms < span && (
               <span
                 className="segment repeat"
                 title="The clock starts over"
-                style={{ left: `${(preview.duration_ms / HOUR_MS) * 100}%`, right: 0 }}
+                style={{ left: `${(preview.duration_ms / span) * 100}%`, right: 0 }}
               />
             )}
           </div>
           <div className="hour-ticks muted small" aria-hidden="true">
-            <span>:00</span>
-            <span>:15</span>
-            <span>:30</span>
-            <span>:45</span>
-            <span>:60</span>
+            {ticks(span).map((tick) => (
+              <span key={tick.at}>{tick.label}</span>
+            ))}
           </div>
           <dl className="facts">
-            <dt>Expected length</dt>
+            <dt>{looping ? "One round" : "Expected length"}</dt>
             <dd className="num">{duration(preview.duration_ms)}</dd>
             {preview.runs_per_hour > 1 && (
               <>
@@ -552,12 +591,12 @@ function HourCard({
                 <dd>{preview.runs_per_hour.toFixed(1)} times an hour</dd>
               </>
             )}
-            {preview.duration_ms > HOUR_MS && (
+            {!looping && preview.duration_ms > HOUR_MS && (
               <>
                 <dt>Past the hour</dt>
                 <dd>
                   {count(preview.slots.filter((s) => s.beyond_hour).length, "slot")} will not play: the next hour
-                  starts its own clock.
+                  starts its own clock. Make the clock loop across hours to play them all.
                 </dd>
               </>
             )}
@@ -570,7 +609,10 @@ function HourCard({
             </Banner>
           )}
           <p className="muted small" style={{ margin: 0 }}>
-            Lengths are the categories' averages; real tracks vary. Each new hour starts its clock from the first slot.
+            Lengths are the categories' averages; real tracks vary.{" "}
+            {looping
+              ? "The loop carries on across hours, from where it stopped."
+              : "Each new hour starts its clock from the first slot."}
           </p>
         </div>
       )}

@@ -6,6 +6,8 @@
 //! selection method, an enforce-rules flag and separation overrides. The
 //! schedule says which clock runs at each hour of the week, in the
 //! station's time zone. Hours without a clock rotate the whole library.
+//! A clock starts over at each hour, unless it loops: then it carries on
+//! from its last slot across hours, like SAM Broadcaster's clockwheel.
 
 use std::collections::HashMap;
 
@@ -57,6 +59,8 @@ fn yes() -> bool {
 pub struct ClockView {
     pub id: u64,
     pub name: String,
+    /// Carries on from its last slot across hours instead of starting over.
+    pub looping: bool,
     pub slots: Vec<ClockSlot>,
     /// Hours of the week it is scheduled at.
     pub scheduled_hours: i64,
@@ -66,6 +70,9 @@ pub struct ClockView {
 #[serde(deny_unknown_fields)]
 pub struct ClockInput {
     pub name: String,
+    /// Off by default: the clock starts over at each hour.
+    #[serde(default)]
+    pub looping: bool,
     pub slots: Vec<ClockSlot>,
 }
 
@@ -87,8 +94,8 @@ impl ClockInput {
 }
 
 async fn clocks(state: &AppState, id: Option<u64>) -> ApiResult<Vec<ClockView>> {
-    let rows: Vec<(u64, String, i64)> = sqlx::query_as(
-        "SELECT c.id, c.name,
+    let rows: Vec<(u64, String, bool, i64)> = sqlx::query_as(
+        "SELECT c.id, c.name, c.looping,
                 (SELECT COUNT(*) FROM clock_schedule s WHERE s.clock_id = c.id)
          FROM clocks c WHERE ? IS NULL OR c.id = ? ORDER BY c.name",
     )
@@ -116,9 +123,10 @@ async fn clocks(state: &AppState, id: Option<u64>) -> ApiResult<Vec<ClockView>> 
     }
     Ok(rows
         .into_iter()
-        .map(|(id, name, scheduled_hours)| ClockView {
+        .map(|(id, name, looping, scheduled_hours)| ClockView {
             id,
             name,
+            looping,
             slots: by_clock.remove(&id).unwrap_or_default(),
             scheduled_hours,
         })
@@ -204,8 +212,9 @@ async fn create_clock(
     user.require(Role::Operator)?;
     let name = input.check()?;
     let mut tx = state.pool.begin().await?;
-    let id = sqlx::query("INSERT INTO clocks (name) VALUES (?)")
+    let id = sqlx::query("INSERT INTO clocks (name, looping) VALUES (?, ?)")
         .bind(name)
+        .bind(input.looping)
         .execute(&mut *tx)
         .await
         .map_err(conflict)?
@@ -236,8 +245,9 @@ async fn update_clock(
     if exists.is_none() {
         return Err(ApiError::not_found("clock"));
     }
-    sqlx::query("UPDATE clocks SET name = ? WHERE id = ?")
+    sqlx::query("UPDATE clocks SET name = ?, looping = ? WHERE id = ?")
         .bind(name)
+        .bind(input.looping)
         .bind(id)
         .execute(&mut *tx)
         .await
@@ -281,7 +291,8 @@ pub struct SlotPreview {
     pub average_ms: Option<u32>,
     /// When the slot is expected to start, from the top of the hour.
     pub expected_start_ms: u64,
-    /// Expected to start after the hour ends: it will not play.
+    /// Expected to start after the hour ends: it will not play (never for
+    /// a looping clock).
     pub beyond_hour: bool,
     /// Windows the slot applies (rotation settings, category, slot).
     pub windows: heron_rotation::Windows,
@@ -299,7 +310,8 @@ pub struct ClockPreview {
     pub slots: Vec<SlotPreview>,
     /// Expected length of the whole clock.
     pub duration_ms: u64,
-    /// Under an hour, the clock starts over: how many times it runs in an hour.
+    /// How many times the clock runs in an hour: more than 1 when it is
+    /// shorter than the hour; under 1 for a looping clock longer than it.
     pub runs_per_hour: f64,
 }
 
@@ -308,6 +320,9 @@ pub struct ClockPreview {
 pub struct PreviewRequest {
     /// The slots as edited, saved or not.
     pub slots: Vec<ClockSlot>,
+    /// Whether the clock loops across hours.
+    #[serde(default)]
+    pub looping: bool,
 }
 
 /// A clock as it will sound, from its slots (saved or not): expected
@@ -339,6 +354,7 @@ async fn preview_clock(
                 separation: slot.separation,
             })
             .collect(),
+        looping: request.looping,
     };
     let clock = &clock;
     let colors: HashMap<u64, Option<String>> =
@@ -372,7 +388,7 @@ async fn preview_clock(
             tracks: u32::try_from(lengths.len()).unwrap_or(u32::MAX),
             average_ms: average_ms.map(|ms| u32::try_from(ms).unwrap_or(u32::MAX)),
             expected_start_ms: at,
-            beyond_hour: at >= HOUR_MS,
+            beyond_hour: !clock.looping && at >= HOUR_MS,
             windows,
             calls_per_hour: 0.0,
             needed_tracks: 0,
@@ -382,7 +398,7 @@ async fn preview_clock(
         at += average_ms.unwrap_or(210_000);
     }
     let duration_ms = at;
-    let runs_per_hour = if duration_ms > 0 && duration_ms < HOUR_MS {
+    let runs_per_hour = if duration_ms > 0 && (duration_ms < HOUR_MS || clock.looping) {
         HOUR_MS as f64 / duration_ms as f64
     } else {
         1.0
@@ -502,6 +518,7 @@ mod tests {
         assert!(slot.separation.is_empty());
         let input = ClockInput {
             name: " ".to_owned(),
+            looping: false,
             slots: vec![],
         };
         assert!(input.check().is_err());

@@ -182,6 +182,7 @@ fn station() -> Station {
     let day = Clock {
         id: 1,
         name: "Day".into(),
+        looping: false,
         slots: vec![
             slot(POWER, Method::Weighted),
             slot(CURRENT, Method::LeastRecentlyPlayed),
@@ -205,6 +206,8 @@ fn station() -> Station {
     let night = Clock {
         id: 2,
         name: "Night".into(),
+        // Runs from midnight to 5, carrying on across the hours.
+        looping: true,
         slots: vec![
             slot(GOLD, Method::Random),
             slot(BALLADS, Method::Random),
@@ -452,6 +455,7 @@ fn a_small_library_relaxes_step_by_step_and_logs_it() {
     parts.clocks = vec![Clock {
         id: 1,
         name: "Small".into(),
+        looping: false,
         slots: vec![
             Slot {
                 category: POWER,

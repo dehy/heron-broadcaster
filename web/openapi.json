@@ -4412,6 +4412,10 @@
           "slots"
         ],
         "properties": {
+          "looping": {
+            "type": "boolean",
+            "description": "Off by default: the clock starts over at each hour."
+          },
           "name": {
             "type": "string"
           },
@@ -4441,7 +4445,7 @@
           "runs_per_hour": {
             "type": "number",
             "format": "double",
-            "description": "Under an hour, the clock starts over: how many times it runs in an hour."
+            "description": "How many times the clock runs in an hour: more than 1 when it is\nshorter than the hour; under 1 for a looping clock longer than it."
           },
           "slots": {
             "type": "array",
@@ -4517,6 +4521,7 @@
         "required": [
           "id",
           "name",
+          "looping",
           "slots",
           "scheduled_hours"
         ],
@@ -4525,6 +4530,10 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "looping": {
+            "type": "boolean",
+            "description": "Carries on from its last slot across hours instead of starting over."
           },
           "name": {
             "type": "string"
@@ -6102,6 +6111,10 @@
           "slots"
         ],
         "properties": {
+          "looping": {
+            "type": "boolean",
+            "description": "Whether the clock loops across hours."
+          },
           "slots": {
             "type": "array",
             "items": {
@@ -7029,7 +7042,7 @@
           },
           "beyond_hour": {
             "type": "boolean",
-            "description": "Expected to start after the hour ends: it will not play."
+            "description": "Expected to start after the hour ends: it will not play (never for\na looping clock)."
           },
           "calls_per_hour": {
             "type": "number",

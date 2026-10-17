@@ -298,6 +298,7 @@ mod tests {
                 clocks: vec![Clock {
                     id: 1,
                     name: "Clock".into(),
+                    looping: false,
                     slots: vec![Slot {
                         category: 1,
                         method: Method::Random,

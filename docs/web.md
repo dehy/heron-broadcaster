@@ -12,7 +12,7 @@
 | **Tracks** | The library: search, filters (playable, not analyzed, silent, missing, disabled, needs review), category, sort, pages; queue one track or a selection | operator |
 | **Track** | Waveform with the cue-in, cue-out, where the next track starts and the fades; listen from anywhere, from the cue-in or the ending; drag the points or type them; Gap Killer and crossfade overrides; categories and weights; analysis, file and identification; recent plays | operator |
 | **Artists** | Artists and their names (search any name); rename, move a name to another artist or split it off, merge artists, mark artists similar, restrict an artist; the suggestions to review, and the MusicBrainz relationships lookup | operator |
-| **Clocks** | Each clock's slots, reordered by dragging (or with the keyboard), with their category, selection method, enforce-rules flag and separation overrides; the hour drawn as it will sound, categories running short, an hour simulated | operator |
+| **Clocks** | Each clock's slots, reordered by dragging (or with the keyboard), with their category, selection method, enforce-rules flag and separation overrides; whether the clock loops across hours; the hour (or the loop) drawn as it will sound, categories running short, an hour simulated | operator |
 | **Schedule** | The week, hour by hour: pick a clock and click or drag over the hours, in station time | operator |
 | **Categories** | Create, rename, recolor and delete categories; the separation windows they override | operator |
 | **Restrictions** | Dayparting, date ranges and sequences on tracks, artists and categories; turn them on and off | operator |

@@ -63,6 +63,7 @@ Building good clocks has to be easy: the editor shows each hour as it will sound
 How a clock runs:
 
 - Each station hour starts its clock at the **first slot**; slots run in order. A clock shorter than the hour **starts over**; slots expected after the end of the hour do not play (the next hour starts its own clock). The track playing at the top of the hour finishes: there is no hard sync yet.
+- A clock can instead **loop across hours**, like SAM Broadcaster's clockwheel: it carries on from its last slot whatever the hour, so it can be longer than an hour (a 27-line wheel of two hours plays every line). Scheduled again after another clock, it resumes where it stopped.
 - A slot that has nothing it may play, even relaxed, is skipped for the next one, and the pick says so.
 - Hours without a clock rotate the **whole library**: least recently played, rules enforced.
 

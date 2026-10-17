@@ -60,7 +60,7 @@ Targets are not foreign keys: restrictions on a deleted category go with it, mer
 
 | Table | Columns |
 |---|---|
-| `clocks` | id, name |
+| `clocks` | id, name, looping (carries on across hours instead of starting over at each hour) |
 | `clock_slots` | clock_id, position, category_id, selection_method (least_recently_played, random, weighted), enforce_rules, separation (JSON: the windows it overrides) |
 | `clock_schedule` | day_of_week (ISO: 1 = Monday), hour (station time), clock_id |
 | `rotation_picks` | id, track_id, planned_at, clock_id, slot, hour_start, category_id, step, explanation (JSON, see [Rotation](rotation.md#rotation-model)), engine_started_at and entry_id (the engine's queue entry), play_id — the selection log |

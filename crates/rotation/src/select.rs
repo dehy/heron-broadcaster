@@ -383,7 +383,8 @@ fn fill(
 ///
 /// - The clock scheduled for the station hour of `at_ms` runs its slots in
 ///   order, from the first one at each new hour, and starts over when it
-///   runs out before the hour ends.
+///   runs out before the hour ends. A looping clock carries on from its
+///   last slot instead, whatever the hour.
 /// - Without a scheduled clock, the whole library rotates: least recently
 ///   played, rules enforced.
 /// - `None` only when restrictions forbid every track a slot, and the
@@ -413,7 +414,10 @@ pub fn next(
     };
     let count = clock.slots.len();
     let first = match last {
-        Some(last) if last.hour_start_unix_ms == hour_start && last.clock_id == clock.id => {
+        Some(last)
+            if last.clock_id == clock.id
+                && (clock.looping || last.hour_start_unix_ms == hour_start) =>
+        {
             (last.slot as usize + 1) % count
         }
         _ => 0,
@@ -508,6 +512,7 @@ mod tests {
                 clocks: vec![Clock {
                     id: 1,
                     name: "Clock".into(),
+                    looping: false,
                     slots,
                 }],
                 // Every hour of 1970-01-01 (a Thursday) but 02:00.
@@ -575,6 +580,58 @@ mod tests {
         assert_eq!(unscheduled.position, None);
         assert_eq!(unscheduled.explanation.category_id, None);
         assert_eq!(unscheduled.explanation.pool, 20);
+    }
+
+    #[test]
+    fn looping_clocks_carry_on_across_hours() {
+        let mut library = library(vec![
+            slot(1, Method::Random),
+            slot(2, Method::Random),
+            slot(3, Method::Random),
+        ]);
+        library.clocks.get_mut(&1).unwrap().looping = true;
+        let mut rng = Rng::new(8);
+        let history = History::default();
+        let first = next(&library, &history, 50 * MIN, None, &mut rng).unwrap();
+        assert_eq!(first.position.unwrap().slot, 0);
+        let second = next(
+            &library,
+            &history,
+            58 * MIN,
+            first.position.as_ref(),
+            &mut rng,
+        )
+        .unwrap();
+        // The next hour carries on with the next slot, then wraps around.
+        let third = next(
+            &library,
+            &history,
+            HOUR + 2 * MIN,
+            second.position.as_ref(),
+            &mut rng,
+        )
+        .unwrap();
+        assert_eq!(third.position.unwrap().slot, 2);
+        assert_eq!(third.position.unwrap().hour_start_unix_ms, HOUR);
+        let fourth = next(
+            &library,
+            &history,
+            HOUR + 6 * MIN,
+            third.position.as_ref(),
+            &mut rng,
+        )
+        .unwrap();
+        assert_eq!(fourth.position.unwrap().slot, 0);
+        // After an unscheduled hour (02:00), it carries on where it stopped.
+        let after = next(
+            &library,
+            &history,
+            3 * HOUR,
+            fourth.position.as_ref(),
+            &mut rng,
+        )
+        .unwrap();
+        assert_eq!(after.position.unwrap().slot, 1);
     }
 
     #[test]

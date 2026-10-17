@@ -1467,6 +1467,8 @@ export interface components {
             rms_right: number;
         };
         ClockInput: {
+            /** @description Off by default: the clock starts over at each hour. */
+            looping?: boolean;
             name: string;
             slots: components["schemas"]["ClockSlot"][];
         };
@@ -1478,7 +1480,8 @@ export interface components {
             duration_ms: number;
             /**
              * Format: double
-             * @description Under an hour, the clock starts over: how many times it runs in an hour.
+             * @description How many times the clock runs in an hour: more than 1 when it is
+             *     shorter than the hour; under 1 for a looping clock longer than it.
              */
             runs_per_hour: number;
             slots: components["schemas"]["SlotPreview"][];
@@ -1515,6 +1518,8 @@ export interface components {
         ClockView: {
             /** Format: int64 */
             id: number;
+            /** @description Carries on from its last slot across hours instead of starting over. */
+            looping: boolean;
             name: string;
             /**
              * Format: int64
@@ -2114,6 +2119,8 @@ export interface components {
             theme: components["schemas"]["Theme"];
         };
         PreviewRequest: {
+            /** @description Whether the clock loops across hours. */
+            looping?: boolean;
             /** @description The slots as edited, saved or not. */
             slots: components["schemas"]["ClockSlot"][];
         };
@@ -2484,7 +2491,10 @@ export interface components {
              * @description Their average playable length; missing for an empty category.
              */
             average_ms?: number | null;
-            /** @description Expected to start after the hour ends: it will not play. */
+            /**
+             * @description Expected to start after the hour ends: it will not play (never for
+             *     a looping clock).
+             */
             beyond_hour: boolean;
             /**
              * Format: double

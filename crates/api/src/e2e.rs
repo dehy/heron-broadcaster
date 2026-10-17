@@ -1218,6 +1218,7 @@ async fn rotation_follows_clocks_restrictions_and_logs_its_picks() {
     assert_eq!(status, StatusCode::CREATED, "{clock}");
     let clock_id = clock["id"].as_u64().unwrap();
     assert_eq!(clock["slots"][1]["separation"]["artist_min"], 0);
+    assert_eq!(clock["looping"], false);
     let week: Vec<Value> = (1..=7)
         .flat_map(|day| {
             (0..24).map(move |hour| json!({"day_of_week": day, "hour": hour, "clock_id": clock_id}))
@@ -1377,6 +1378,34 @@ async fn rotation_follows_clocks_restrictions_and_logs_its_picks() {
     assert_eq!(preview["slots"][0]["tracks"], 3, "{preview}");
     assert_eq!(preview["slots"][1]["average_ms"], 3_000);
     assert!(preview["runs_per_hour"].as_f64().unwrap() > 100.0);
+    // A looping clock: nothing falls past the hour.
+    let long: Vec<Value> = (0..30)
+        .map(|_| json!({"category_id": categories[0]}))
+        .collect();
+    let (status, looped) = admin
+        .send(
+            Method::POST,
+            "/clocks/preview",
+            json!({"slots": long, "looping": true}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{looped}");
+    assert!(
+        looped["slots"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|s| s["beyond_hour"] == false)
+    );
+    let (status, saved) = admin
+        .send(
+            Method::PUT,
+            &format!("/clocks/{clock_id}"),
+            json!({"name": "Hour", "looping": true, "slots": clock["slots"]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["looping"], true);
     let (status, report) = admin
         .send(
             Method::POST,

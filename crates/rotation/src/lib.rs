@@ -156,6 +156,9 @@ pub struct Clock {
     pub id: ClockId,
     pub name: String,
     pub slots: Vec<Slot>,
+    /// Loops across hours: carries on from its last slot instead of
+    /// starting over at each hour (SAM Broadcaster's clockwheel).
+    pub looping: bool,
 }
 
 /// Which clock runs at a given hour of a given day.
