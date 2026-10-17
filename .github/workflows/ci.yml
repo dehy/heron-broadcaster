@@ -67,7 +67,7 @@ jobs:
       - run: scripts/check-spdx.sh
 
   compose:
-    name: Docker Compose on ${{ matrix.arch }} (build, start, import)
+    name: Docker Compose on ${{ matrix.arch }} (build, start, import, stream)
     # Native runners for both architectures: Heron must run on a Raspberry Pi.
     runs-on: ${{ matrix.runner }}
     needs: [rust, web]
@@ -85,7 +85,8 @@ jobs:
       - name: Generate a test library
         run: scripts/generate-test-library.sh data/music 60
       - run: docker compose build
-      - run: docker compose up -d --wait --wait-timeout 300
+      # The icecast profile adds a local Icecast server for the streaming check.
+      - run: docker compose --profile icecast up -d --wait --wait-timeout 300
       - name: Migrations were applied
         run: |
           docker compose exec -T mariadb \
@@ -95,7 +96,9 @@ jobs:
         run: curl -fsS http://localhost:8000/api/v1/status | grep -q '"database":"ok"'
       - name: Every track is imported and analyzed
         run: scripts/wait-for-analysis.sh http://localhost:8000 60 300
+      - name: The engine streams to Icecast
+        run: scripts/check-streaming.sh data/music
       - if: failure()
-        run: docker compose ps && docker compose logs
+        run: docker compose --profile icecast ps && docker compose --profile icecast logs
       - if: always()
-        run: docker compose down -v
+        run: docker compose --profile icecast down -v

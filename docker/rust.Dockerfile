@@ -5,6 +5,10 @@
 # Targets: heron-engine, heron-api, heron-analyzer.
 
 FROM rust:1.99.1-slim-trixie AS builder
+# LAME (MP3 encoding) is compiled from source by its build script (configure, make).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends g++ make \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
 COPY crates ./crates
