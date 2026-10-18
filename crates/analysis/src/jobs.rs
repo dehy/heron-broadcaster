@@ -204,8 +204,8 @@ pub async fn complete(
     sqlx::query(
         "INSERT INTO track_analysis (
              track_id, analysis_version, params_hash, integrated_lufs, true_peak_db,
-             cue_in_ms, cue_out_ms, fade_out_start_ms, has_internal_silence, analyzed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6))
+             cue_in_ms, cue_out_ms, fade_out_start_ms, has_internal_silence, bpm, analyzed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6))
          ON DUPLICATE KEY UPDATE
              analysis_version = VALUES(analysis_version),
              params_hash = VALUES(params_hash),
@@ -215,6 +215,7 @@ pub async fn complete(
              cue_out_ms = VALUES(cue_out_ms),
              fade_out_start_ms = VALUES(fade_out_start_ms),
              has_internal_silence = VALUES(has_internal_silence),
+             bpm = VALUES(bpm),
              analyzed_at = VALUES(analyzed_at)",
     )
     .bind(job.track_id)
@@ -226,6 +227,7 @@ pub async fn complete(
     .bind(analysis.cue_out_ms)
     .bind(analysis.fade_out_start_ms)
     .bind(analysis.has_internal_silence)
+    .bind(analysis.bpm)
     .execute(&mut *tx)
     .await?;
     sqlx::query(
@@ -399,6 +401,7 @@ mod tests {
             cue_out_ms: 178_500,
             fade_out_start_ms: Some(176_000),
             has_internal_silence: false,
+            bpm: Some(120.5),
             waveform: crate::Waveform {
                 interval_ms: 50,
                 peaks: vec![0, 128, 255],

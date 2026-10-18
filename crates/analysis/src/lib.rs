@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Track analysis: loudness, silence, cue and fade point detection.
+//! Track analysis: loudness, silence, cue and fade point detection, tempo.
 //!
 //! Runs in `heron-analyzer` when a track is imported, never in the engine.
 //! The algorithm is described in `docs/analysis.md`.
@@ -10,6 +10,7 @@ pub mod decode;
 pub mod fingerprint;
 #[cfg(feature = "mysql")]
 pub mod jobs;
+mod tempo;
 
 pub use analyzer::{
     Analysis, Analyzer, FRAME_MS, WAVEFORM_FLOOR_DB, WAVEFORM_INTERVAL_MS, Waveform,
@@ -24,7 +25,8 @@ pub use fingerprint::{Chromaprint, fingerprint_file};
 /// - 1: M1.
 /// - 2: adds the Chromaprint fingerprint (M1b).
 /// - 3: adds the waveform overview (M5).
-pub const ALGORITHM_VERSION: u32 = 3;
+/// - 4: adds the tempo (M5b).
+pub const ALGORITHM_VERSION: u32 = 4;
 
 /// Errors raised while analyzing a file.
 #[derive(Debug, thiserror::Error)]
