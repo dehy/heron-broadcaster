@@ -159,6 +159,7 @@ Every rule works with pushed and scraped metrics, and alerts name the station.
 | `HeronUnderruns` | warning | More than 50 blocks without decoded audio in 10 min | The machine is overloaded, or the library is slow (network share). |
 | `HeronOutputUnstable` | warning | An output reconnected more than 3 times in 30 min | Network or stream server trouble. |
 | `HeronPreloadFailures` | warning | Queued tracks could not be read | The library is unreachable, or files were deleted. |
+| `HeronTrackStalled` | warning | A cued track could not start within 10 s while nothing played, and was skipped | Its file hangs: an unreachable network share. The fallback directory filled in. |
 | `HeronClockStalled` | warning | The engine stalled for more than 1 s in the last hour | The machine was suspended or starved of CPU: listeners heard a gap. |
 | `HeronClockNotSynchronized` | warning | The kernel reports the clock unsynchronized for 10 min | Run NTP on the host (chrony, systemd-timesyncd). |
 | `HeronClockOff` | warning | The clock may be off by more than 1 s for 10 min | Same. |
@@ -194,6 +195,7 @@ Every service also exports `heron_build_info{service, version}` (always 1), and,
 | `heron_engine_fallback_tracks_total` | counter | | Tracks started from the fallback directory |
 | `heron_engine_silence_skips_total` | counter | | Tracks skipped by the silence watchdog |
 | `heron_engine_preload_failures_total` | counter | | Queued tracks whose file could not be read ahead of time |
+| `heron_engine_stalled_tracks_total` | counter | | Cued tracks skipped because they could not start within 10 s while nothing played |
 | `heron_clock_synchronized` | gauge | | 1 when the kernel reports the clock synchronized (Linux only) |
 | `heron_clock_offset_seconds` | gauge | | Offset the kernel is correcting |
 | `heron_clock_estimated_error_seconds` | gauge | | The kernel's estimate of the clock's error |
@@ -332,6 +334,8 @@ Errors and panics of every service, and JavaScript errors of the web interface, 
 | `HERON_SENTRY_ENVIRONMENT` | both | Environment shown in Sentry (`production` by default) |
 | `HERON_SENTRY_TRACES_SAMPLE_RATE` | Rust services | Share of operations traced for performance monitoring, 0 (default) to 1 |
 
+None of them can stop a service: an invalid value is logged as an error and ignored. The same goes for the remote write settings (an invalid interval means 15 s).
+
 1. In Sentry, create a project for the services (platform *Rust*) and, if you want browser errors, another for the web interface (platform *React*). Browsers can read the web DSN, so keep it separate from the services'.
 2. Copy their DSNs into `.env`:
 
@@ -345,7 +349,7 @@ Errors and panics of every service, and JavaScript errors of the web interface, 
 
 What is sent:
 
-- **Rust services:** every `ERROR` log becomes a Sentry event, with the `INFO` and `WARN` logs before it as breadcrumbs, and every panic. Events carry the release (`heron-engine@0.1.0`…), a `service` tag and the host's name. No IP addresses or request bodies. The engine's audio thread never logs, so reporting never touches it.
+- **Rust services:** every `ERROR` log becomes a Sentry event, with the `WARN` logs before it as breadcrumbs, and every panic. `INFO` logs are not sent. Fields that may identify people (`user`, `username`, `by`, `email`, addresses, passwords, tokens, keys) are replaced by `[redacted]` in events and breadcrumbs. Events carry the release (`heron-engine@0.1.0`…), a `service` tag and the host's name. No IP addresses or request bodies. The engine's audio thread never logs, so reporting never touches it.
 - **Web interface:** uncaught errors and unhandled promise rejections, with the release `heron-web@<version>` and a `service` tag. No user details, cookies, headers, request bodies or query strings (sessions and API tokens travel in them). The Sentry SDK is only downloaded by browsers when the DSN is set.
 
 The web interface reads its DSN when the page loads, from `/config.js`, which `heron-web` builds from its environment at startup: changing it needs `docker compose up -d heron-web`, not a rebuild.

@@ -1077,6 +1077,15 @@
           "expr": "increase(heron_engine_underrun_tracks_total{station=~\"$station\"}[$__interval])",
           "refId": "C",
           "legendFormat": "tracks with underruns"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "increase(heron_engine_stalled_tracks_total{station=~\"$station\"}[$__interval])",
+          "refId": "D",
+          "legendFormat": "tracks that could not start"
         }
       ],
       "options": {

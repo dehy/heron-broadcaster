@@ -37,7 +37,7 @@ groups:
             heron-api is up and that rotation can pick tracks.
 
       - alert: HeronSilenceOnAir
-        expr: heron_engine_silent_seconds > 45 and on() heron_engine_paused == 0
+        expr: heron_engine_silent_seconds > 45 and heron_engine_paused == 0
         labels:
           severity: critical
         annotations:
@@ -118,6 +118,16 @@ groups:
           description: >-
             The library may be unreachable (network share?) or files were
             deleted. Tracks that cannot be read are skipped.
+
+      - alert: HeronTrackStalled
+        expr: increase(heron_engine_stalled_tracks_total[30m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.station }}: a track could not start and was skipped"
+          description: >-
+            A cued track's file could not be read for 10 s while nothing played
+            (unreachable network share?). The fallback directory filled in.
 
       - alert: HeronClockStalled
         expr: increase(heron_engine_clock_resets_total[1h]) > 0

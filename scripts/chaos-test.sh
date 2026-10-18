@@ -36,7 +36,36 @@ music=$(setting HERON_MUSIC_DIR ./data/music)
 ffmpeg_image=linuxserver/ffmpeg:7.1.1
 work=$(mktemp -d)
 failures=0
-trap 'rm -rf "${work:?}"' EXIT
+
+# Puts back the library files step 4 moved away. Fails, keeping them in the
+# work directory, when one cannot be put back.
+restore_deleted() {
+    [ -d "$work/deleted" ] || return 0
+    (cd "$work/deleted" && find . -type f) >"$work/to-restore"
+    restore_failed=0
+    while IFS= read -r path; do
+        if [ -e "$music/$path" ] || ! mv "$work/deleted/$path" "$music/$path"; then
+            echo "  cannot restore $music/$path" >&2
+            restore_failed=1
+        fi
+    done <"$work/to-restore"
+    [ "$restore_failed" -eq 0 ] && rm -rf "${work:?}/deleted"
+}
+
+# On any exit, the library is left as it was found.
+cleanup() {
+    status=$?
+    rm -f -- "${music:?}/chaos-silence.wav"
+    if restore_deleted; then
+        rm -rf "${work:?}"
+    else
+        echo "library files moved by the test are kept in $work/deleted" >&2
+        status=1
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 ctl() {
     docker compose exec -T heron-engine heron-engine ctl "$@"
@@ -197,9 +226,7 @@ main() {
         sleep 5
     done
     check_listening 3 && pass "missing files were skipped (or played from memory) without dead air"
-    (cd "$work/deleted" && find . -type f) | while read -r path; do
-        mv "$work/deleted/$path" "$music/$path"
-    done
+    restore_deleted || fail "the deleted files could not all be restored"
 
     step "5. A silent file queued"
     skips=$(metric heron_engine_silence_skips_total)

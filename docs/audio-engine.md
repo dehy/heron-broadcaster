@@ -142,7 +142,7 @@ Every failure path ends with audio continuing, in this order:
 | Failure | What happens |
 |---|---|
 | A queued file is missing, unreadable or corrupt | Read ahead into memory when it is queued (it plays even if deleted later); if it cannot be read or decoded, it is skipped before it starts. A file that fails mid-way ends there and the next track starts. |
-| The library is slow or unreachable | The next tracks are already in memory ([Preloading](#preloading)). |
+| The library is slow or unreachable | The next tracks are already in memory ([Preloading](#preloading)). A cued track whose file hangs (not preloaded in time) is given up after 10 s with nothing on air, and a fallback track plays instead; it is not put back in the queue. |
 | The queue runs dry (the API is down or cannot reach the engine, autofill is off, restrictions forbid every track) | A track from the **fallback directory** is cued, 30 s before the track on air ends or at once when nothing plays, so it starts with the planned transition. Anything queued replaces a cued fallback track. |
 | A track stays silent | The **silence watchdog** skips it after `silence_watchdog.timeout_ms` of silence (below −50 dBFS) on the master bus. If the next track is silent too, it skips to the fallback directory instead. Pauses do not count. |
 | Nothing to play at all | Silence is streamed (the outputs stay connected). After 5 s, the engine logs an error, sets `heron_engine_dead_air` and warns in `/healthz`. |
@@ -169,7 +169,7 @@ The chaos tests (`scripts/chaos-test.sh`) check each of these on a running stack
 | `heron_engine_silent_seconds` | How long the master bus has been silent (below −50 dBFS) |
 | `heron_engine_dead_air` | 1 when there is nothing to play |
 | `heron_engine_fallback_tracks_total`, `heron_engine_silence_skips_total` | Tracks started from the fallback directory, tracks skipped by the silence watchdog |
-| `heron_engine_preload_failures_total` | Queued tracks that could not be read ahead of time |
+| `heron_engine_preload_failures_total`, `heron_engine_stalled_tracks_total` | Queued tracks that could not be read ahead of time, cued tracks given up because they could not start |
 | `heron_clock_synchronized`, `heron_clock_offset_seconds`, `heron_clock_estimated_error_seconds` | The server clock's synchronization, from the kernel (read-only `adjtimex`) |
 | `heron_output_connected`, `heron_output_bytes_total`, `heron_output_reconnects_total`, `heron_output_dropped_chunks_total` | Per output |
 | `heron_encoder_dropped_chunks_total` | Per encoder profile |
