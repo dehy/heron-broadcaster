@@ -28,7 +28,7 @@
 - **Library management through the API:** the API cannot write files, so the review of identifications (apply a candidate release, or keep the file's tags), organizing after a dry run and undoing batches are **library tasks** (`library_tasks`) that `heron-librarian` runs in order ([Library management](../library.md#work-asked-through-the-api)). A picked release is applied as a `review` batch; undoing it puts the track back in review.
 - **Waveforms** are computed with the analysis (`track_waveforms`, one byte per 50 ms on a dB scale). `ALGORITHM_VERSION` 3: upgrading re-analyzes the library once, in the background.
 - **Web app:** React with TanStack Query and dnd-kit, a small History API router, live state from the WebSocket, light and dark themes following the system with a per-user override, responsive down to phone width. Unit tests with Vitest in CI.
-- Deferred: tag editing in the browser; forms for outputs and encoders other than Icecast and MP3 ([M10](m10-sinks-live-dj.md)); clockwheel and rotation screens ([M6](m6-rotation-clockwheels.md)); a browser end-to-end test in CI (the demonstration above was run by hand).
+- Deferred: tag editing in the browser ([M5b](m5b-track-details-tags.md)); forms for outputs and encoders other than Icecast and MP3 ([M10](m10-sinks-live-dj.md)); clockwheel and rotation screens (delivered in [M6](m6-rotation-clockwheels.md)); a browser end-to-end test in CI (the demonstration above was run by hand).
 - Not verified here: the Compose images were not rebuilt locally (Docker had no outbound network during the work); CI builds and runs them.
 
 ## References
