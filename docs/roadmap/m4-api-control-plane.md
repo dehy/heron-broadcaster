@@ -25,7 +25,7 @@
 
 - Design: [API and control plane](../api.md).
 - **Authentication:** users with three roles (viewer, operator, admin), session cookies (HttpOnly, SameSite=Strict, plus an `X-Requested-With` header on changes) and API tokens; Argon2id, hashed one at a time; sign-in lockout. The first admin is created with `heron-api user add`.
-- **Queue manager:** builds the engine's tracks from the analysis and overrides; autofill with the least recently played tracks stands in for the rotation until [M6](m6-rotation-clockwheels.md); queued tracks follow the librarian's moves, cue point changes and missing files.
+- **Queue manager:** builds the engine's tracks from the analysis and overrides; autofill with the least recently played tracks stood in for the rotation until [M6](m6-rotation-clockwheels.md) replaced it; queued tracks follow the librarian's moves, cue point changes and missing files.
 - **Play history** from the engine's track changes, with how each play ended, reconciled after reconnections.
 - **Engine configuration** in MariaDB, checked before it is saved and pushed when it changes or the engine reconnects. The first time, the API adopts what the engine runs (outputs set with `ctl` in M2), keeping their IDs, so stations stay on air when upgrading.
 - **Engine:** new `MoveQueueEntry` and `ReplaceQueueEntry` calls, a play source on each track, the engine's start time in its state. Fixed: enqueuing at a position other than 0 went one place too far when a track was cued.

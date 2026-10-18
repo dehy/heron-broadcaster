@@ -60,5 +60,5 @@ npm run typecheck && npm run build
 
 - The FX player and transport act at once; there is no undo for a skip.
 - Only Icecast outputs and MP3 profiles have forms: the other kinds arrive with their encoders and sinks in [M10](roadmap/m10-sinks-live-dj.md) (the engine refuses them until then).
-- Tags cannot be edited in the browser: identification or the files' own tags decide them.
+- Tags cannot be edited in the browser yet: identification or the files' own tags decide them. Editing them comes with [M5b](roadmap/m5b-track-details-tags.md), with labels and the track details (date added, last played, plays, bitrate).
 - The clock editor draws each slot with its category's average length: real tracks vary, so the hour as it sounds drifts from the drawing; simulate it to see real picks.

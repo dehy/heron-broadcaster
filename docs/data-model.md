@@ -14,6 +14,17 @@ The schema lives in `migrations/`; this page summarizes it. Tables not used yet 
 | `track_waveforms` | track_id, interval_ms (50), peaks (one byte per interval: the highest sample peak on a dB scale, 0 for −72 dBFS or below, 255 for full scale) — drawn by the web UI, computed with the analysis |
 | `track_identifications` | track_id, status (identified, needs_review, kept: reviewed, the file keeps its own tags), reason, score, recording_mbid, release_mbid, candidates (JSON, for the review screen), updated_at |
 
+## Track details and labels
+
+Sketch, defined in [M5b](roadmap/m5b-track-details-tags.md).
+
+| Table | Columns |
+|---|---|
+| `tracks` (added) | added_at (date added to the station: the first scan), bitrate_kbps, vbr, sample_rate, channels, codec; isrc, record_label, catalog_number, first_release_year, genres (from MusicBrainz) |
+| `track_programming` | track_id, bpm (measured, or set by hand), era, mood, sound_code (the last three on scales the station defines in the settings) |
+| `labels` | id, name (unique), color |
+| `track_labels` | track_id, label_id |
+
 ## Library management
 
 See [Library management](library.md).
