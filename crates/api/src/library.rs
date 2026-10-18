@@ -19,6 +19,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use heron_core::{FileStamp, LibraryPath};
+use heron_library::details::{self, DETAILS_VERSION};
+use heron_library::tags::FileTags;
 use heron_library::{LibraryLock, is_audio, is_hidden};
 use serde::Serialize;
 use sqlx::{MySqlPool, Row};
@@ -63,6 +65,9 @@ pub struct ScanReport {
     pub missing: u64,
     /// Files modified too recently (probably still being copied).
     pub deferred: u64,
+    /// Unchanged files read again for details an older scanner did not
+    /// read (bitrate, genre, …), without being analyzed again.
+    pub refreshed: u64,
     /// Files that could not be read.
     pub failed: u64,
     /// Analysis jobs queued.
@@ -96,17 +101,14 @@ struct KnownTrack {
     stamp: Option<FileStamp>,
     hash: Option<Vec<u8>>,
     missing: bool,
+    /// Read by an older scanner: its details are read again.
+    stale_details: bool,
 }
 
 /// What the scanner reads from a new or changed file.
 struct FileInfo {
     hash: [u8; 32],
-    title: Option<String>,
-    artist: Option<String>,
-    album: Option<String>,
-    /// The first MusicBrainz artist ID of the artist tag.
-    musicbrainz_artist_id: Option<String>,
-    duration_ms: Option<u32>,
+    tags: FileTags,
 }
 
 /// Library and analysis progress, served by `/api/v1/library/status`.
@@ -293,6 +295,9 @@ impl Library {
                     } else {
                         report.unchanged += 1;
                     }
+                    if track.stale_details && self.refresh(track.id, &file.path).await? {
+                        report.refreshed += 1;
+                    }
                 }
                 _ if file.stamp.mtime_us > settle_before => report.deferred += 1,
                 existing => {
@@ -361,6 +366,7 @@ impl Library {
             restored = report.restored,
             missing = report.missing,
             deferred = report.deferred,
+            refreshed = report.refreshed,
             failed = report.failed,
             enqueued = report.enqueued,
             duration_ms = report.duration_ms,
@@ -378,9 +384,10 @@ impl Library {
     async fn known_tracks(&self) -> Result<HashMap<String, KnownTrack>, sqlx::Error> {
         let rows = sqlx::query(
             "SELECT id, path, file_size, file_mtime_us, file_hash,
-                    missing_since IS NOT NULL AS missing
+                    missing_since IS NOT NULL AS missing, details_version < ? AS stale_details
              FROM tracks",
         )
+        .bind(DETAILS_VERSION)
         .fetch_all(&self.pool)
         .await?;
         let mut tracks = HashMap::with_capacity(rows.len());
@@ -396,6 +403,7 @@ impl Library {
                         .map(|(size, mtime_us)| FileStamp { size, mtime_us }),
                     hash: row.try_get("file_hash")?,
                     missing: row.try_get("missing")?,
+                    stale_details: row.try_get("stale_details")?,
                 },
             );
         }
@@ -429,24 +437,19 @@ impl Library {
     }
 
     async fn insert(&self, file: &DiskFile, info: &FileInfo) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "INSERT INTO tracks
-                 (path, file_hash, file_size, file_mtime_us, title, artist, album,
-                  musicbrainz_artist_id, duration_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        let mut tx = self.pool.begin().await?;
+        let id = sqlx::query(
+            "INSERT INTO tracks (path, file_hash, file_size, file_mtime_us) VALUES (?, ?, ?, ?)",
         )
         .bind(file.path.as_str())
         .bind(&info.hash[..])
         .bind(file.stamp.size)
         .bind(file.stamp.mtime_us)
-        .bind(&info.title)
-        .bind(&info.artist)
-        .bind(&info.album)
-        .bind(&info.musicbrainz_artist_id)
-        .bind(info.duration_ms)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
+        .execute(&mut *tx)
+        .await?
+        .last_insert_id();
+        details::save(&mut *tx, id, &info.tags).await?;
+        tx.commit().await
     }
 
     async fn update(
@@ -459,22 +462,16 @@ impl Library {
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             "UPDATE tracks
-             SET file_hash = ?, file_size = ?, file_mtime_us = ?, title = ?, artist = ?,
-                 album = ?, musicbrainz_artist_id = ?, duration_ms = COALESCE(?, duration_ms),
-                 missing_since = NULL
+             SET file_hash = ?, file_size = ?, file_mtime_us = ?, missing_since = NULL
              WHERE id = ?",
         )
         .bind(&info.hash[..])
         .bind(file.stamp.size)
         .bind(file.stamp.mtime_us)
-        .bind(&info.title)
-        .bind(&info.artist)
-        .bind(&info.album)
-        .bind(&info.musicbrainz_artist_id)
-        .bind(info.duration_ms)
         .bind(id)
         .execute(&mut *tx)
         .await?;
+        details::save(&mut *tx, id, &info.tags).await?;
         // The file changed: its cue points may be wrong, analyze it again.
         if file_changed {
             sqlx::query("DELETE FROM track_analysis WHERE track_id = ?")
@@ -483,6 +480,30 @@ impl Library {
                 .await?;
         }
         tx.commit().await
+    }
+
+    /// Reads the details of an unchanged file again. Returns whether it
+    /// could be read.
+    async fn refresh(&self, id: u64, path: &LibraryPath) -> Result<bool, ScanError> {
+        let absolute = path.resolve(&self.root);
+        let read =
+            tokio::task::spawn_blocking(move || heron_library::tags::read(&absolute)).await?;
+        match read {
+            Ok(read) => {
+                details::save(&self.pool, id, &read).await?;
+                Ok(true)
+            }
+            Err(error) => {
+                tracing::warn!(%path, %error, "cannot read tags");
+                // Not read again at every scan: the file is unreadable.
+                sqlx::query("UPDATE tracks SET details_version = ? WHERE id = ?")
+                    .bind(DETAILS_VERSION)
+                    .bind(id)
+                    .execute(&self.pool)
+                    .await?;
+                Ok(false)
+            }
+        }
     }
 
     async fn update_path(
@@ -560,16 +581,9 @@ fn read_file(path: &Path) -> std::io::Result<FileInfo> {
     // Unreadable tags are not fatal: the track is still imported and analyzed.
     let read = heron_library::tags::read(path).unwrap_or_else(|error| {
         tracing::warn!(path = %path.display(), %error, "cannot read tags");
-        heron_library::tags::FileTags::default()
+        FileTags::default()
     });
-    Ok(FileInfo {
-        hash,
-        title: read.tags.title,
-        artist: read.tags.artist,
-        album: read.tags.album,
-        musicbrainz_artist_id: read.tags.musicbrainz.first_artist(),
-        duration_ms: read.duration_ms,
-    })
+    Ok(FileInfo { hash, tags: read })
 }
 
 fn now_us() -> i64 {
@@ -671,6 +685,56 @@ mod tests {
         let restored = scan(&library).await;
         assert_eq!(restored.restored + restored.updated, 1, "{restored:?}");
         assert_eq!(track_count(&db.pool, "missing_since IS NOT NULL").await, 0);
+        db.drop().await;
+    }
+
+    #[tokio::test]
+    async fn tracks_scanned_before_m5b_get_their_details_without_analysis() {
+        let Some(db) = ScratchDatabase::create().await else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        write_wav(&dir.path().join("a.wav"), 1.0, 440.0);
+        let library = Library::new(db.pool.clone(), dir.path().to_path_buf());
+        scan(&library).await;
+        let details: (Option<String>, Option<u32>, Option<u32>, Option<u8>) =
+            sqlx::query_as("SELECT codec, bitrate_kbps, sample_rate, channels FROM tracks")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            details,
+            (Some("PCM".into()), Some(128), Some(8_000), Some(1))
+        );
+
+        // As an older scanner left it, analyzed.
+        sqlx::query("UPDATE tracks SET codec = NULL, bitrate_kbps = NULL, details_version = 0")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO track_analysis (track_id, analysis_version, params_hash, cue_in_ms, cue_out_ms)
+             SELECT id, 1, '', 0, 1000 FROM tracks",
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        let report = scan(&library).await;
+        assert_eq!(
+            (report.refreshed, report.unchanged, report.updated),
+            (1, 1, 0),
+            "{report:?}"
+        );
+        assert_eq!(
+            track_count(&db.pool, "codec = 'PCM' AND bitrate_kbps = 128").await,
+            1
+        );
+        let analyzed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM track_analysis")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(analyzed, 1, "not analyzed again");
+        assert_eq!(scan(&library).await.refreshed, 0, "read once");
         db.drop().await;
     }
 

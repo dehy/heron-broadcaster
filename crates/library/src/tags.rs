@@ -1,19 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The tags Heron reads from files and writes after identification.
+//! The tags Heron reads from files and writes after identification, and
+//! the fields edited from the browser.
 //!
-//! Only these fields are written; every other tag in the file (genre,
-//! comments, lyrics, …) is left alone. Writing a [`Tags`] whose field is
-//! `None` removes that field, so writing back the tags read before a change
-//! undoes it.
+//! Only these fields are written; every other tag in the file (comments,
+//! lyrics, pictures, ReplayGain, …) is left alone. Writing a [`Tags`] whose
+//! field is `None` removes that field, so writing back the tags read before
+//! a change undoes it. [`write_fields`] writes only the fields it is given.
 
 use std::path::Path;
+
+use heron_core::library::{FieldValues, TagField};
 
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::tag::{Accessor, ItemKey, Tag};
 use serde::{Deserialize, Serialize};
+
+use crate::properties::AudioProperties;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TagError {
@@ -87,20 +92,24 @@ impl Tags {
 #[derive(Clone, Debug, Default)]
 pub struct FileTags {
     pub tags: Tags,
+    pub genre: Option<String>,
     pub duration_ms: Option<u32>,
+    pub properties: AudioProperties,
     /// The file has embedded cover art.
     pub has_cover: bool,
 }
 
-/// Reads the tags and duration of `path`.
+/// Reads the tags, duration and audio properties of `path`.
 pub fn read(path: &Path) -> Result<FileTags, TagError> {
     let tagged = lofty::read_from_path(path)?;
     let duration_ms = u32::try_from(tagged.properties().duration().as_millis())
         .ok()
         .filter(|&ms| ms > 0);
+    let properties = crate::properties::of(path, &tagged);
     let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) else {
         return Ok(FileTags {
             duration_ms,
+            properties,
             ..FileTags::default()
         });
     };
@@ -129,7 +138,9 @@ pub fn read(path: &Path) -> Result<FileTags, TagError> {
     };
     Ok(FileTags {
         tags,
+        genre: tag.genre().and_then(|value| clean(&value)),
         duration_ms,
+        properties,
         has_cover: tag.pictures().iter().any(|picture| {
             picture.pic_type() == PictureType::CoverFront
                 || picture.pic_type() == PictureType::Other
@@ -212,6 +223,111 @@ pub fn write(path: &Path, tags: &Tags, cover: Cover<'_>) -> Result<(), TagError>
         Cover::Remove => tag.remove_picture_type(PictureType::CoverFront),
     }
 
+    Ok(tagged.save_to_path(path, WriteOptions::default())?)
+}
+
+/// Reads `fields` from `path`, as written in the file (a full date for
+/// [`TagField::Year`]): what [`write_fields`] needs to put them back.
+pub fn read_fields(
+    path: &Path,
+    fields: impl IntoIterator<Item = TagField>,
+) -> Result<FieldValues, TagError> {
+    let tagged = lofty::read_from_path(path)?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+    Ok(fields
+        .into_iter()
+        .map(|field| (field, tag.and_then(|tag| field_value(tag, field))))
+        .collect())
+}
+
+fn field_value(tag: &Tag, field: TagField) -> Option<String> {
+    let text = |key: ItemKey| tag.get_string(key).and_then(clean);
+    match field {
+        TagField::Title => tag.title().and_then(|value| clean(&value)),
+        TagField::Artist => tag.artist().and_then(|value| clean(&value)),
+        TagField::Album => tag.album().and_then(|value| clean(&value)),
+        TagField::AlbumArtist => text(ItemKey::AlbumArtist),
+        TagField::Year => text(ItemKey::RecordingDate).or_else(|| text(ItemKey::Year)),
+        TagField::Genre => tag.genre().and_then(|value| clean(&value)),
+        TagField::Track => tag.track().map(|track| track.to_string()),
+        TagField::Disc => tag.disk().map(|disc| disc.to_string()),
+        TagField::Isrc => text(ItemKey::Isrc),
+        TagField::RecordLabel => text(label_key(tag)),
+        TagField::Bpm => text(ItemKey::Bpm).or_else(|| text(ItemKey::IntegerBpm)),
+        TagField::Mood => text(ItemKey::Mood),
+    }
+}
+
+/// The record label: ID3v2 has only a publisher frame (`TPUB`), the other
+/// formats a label of their own.
+fn label_key(tag: &Tag) -> ItemKey {
+    if tag.tag_type() == lofty::tag::TagType::Id3v2 {
+        ItemKey::Publisher
+    } else {
+        ItemKey::Label
+    }
+}
+
+/// Writes `values` into `path` in place, leaving every other tag alone; a
+/// `None` value removes the field. Callers write into a copy and swap it
+/// in, like [`write`].
+pub fn write_fields(path: &Path, values: &FieldValues) -> Result<(), TagError> {
+    let mut tagged = lofty::read_from_path(path)?;
+    let tag_type = tagged.primary_tag_type();
+    if tagged.tag(tag_type).is_none() {
+        tagged.insert_tag(Tag::new(tag_type));
+    }
+    let Some(tag) = tagged.tag_mut(tag_type) else {
+        return Ok(());
+    };
+    let set_text = |tag: &mut Tag, key: ItemKey, value: &Option<String>| {
+        tag.remove_key(key);
+        if let Some(value) = value {
+            tag.insert_text(key, value.clone());
+        }
+    };
+    let number = |value: &Option<String>| value.as_deref().and_then(|value| value.parse().ok());
+    for (&field, value) in values {
+        match field {
+            TagField::Title => set_text(tag, ItemKey::TrackTitle, value),
+            TagField::Artist => set_text(tag, ItemKey::TrackArtist, value),
+            TagField::Album => set_text(tag, ItemKey::AlbumTitle, value),
+            TagField::AlbumArtist => set_text(tag, ItemKey::AlbumArtist, value),
+            TagField::Year => {
+                tag.remove_key(ItemKey::Year);
+                set_text(tag, ItemKey::RecordingDate, value);
+            }
+            TagField::Genre => set_text(tag, ItemKey::Genre, value),
+            TagField::Track => match number(value) {
+                Some(track) => tag.set_track(track),
+                None => tag.remove_track(),
+            },
+            TagField::Disc => match number(value) {
+                Some(disc) => tag.set_disk(disc),
+                None => tag.remove_disk(),
+            },
+            TagField::Isrc => set_text(tag, ItemKey::Isrc, value),
+            TagField::RecordLabel => {
+                let key = label_key(tag);
+                set_text(tag, key, value);
+            }
+            TagField::Bpm => {
+                tag.remove_key(ItemKey::Bpm);
+                tag.remove_key(ItemKey::IntegerBpm);
+                if let Some(bpm) = value {
+                    // ID3v2 and MP4 only have whole tempos; Vorbis comments
+                    // keep the decimal.
+                    let whole = bpm
+                        .parse::<f64>()
+                        .map_or_else(|_| bpm.clone(), |bpm| format!("{:.0}", bpm.round()));
+                    if !tag.insert_text(ItemKey::IntegerBpm, whole) {
+                        tag.insert_text(ItemKey::Bpm, bpm.clone());
+                    }
+                }
+            }
+            TagField::Mood => set_text(tag, ItemKey::Mood, value),
+        }
+    }
     Ok(tagged.save_to_path(path, WriteOptions::default())?)
 }
 
@@ -321,6 +437,95 @@ mod tests {
         let read = read(&path).unwrap();
         assert_eq!(read.tags, previous);
         assert!(!read.has_cover);
+    }
+
+    #[test]
+    fn fields_are_written_alone_and_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.wav", "b.mp3", "c.flac"] {
+            let path = dir.path().join(name);
+            match name {
+                "a.wav" => write_wav(&path),
+                "b.mp3" => {
+                    std::fs::copy(
+                        concat!(
+                            env!("CARGO_MANIFEST_DIR"),
+                            "/../analysis/tests/fixtures/silence-1s-sine-3s.mp3"
+                        ),
+                        &path,
+                    )
+                    .unwrap();
+                }
+                _ => {
+                    let Some(flac) = flac_fixture() else { continue };
+                    std::fs::copy(flac, &path).unwrap();
+                }
+            }
+            write(&path, &full_tags(), Cover::Keep).unwrap();
+            let values: FieldValues = [
+                (TagField::Genre, Some("Jazz".to_owned())),
+                (TagField::Year, Some("1960".to_owned())),
+                (TagField::Isrc, Some("USRC17607839".to_owned())),
+                (TagField::RecordLabel, Some("Columbia".to_owned())),
+                (TagField::Bpm, Some("136".to_owned())),
+                (TagField::Mood, Some("mellow".to_owned())),
+                (TagField::Track, Some("2".to_owned())),
+                (TagField::Album, None),
+            ]
+            .into_iter()
+            .collect();
+            write_fields(&path, &values).unwrap();
+            let read_back = read_fields(&path, values.keys().copied()).unwrap();
+            assert_eq!(read_back, values, "{name}");
+            let all = read(&path).unwrap();
+            assert_eq!(all.genre.as_deref(), Some("Jazz"), "{name}");
+            // Fields left alone keep their value.
+            assert_eq!(all.tags.title, full_tags().title, "{name}");
+            assert_eq!(all.tags.track_total, Some(5), "{name}");
+            assert_eq!(all.tags.musicbrainz, full_tags().musicbrainz, "{name}");
+            assert_eq!(all.tags.album, None, "{name}");
+        }
+    }
+
+    /// A FLAC file, when ffmpeg is installed.
+    fn flac_fixture() -> Option<std::path::PathBuf> {
+        let dir = std::env::temp_dir().join(format!("heron-library-flac-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).ok()?;
+        let path = dir.join("fixture.flac");
+        let made = std::process::Command::new("ffmpeg")
+            .args([
+                "-v", "quiet", "-y", "-f", "lavfi", "-i", "sine=d=1", "-c:a", "flac",
+            ])
+            .arg(&path)
+            .status()
+            .is_ok_and(|status| status.success());
+        made.then_some(path)
+    }
+
+    #[test]
+    fn audio_properties_are_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("a.wav");
+        write_wav(&wav);
+        let properties = read(&wav).unwrap().properties;
+        assert_eq!(properties.codec.as_deref(), Some("PCM"));
+        assert_eq!(properties.sample_rate, Some(8_000));
+        assert_eq!(properties.channels, Some(1));
+        assert_eq!(properties.bitrate_kbps, Some(128));
+        assert_eq!(
+            properties.bitrate_mode,
+            Some(crate::properties::BitrateMode::Lossless)
+        );
+
+        let mp3 = read(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../analysis/tests/fixtures/silence-1s-sine-3s.mp3"
+        )))
+        .unwrap()
+        .properties;
+        assert_eq!(mp3.codec.as_deref(), Some("MP3"));
+        assert!(mp3.bitrate_mode.is_some(), "{mp3:?}");
+        assert!(mp3.bitrate_kbps.is_some(), "{mp3:?}");
     }
 
     #[test]
