@@ -2,11 +2,11 @@
 
 // What was played, newest first.
 
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { type Play, api, query, unwrap } from "../api";
 import { Card, Empty, ErrorView, Loading, PageHead } from "../components/ui";
-import { clockTime, duration } from "../lib/format";
+import { clockTime, duration, fullDate } from "../lib/format";
 import { useLive } from "../lib/live";
 import { Link } from "../lib/router";
 
@@ -35,12 +35,16 @@ export function History() {
     getNextPageParam: (last) => (last.length < PAGE ? undefined : last[last.length - 1]?.started_at_unix_ms),
   });
   const rows = plays.data?.pages.flat() ?? [];
+  const station = useQuery({
+    queryKey: ["settings", "station"],
+    queryFn: () => unwrap(api.GET("/api/v1/settings/station")),
+  });
 
   return (
     <>
       <PageHead
         title="History"
-        description="Every play, as the engine reported it."
+        description={`Every play, as the engine reported it, in station time (${station.data?.timezone ?? "…"}).`}
         actions={
           <label className="check">
             <input type="checkbox" checked={withFx} onChange={(e) => setWithFx(e.target.checked)} />
@@ -90,12 +94,10 @@ export function History() {
   );
 }
 
-const dayFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "full" });
-
 function groupByDay(plays: Play[]): [string, Play[]][] {
   const groups = new Map<string, Play[]>();
   for (const play of plays) {
-    const day = dayFormat.format(new Date(play.started_at_unix_ms));
+    const day = fullDate(play.started_at_unix_ms);
     groups.set(day, [...(groups.get(day) ?? []), play]);
   }
   return [...groups.entries()];

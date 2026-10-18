@@ -36,6 +36,10 @@ The waveform comes with the analysis ([Import and analysis](analysis.md)): one p
 
 Points dragged on the waveform become the track's overrides once saved. Dragging *Next starts* sets a fixed crossfade for the track (that long before its cue-out). Queued entries of the track follow within seconds.
 
+## Times
+
+Every time and date is shown in the station's time zone (`station` settings, see [Rotation](rotation.md)), whatever the browser's: the history's days, the queue's start times, the selection log and the schedule agree with the clocks and restrictions. The History and Schedule pages name the zone.
+
 ## Themes
 
 Light and dark themes. *System* (the default) follows the device's setting (`prefers-color-scheme`); *Light* or *Dark* is saved per user by the API (`PUT /api/v1/auth/preferences`) and also remembered by the browser, so the first paint uses it.

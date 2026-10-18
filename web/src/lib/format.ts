@@ -48,20 +48,45 @@ export function db(value: number | null | undefined, unit = "dB"): string {
   return `${sign}${value.toFixed(1)} ${unit}`;
 }
 
-const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: "medium" });
-const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
+// Times are shown in the station's time zone, like the schedule and the
+// restrictions; in the browser's until the station's is known.
+function formats(timeZone?: string) {
+  return {
+    time: new Intl.DateTimeFormat(undefined, { timeStyle: "medium", timeZone }),
+    dateTime: new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone }),
+    fullDate: new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeZone }),
+  };
+}
+
+let zone: string | undefined;
+let zoned = formats();
+
+/** Shows times in `timeZone` (an IANA name) from now on; a name the browser does not know is ignored. */
+export function setTimeZone(timeZone: string) {
+  if (timeZone === zone) {
+    return;
+  }
+  try {
+    zoned = formats(timeZone);
+    zone = timeZone;
+  } catch {
+    // Keep the current zone.
+  }
+}
 
 /** Time of day of a Unix time in ms. */
 export function clockTime(unixMs: number): string {
-  return timeFormat.format(new Date(unixMs));
+  return zoned.time.format(new Date(unixMs));
 }
 
 /** Date and time of a Unix time in ms. */
 export function dateTime(unixMs: number | null | undefined): string {
-  return unixMs === null || unixMs === undefined ? "–" : dateTimeFormat.format(new Date(unixMs));
+  return unixMs === null || unixMs === undefined ? "–" : zoned.dateTime.format(new Date(unixMs));
+}
+
+/** The date of a Unix time in ms, written in full with its weekday. */
+export function fullDate(unixMs: number): string {
+  return zoned.fullDate.format(new Date(unixMs));
 }
 
 // The interface is in English: so are relative times.
