@@ -10,6 +10,7 @@ pub mod clock;
 #[cfg(feature = "mysql")]
 pub mod db;
 pub mod ops;
+pub mod priority;
 pub mod probe;
 pub mod remote_write;
 pub mod telemetry;

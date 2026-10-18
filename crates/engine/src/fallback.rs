@@ -3,8 +3,8 @@
 //! The fallback directory: local tracks played when the queue runs dry,
 //! because the API is unreachable or rotation has nothing to offer.
 //!
-//! A thread of its own scans the directory every minute and analyzes new
-//! files once, in the background, the way the analyzer analyzes library
+//! A thread of its own, at the lowest priority, scans the directory every
+//! minute and analyzes new files once, in the background, the way the analyzer analyzes library
 //! tracks at import (cue points, crossfade point, loudness). Results are
 //! kept in `fallback.json` in the state directory, so a restart does not
 //! analyze them again. A file not analyzed yet plays whole, at its own level.
@@ -233,6 +233,11 @@ struct Scanner {
 
 impl Scanner {
     fn run(self) {
+        // Analysis is background work: it must yield the CPU and the disk
+        // to the audio, decode and encoder threads.
+        if let Err(error) = heron_service::priority::lower_current_thread(19) {
+            tracing::warn!(%error, "cannot lower the fallback scanner's priority");
+        }
         let mut reported = None;
         while !self.stop.load(Ordering::Relaxed) {
             let found = self.scan();

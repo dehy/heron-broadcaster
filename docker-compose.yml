@@ -2,6 +2,12 @@
 #
 # Heron Broadcaster: one service per process. See docs/architecture.md.
 # Copy .env.example to .env first.
+#
+# Priorities (docs/architecture.md#priorities): when the CPU is busy, it is
+# shared by `cpu_shares`, so the engine comes first and the analyzer and the
+# librarian last; when memory runs out, the kernel kills by `oom_score_adj`,
+# the analyzer first and the engine last. Every service sets `cpu_shares`:
+# some Docker versions map 1024 below the weight of a service without it.
 
 name: heron
 
@@ -25,6 +31,7 @@ services:
   mariadb:
     image: mariadb:11.8
     restart: unless-stopped
+    cpu_shares: 1024
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_uca1400_ai_ci
@@ -55,6 +62,7 @@ services:
     image: ghcr.io/dehy/heron-api:${HERON_VERSION:-latest}
     restart: unless-stopped
     user: ${HERON_LIBRARIAN_USER:-10001:10001}
+    cpu_shares: 1024
     environment:
       <<: *rust-env
       HERON_DATABASE_URL: *database-url
@@ -79,10 +87,15 @@ services:
       target: heron-analyzer
     image: ghcr.io/dehy/heron-analyzer:${HERON_VERSION:-latest}
     restart: unless-stopped
+    # Background work: last for the CPU, first to go when memory runs out.
+    # Its workers also run at nice 10 (HERON_NICE).
+    cpu_shares: 256
+    oom_score_adj: 500
     environment:
       <<: *rust-env
       HERON_DATABASE_URL: *database-url
       HERON_LIBRARY_DIR: /music
+      HERON_NICE: ${HERON_NICE:-10}
     volumes:
       - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
     depends_on:
@@ -104,6 +117,9 @@ services:
       target: heron-librarian
     image: ghcr.io/dehy/heron-librarian:${HERON_VERSION:-latest}
     restart: unless-stopped
+    # Background work, like the analyzer; nice 10 (HERON_NICE).
+    cpu_shares: 256
+    oom_score_adj: 300
     user: ${HERON_LIBRARIAN_USER:-10001:10001}
     environment:
       <<: *rust-env
@@ -112,6 +128,7 @@ services:
       HERON_INCOMING_DIR: /incoming
       HERON_STAGING_DIR: /staging
       HERON_INCOMING_WATCH: ${HERON_LIBRARY_WATCH:-true}
+      HERON_NICE: ${HERON_NICE:-10}
     volumes:
       - ${HERON_MUSIC_DIR:-./data/music}:/music
       - ${HERON_INCOMING_FOLDER:-./data/incoming}:/incoming
@@ -132,6 +149,9 @@ services:
       target: heron-engine
     image: ghcr.io/dehy/heron-engine:${HERON_VERSION:-latest}
     restart: unless-stopped
+    # The air: first for the CPU, last to be killed when memory runs out.
+    cpu_shares: 8192
+    oom_score_adj: -500
     environment:
       <<: *rust-env
       HERON_LIBRARY_DIR: /music
@@ -160,6 +180,7 @@ services:
       target: heron-web
     image: ghcr.io/dehy/heron-web:${HERON_VERSION:-latest}
     restart: unless-stopped
+    cpu_shares: 1024
     environment:
       # Error reporting from the browser, off when empty. A separate Sentry
       # project from the services' is advised: browsers can read this DSN.

@@ -109,6 +109,16 @@ struct Cli {
     #[arg(long, env = "HERON_COVER_ART_URL", hide = true)]
     cover_art_url: Option<String>,
 
+    /// Niceness, 0 to 19 (0 leaves it as is). The librarian yield the CPU and
+    /// the disk to the engine; they also get the lowest best-effort I/O priority.
+    #[arg(
+        long,
+        env = "HERON_NICE",
+        default_value_t = heron_service::priority::BACKGROUND_NICE,
+        global = true
+    )]
+    nice: i32,
+
     #[command(flatten)]
     log: LogArgs,
 
@@ -153,13 +163,23 @@ fn main() -> anyhow::Result<()> {
             heron_service::probe::probe(cli.http_addr, "/healthz", Duration::from_secs(3))?;
             Ok(())
         }
-        _ => run(cli),
+        _ => {
+            // Before the runtime starts: its threads inherit the priority.
+            let lowered = heron_service::priority::lower_current_thread(cli.nice);
+            run(cli, lowered)
+        }
     }
 }
 
 #[tokio::main]
-async fn run(cli: Cli) -> anyhow::Result<()> {
+async fn run(cli: Cli, lowered: Result<(), String>) -> anyhow::Result<()> {
     let _telemetry = heron_service::telemetry::init_tracing(&cli.log, SERVICE)?;
+    match lowered {
+        Ok(()) => {
+            tracing::info!(nice = ?heron_service::priority::current_nice(), "priority lowered")
+        }
+        Err(error) => tracing::warn!(%error, "cannot lower the priority"),
+    }
     let database_url = cli
         .database_url
         .clone()

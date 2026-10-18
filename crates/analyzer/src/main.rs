@@ -54,6 +54,16 @@ struct Cli {
     #[arg(long, env = "HERON_ANALYZER_ID")]
     instance: Option<String>,
 
+    /// Niceness, 0 to 19 (0 leaves it as is). The workers yield the CPU and
+    /// the disk to the engine; they also get the lowest best-effort I/O priority.
+    #[arg(
+        long,
+        env = "HERON_NICE",
+        default_value_t = heron_service::priority::BACKGROUND_NICE,
+        global = true
+    )]
+    nice: i32,
+
     #[command(flatten)]
     log: LogArgs,
 
@@ -74,13 +84,23 @@ fn main() -> anyhow::Result<()> {
             heron_service::probe::probe(cli.http_addr, "/healthz", Duration::from_secs(3))?;
             Ok(())
         }
-        None => run(cli),
+        None => {
+            // Before the runtime starts: its threads inherit the priority.
+            let lowered = heron_service::priority::lower_current_thread(cli.nice);
+            run(cli, lowered)
+        }
     }
 }
 
 #[tokio::main]
-async fn run(cli: Cli) -> anyhow::Result<()> {
+async fn run(cli: Cli, lowered: Result<(), String>) -> anyhow::Result<()> {
     let _telemetry = heron_service::telemetry::init_tracing(&cli.log, SERVICE)?;
+    match lowered {
+        Ok(()) => {
+            tracing::info!(nice = ?heron_service::priority::current_nice(), "priority lowered")
+        }
+        Err(error) => tracing::warn!(%error, "cannot lower the priority"),
+    }
     let metrics = heron_service::ops::install_metrics(SERVICE, &cli.metrics)?;
     let database_url = cli
         .database_url
