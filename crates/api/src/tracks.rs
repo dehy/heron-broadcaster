@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The library as seen through the API: browsing and searching tracks,
-//! their analysis, overrides and categories, and transition previews.
+//! The library as seen through the API: browsing, searching, sorting and
+//! filtering tracks, their details, analysis, overrides and categories,
+//! and transition previews.
 //!
 //! The API never writes files: tags and moves belong to `heron-librarian`.
 
@@ -14,7 +15,7 @@ use base64::Engine as _;
 use heron_core::playout::CrossfadeOverrides;
 use heron_core::{LibraryPath, PlayoutSettings, TrackOverrides, plan_transition};
 use serde::{Deserialize, Serialize};
-use sqlx::QueryBuilder;
+use sqlx::{FromRow, QueryBuilder, Row};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -22,7 +23,7 @@ use utoipa_axum::routes;
 use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{ApiError, ApiResult, ErrorBody};
-use crate::settings;
+use crate::settings::{self, ProgrammingSettings};
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -35,7 +36,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_audio))
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TrackFilter {
     /// Present, enabled, analyzed and audible: what autofill picks from.
@@ -50,7 +51,7 @@ pub enum TrackFilter {
     NeedsReview,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, ToSchema)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TrackSort {
     /// Artist, album, then path.
@@ -62,21 +63,70 @@ pub enum TrackSort {
     Added,
     /// Least recently played first, never played before all.
     LastPlayed,
+    /// Most played first.
+    PlayCount,
+    /// Lowest bitrate first.
+    Bitrate,
+    /// Shortest first.
+    Duration,
+    /// Year of first release (MusicBrainz, else the year tag), oldest first.
+    Year,
+    /// Slowest first.
+    Bpm,
+    /// In the order of the mood scale.
+    Mood,
+    /// In the order of the sound code scale.
+    SoundCode,
+    Genre,
 }
 
-#[derive(Debug, Deserialize, IntoParams)]
+/// Which tracks: the filters of `GET /tracks`, also used to select tracks
+/// for the actions on a selection. Lists of IDs are comma-separated.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, IntoParams, ToSchema)]
+#[serde(default, deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct TrackQuery {
-    /// Words found in the title, artist, album or path.
+    /// Words found in the title, artist, album, album artist, genre or path.
     pub q: Option<String>,
     pub category_id: Option<u64>,
     #[param(inline)]
     pub filter: Option<TrackFilter>,
+    /// Tracks with every one of these labels (IDs, comma-separated).
+    pub labels_all: Option<String>,
+    /// Tracks with at least one of these labels.
+    pub labels_any: Option<String>,
+    /// Tracks with none of these labels.
+    pub labels_none: Option<String>,
+    /// Tracks never played.
+    pub never_played: Option<bool>,
+    /// Tracks not played for this many days (including those never played).
+    pub not_played_days: Option<u32>,
+    /// Tracks added in the last this many days.
+    pub added_days: Option<u32>,
+    /// Tracks whose bitrate is below this many kbps.
+    pub bitrate_below: Option<u32>,
+    pub era: Option<String>,
+    pub mood: Option<String>,
+    pub sound_code: Option<String>,
+    pub genre: Option<String>,
+    pub year_min: Option<u16>,
+    pub year_max: Option<u16>,
+    pub bpm_min: Option<f64>,
+    pub bpm_max: Option<f64>,
     #[param(inline)]
     pub sort: Option<TrackSort>,
+    /// Reverses the order of `sort`.
+    pub desc: Option<bool>,
     /// 1 to 500, 50 by default.
     pub limit: Option<u32>,
     pub offset: Option<u32>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema, sqlx::FromRow)]
+pub struct TrackLabel {
+    pub id: u64,
+    pub name: String,
+    pub color: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema, sqlx::FromRow)]
@@ -87,13 +137,35 @@ pub struct TrackSummary {
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,
+    pub album_artist: Option<String>,
+    pub genre: Option<String>,
     pub duration_ms: Option<u32>,
     /// Disabled tracks are never picked by autofill or rotation.
     pub enabled: bool,
     pub missing: bool,
     pub analyzed: bool,
     pub silent: bool,
+    /// When the scanner first found the file.
+    pub added_at_unix_ms: i64,
+    /// Plays that count (FX player aside, at least the programming
+    /// settings' `min_play_s`).
     pub last_played_at_unix_ms: Option<i64>,
+    pub play_count: u64,
+    /// `MP3`, `AAC`, `FLAC`, …
+    pub codec: Option<String>,
+    pub bitrate_kbps: Option<u32>,
+    /// `cbr`, `vbr` or `lossless`; unknown for some formats (AAC).
+    pub bitrate_mode: Option<String>,
+    /// Of first release: from MusicBrainz, else the year tag.
+    pub year: Option<u16>,
+    /// From the year, on the station's eras (decades by default).
+    pub era: Option<String>,
+    /// Set by hand, else measured.
+    pub bpm: Option<f64>,
+    pub mood: Option<String>,
+    pub sound_code: Option<String>,
+    #[sqlx(skip)]
+    pub labels: Vec<TrackLabel>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -103,18 +175,380 @@ pub struct TrackPage {
     pub total: u64,
 }
 
-pub(crate) const SUMMARY_COLUMNS: &str = "
-    t.id, t.path, t.title, t.artist, t.album, t.duration_ms, t.enabled,
-    t.missing_since IS NOT NULL AS missing,
-    a.track_id IS NOT NULL AS analyzed,
-    COALESCE(a.cue_out_ms <= a.cue_in_ms, FALSE) AS silent,
-    CAST(UNIX_TIMESTAMP(h.last_played) * 1000 AS SIGNED) AS last_played_at_unix_ms";
+/// What the track list takes from the programming settings.
+pub(crate) struct ListContext {
+    settings: ProgrammingSettings,
+}
 
-pub(crate) const SUMMARY_JOINS: &str = "
-    FROM tracks t
-    LEFT JOIN track_analysis a ON a.track_id = t.id
-    LEFT JOIN (SELECT track_id, MAX(started_at) AS last_played FROM play_history
-               WHERE track_id IS NOT NULL GROUP BY track_id) h ON h.track_id = t.id";
+impl ListContext {
+    pub async fn load(pool: &sqlx::MySqlPool) -> ApiResult<Self> {
+        Ok(Self {
+            settings: settings::load(pool, ProgrammingSettings::SETTINGS_NAME).await?,
+        })
+    }
+
+    /// `SELECT` and `FROM` of track summaries.
+    pub fn push_select(&self, query: &mut QueryBuilder<sqlx::MySql>) {
+        query.push(
+            "SELECT t.id, t.path, t.title, t.artist, t.album, t.album_artist, t.genre,
+                    t.duration_ms, t.enabled,
+                    t.missing_since IS NOT NULL AS missing,
+                    a.track_id IS NOT NULL AS analyzed,
+                    COALESCE(a.cue_out_ms <= a.cue_in_ms, FALSE) AS silent,
+                    CAST(UNIX_TIMESTAMP(t.created_at) * 1000 AS SIGNED) AS added_at_unix_ms,
+                    CAST(UNIX_TIMESTAMP(h.last_played) * 1000 AS SIGNED) AS last_played_at_unix_ms,
+                    CAST(COALESCE(h.plays, 0) AS UNSIGNED) AS play_count,
+                    t.codec, t.bitrate_kbps, CAST(t.bitrate_mode AS CHAR) AS bitrate_mode,
+                    COALESCE(mb.first_release_year, t.year) AS year, ",
+        );
+        self.push_era(query);
+        query.push(" AS era, CAST(COALESCE(p.bpm, a.bpm) AS DOUBLE) AS bpm, p.mood, p.sound_code ");
+        self.push_from(query);
+    }
+
+    /// The tracks and everything their summaries need.
+    pub fn push_from(&self, query: &mut QueryBuilder<sqlx::MySql>) {
+        query.push(
+            " FROM tracks t
+              LEFT JOIN track_analysis a ON a.track_id = t.id
+              LEFT JOIN track_musicbrainz mb ON mb.track_id = t.id
+              LEFT JOIN track_programming p ON p.track_id = t.id
+              LEFT JOIN (SELECT track_id, COUNT(*) AS plays, MAX(started_at) AS last_played
+                         FROM play_history
+                         WHERE track_id IS NOT NULL AND deck <> 'fx'
+                           AND (played_ms >= ",
+        );
+        let min_play_s = self.settings.min_play_s;
+        query.push_bind(min_play_s * 1000);
+        // Still playing, or its end was missed: it counts once long enough.
+        query.push(" OR (played_ms IS NULL AND started_at <= NOW(6) - INTERVAL ");
+        query.push_bind(min_play_s);
+        query.push(" SECOND)) GROUP BY track_id) h ON h.track_id = t.id");
+    }
+
+    /// The era of the year of first release.
+    fn push_era(&self, query: &mut QueryBuilder<sqlx::MySql>) {
+        let year = "COALESCE(mb.first_release_year, t.year)";
+        if self.settings.eras.is_empty() {
+            query.push(format!(
+                "CASE WHEN {year} IS NULL THEN NULL
+                      WHEN {year} >= 2000 OR {year} < 1910 THEN CONCAT({year} DIV 10 * 10, 's')
+                      ELSE CONCAT({year} DIV 10 % 10 * 10, 's') END"
+            ));
+            return;
+        }
+        query.push("CASE");
+        for era in &self.settings.eras {
+            query.push(format!(" WHEN {year} IS NOT NULL"));
+            if let Some(from) = era.from_year {
+                query.push(format!(" AND {year} >= ")).push_bind(from);
+            }
+            if let Some(to) = era.to_year {
+                query.push(format!(" AND {year} <= ")).push_bind(to);
+            }
+            query.push(" THEN ").push_bind(era.name.clone());
+        }
+        query.push(" END");
+    }
+
+    /// `WHERE` of the filters.
+    pub fn push_filters(
+        &self,
+        query: &mut QueryBuilder<sqlx::MySql>,
+        params: &TrackQuery,
+    ) -> ApiResult<()> {
+        query.push(" WHERE TRUE");
+        for word in params.q.iter().flat_map(|q| q.split_whitespace()).take(10) {
+            let pattern = like_pattern(word);
+            // Paths compare as bytes: search case- and accent-insensitively.
+            query.push(
+                " AND CONVERT(CONCAT_WS(' ', t.title, t.artist, t.album, t.album_artist, t.genre,
+                                        t.path) USING utf8mb4)
+                      COLLATE utf8mb4_unicode_ci LIKE ",
+            );
+            query.push_bind(pattern);
+        }
+        if let Some(category_id) = params.category_id {
+            query.push(" AND EXISTS (SELECT 1 FROM track_categories tc WHERE tc.track_id = t.id AND tc.category_id = ");
+            query.push_bind(category_id);
+            query.push(")");
+        }
+        let condition = match params.filter {
+            None => "",
+            Some(TrackFilter::Playable) => {
+                " AND t.enabled AND t.missing_since IS NULL AND a.cue_out_ms > a.cue_in_ms"
+            }
+            Some(TrackFilter::Missing) => " AND t.missing_since IS NOT NULL",
+            Some(TrackFilter::Unanalyzed) => " AND a.track_id IS NULL",
+            Some(TrackFilter::Silent) => " AND a.cue_out_ms <= a.cue_in_ms",
+            Some(TrackFilter::Disabled) => " AND NOT t.enabled",
+            Some(TrackFilter::NeedsReview) => {
+                " AND EXISTS (SELECT 1 FROM track_identifications i
+                              WHERE i.track_id = t.id AND i.status = 'needs_review')"
+            }
+        };
+        query.push(condition);
+
+        let labels = |name: &str, ids: &Option<String>| -> ApiResult<Vec<u64>> {
+            ids.iter()
+                .flat_map(|ids| ids.split(','))
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(|id| {
+                    id.parse()
+                        .map_err(|_| ApiError::BadRequest(format!("{name}: {id:?} is not an ID")))
+                })
+                .collect()
+        };
+        for id in labels("labels_all", &params.labels_all)? {
+            query.push(" AND EXISTS (SELECT 1 FROM track_labels tl WHERE tl.track_id = t.id AND tl.label_id = ");
+            query.push_bind(id).push(")");
+        }
+        for (ids, negate) in [
+            (labels("labels_any", &params.labels_any)?, ""),
+            (labels("labels_none", &params.labels_none)?, " NOT"),
+        ] {
+            if ids.is_empty() {
+                continue;
+            }
+            query.push(format!(
+                " AND{negate} EXISTS (SELECT 1 FROM track_labels tl WHERE tl.track_id = t.id AND tl.label_id IN ("
+            ));
+            let mut separated = query.separated(", ");
+            for id in ids {
+                separated.push_bind(id);
+            }
+            query.push("))");
+        }
+
+        if params.never_played == Some(true) {
+            query.push(" AND h.track_id IS NULL");
+        }
+        if let Some(days) = params.not_played_days {
+            query.push(" AND (h.last_played IS NULL OR h.last_played < NOW(6) - INTERVAL ");
+            query.push_bind(days).push(" DAY)");
+        }
+        if let Some(days) = params.added_days {
+            query.push(" AND t.created_at >= NOW(6) - INTERVAL ");
+            query.push_bind(days).push(" DAY");
+        }
+        if let Some(kbps) = params.bitrate_below {
+            query.push(" AND t.bitrate_kbps < ").push_bind(kbps);
+        }
+        if let Some(era) = &params.era {
+            query.push(" AND (");
+            self.push_era(query);
+            query.push(") = ").push_bind(era.clone());
+        }
+        for (column, value) in [
+            ("p.mood", &params.mood),
+            ("p.sound_code", &params.sound_code),
+            ("t.genre", &params.genre),
+        ] {
+            if let Some(value) = value {
+                query
+                    .push(format!(" AND {column} = "))
+                    .push_bind(value.clone());
+            }
+        }
+        if let Some(year) = params.year_min {
+            query
+                .push(" AND COALESCE(mb.first_release_year, t.year) >= ")
+                .push_bind(year);
+        }
+        if let Some(year) = params.year_max {
+            query
+                .push(" AND COALESCE(mb.first_release_year, t.year) <= ")
+                .push_bind(year);
+        }
+        if let Some(bpm) = params.bpm_min {
+            query.push(" AND COALESCE(p.bpm, a.bpm) >= ").push_bind(bpm);
+        }
+        if let Some(bpm) = params.bpm_max {
+            query.push(" AND COALESCE(p.bpm, a.bpm) <= ").push_bind(bpm);
+        }
+        Ok(())
+    }
+
+    /// `ORDER BY` of `sort`. Tracks without the value come last.
+    fn push_order(&self, query: &mut QueryBuilder<sqlx::MySql>, sort: TrackSort, desc: bool) {
+        let direction = |ascending: bool| if ascending != desc { "" } else { " DESC" };
+        let scale = |query: &mut QueryBuilder<sqlx::MySql>, column: &str, scale: &[String]| {
+            query.push(format!(" ORDER BY {column} IS NULL, "));
+            if scale.is_empty() {
+                query.push(column.to_owned());
+            } else {
+                // Values off the scale (it changed) after those on it.
+                query.push(format!("FIELD({column}"));
+                for value in scale.iter().rev() {
+                    query.push(", ").push_bind(value.clone());
+                }
+                query.push(")");
+            }
+            query.push(format!("{}, t.artist, t.title", direction(false)));
+        };
+        match sort {
+            TrackSort::Artist => query.push(format!(
+                " ORDER BY t.artist IS NULL, t.artist{0}, t.album{0}, t.path{0}",
+                direction(true)
+            )),
+            TrackSort::Title => query.push(format!(
+                " ORDER BY t.title IS NULL, t.title{0}, t.artist{0}",
+                direction(true)
+            )),
+            TrackSort::Album => query.push(format!(
+                " ORDER BY t.album IS NULL, t.album{0}, t.path{0}",
+                direction(true)
+            )),
+            TrackSort::Genre => query.push(format!(
+                " ORDER BY t.genre IS NULL, t.genre{0}, t.artist{0}, t.title{0}",
+                direction(true)
+            )),
+            TrackSort::Added => query.push(format!(
+                " ORDER BY t.created_at{0}, t.id{0}",
+                direction(false)
+            )),
+            TrackSort::LastPlayed => query.push(format!(
+                " ORDER BY h.last_played IS NOT NULL{0}, h.last_played{0}, t.id{0}",
+                direction(true)
+            )),
+            TrackSort::PlayCount => query.push(format!(
+                " ORDER BY COALESCE(h.plays, 0){0}, t.artist, t.title",
+                direction(false)
+            )),
+            TrackSort::Bitrate => query.push(format!(
+                " ORDER BY t.bitrate_kbps IS NULL, t.bitrate_kbps{0}, t.artist, t.title",
+                direction(true)
+            )),
+            TrackSort::Duration => query.push(format!(
+                " ORDER BY t.duration_ms IS NULL, t.duration_ms{0}, t.artist, t.title",
+                direction(true)
+            )),
+            TrackSort::Year => query.push(format!(
+                " ORDER BY COALESCE(mb.first_release_year, t.year) IS NULL,
+                           COALESCE(mb.first_release_year, t.year){0}, t.artist, t.title",
+                direction(true)
+            )),
+            TrackSort::Bpm => query.push(format!(
+                " ORDER BY COALESCE(p.bpm, a.bpm) IS NULL, COALESCE(p.bpm, a.bpm){0},
+                           t.artist, t.title",
+                direction(true)
+            )),
+            TrackSort::Mood => {
+                scale(query, "p.mood", &self.settings.moods);
+                query
+            }
+            TrackSort::SoundCode => {
+                scale(query, "p.sound_code", &self.settings.sound_codes);
+                query
+            }
+        };
+    }
+
+    /// The tracks matching `params`, a page at a time.
+    pub async fn page(&self, pool: &sqlx::MySqlPool, params: &TrackQuery) -> ApiResult<TrackPage> {
+        let limit = params.limit.unwrap_or(50);
+        if !(1..=500).contains(&limit) {
+            return Err(ApiError::BadRequest("limit is 1 to 500".to_owned()));
+        }
+        let mut count = QueryBuilder::new("SELECT CAST(COUNT(*) AS SIGNED)");
+        self.push_from(&mut count);
+        self.push_filters(&mut count, params)?;
+        let total: i64 = count.build_query_scalar().fetch_one(pool).await?;
+
+        let mut query = QueryBuilder::new("");
+        self.push_select(&mut query);
+        self.push_filters(&mut query, params)?;
+        self.push_order(
+            &mut query,
+            params.sort.unwrap_or_default(),
+            params.desc.unwrap_or(false),
+        );
+        query.push(" LIMIT ").push_bind(limit);
+        query.push(" OFFSET ").push_bind(params.offset.unwrap_or(0));
+        let mut items: Vec<TrackSummary> = query.build_query_as().fetch_all(pool).await?;
+        add_labels(pool, &mut items).await?;
+        Ok(TrackPage {
+            items,
+            total: u64::try_from(total).unwrap_or(0),
+        })
+    }
+
+    /// The summaries of `ids`, in no particular order.
+    pub async fn summaries(
+        &self,
+        pool: &sqlx::MySqlPool,
+        ids: &[u64],
+    ) -> ApiResult<Vec<TrackSummary>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut query = QueryBuilder::new("");
+        self.push_select(&mut query);
+        query.push(" WHERE t.id IN (");
+        let mut separated = query.separated(", ");
+        for id in ids {
+            separated.push_bind(*id);
+        }
+        query.push(")");
+        let mut items: Vec<TrackSummary> = query.build_query_as().fetch_all(pool).await?;
+        add_labels(pool, &mut items).await?;
+        Ok(items)
+    }
+
+    /// The IDs of every track matching `params`, at most `max`.
+    pub async fn ids(
+        &self,
+        pool: &sqlx::MySqlPool,
+        params: &TrackQuery,
+        max: usize,
+    ) -> ApiResult<Vec<u64>> {
+        let mut query = QueryBuilder::new("SELECT t.id");
+        self.push_from(&mut query);
+        self.push_filters(&mut query, params)?;
+        query
+            .push(" ORDER BY t.id LIMIT ")
+            .push_bind(max as u64 + 1);
+        let ids: Vec<u64> = query.build_query_scalar().fetch_all(pool).await?;
+        if ids.len() > max {
+            return Err(ApiError::Invalid(format!(
+                "the selection has more than {max} tracks"
+            )));
+        }
+        Ok(ids)
+    }
+}
+
+/// Fills in the labels of `tracks`.
+async fn add_labels(pool: &sqlx::MySqlPool, tracks: &mut [TrackSummary]) -> ApiResult<()> {
+    if tracks.is_empty() {
+        return Ok(());
+    }
+    let mut query = QueryBuilder::new(
+        "SELECT tl.track_id, l.id, l.name, l.color
+         FROM track_labels tl JOIN labels l ON l.id = tl.label_id
+         WHERE tl.track_id IN (",
+    );
+    let mut separated = query.separated(", ");
+    for track in tracks.iter() {
+        separated.push_bind(track.id);
+    }
+    query.push(") ORDER BY l.name");
+    let rows: Vec<(u64, u64, String, Option<String>)> =
+        query.build_query_as().fetch_all(pool).await?;
+    let mut by_track: std::collections::HashMap<u64, Vec<TrackLabel>> =
+        std::collections::HashMap::new();
+    for (track_id, id, name, color) in rows {
+        by_track
+            .entry(track_id)
+            .or_default()
+            .push(TrackLabel { id, name, color });
+    }
+    for track in tracks {
+        track.labels = by_track.remove(&track.id).unwrap_or_default();
+    }
+    Ok(())
+}
 
 /// Escapes `%`, `_` and `\` for LIKE.
 fn like_pattern(word: &str) -> String {
@@ -129,39 +563,6 @@ fn like_pattern(word: &str) -> String {
     pattern
 }
 
-fn push_filters(query: &mut QueryBuilder<sqlx::MySql>, params: &TrackQuery) {
-    query.push(" WHERE TRUE");
-    for word in params.q.iter().flat_map(|q| q.split_whitespace()).take(10) {
-        let pattern = like_pattern(word);
-        // Paths compare as bytes: search case- and accent-insensitively.
-        query.push(
-            " AND CONVERT(CONCAT_WS(' ', t.title, t.artist, t.album, t.path) USING utf8mb4)
-                  COLLATE utf8mb4_unicode_ci LIKE ",
-        );
-        query.push_bind(pattern);
-    }
-    if let Some(category_id) = params.category_id {
-        query.push(" AND EXISTS (SELECT 1 FROM track_categories tc WHERE tc.track_id = t.id AND tc.category_id = ");
-        query.push_bind(category_id);
-        query.push(")");
-    }
-    let condition = match params.filter {
-        None => "",
-        Some(TrackFilter::Playable) => {
-            " AND t.enabled AND t.missing_since IS NULL AND a.cue_out_ms > a.cue_in_ms"
-        }
-        Some(TrackFilter::Missing) => " AND t.missing_since IS NOT NULL",
-        Some(TrackFilter::Unanalyzed) => " AND a.track_id IS NULL",
-        Some(TrackFilter::Silent) => " AND a.cue_out_ms <= a.cue_in_ms",
-        Some(TrackFilter::Disabled) => " AND NOT t.enabled",
-        Some(TrackFilter::NeedsReview) => {
-            " AND EXISTS (SELECT 1 FROM track_identifications i
-                          WHERE i.track_id = t.id AND i.status = 'needs_review')"
-        }
-    };
-    query.push(condition);
-}
-
 /// Library tracks, searched, filtered and sorted, a page at a time.
 #[utoipa::path(get, path = "/tracks", tag = "library",
     params(TrackQuery),
@@ -171,33 +572,8 @@ async fn list_tracks(
     State(state): State<AppState>,
     Query(params): Query<TrackQuery>,
 ) -> ApiResult<Json<TrackPage>> {
-    let limit = params.limit.unwrap_or(50);
-    if !(1..=500).contains(&limit) {
-        return Err(ApiError::BadRequest("limit is 1 to 500".to_owned()));
-    }
-    let mut count = QueryBuilder::new(
-        "SELECT CAST(COUNT(*) AS SIGNED) FROM tracks t
-         LEFT JOIN track_analysis a ON a.track_id = t.id",
-    );
-    push_filters(&mut count, &params);
-    let total: i64 = count.build_query_scalar().fetch_one(&state.pool).await?;
-
-    let mut query = QueryBuilder::new(format!("SELECT {SUMMARY_COLUMNS} {SUMMARY_JOINS}"));
-    push_filters(&mut query, &params);
-    query.push(match params.sort.unwrap_or_default() {
-        TrackSort::Artist => " ORDER BY t.artist IS NULL, t.artist, t.album, t.path",
-        TrackSort::Title => " ORDER BY t.title IS NULL, t.title, t.artist",
-        TrackSort::Album => " ORDER BY t.album IS NULL, t.album, t.path",
-        TrackSort::Added => " ORDER BY t.created_at DESC, t.id DESC",
-        TrackSort::LastPlayed => " ORDER BY h.last_played IS NOT NULL, h.last_played, t.id",
-    });
-    query.push(" LIMIT ").push_bind(limit);
-    query.push(" OFFSET ").push_bind(params.offset.unwrap_or(0));
-    let items = query.build_query_as().fetch_all(&state.pool).await?;
-    Ok(Json(TrackPage {
-        items,
-        total: u64::try_from(total).unwrap_or(0),
-    }))
+    let context = ListContext::load(&state.pool).await?;
+    Ok(Json(context.page(&state.pool, &params).await?))
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema, sqlx::FromRow)]
@@ -209,6 +585,8 @@ pub struct TrackAnalysis {
     /// The crossfade point: where the next track starts.
     pub fade_out_start_ms: Option<u32>,
     pub has_internal_silence: bool,
+    /// The measured tempo.
+    pub bpm: Option<f64>,
     pub analyzed_at_unix_ms: i64,
 }
 
@@ -241,13 +619,43 @@ pub struct EffectivePlayout {
     pub gain_db: f64,
 }
 
+/// The file and its tags, as the scanner read them.
+#[derive(Clone, Debug, Serialize, ToSchema, sqlx::FromRow)]
+pub struct TrackFile {
+    pub size: Option<u64>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u8>,
+    /// The year tag.
+    pub year_tag: Option<u16>,
+    pub track_number: Option<u16>,
+    pub disc_number: Option<u16>,
+    pub musicbrainz_recording_id: Option<String>,
+    pub musicbrainz_release_id: Option<String>,
+    pub missing_since_unix_ms: Option<i64>,
+}
+
+/// What MusicBrainz says about the track.
+#[derive(Clone, Debug, Serialize, ToSchema, sqlx::FromRow)]
+pub struct TrackMusicBrainz {
+    pub album: Option<String>,
+    pub record_label: Option<String>,
+    pub catalog_number: Option<String>,
+    pub isrc: Option<String>,
+    pub first_release_year: Option<u16>,
+    /// Most voted first: suggestions for the genre tag.
+    #[sqlx(skip)]
+    pub genres: Vec<String>,
+    pub fetched_at_unix_ms: i64,
+}
+
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct TrackDetail {
     #[serde(flatten)]
     pub summary: TrackSummary,
-    pub file_size: Option<u64>,
-    pub added_at_unix_ms: i64,
-    pub missing_since_unix_ms: Option<i64>,
+    pub file: TrackFile,
+    /// The tempo set by hand, replacing the measured one.
+    pub bpm_by_hand: Option<f64>,
+    pub musicbrainz: Option<TrackMusicBrainz>,
     pub analysis: Option<TrackAnalysis>,
     pub overrides: TrackOverrides,
     pub playout: EffectivePlayout,
@@ -255,7 +663,8 @@ pub struct TrackDetail {
     pub identification: Option<TrackIdentification>,
 }
 
-/// A track with its analysis, overrides, categories and identification.
+/// A track with its details, analysis, overrides, categories and
+/// identification.
 #[utoipa::path(get, path = "/tracks/{id}", tag = "library",
     params(("id" = u64, Path)),
     responses((status = 200, body = TrackDetail), (status = "4XX", body = ErrorBody)))]
@@ -264,25 +673,31 @@ async fn get_track(
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> ApiResult<Json<TrackDetail>> {
-    let summary: TrackSummary = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {SUMMARY_COLUMNS} {SUMMARY_JOINS} WHERE t.id = ?"
-    )))
+    let context = ListContext::load(&state.pool).await?;
+    let summary = context
+        .summaries(&state.pool, &[id])
+        .await?
+        .pop()
+        .ok_or_else(|| ApiError::not_found("track"))?;
+    let file: TrackFile = sqlx::query_as(
+        "SELECT file_size AS size, sample_rate, channels, year AS year_tag, track_number,
+                disc_number, musicbrainz_recording_id, musicbrainz_release_id,
+                CAST(UNIX_TIMESTAMP(missing_since) * 1000 AS SIGNED) AS missing_since_unix_ms
+         FROM tracks WHERE id = ?",
+    )
     .bind(id)
-    .fetch_optional(&state.pool)
-    .await?
-    .ok_or_else(|| ApiError::not_found("track"))?;
-    let (file_size, added_at_unix_ms, missing_since_unix_ms): (Option<u64>, i64, Option<i64>) =
-        sqlx::query_as(
-            "SELECT file_size, CAST(UNIX_TIMESTAMP(created_at) * 1000 AS SIGNED),
-                    CAST(UNIX_TIMESTAMP(missing_since) * 1000 AS SIGNED)
-             FROM tracks WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_one(&state.pool)
-        .await?;
+    .fetch_one(&state.pool)
+    .await?;
+    let bpm_by_hand: Option<f64> =
+        sqlx::query_scalar("SELECT CAST(bpm AS DOUBLE) FROM track_programming WHERE track_id = ?")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?
+            .flatten();
+    let musicbrainz = load_musicbrainz(&state, id).await?;
     let analysis: Option<TrackAnalysis> = sqlx::query_as(
         "SELECT integrated_lufs, true_peak_db, cue_in_ms, cue_out_ms, fade_out_start_ms,
-                has_internal_silence,
+                has_internal_silence, CAST(bpm AS DOUBLE) AS bpm,
                 CAST(UNIX_TIMESTAMP(analyzed_at) * 1000 AS SIGNED) AS analyzed_at_unix_ms
          FROM track_analysis WHERE track_id = ?",
     )
@@ -310,9 +725,9 @@ async fn get_track(
         settings::load(&state.pool, PlayoutSettings::SETTINGS_NAME).await?;
     Ok(Json(TrackDetail {
         summary,
-        file_size,
-        added_at_unix_ms,
-        missing_since_unix_ms,
+        file,
+        bpm_by_hand,
+        musicbrainz,
         analysis,
         overrides,
         playout: EffectivePlayout {
@@ -324,6 +739,27 @@ async fn get_track(
         categories,
         identification,
     }))
+}
+
+async fn load_musicbrainz(state: &AppState, id: u64) -> ApiResult<Option<TrackMusicBrainz>> {
+    let found = sqlx::query(
+        "SELECT album, record_label, catalog_number, isrc, first_release_year,
+                CAST(genres AS CHAR) AS genres,
+                CAST(UNIX_TIMESTAMP(fetched_at) * 1000 AS SIGNED) AS fetched_at_unix_ms
+         FROM track_musicbrainz WHERE track_id = ?",
+    )
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let Some(row) = found else {
+        return Ok(None);
+    };
+    let mut details = TrackMusicBrainz::from_row(&row)?;
+    let genres: Option<String> = row.try_get("genres")?;
+    details.genres = genres
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
+    Ok(Some(details))
 }
 
 async fn load_overrides(state: &AppState, id: u64) -> ApiResult<TrackOverrides> {

@@ -1450,3 +1450,362 @@ async fn rotation_follows_clocks_restrictions_and_logs_its_picks() {
     assert_eq!(status, StatusCode::FORBIDDEN);
     station.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn track_details_labels_programming_and_tags() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let pool = &station.db.pool;
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+
+    // 1,000 tracks never analyzed (autofill leaves them alone), half of
+    // them at a low bitrate, added a year ago but the last ten.
+    sqlx::query(
+        "INSERT INTO tracks (path, title, artist, bitrate_kbps, created_at)
+         SELECT CONCAT('bulk/', seq, '.mp3'), CONCAT('Bulk ', seq), 'Bulk artist',
+                IF(seq % 2 = 0, 96, 320),
+                IF(seq > 990, NOW(6), NOW(6) - INTERVAL 1 YEAR)
+         FROM seq_1_to_1000",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    let bulk: Vec<u64> =
+        sqlx::query_scalar("SELECT id FROM tracks WHERE path LIKE 'bulk/%' ORDER BY id")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    let (a, b, c) = (bulk[0], bulk[1], bulk[2]);
+    // a: two plays that count and a skip; b: only on the FX player;
+    // c: playing for a minute (its end not known yet).
+    for (track, deck, played_ms, ago_s) in [
+        (a, "a", Some(40_000), 3_600),
+        (a, "b", Some(10_000), 1_800),
+        (a, "a", Some(35_000), 600),
+        (b, "fx", Some(60_000), 300),
+        (c, "a", None, 60),
+    ] {
+        sqlx::query(
+            "INSERT INTO play_history (track_id, title, started_at, ended_at, played_ms, deck, source)
+             VALUES (?, 'x', NOW(6) - INTERVAL ? SECOND,
+                     IF(? IS NULL, NULL, NOW(6) - INTERVAL ? SECOND), ?, ?, 'manual')",
+        )
+        .bind(track)
+        .bind(ago_s)
+        .bind(played_ms)
+        .bind(ago_s - 60)
+        .bind(played_ms)
+        .bind(deck)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    let page = admin.get("/tracks?q=Bulk&sort=play_count&limit=3").await;
+    assert_eq!(page["total"], 1000);
+    let counts: Vec<(u64, u64)> = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| (t["id"].as_u64().unwrap(), t["play_count"].as_u64().unwrap()))
+        .collect();
+    assert_eq!(
+        counts[..2],
+        [(a, 2), (c, 1)],
+        "skips and FX plays do not count"
+    );
+    let detail = admin.get(&format!("/tracks/{a}")).await;
+    assert_eq!(detail["bitrate_kbps"], 320);
+    let last_played = detail["last_played_at_unix_ms"].as_i64().unwrap();
+    let ten_minutes_ago = jiff::Timestamp::now().as_millisecond() - 600_000;
+    assert!(
+        (last_played - ten_minutes_ago).abs() < 5_000,
+        "the skip is not the last play"
+    );
+    // Every start counts with a minimum of 0 s.
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/programming",
+            json!({"min_play_s": 0}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(admin.get(&format!("/tracks/{a}")).await["play_count"], 3);
+    admin
+        .send(
+            Method::PUT,
+            "/settings/programming",
+            json!({"min_play_s": 30}),
+        )
+        .await;
+
+    assert_eq!(
+        admin.get("/tracks?q=Bulk&never_played=true").await["total"],
+        998
+    );
+    assert_eq!(
+        admin.get("/tracks?q=Bulk&not_played_days=1").await["total"],
+        998
+    );
+    assert_eq!(admin.get("/tracks?q=Bulk&added_days=7").await["total"], 10);
+    assert_eq!(
+        admin.get("/tracks?q=Bulk&bitrate_below=128").await["total"],
+        500
+    );
+    let lowest = admin.get("/tracks?q=Bulk&sort=bitrate&limit=1").await;
+    assert_eq!(lowest["items"][0]["bitrate_kbps"], 96);
+    let highest = admin
+        .get("/tracks?q=Bulk&sort=bitrate&desc=true&limit=1")
+        .await;
+    assert_eq!(highest["items"][0]["bitrate_kbps"], 320);
+
+    // A label on the 1,000 tracks in one action, then off them.
+    let (status, christmas) = admin
+        .send(
+            Method::POST,
+            "/labels",
+            json!({"name": "Christmas", "color": "#AA0000"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{christmas}");
+    let (_, live) = admin
+        .send(Method::POST, "/labels", json!({"name": "live"}))
+        .await;
+    let (status, _) = admin
+        .send(Method::POST, "/labels", json!({"name": "christmas"}))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "unique ignoring case");
+    let (christmas, live) = (
+        christmas["id"].as_u64().unwrap(),
+        live["id"].as_u64().unwrap(),
+    );
+    let (status, _) = viewer
+        .send(
+            Method::POST,
+            "/tracks/labels",
+            json!({"selection": {"filters": {"q": "Bulk"}}, "add": [christmas]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let started = Instant::now();
+    let (status, added) = admin
+        .send(
+            Method::POST,
+            "/tracks/labels",
+            json!({"selection": {"filters": {"q": "Bulk"}}, "add": [christmas]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{added}");
+    assert_eq!(
+        (added["tracks"].as_u64(), added["changed"].as_u64()),
+        (Some(1000), Some(1000))
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    admin
+        .send(
+            Method::POST,
+            "/tracks/labels",
+            json!({"selection": {"track_ids": [a, b]}, "add": [live]}),
+        )
+        .await;
+    assert_eq!(
+        admin.get(&format!("/tracks?labels_all={christmas}")).await["total"],
+        1000
+    );
+    assert_eq!(
+        admin
+            .get(&format!("/tracks?labels_all={christmas},{live}"))
+            .await["total"],
+        2
+    );
+    assert_eq!(
+        admin
+            .get(&format!(
+                "/tracks?labels_any={christmas}&labels_none={live}&bitrate_below=128"
+            ))
+            .await["total"],
+        499
+    );
+    assert_eq!(
+        admin.get(&format!("/tracks?labels_none={christmas}")).await["total"],
+        5
+    );
+    let page = admin.get(&format!("/tracks?labels_all={live}")).await;
+    assert_eq!(page["items"][0]["labels"].as_array().unwrap().len(), 2);
+    let labels = admin.get("/labels").await;
+    assert_eq!(labels[0]["name"], "Christmas");
+    assert_eq!(labels[0]["tracks"], 1000);
+
+    // A category filled from the label.
+    let (_, category) = admin
+        .send(Method::POST, "/categories", json!({"name": "Holidays"}))
+        .await;
+    let (status, filled) = admin
+        .send(
+            Method::POST,
+            "/tracks/categories",
+            json!({"selection": {"filters": {"labels_any": christmas.to_string()}},
+                   "add": [{"category_id": category["id"]}]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{filled}");
+    assert_eq!(
+        admin.get(&format!("/categories/{}", category["id"])).await["tracks"],
+        1000
+    );
+
+    let (status, removed) = admin
+        .send(
+            Method::POST,
+            "/tracks/labels",
+            json!({"selection": {"filters": {"labels_any": christmas.to_string()}},
+                   "remove": [christmas]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    assert_eq!(removed["changed"], 1000);
+    assert_eq!(
+        admin.get(&format!("/tracks?labels_any={christmas}")).await["total"],
+        0
+    );
+    let (status, merged) = admin
+        .send(
+            Method::POST,
+            &format!("/labels/{live}/merge"),
+            json!({"into_id": christmas}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{merged}");
+    assert_eq!(merged["tracks"], 2);
+
+    // Mood, sound code and tempo on a selection; eras from the year.
+    let (status, set) = admin
+        .send(
+            Method::POST,
+            "/tracks/programming",
+            json!({"selection": {"track_ids": [a, b]}, "mood": "3", "sound_code": "hard",
+                   "bpm": 98.44}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/tracks/programming",
+            json!({"selection": {"track_ids": [a]}, "mood": "wistful"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "not on the scale");
+    admin
+        .send(
+            Method::POST,
+            "/tracks/programming",
+            json!({"selection": {"track_ids": [c]}, "sound_code": "soft"}),
+        )
+        .await;
+    let detail = admin.get(&format!("/tracks/{a}")).await;
+    assert_eq!(
+        (detail["mood"].as_str(), detail["sound_code"].as_str()),
+        (Some("3"), Some("hard"))
+    );
+    assert_eq!(detail["bpm"], 98.4);
+    assert_eq!(detail["bpm_by_hand"], 98.4);
+    assert_eq!(admin.get("/tracks?mood=3").await["total"], 2);
+    let by_code = admin.get("/tracks?q=Bulk&sort=sound_code&limit=3").await;
+    assert_eq!(
+        by_code["items"][0]["sound_code"], "soft",
+        "in the order of the scale"
+    );
+    assert_eq!(by_code["items"][1]["sound_code"], "hard");
+    sqlx::query("UPDATE tracks SET year = 1975 WHERE id = ?")
+        .bind(a)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO track_musicbrainz (track_id, release_id, recording_id, first_release_year)
+         VALUES (?, 'rel', 'rec', 2004)",
+    )
+    .bind(b)
+    .execute(pool)
+    .await
+    .unwrap();
+    assert_eq!(admin.get(&format!("/tracks/{a}")).await["era"], "70s");
+    assert_eq!(admin.get(&format!("/tracks/{b}")).await["era"], "2000s");
+    assert_eq!(admin.get("/tracks?era=70s").await["total"], 1);
+    admin
+        .send(
+            Method::PUT,
+            "/settings/programming",
+            json!({"eras": [{"name": "classics", "to_year": 1989},
+                            {"name": "recurrents", "from_year": 1990}]}),
+        )
+        .await;
+    assert_eq!(admin.get(&format!("/tracks/{a}")).await["era"], "classics");
+    assert_eq!(admin.get("/tracks?era=recurrents").await["total"], 1);
+
+    // Tags edited from the browser, written by heron-librarian, undone byte
+    // for byte.
+    let track = station.tracks[0];
+    let file = station.library.path().join("Artist 1/Track 1.wav");
+    let original = std::fs::read(&file).unwrap();
+    let roots = heron_librarian::journal::Roots {
+        library: station.library.path().to_path_buf(),
+        incoming: station.library.path().join(".incoming"),
+    };
+    let librarian = heron_librarian::tasks::TaskRunner::new(
+        pool.clone(),
+        roots,
+        heron_librarian::identify::Endpoints::default(),
+    );
+    let (status, invalid) = admin
+        .send(
+            Method::POST,
+            "/tracks/tags",
+            json!({"selection": {"track_ids": [track]}, "set": {"year": "soon"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid}");
+    let (status, task) = admin
+        .send(
+            Method::POST,
+            "/tracks/tags",
+            json!({"selection": {"track_ids": [track]},
+                   "set": {"genre": "Jazz", "year": "1999", "album_artist": "Various"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{task}");
+    assert!(librarian.run_next().await.unwrap());
+    let task = admin.get(&format!("/library/tasks/{}", task["id"])).await;
+    assert_eq!(task["report"]["done"], 1, "{task}");
+    let detail = admin.get(&format!("/tracks/{track}")).await;
+    assert_eq!(detail["genre"], "Jazz");
+    assert_eq!(detail["album_artist"], "Various");
+    assert_eq!(detail["year"], 1999);
+    assert_eq!(detail["id"], track, "same track");
+    assert_eq!(detail["analysis"]["cue_out_ms"], 3000, "not analyzed again");
+    assert_ne!(std::fs::read(&file).unwrap(), original);
+    let batches = admin.get("/library/batches").await;
+    assert_eq!(batches[0]["kind"], "edit");
+    let (status, _) = admin
+        .request(
+            Method::POST,
+            &format!("/library/batches/{}/undo", batches[0]["id"]),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(librarian.run_next().await.unwrap());
+    assert_eq!(std::fs::read(&file).unwrap(), original, "byte for byte");
+    assert_eq!(
+        admin.get(&format!("/tracks/{track}")).await["genre"],
+        Value::Null
+    );
+    station.stop().await;
+}

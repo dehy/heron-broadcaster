@@ -12,7 +12,7 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use heron_core::library::{BatchReport, OrganizePlan, RelationsReport, TaskRequest};
+use heron_core::library::{BatchReport, DetailsReport, OrganizePlan, RelationsReport, TaskRequest};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
@@ -21,7 +21,7 @@ use utoipa_axum::routes;
 use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{ApiError, ApiResult, ErrorBody};
-use crate::tracks::{SUMMARY_COLUMNS, SUMMARY_JOINS, TrackSummary};
+use crate::tracks::{ListContext, TrackSummary};
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -34,6 +34,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_review))
         .routes(routes!(apply_release))
         .routes(routes!(keep_tags))
+        .routes(routes!(fetch_details))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ToSchema)]
@@ -59,6 +60,8 @@ pub struct LibraryTask {
     pub report: Option<BatchReport>,
     /// What a finished MusicBrainz relationships lookup found.
     pub relations: Option<RelationsReport>,
+    /// What a finished MusicBrainz details lookup did.
+    pub details: Option<DetailsReport>,
     pub requested_by: Option<String>,
     pub created_at_unix_ms: i64,
     pub started_at_unix_ms: Option<i64>,
@@ -96,16 +99,18 @@ fn task(
         _ => TaskStatus::Pending,
     };
     let result = result.as_deref().filter(|_| status == TaskStatus::Done);
-    let (plan, report, relations) = match (&request, result) {
-        (_, None) => (None, None, None),
-        (TaskRequest::OrganizePlan, Some(result)) => {
-            (serde_json::from_str(result).ok(), None, None)
-        }
+    let (mut plan, mut report, mut relations, mut details) = (None, None, None, None);
+    match (&request, result) {
+        (_, None) => {}
+        (TaskRequest::OrganizePlan, Some(result)) => plan = serde_json::from_str(result).ok(),
         (TaskRequest::ArtistRelations, Some(result)) => {
-            (None, None, serde_json::from_str(result).ok())
+            relations = serde_json::from_str(result).ok();
         }
-        (_, Some(result)) => (None, serde_json::from_str(result).ok(), None),
-    };
+        (TaskRequest::MusicbrainzDetails { .. }, Some(result)) => {
+            details = serde_json::from_str(result).ok();
+        }
+        (_, Some(result)) => report = serde_json::from_str(result).ok(),
+    }
     Ok(LibraryTask {
         id,
         request,
@@ -114,6 +119,7 @@ fn task(
         plan,
         report,
         relations,
+        details,
         requested_by,
         created_at_unix_ms: created,
         started_at_unix_ms: started,
@@ -251,6 +257,8 @@ pub enum BatchKind {
     Undo,
     /// A release picked on the review screen.
     Review,
+    /// Tags edited from the browser.
+    Edit,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -299,6 +307,7 @@ async fn list_batches(
                         "organize" => BatchKind::Organize,
                         "undo" => BatchKind::Undo,
                         "review" => BatchKind::Review,
+                        "edit" => BatchKind::Edit,
                         _ => BatchKind::Import,
                     },
                     undoes,
@@ -409,15 +418,20 @@ async fn list_review(
     )
     .fetch_one(&state.pool)
     .await?;
-    let tracks: Vec<TrackSummary> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {SUMMARY_COLUMNS} {SUMMARY_JOINS}
+    let ids: Vec<u64> = sqlx::query_scalar(
+        "SELECT t.id FROM tracks t
          JOIN track_identifications i ON i.track_id = t.id AND i.status = 'needs_review'
-         ORDER BY t.path LIMIT ? OFFSET ?"
-    )))
+         ORDER BY t.path LIMIT ? OFFSET ?",
+    )
     .bind(limit)
     .bind(query.offset.unwrap_or(0))
     .fetch_all(&state.pool)
     .await?;
+    let mut tracks = ListContext::load(&state.pool)
+        .await?
+        .summaries(&state.pool, &ids)
+        .await?;
+    tracks.sort_by(|a, b| a.path.cmp(&b.path));
     let mut items = Vec::with_capacity(tracks.len());
     for track in tracks {
         let (reason, score, candidates): (Option<String>, Option<f64>, Option<String>) =
@@ -540,4 +554,33 @@ async fn keep_tags(
         ));
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct DetailsRequest {
+    /// Look up every identified track again, not only those never looked up.
+    pub all: bool,
+}
+
+/// Fetches the programming details of identified tracks from MusicBrainz
+/// (album, record label, ISRC, first release year, genres), one release a
+/// second. From then on, new tracks are looked up in the background.
+/// Operators and admins.
+#[utoipa::path(post, path = "/library/musicbrainz-details", tag = "library",
+    request_body = DetailsRequest,
+    responses((status = 202, body = LibraryTask), (status = "4XX", body = ErrorBody)))]
+async fn fetch_details(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(request): Json<DetailsRequest>,
+) -> ApiResult<(StatusCode, Json<LibraryTask>)> {
+    user.require(Role::Operator)?;
+    let task = ask(
+        &state,
+        &user,
+        TaskRequest::MusicbrainzDetails { all: request.all },
+    )
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(task)))
 }

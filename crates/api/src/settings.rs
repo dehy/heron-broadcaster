@@ -9,6 +9,8 @@
 //! - `queue`: the queue manager.
 //! - `rotation`: separation rules, fallback category and weights.
 //! - `station`: the time zone clocks and restrictions follow.
+//! - `programming`: what counts as a play, eras, and the mood and sound
+//!   code scales.
 
 use axum::Json;
 use axum::extract::State;
@@ -92,6 +94,82 @@ impl Default for StationSettings {
     }
 }
 
+/// What music programmers sort and separate tracks by.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProgrammingSettings {
+    /// A play counts (play counts, last played) when it lasted at least
+    /// this long, so skipped tracks do not count. 0 counts every start.
+    pub min_play_s: u32,
+    /// Eras by year of first release, the first matching one applies.
+    /// Empty: decades (`70s`, `80s`, `2000s`).
+    pub eras: Vec<Era>,
+    /// The mood scale, in order (an energy from 1 to 5 by default).
+    pub moods: Vec<String>,
+    /// The sound code scale, in order.
+    pub sound_codes: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Era {
+    pub name: String,
+    /// First year, open-ended when missing.
+    pub from_year: Option<u16>,
+    /// Last year, open-ended when missing.
+    pub to_year: Option<u16>,
+}
+
+impl ProgrammingSettings {
+    pub const SETTINGS_NAME: &'static str = "programming";
+
+    fn check(&self) -> Result<(), String> {
+        if self.min_play_s > 3_600 {
+            return Err("min_play_s is at most 3600".to_owned());
+        }
+        let names = |what: &str, names: &mut dyn Iterator<Item = &String>| -> Result<(), String> {
+            let mut seen = std::collections::HashSet::new();
+            for name in names {
+                let trimmed = name.trim();
+                if trimmed.is_empty() || trimmed.chars().count() > 64 || trimmed != name {
+                    return Err(format!(
+                        "{what} are 1 to 64 characters, without spaces around"
+                    ));
+                }
+                if !seen.insert(name.to_lowercase()) {
+                    return Err(format!("{what}: {name:?} appears twice"));
+                }
+            }
+            if seen.len() > 50 {
+                return Err(format!("at most 50 {what}"));
+            }
+            Ok(())
+        };
+        names("eras", &mut self.eras.iter().map(|era| &era.name))?;
+        names("moods", &mut self.moods.iter())?;
+        names("sound codes", &mut self.sound_codes.iter())?;
+        for era in &self.eras {
+            if let (Some(from), Some(to)) = (era.from_year, era.to_year)
+                && from > to
+            {
+                return Err(format!("era {:?} ends before it starts", era.name));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Default for ProgrammingSettings {
+    fn default() -> Self {
+        Self {
+            min_play_s: 30,
+            eras: Vec::new(),
+            moods: (1..=5).map(|energy| energy.to_string()).collect(),
+            sound_codes: ["soft", "medium", "hard"].map(str::to_owned).to_vec(),
+        }
+    }
+}
+
 /// Library settings as shown: the AcoustID key is never sent back.
 #[derive(Clone, Debug, PartialEq, Serialize, ToSchema)]
 pub struct LibrarySettingsView {
@@ -132,10 +210,10 @@ pub struct LibrarySettingsPatch {
 }
 
 /// Tells a field set to `null` (`Some(None)`) from a missing one (`None`).
-fn some_or_null<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn some_or_null<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,
-) -> Result<Option<Option<String>>, D::Error> {
-    Option::<String>::deserialize(deserializer).map(Some)
+) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 /// Marks the engine's configuration as managed by the API (see `sync`).
@@ -203,6 +281,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_queue_settings, put_queue_settings))
         .routes(routes!(get_rotation_settings, put_rotation_settings))
         .routes(routes!(get_station, put_station))
+        .routes(routes!(get_programming, put_programming))
 }
 
 /// Crossfades and loudness normalization.
@@ -448,6 +527,36 @@ async fn put_station(
     Ok(Json(settings))
 }
 
+/// What counts as a play, eras, and the mood and sound code scales.
+#[utoipa::path(get, path = "/settings/programming", tag = "settings",
+    responses((status = 200, body = ProgrammingSettings), (status = "4XX", body = ErrorBody)))]
+async fn get_programming(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<ProgrammingSettings>> {
+    Ok(Json(
+        load(&state.pool, ProgrammingSettings::SETTINGS_NAME).await?,
+    ))
+}
+
+/// Replaces the programming settings (missing fields take the defaults).
+/// Tracks keep their mood and sound code when a scale changes. Operators
+/// and admins.
+#[utoipa::path(put, path = "/settings/programming", tag = "settings",
+    request_body = ProgrammingSettings,
+    responses((status = 200, body = ProgrammingSettings), (status = "4XX", body = ErrorBody)))]
+async fn put_programming(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(settings): Json<ProgrammingSettings>,
+) -> ApiResult<Json<ProgrammingSettings>> {
+    user.require(Role::Operator)?;
+    settings.check().map_err(ApiError::Invalid)?;
+    save(&state.pool, ProgrammingSettings::SETTINGS_NAME, &settings).await?;
+    tracing::info!(user = %user.username, ?settings, "programming settings changed");
+    Ok(Json(settings))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -462,6 +571,28 @@ mod tests {
         assert_eq!(keep.acoustid_key, None);
         let set: LibrarySettingsPatch = serde_json::from_str(r#"{"acoustid_key": "k"}"#).unwrap();
         assert_eq!(set.acoustid_key, Some(Some("k".to_owned())));
+    }
+
+    #[test]
+    fn programming_settings_are_checked() {
+        let defaults = ProgrammingSettings::default();
+        assert_eq!(defaults.check(), Ok(()));
+        let twice = ProgrammingSettings {
+            moods: vec!["calm".into(), "Calm".into()],
+            ..ProgrammingSettings::default()
+        };
+        assert!(twice.check().is_err());
+        let backwards = ProgrammingSettings {
+            eras: vec![Era {
+                name: "currents".into(),
+                from_year: Some(2024),
+                to_year: Some(2020),
+            }],
+            ..ProgrammingSettings::default()
+        };
+        assert!(backwards.check().is_err());
+        let partial: ProgrammingSettings = serde_json::from_str(r#"{"min_play_s": 0}"#).unwrap();
+        assert_eq!(partial.sound_codes, defaults.sound_codes);
     }
 
     #[test]
