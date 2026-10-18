@@ -55,6 +55,9 @@ impl Station {
             now_playing_tx,
         )
         .with_source_loader(|file, cue_in_ms, cue_out_ms| {
+            if file.path.ends_with("stalled.wav") {
+                return Ok(Box::new(Stalled));
+            }
             let audio = decode_to_memory(&file.path, cue_in_ms, cue_out_ms);
             Ok(Box::new(VecSource::new(audio)))
         });
@@ -96,6 +99,23 @@ impl Station {
             playout: TrackPlayout::unanalyzed(duration_ms),
             source: PlaySource::Manual,
         }
+    }
+}
+
+/// A file on an unreachable share: its decoder never delivers anything.
+struct Stalled;
+
+impl AudioSource for Stalled {
+    fn read(&mut self, _out: &mut [f32]) -> usize {
+        0
+    }
+
+    fn is_finished(&self) -> bool {
+        false
+    }
+
+    fn is_ready(&self) -> bool {
+        false
     }
 }
 
@@ -624,4 +644,33 @@ fn a_restart_resumes_the_track_on_air_and_the_queue() {
     // New entries do not reuse the IDs of the saved ones.
     let four = station.file("four.wav", 1.0);
     assert!(station.player.enqueue(vec![four], None).unwrap()[0] > ids[2]);
+}
+
+#[test]
+fn a_track_that_cannot_start_gives_way_to_the_fallback_directory() {
+    let fallback = tempfile::tempdir().unwrap();
+    write_tone(&fallback.path().join("filler.wav"), 2.0, 0.3);
+    let mut station = Station::with_fallback(fallback.path());
+    let tracks = vec![
+        station.file("stalled.wav", 30.0),
+        station.file("music.wav", 1.0),
+    ];
+    station.player.enqueue(tracks, None).unwrap();
+    station.play(9.0);
+    assert!(started(&station.events()).is_empty(), "still waiting");
+    station.play(4.0);
+    let paths: Vec<String> = started_sources(&station.events())
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(paths[..2], ["filler.wav", "music.wav"]);
+    // Dropped, not retried.
+    assert!(
+        station
+            .player
+            .snapshot()
+            .queue
+            .iter()
+            .all(|entry| entry.track.path != "stalled.wav")
+    );
 }

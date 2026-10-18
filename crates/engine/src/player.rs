@@ -37,6 +37,10 @@ pub const PRELOAD_TRACKS: usize = 3;
 /// With nothing waiting, a fallback track is cued when the track on air has
 /// less than this left, so it starts with the planned transition.
 const FALLBACK_LEAD_MS: u32 = 30_000;
+/// With nothing on air, a cued track that has not started after this
+/// (its file hangs on an unreachable share) is given up. Long enough for a
+/// track resumed far into its file on a Raspberry Pi.
+const STALLED_CUE_MS: u32 = 10_000;
 /// A track resumed after a restart fades in over this.
 const RESUME_FADE_MS: u32 = 500;
 /// A track this close to its end when the engine stopped is not resumed.
@@ -180,6 +184,9 @@ pub struct Player {
     watch_from: u64,
     /// Tracks the watchdog skipped since sound was last heard.
     silence_skips: u32,
+    /// Master frame since which the cued track has been waiting to start
+    /// with nothing on air.
+    stalled_since: Option<u64>,
     /// Something to save changed since the last [`Self::take_changed`].
     changed: bool,
 }
@@ -213,6 +220,7 @@ impl Player {
             idle_since: None,
             watch_from: 0,
             silence_skips: 0,
+            stalled_since: None,
             changed: false,
         }
     }
@@ -433,6 +441,7 @@ impl Player {
             self.handle(event);
         }
         self.watch_silence();
+        self.watch_stalled_cue();
         self.ensure_cued();
         self.preload();
     }
@@ -485,6 +494,34 @@ impl Player {
             self.silence_skips += 1;
             self.watch_from = frame;
         }
+    }
+
+    /// Gives up a cued track that cannot start while nothing plays: its
+    /// decoder is stuck (a file on an unreachable share). It is dropped, not
+    /// put back in the queue, and a fallback track plays instead.
+    fn watch_stalled_cue(&mut self) {
+        let frame = self.mixer.status.frame.load(Ordering::Relaxed);
+        let Some(cued) = self.cued.filter(|_| self.on_air.is_none() && !self.paused) else {
+            self.stalled_since = None;
+            return;
+        };
+        let since = *self.stalled_since.get_or_insert(frame);
+        if frame.saturating_sub(since) < ms_to_frames(STALLED_CUE_MS) {
+            return;
+        }
+        self.stalled_since = None;
+        let path = self.loaded.get(&cued).map(|entry| entry.track.path.clone());
+        if self.uncue_with(false).is_err() {
+            return;
+        }
+        tracing::warn!(
+            entry_id = cued,
+            ?path,
+            "the cued track could not start (is its file reachable?): skipped"
+        );
+        metrics::counter!("heron_engine_stalled_tracks_total").increment(1);
+        self.changed = true;
+        self.cue_fallback();
     }
 
     /// Cues a fallback track in place of the cued one (put back in the queue).
@@ -714,6 +751,12 @@ impl Player {
 
     /// Removes the cued track from the mixer and puts it back in front of the queue.
     fn uncue(&mut self) -> Result<(), PlayerError> {
+        self.uncue_with(true)
+    }
+
+    /// Removes the cued track from the mixer; puts it back in front of the
+    /// queue if `requeue` (never a fallback track).
+    fn uncue_with(&mut self, requeue: bool) -> Result<(), PlayerError> {
         let Some(cued) = self.cued.take() else {
             return Ok(());
         };
@@ -722,7 +765,8 @@ impl Player {
             return Err(error);
         }
         self.uncueing.insert(cued);
-        if !self.fallback_entries.contains(&cued)
+        if requeue
+            && !self.fallback_entries.contains(&cued)
             && let Some(entry) = self.loaded.get(&cued).cloned()
         {
             self.queue.push_front(entry);

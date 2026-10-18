@@ -268,36 +268,44 @@ impl Scanner {
     fn scan(&self) -> usize {
         let mut found = Vec::new();
         list_audio(&self.dir, &self.dir, &mut found);
-        let mut changed = false;
-        let mut catalog = self.lock();
-        let before = catalog.files.len();
-        catalog
-            .files
-            .retain(|path, _| found.iter().any(|(found, _, _)| found == path));
-        changed |= catalog.files.len() != before;
-        for (path, size, modified_unix_ms) in &found {
-            let known = catalog.files.get(path).is_some_and(|file| {
-                file.size == *size && file.modified_unix_ms == *modified_unix_ms
-            });
-            if known {
-                continue;
-            }
-            let (title, artist, album) = read_tags(&self.dir.join(path));
-            catalog.files.insert(
-                path.clone(),
-                FallbackFile {
-                    size: *size,
-                    modified_unix_ms: *modified_unix_ms,
+        let (removed, new) = {
+            let mut catalog = self.lock();
+            let before = catalog.files.len();
+            catalog
+                .files
+                .retain(|path, _| found.iter().any(|(found, _, _)| found == path));
+            let new: Vec<(String, u64, u64)> = found
+                .iter()
+                .filter(|(path, size, modified)| {
+                    catalog
+                        .files
+                        .get(path)
+                        .is_none_or(|file| file.size != *size || file.modified_unix_ms != *modified)
+                })
+                .cloned()
+                .collect();
+            (catalog.files.len() != before, new)
+        };
+        // Tags are read without holding the catalog: the player picks from
+        // it, and a slow file must not hold the air up.
+        let added: Vec<(String, FallbackFile)> = new
+            .into_iter()
+            .map(|(path, size, modified_unix_ms)| {
+                let (title, artist, album) = read_tags(&self.dir.join(&path));
+                let file = FallbackFile {
+                    size,
+                    modified_unix_ms,
                     title,
                     artist,
                     album,
                     analysis: None,
                     unplayable: false,
-                },
-            );
-            changed = true;
-        }
-        drop(catalog);
+                };
+                (path, file)
+            })
+            .collect();
+        let changed = removed || !added.is_empty();
+        self.lock().files.extend(added);
         if changed {
             self.save();
         }
