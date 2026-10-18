@@ -19,6 +19,8 @@ use heron_engine::grpc::EngineService;
 use heron_service::LogArgs;
 
 const SERVICE: &str = "heron-engine";
+/// How long a shutdown waits for open connections to close.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Parser)]
 #[command(name = SERVICE, version, about = "Heron Broadcaster playout engine")]
@@ -127,10 +129,30 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 
     let health = EngineHealth(std::sync::Arc::clone(&engine));
     let router = heron_service::ops_router(SERVICE, metrics, health);
-    let (grpc, http) = tokio::join!(grpc, heron_service::serve(cli.http_addr, router));
-    // Where the track on air is now, for the next start.
+    let servers = async {
+        let (grpc, http) = tokio::join!(grpc, heron_service::serve(cli.http_addr, router));
+        grpc.context("grpc server failed")?;
+        http?;
+        anyhow::Ok(())
+    };
+    tokio::pin!(servers);
+    tokio::select! {
+        result = &mut servers => {
+            engine.save_queue();
+            return result;
+        }
+        () = heron_service::shutdown_signal() => {}
+    }
+    // Where the track on air is now, for the next start: first, before
+    // anything can delay the exit.
     engine.save_queue();
-    grpc.context("grpc server failed")?;
-    http?;
-    Ok(())
+    // Streams (the API's WatchEvents) never end on their own: do not wait
+    // for them, or Docker kills the engine after 10 s.
+    match tokio::time::timeout(SHUTDOWN_GRACE, &mut servers).await {
+        Ok(result) => result,
+        Err(_) => {
+            tracing::info!("closing the connections still open");
+            Ok(())
+        }
+    }
 }
