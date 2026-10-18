@@ -67,6 +67,11 @@ describe("names and times", () => {
 });
 
 describe("time zone", () => {
+  // The machine's locale decides how times are written ("00:30:00",
+  // "12:30:00 AM", "00 h 30 min 00 s"): compare with it, not with a pattern.
+  const time = (timeZone: string, unixMs: number) =>
+    new Intl.DateTimeFormat(undefined, { timeStyle: "medium", timeZone }).format(unixMs);
+
   it("writes times in the station's time zone", () => {
     setTimeZone("UTC");
     const first = fullDate(Date.UTC(2024, 0, 1, 12));
@@ -74,16 +79,19 @@ describe("time zone", () => {
     // 2024-01-01 23:30 UTC: already the 2nd in Paris, still the 1st in Montréal.
     const at = Date.UTC(2024, 0, 1, 23, 30);
     setTimeZone("Europe/Paris");
-    expect(clockTime(at)).toMatch(/^(0?0|12):30:00/);
+    expect(clockTime(at)).toBe(time("Europe/Paris", at));
     expect(fullDate(at)).toBe(second);
     setTimeZone("America/Montreal");
-    expect(clockTime(at)).toMatch(/^(18|6):30:00/);
+    expect(clockTime(at)).toBe(time("America/Montreal", at));
+    expect(clockTime(at)).not.toBe(time("Europe/Paris", at));
     expect(fullDate(at)).toBe(first);
   });
 
   it("ignores a zone the browser does not know", () => {
+    const at = Date.UTC(2024, 0, 1, 12);
     setTimeZone("UTC");
+    const utc = clockTime(at);
     setTimeZone("Not/AZone");
-    expect(clockTime(Date.UTC(2024, 0, 1, 12))).toMatch(/^12:00:00/);
+    expect(clockTime(at)).toBe(utc);
   });
 });
