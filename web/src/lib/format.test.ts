@@ -1,7 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { ago, bytes, count, db, duration, parseDuration, trackName } from "./format";
+import {
+  ago,
+  bytes,
+  clockTime,
+  count,
+  db,
+  duration,
+  fullDate,
+  parseDuration,
+  setTimeZone,
+  trackName,
+} from "./format";
 
 describe("duration", () => {
   it("formats minutes and hours", () => {
@@ -52,5 +63,35 @@ describe("names and times", () => {
     const now = 1_700_000_000_000;
     expect(ago(now - 5 * 60_000, now)).toBe("5 minutes ago");
     expect(ago(null, now)).toBe("never");
+  });
+});
+
+describe("time zone", () => {
+  // The machine's locale decides how times are written ("00:30:00",
+  // "12:30:00 AM", "00 h 30 min 00 s"): compare with it, not with a pattern.
+  const time = (timeZone: string, unixMs: number) =>
+    new Intl.DateTimeFormat(undefined, { timeStyle: "medium", timeZone }).format(unixMs);
+
+  it("writes times in the station's time zone", () => {
+    setTimeZone("UTC");
+    const first = fullDate(Date.UTC(2024, 0, 1, 12));
+    const second = fullDate(Date.UTC(2024, 0, 2, 12));
+    // 2024-01-01 23:30 UTC: already the 2nd in Paris, still the 1st in Montréal.
+    const at = Date.UTC(2024, 0, 1, 23, 30);
+    setTimeZone("Europe/Paris");
+    expect(clockTime(at)).toBe(time("Europe/Paris", at));
+    expect(fullDate(at)).toBe(second);
+    setTimeZone("America/Montreal");
+    expect(clockTime(at)).toBe(time("America/Montreal", at));
+    expect(clockTime(at)).not.toBe(time("Europe/Paris", at));
+    expect(fullDate(at)).toBe(first);
+  });
+
+  it("ignores a zone the browser does not know", () => {
+    const at = Date.UTC(2024, 0, 1, 12);
+    setTimeZone("UTC");
+    const utc = clockTime(at);
+    setTimeZone("Not/AZone");
+    expect(clockTime(at)).toBe(utc);
   });
 });

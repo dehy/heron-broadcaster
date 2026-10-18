@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { api, done, errorMessage, fetchStatus, unwrap } from "./api";
 import { Banner, Icon, type IconName, Loading, Logo } from "./components/ui";
+import { setTimeZone } from "./lib/format";
 import { startLive, stopLive, useLive } from "./lib/live";
 import { Link, match, navigate, useLocation } from "./lib/router";
 import { ME_KEY, UserContext, useCan, useMeQuery } from "./lib/session";
@@ -155,6 +156,14 @@ function Shell() {
     refetchInterval: 60_000,
   });
   const reviewCount = review.data?.total ?? 0;
+  const station = useQuery({
+    queryKey: ["settings", "station"],
+    queryFn: () => unwrap(api.GET("/api/v1/settings/station")),
+  });
+  // Before the pages render, so they write times in station time.
+  if (station.data) {
+    setTimeZone(station.data.timezone);
+  }
 
   useEffect(() => {
     setNavOpen(false);

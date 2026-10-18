@@ -258,7 +258,7 @@ function StationCard() {
   return (
     <SettingsCard
       title="Station"
-      description="The schedule and restrictions follow the station's time zone. When the clocks go back, the repeated hour runs its clock again; when they go forward, the skipped hour is skipped."
+      description="The schedule, the restrictions and every time shown follow the station's time zone. When the clocks go back, the repeated hour runs its clock again; when they go forward, the skipped hour is skipped."
       value={settings.data}
       save={(value) => save.mutate(value)}
       saving={save.isPending}
