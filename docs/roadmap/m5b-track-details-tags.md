@@ -2,7 +2,7 @@
 
 **Depends on:** M5.
 
-What a music programmer looks at every day: when a track was added, when it last played, how often, at what bitrate; keywords to sort the library; and tags fixed from the browser.
+What a music programmer looks at every day: when a track was added, when it last played, how often, at what bitrate; its label, ISRC, era, BPM, mood and sound code; keywords to sort the library; and tags fixed from the browser.
 
 ## Scope
 
@@ -14,6 +14,16 @@ What a music programmer looks at every day: when a track was added, when it last
   - the **file**: bitrate, CBR or VBR, sample rate, channels, codec, size, read by the scanner with the tags.
 - The library can be **sorted** by each of them and **filtered**: never played, not played for N days, added in the last N days, bitrate below N kbps.
 - Tracks scanned before M5b get their file details at the next scan, without being analyzed again.
+
+### Programming details
+
+What music schedulers sort and separate by, filled in from where each one is reliable:
+
+- **From MusicBrainz**, for identified tracks ([M1b](m1b-library-management.md)): album, record label and catalog number, ISRC, the year of first release, and genres (as suggestions). Fetched for the whole library on request, at MusicBrainz's pace (one request a second), and kept up to date for new tracks.
+- **Era**, from the year of first release: the decade (`70s`, `80s`…) by default, or eras the station defines (`classics`, `recurrents`, `currents`).
+- **BPM**, measured during the analysis ([Import and analysis](../analysis.md)): MusicBrainz has no tempo. Editable when the measure is wrong (half or double tempo).
+- **Mood and sound code**, set by the programmers on scales the station defines (a sound code such as soft, medium, hard; an energy from 1 to 5), on one track or a selection at once. MusicBrainz has no mood, and AcousticBrainz, which estimated them, closed in 2022.
+- All of them show in the library and on the track page, sort and filter like the track details, and can be written into the files' tags when the station wants (ISRC, label, BPM, mood).
 
 ### Labels
 
@@ -32,6 +42,7 @@ What a music programmer looks at every day: when a track was added, when it last
 ## Acceptance criteria
 
 - [ ] The library sorts and filters by date added, last played, play count and bitrate; the counts match the play history (skipped plays under the threshold excluded).
+- [ ] Identified tracks get their album, label, ISRC, first release year and era from MusicBrainz; BPM is measured within 2 % on test tracks of known tempo; mood and sound code are set on a selection in one action.
 - [ ] A label is added to and removed from 1,000 selected tracks in one action, and the library filters by labels combined with its other filters.
 - [ ] Tags edited on a selection are written to the files and undone byte for byte; the tracks keep their ID, analysis, categories and history.
 

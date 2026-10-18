@@ -20,7 +20,8 @@ Sketch, defined in [M5b](roadmap/m5b-track-details-tags.md).
 
 | Table | Columns |
 |---|---|
-| `tracks` (added) | added_at (date added to the station: the first scan), bitrate_kbps, vbr, sample_rate, channels, codec |
+| `tracks` (added) | added_at (date added to the station: the first scan), bitrate_kbps, vbr, sample_rate, channels, codec; isrc, record_label, catalog_number, first_release_year, genres (from MusicBrainz) |
+| `track_programming` | track_id, bpm (measured, or set by hand), era, mood, sound_code (the last three on scales the station defines in the settings) |
 | `labels` | id, name (unique), color |
 | `track_labels` | track_id, label_id |
 
