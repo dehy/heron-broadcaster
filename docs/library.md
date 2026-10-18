@@ -26,6 +26,7 @@ Like iTunes' "Keep Music folder organized": drop files into the incoming folder 
 - **Files still being copied:** files modified less than `HERON_IMPORT_SETTLE` seconds ago (default 5) wait. A file that changes while it is being imported is left for the next pass.
 - **Siblings:** the files of one folder are handled together, so the files of an album agree on their release.
 - Emptied folders are removed from the incoming folder.
+- With [M5c](roadmap/m5c-track-management.md), incoming files wait in a buffer zone, with browser uploads, until someone imports them.
 
 ## Identification
 
@@ -150,6 +151,7 @@ The scanner (in `heron-api`, read-only) and the librarian share a MariaDB named 
 
 - The engine holds its upcoming tracks by path. The queue manager follows moves within 5 seconds ([API](api.md#queue-manager)), so only a track due to start in those seconds can be skipped.
 - Existing tracks are fingerprinted but not identified yet: identification runs on incoming files only.
-- Identical files dropped twice are imported twice (with a ` (2)` suffix).
+- Identical files dropped twice are imported twice (with a ` (2)` suffix). The buffer zone of [M5c](roadmap/m5c-track-management.md) flags duplicates before they are imported.
+- Tracks cannot be deleted with their files yet: [M5c](roadmap/m5c-track-management.md) adds deletion through a trash.
 
 Metrics: `heron_librarian_imports_total{result}` (identified, needs_review, unidentified, failed).
