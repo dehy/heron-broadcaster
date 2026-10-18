@@ -1,0 +1,257 @@
+#!/usr/bin/env sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Chaos tests (M3): breaks a running Compose stack in the ways a station
+# breaks, while listening to the stream, and checks each time that the air
+# stays on or comes back by itself:
+#
+#   1. MariaDB stopped;
+#   2. heron-api stopped, and the queue emptied: the fallback directory plays;
+#   3. Icecast restarted;
+#   4. the files of queued tracks deleted;
+#   5. a silent file queued: the silence watchdog skips it;
+#   6. heron-engine restarted, cleanly then killed: it resumes the track on air.
+#
+#   docker compose --profile icecast up -d --wait
+#   scripts/chaos-test.sh
+#
+# Needs tracks in the library and in the fallback directory, curl, and
+# Docker (ffmpeg in a container listens to the stream). Takes about 10 min.
+
+set -eu
+export LC_ALL=C
+cd "$(dirname "$0")/.."
+
+# Settings from the environment, else from .env, else the defaults.
+setting() {
+    eval "value=\${$1:-}"
+    [ -n "$value" ] || value=$(sed -n "s/^$1=//p" .env 2>/dev/null | tail -1)
+    echo "${value:-$2}"
+}
+HERON_HTTP_PORT=$(setting HERON_HTTP_PORT 8000)
+HERON_ICECAST_PORT=$(setting HERON_ICECAST_PORT 8010)
+export HERON_HTTP_PORT HERON_ICECAST_PORT
+icecast=http://localhost:$HERON_ICECAST_PORT
+music=$(setting HERON_MUSIC_DIR ./data/music)
+ffmpeg_image=linuxserver/ffmpeg:7.1.1
+work=$(mktemp -d)
+failures=0
+trap 'rm -rf "${work:?}"' EXIT
+
+ctl() {
+    docker compose exec -T heron-engine heron-engine ctl "$@"
+}
+
+# One of the engine's metrics, read from inside the network, summed over
+# its labels.
+metric() {
+    docker compose exec -T heron-web wget -q -O - http://heron-engine:8081/metrics |
+        awk -v name="$1" '$1 == name || index($1, name "{") == 1 { sum += $2; found = 1 }
+            END { if (found) print sum }'
+}
+
+# Compose commands, without their progress lines.
+compose() {
+    docker compose --progress quiet "$@"
+}
+
+step() {
+    printf '\n== %s\n' "$*"
+}
+
+pass() {
+    printf '  PASS %s\n' "$*"
+}
+
+fail() {
+    printf '  FAIL %s\n' "$*"
+    failures=$((failures + 1))
+}
+
+# Waits up to $1 seconds for the command that follows to succeed.
+wait_for() {
+    timeout=$1
+    shift
+    start=$(date +%s)
+    until "$@" >/dev/null 2>&1; do
+        [ $(($(date +%s) - start)) -lt "$timeout" ] || return 1
+        sleep 1
+    done
+}
+
+on_icecast() {
+    curl -fsS "$icecast/status-json.xsl" | grep -q '"listenurl"'
+}
+
+# Starts recording $1 seconds of the stream in the background.
+start_listening() {
+    capture="$work/capture-$(date +%s).mp3"
+    curl -s -m "$1" "$icecast/live" >"$capture" &
+    listener=$!
+    listened=$1
+}
+
+# Waits for the recording, then checks it: at least 90 % of the time
+# requested, and no silence longer than $1 seconds. Prints the longest silence.
+check_listening() {
+    max_silence=$1
+    wait "$listener" || true
+    report=$(docker run --rm -i --entrypoint ffmpeg "$ffmpeg_image" -hide_banner -nostdin \
+        -i pipe:0 -af silencedetect=noise=-50dB:duration=1 -f null - <"$capture" 2>&1 || true)
+    heard=$(printf '%s\n' "$report" | tr '\r' '\n' | sed -n 's/.*time=\([0-9:.]*\).*/\1/p' | tail -1 |
+        awk -F: '{ print $1 * 3600 + $2 * 60 + $3 }')
+    longest=$(printf '%s\n' "$report" | sed -n 's/.*silence_duration: \([0-9.]*\).*/\1/p' |
+        sort -n | tail -1)
+    starts=$(printf '%s\n' "$report" | grep -c 'silence_start' || true)
+    ends=$(printf '%s\n' "$report" | grep -c 'silence_end' || true)
+    longest=${longest:-0}
+    heard=${heard:-0}
+    echo "  heard ${heard} s of ${listened} s, longest silence ${longest} s"
+    if [ "$starts" -gt "$ends" ]; then
+        fail "the stream was still silent at the end"
+        return 1
+    fi
+    if awk -v heard="$heard" -v wanted="$listened" -v longest="$longest" -v max="$max_silence" \
+        'BEGIN { exit !(heard >= wanted * 0.9 && longest <= max) }'; then
+        return 0
+    fi
+    fail "the stream was interrupted"
+    return 1
+}
+
+waiting_tracks() {
+    ctl state | grep -cE '^(cued|  queued): #' || true
+}
+
+has_rotation_queue() {
+    ctl state | grep -E '^  queued: #' | grep -q '(rotation)'
+}
+
+on_air_line() {
+    ctl state | grep '(on air)'
+}
+
+# All in a function: the shell reads it whole before running, so editing
+# this file during a run cannot break the run.
+main() {
+    step "Setup: an output to the local Icecast, the queue filled by the API"
+    scripts/check-streaming.sh >/dev/null
+    wait_for 60 has_rotation_queue || fail "autofill did not fill the queue"
+    start_listening 15
+    check_listening 1 && pass "on air"
+
+    step "1. MariaDB stopped for 90 s"
+    start_listening 100
+    compose stop mariadb >/dev/null
+    sleep 90
+    compose start mariadb >/dev/null
+    check_listening 1 && pass "the air stayed on without the database"
+    if wait_for 120 sh -c "curl -fsS http://localhost:$HERON_HTTP_PORT/api/v1/status | grep -q '\"database\":\"ok\"'"; then
+        pass "the API found the database again"
+    else
+        fail "the API did not recover its database"
+    fi
+
+    step "2. heron-api stopped, the queue emptied"
+    compose stop heron-api >/dev/null
+    start_listening 70
+    ctl clear >/dev/null
+    ctl skip >/dev/null
+    sleep 10
+    if on_air_line | grep -q '(fallback)'; then
+        pass "the fallback directory is on air: $(on_air_line)"
+    else
+        fail "no fallback track on air: $(on_air_line || echo nothing)"
+    fi
+    check_listening 2 && pass "the air stayed on without the API"
+    compose start heron-api >/dev/null
+    if wait_for 120 has_rotation_queue; then
+        pass "the API refilled the queue with rotation"
+    else
+        fail "the queue was not refilled"
+    fi
+
+    step "3. Icecast restarted"
+    reconnects=$(metric heron_output_reconnects_total)
+    compose restart icecast >/dev/null
+    if wait_for 60 on_icecast; then
+        pass "the engine reconnected (reconnections: ${reconnects:-0} -> $(metric heron_output_reconnects_total))"
+    else
+        fail "the engine did not reconnect to Icecast"
+    fi
+    start_listening 15
+    check_listening 1 && pass "on air again"
+
+    step "4. The files of the queued tracks deleted"
+    paths=$(ctl state | sed -nE 's/^(cued|  queued): #.*\[(.*)\] \(rotation\)$/\2/p')
+    count=$(printf '%s\n' "$paths" | grep -c . || true)
+    printf '%s\n' "$paths" | while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        mkdir -p "$work/deleted/$(dirname "$path")"
+        mv "$music/$path" "$work/deleted/$path"
+    done
+    echo "  deleted $count queued files"
+    start_listening 45
+    for _ in 1 2 3 4; do
+        ctl skip >/dev/null
+        sleep 5
+    done
+    check_listening 3 && pass "missing files were skipped (or played from memory) without dead air"
+    (cd "$work/deleted" && find . -type f) | while read -r path; do
+        mv "$work/deleted/$path" "$music/$path"
+    done
+
+    step "5. A silent file queued"
+    skips=$(metric heron_engine_silence_skips_total)
+    docker run --rm -v "$(cd "$music" && pwd):/out" --entrypoint ffmpeg "$ffmpeg_image" -loglevel error -nostdin -y \
+        -f lavfi -i anullsrc=r=44100:cl=stereo:d=90 -c:a pcm_s16le /out/chaos-silence.wav
+    ctl enqueue --next --no-analysis chaos-silence.wav >/dev/null
+    ctl skip >/dev/null
+    start_listening 50
+    check_listening 25 || true
+    if awk -v longest="$longest" 'BEGIN { exit !(longest >= 15 && longest <= 25) }'; then
+        pass "the silence watchdog skipped the silent track after ${longest} s"
+    else
+        fail "expected one silence of about 20 s, got ${longest} s"
+    fi
+    echo "  silence skips: ${skips:-0} -> $(metric heron_engine_silence_skips_total)"
+    rm -f -- "${music:?}/chaos-silence.wav"
+
+    step "6. heron-engine restarted"
+    for how in restart kill; do
+        before=$(on_air_line || true)
+        entry=$(printf '%s\n' "$before" | sed -n 's/.*#\([0-9]*\) .*/\1/p')
+        if [ "$how" = restart ]; then
+            compose restart heron-engine >/dev/null
+        else
+            # No clean shutdown: the queue saved every 5 s is all there is.
+            compose kill heron-engine >/dev/null
+            compose start heron-engine >/dev/null
+        fi
+        start=$(date +%s)
+        if wait_for 30 on_icecast; then
+            pass "$how: back on Icecast after $(($(date +%s) - start)) s"
+        else
+            fail "$how: not back on Icecast after 30 s"
+        fi
+        after=$(on_air_line || true)
+        echo "  before: $before"
+        echo "  after:  $after"
+        if [ -n "$entry" ] && printf '%s\n' "$after" | grep -q "#$entry "; then
+            pass "$how: the track on air was resumed"
+        else
+            fail "$how: the track on air was not resumed"
+        fi
+        start_listening 15
+        check_listening 1 && pass "$how: on air"
+    done
+
+    printf '\n'
+    if [ "$failures" -gt 0 ]; then
+        echo "$failures check(s) failed"
+        exit 1
+    fi
+    echo "every check passed"
+}
+
+main "$@"
