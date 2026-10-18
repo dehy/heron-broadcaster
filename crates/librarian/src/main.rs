@@ -156,7 +156,7 @@ fn main() -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn run(cli: Cli) -> anyhow::Result<()> {
-    heron_service::telemetry::init_tracing(&cli.log)?;
+    let _telemetry = heron_service::telemetry::init_tracing(&cli.log, SERVICE)?;
     let database_url = cli
         .database_url
         .clone()

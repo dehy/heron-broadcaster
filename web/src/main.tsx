@@ -8,6 +8,9 @@ import { App } from "./App";
 import { ToastProvider } from "./components/ui";
 import { startLanguage } from "./i18n";
 import "./index.css";
+import { startErrorReporting } from "./sentry";
+
+startErrorReporting();
 
 const queries = new QueryClient({
   defaultOptions: {

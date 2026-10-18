@@ -95,7 +95,7 @@ fn main() -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn run(cli: Cli) -> anyhow::Result<()> {
-    heron_service::telemetry::init_tracing(&cli.log)?;
+    let _telemetry = heron_service::telemetry::init_tracing(&cli.log, SERVICE)?;
     let metrics = heron_service::ops::install_metrics(SERVICE)?;
 
     std::fs::create_dir_all(&cli.state_dir).with_context(|| {
