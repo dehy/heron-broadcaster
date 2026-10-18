@@ -26,7 +26,9 @@ The web UI in more than one language, starting with **English and French**. Toda
 - Dates, times, numbers, file sizes, levels and relative times (`format.ts`, `rotation.ts`, the history days) use the chosen language instead of the browser's locale or a fixed `"en"`: `-1,5 dB` and *il y a 5 minutes* in French.
 - Duration fields accept the language's decimal separator (`1:23,5` in French) as well as the dot.
 - Day and month names (schedule, history, restrictions) come from `Intl`, not from the catalogs.
-- Times stay in the station's time zone as today; only their writing changes.
+- Only the language changes, never the time zone, so no hour or day boundary moves. Each display keeps the zone it uses today:
+  - Timestamps (`clockTime`, `dateTime`) and the history's days: the browser's time zone.
+  - The schedule and the rotation: the station's time zone. Dates computed by `rotation.ts` are formatted in UTC.
 
 ### What is not translated
 
