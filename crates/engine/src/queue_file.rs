@@ -4,12 +4,13 @@
 //! restarted engine resumes the track on air where it was and plays the
 //! queue it had, even when the API is down.
 //!
-//! Saves are written by a thread of their own: a slow disk (an SD card)
-//! never holds up the player.
+//! Saves are written by a thread of their own, the only one writing the
+//! file: a slow disk (an SD card) never holds up the player.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use crate::config::write_atomically;
 use crate::player::SavedQueue;
@@ -40,7 +41,11 @@ pub fn save(dir: &Path, queue: &SavedQueue) -> std::io::Result<()> {
 
 #[derive(Default)]
 struct Pending {
-    latest: Option<SavedQueue>,
+    /// The latest queue not written yet, and its number.
+    latest: Option<(u64, SavedQueue)>,
+    /// Number of the last queue submitted, and of the last written.
+    submitted: u64,
+    written: u64,
     stop: bool,
 }
 
@@ -69,13 +74,18 @@ impl QueueWriter {
                                 .unwrap_or_else(std::sync::PoisonError::into_inner);
                         }
                         match pending.latest.take() {
-                            Some(queue) => queue,
+                            Some(latest) => latest,
                             None => return,
                         }
                     };
+                    let (number, queue) = queue;
                     if let Err(error) = save(&dir, &queue) {
                         tracing::error!(%error, "cannot save the queue");
                     }
+                    lock.lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .written = number;
+                    wake.notify_all();
                 }
             })?;
         Ok(Self {
@@ -84,13 +94,31 @@ impl QueueWriter {
         })
     }
 
-    /// Saves `queue` soon, replacing a save not written yet.
-    pub fn submit(&self, queue: SavedQueue) {
+    /// Saves `queue` soon, replacing a save not written yet. Returns its
+    /// number, for [`Self::wait_written`].
+    pub fn submit(&self, queue: SavedQueue) -> u64 {
         let (lock, wake) = &*self.shared;
-        lock.lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .latest = Some(queue);
-        wake.notify_one();
+        let mut pending = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        pending.submitted += 1;
+        let number = pending.submitted;
+        pending.latest = Some((number, queue));
+        wake.notify_all();
+        number
+    }
+
+    /// Waits up to `timeout` for the queue `number` (or a later one) to be
+    /// on disk. Returns whether it is.
+    pub fn wait_written(&self, number: u64, timeout: Duration) -> bool {
+        let (lock, wake) = &*self.shared;
+        let pending = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (pending, _) = wake
+            .wait_timeout_while(pending, timeout, |pending| pending.written < number)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        pending.written >= number
     }
 }
 
@@ -101,7 +129,7 @@ impl Drop for QueueWriter {
         lock.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .stop = true;
-        wake.notify_one();
+        wake.notify_all();
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
@@ -125,6 +153,14 @@ mod tests {
         }
         drop(writer);
         assert_eq!(load(dir.path()).next_entry_id, 20);
+
+        let writer = QueueWriter::start(dir.path().to_path_buf()).unwrap();
+        let number = writer.submit(SavedQueue {
+            next_entry_id: 21,
+            ..SavedQueue::default()
+        });
+        assert!(writer.wait_written(number, Duration::from_secs(5)));
+        assert_eq!(load(dir.path()).next_entry_id, 21);
 
         std::fs::write(dir.path().join(FILE_NAME), b"{broken").unwrap();
         assert_eq!(load(dir.path()), SavedQueue::default());

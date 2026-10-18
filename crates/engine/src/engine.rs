@@ -4,7 +4,7 @@
 //! task keeping them in step and saving the queue.
 
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -65,6 +65,8 @@ pub struct Engine {
     status: Arc<MixerStatus>,
     clock: Arc<ClockStatus>,
     queue_writer: QueueWriter,
+    /// Set when shutting down: the last save is made, no other may follow.
+    closing: AtomicBool,
     started: Instant,
     started_at: SystemTime,
     #[cfg(feature = "monitor")]
@@ -96,6 +98,7 @@ impl Engine {
             "heron_engine_fallback_tracks_total",
             "heron_engine_preload_failures_total",
             "heron_engine_underrun_tracks_total",
+            "heron_engine_stalled_tracks_total",
         ] {
             metrics::counter!(counter).absolute(0);
         }
@@ -163,6 +166,7 @@ impl Engine {
             status,
             clock,
             queue_writer,
+            closing: AtomicBool::new(false),
             started: Instant::now(),
             started_at: SystemTime::now(),
             #[cfg(feature = "monitor")]
@@ -225,12 +229,25 @@ impl Engine {
         Ok(())
     }
 
-    /// Saves the queue now, on the calling thread (when shutting down).
+    /// Saves the queue a last time and waits for it to be on disk (when
+    /// shutting down). No periodic save follows it.
     pub fn save_queue(&self) {
-        let queue = self.player().saved();
-        match queue_file::save(&self.state_dir, &queue) {
-            Ok(()) => tracing::info!(waiting = queue.waiting.len(), "queue saved"),
-            Err(error) => tracing::error!(%error, "cannot save the queue"),
+        // Under the player's lock, like periodic saves: none can slip in
+        // after this one with an older queue.
+        let (number, waiting) = {
+            let player = self.player();
+            self.closing.store(true, Ordering::Relaxed);
+            let queue = player.saved();
+            let waiting = queue.waiting.len();
+            (self.queue_writer.submit(queue), waiting)
+        };
+        if self
+            .queue_writer
+            .wait_written(number, Duration::from_secs(2))
+        {
+            tracing::info!(waiting, "queue saved");
+        } else {
+            tracing::error!("the queue could not be saved in time");
         }
     }
 
@@ -316,14 +333,15 @@ async fn run_player(engine: std::sync::Weak<Engine>) {
         let Some(engine) = engine.upgrade() else {
             return;
         };
-        let saved = {
+        {
             let mut player = engine.player();
             player.tick();
-            (player.take_changed() || saved_at.elapsed() >= SAVE_EVERY).then(|| player.saved())
-        };
-        if let Some(queue) = saved {
-            engine.queue_writer.submit(queue);
-            saved_at = Instant::now();
+            let due = player.take_changed() || saved_at.elapsed() >= SAVE_EVERY;
+            // Under the player's lock: see `save_queue`.
+            if due && !engine.closing.load(Ordering::Relaxed) {
+                engine.queue_writer.submit(player.saved());
+                saved_at = Instant::now();
+            }
         }
         ticks += 1;
         if ticks.is_multiple_of(100) {
