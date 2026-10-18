@@ -313,6 +313,36 @@ impl Identifier {
             .and_then(|release| release.tags(recording_id, disc, track)))
     }
 
+    /// The artists `id` is related to on MusicBrainz: relationship type
+    /// (`member of band`, `is person`, …) and the other artist's ID, in
+    /// MusicBrainz's direction. Empty if MusicBrainz does not know it.
+    pub async fn artist_relations(
+        &self,
+        id: &str,
+    ) -> Result<Vec<(String, String, bool)>, IdentifyError> {
+        let url = format!("{}/artist/{id}", self.endpoints.musicbrainz);
+        let response = self
+            .send("MusicBrainz", &self.musicbrainz, || {
+                self.http
+                    .get(&url)
+                    .query(&[("inc", "artist-rels"), ("fmt", "json")])
+            })
+            .await;
+        let artist: MbArtistRelations = match response {
+            Ok(response) => response.json().await?,
+            Err(IdentifyError::Service { status: 404, .. }) => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        Ok(artist
+            .relations
+            .into_iter()
+            .filter_map(|relation| {
+                let other = relation.artist?;
+                Some((relation.kind, other.id, relation.direction == "backward"))
+            })
+            .collect())
+    }
+
     /// The release's front cover (500 px JPEG), if it has one.
     pub async fn cover(&self, release_id: &str) -> Result<Option<Vec<u8>>, IdentifyError> {
         let url = format!(
@@ -511,6 +541,23 @@ struct MbCredit {
 #[derive(Debug, Deserialize)]
 struct MbArtist {
     id: String,
+}
+
+// MusicBrainz artist lookups (`inc=artist-rels`).
+#[derive(Debug, Deserialize)]
+struct MbArtistRelations {
+    #[serde(default)]
+    relations: Vec<MbRelation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbRelation {
+    #[serde(rename = "type")]
+    kind: String,
+    /// `forward`: this artist is the subject (`A member of band B`).
+    #[serde(default)]
+    direction: String,
+    artist: Option<MbArtist>,
 }
 
 fn credited(credits: &[MbCredit]) -> Option<String> {

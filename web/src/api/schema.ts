@@ -3,6 +3,156 @@
 // Generated from openapi.json by `npm run generate-api`. Do not edit.
 
 export interface paths {
+    "/api/v1/artist-names/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Moves a name to another artist (or to a new one): the tracks tagged
+         *     with it follow. Operators and admins.
+         */
+        put: operations["move_name"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artist-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Links waiting for review. */
+        get: operations["list_suggestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artist-suggestions/musicbrainz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Asks heron-librarian to look up the MusicBrainz relationships ("member
+         *     of", "is person", …) between the artists that have a MusicBrainz ID;
+         *     they become suggestions. Operators and admins.
+         */
+        post: operations["look_up_relations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artist-suggestions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accepts or dismisses a suggestion. Operators and admins. */
+        post: operations["review_suggestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Artists, by name. */
+        get: operations["list_artists"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_artist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Renames an artist, or sets its MusicBrainz ID. Operators and admins. */
+        patch: operations["patch_artist"];
+        trace?: never;
+    };
+    "/api/v1/artists/{id}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merges another artist into this one: its names, tracks, similar
+         *     artists and restrictions. Operators and admins.
+         */
+        post: operations["merge_artist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artists/{id}/similar/{other}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Marks two artists similar: separation treats them as the same artist.
+         *     Operators and admins.
+         */
+        put: operations["add_similar"];
+        post?: never;
+        /** Operators and admins. */
+        delete: operations["remove_similar"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -113,14 +263,75 @@ export interface paths {
             cookie?: never;
         };
         get: operations["get_category"];
-        /** Renames or recolors a category. Operators and admins. */
+        /**
+         * Renames, recolors a category or changes its separation. Operators and
+         *     admins.
+         */
         put: operations["update_category"];
         post?: never;
         /**
-         * Deletes a category; its tracks stay in the library. Refused while a
-         *     clock uses it. Operators and admins.
+         * Deletes a category and its restrictions; its tracks stay in the
+         *     library. Refused while a clock uses it. Operators and admins.
          */
         delete: operations["delete_category"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_clocks"];
+        put?: never;
+        /** Operators and admins. */
+        post: operations["create_clock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clocks/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A clock as it will sound, from its slots (saved or not): expected
+         *     starts and lengths, and the categories running short.
+         */
+        post: operations["preview_clock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clocks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_clock"];
+        /** Renames a clock and replaces its slots. Operators and admins. */
+        put: operations["update_clock"];
+        post?: never;
+        /**
+         * Deletes a clock; the hours it was scheduled at rotate the whole library
+         *     until another clock is scheduled. Operators and admins.
+         */
+        delete: operations["delete_clock"];
         options?: never;
         head?: never;
         patch?: never;
@@ -587,6 +798,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/restrictions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_restrictions"];
+        put?: never;
+        /** Operators and admins. */
+        post: operations["create_restriction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/restrictions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Operators and admins. */
+        put: operations["update_restriction"];
+        post?: never;
+        /** Operators and admins. */
+        delete: operations["delete_restriction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rotation/picks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The selection log, most recent first. */
+        get: operations["list_picks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rotation/simulate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generates programming offline, without touching the queue, and checks
+         *     it: separation as relaxed at each pick's step, restrictions always.
+         *     Operators and admins.
+         */
+        post: operations["simulate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Which clock runs when; hours left out rotate the whole library. */
+        get: operations["get_schedule"];
+        /** Replaces the whole schedule. Operators and admins. */
+        put: operations["put_schedule"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/analysis": {
         parameters: {
             query?: never;
@@ -657,6 +959,44 @@ export interface paths {
         get: operations["get_queue_settings"];
         /** Replaces the queue manager settings. Operators and admins. */
         put: operations["put_queue_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/rotation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Separation rules, the fallback category and weights. */
+        get: operations["get_rotation_settings"];
+        /**
+         * Replaces the rotation settings (missing fields take the defaults).
+         *     Operators and admins.
+         */
+        put: operations["put_rotation_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/station": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_station"];
+        /** Replaces the station settings. Admins only. */
+        put: operations["put_station"];
         post?: never;
         delete?: never;
         options?: never;
@@ -994,6 +1334,49 @@ export interface components {
             last_used_at_unix_ms?: number | null;
             name: string;
         };
+        Artist: {
+            /** Format: int64 */
+            id: number;
+            musicbrainz_id?: string | null;
+            name: string;
+            names: components["schemas"]["ArtistName"][];
+            /** @description Separation treats these as the same artist. */
+            similar: components["schemas"]["ArtistRef"][];
+            /** Format: int64 */
+            tracks: number;
+        };
+        ArtistName: {
+            /** @description Moved to this artist by hand. */
+            by_hand: boolean;
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        ArtistPage: {
+            artists: components["schemas"]["Artist"][];
+            /** Format: int64 */
+            total: number;
+        };
+        ArtistPatch: {
+            /** @description `null` removes it. */
+            musicbrainz_id?: string | null;
+            /** @description The name shown. */
+            name?: string | null;
+        };
+        ArtistRef: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        ArtistSuggestion: {
+            artist: components["schemas"]["ArtistRef"];
+            /** Format: int64 */
+            id: number;
+            other: components["schemas"]["ArtistRef"];
+            reason: string;
+            /** @description `names` or `musicbrainz`. */
+            source: string;
+        };
         Batch: {
             /** Format: int64 */
             created_at_unix_ms: number;
@@ -1032,12 +1415,27 @@ export interface components {
             /** @description Operations not done, with the reason. */
             skipped: components["schemas"]["SkippedFile"][];
         };
+        Blocked: {
+            /** Format: int32 */
+            album: number;
+            /** Format: int32 */
+            artist: number;
+            /** Format: int32 */
+            title: number;
+            /** Format: int32 */
+            track: number;
+        };
         Category: {
             /** @description `#rrggbb`. */
             color?: string | null;
             /** Format: int64 */
             id: number;
             name: string;
+            /**
+             * @description Windows this category overrides; the others follow the rotation
+             *     settings (clock slots can override them again).
+             */
+            separation: components["schemas"]["SeparationOverrides"];
             /** Format: int64 */
             tracks: number;
         };
@@ -1054,6 +1452,8 @@ export interface components {
             /** @description `#rrggbb`, or none. */
             color?: string | null;
             name: string;
+            /** @description None overridden by default. */
+            separation?: components["schemas"]["SeparationOverrides"];
         };
         /** @description dBFS, −120 for silence. */
         ChannelLevels: {
@@ -1065,6 +1465,36 @@ export interface components {
             rms_left: number;
             /** Format: float */
             rms_right: number;
+        };
+        ClockInput: {
+            /** @description Off by default: the clock starts over at each hour. */
+            looping?: boolean;
+            name: string;
+            slots: components["schemas"]["ClockSlot"][];
+        };
+        ClockPreview: {
+            /**
+             * Format: int64
+             * @description Expected length of the whole clock.
+             */
+            duration_ms: number;
+            /**
+             * Format: double
+             * @description How many times the clock runs in an hour: more than 1 when it is
+             *     shorter than the hour; under 1 for a looping clock longer than it.
+             */
+            runs_per_hour: number;
+            slots: components["schemas"]["SlotPreview"][];
+        };
+        /** @description How a slot calls its category. */
+        ClockSlot: {
+            /** Format: int64 */
+            category_id: number;
+            /** @description Off, the slot skips the separation rules (restrictions still apply). */
+            enforce_rules?: boolean;
+            method?: components["schemas"]["Method"];
+            /** @description Windows this slot overrides, over its category's. */
+            separation?: components["schemas"]["SeparationOverrides"];
         };
         ClockStatus: {
             /**
@@ -1084,6 +1514,19 @@ export interface components {
              *     or unknown.
              */
             warning?: string | null;
+        };
+        ClockView: {
+            /** Format: int64 */
+            id: number;
+            /** @description Carries on from its last slot across hours instead of starting over. */
+            looping: boolean;
+            name: string;
+            /**
+             * Format: int64
+             * @description Hours of the week it is scheduled at.
+             */
+            scheduled_hours: number;
+            slots: components["schemas"]["ClockSlot"][];
         };
         CreatedToken: {
             /** Format: int64 */
@@ -1268,6 +1711,67 @@ export interface components {
             /** @description For people. */
             message: string;
         };
+        /** @description Why a track was picked: the selection log. */
+        Explanation: {
+            /**
+             * Format: int64
+             * @description When the track is planned to start (Unix ms).
+             */
+            at_unix_ms: number;
+            /**
+             * @description Tracks of the slot's category held back by each separation rule
+             *     with the rules as configured (the first rule that applies counts).
+             */
+            blocked: components["schemas"]["Blocked"];
+            /**
+             * Format: int32
+             * @description Tracks the method chose among.
+             */
+            candidates: number;
+            category_id?: components["schemas"]["u64"] | null;
+            category_name?: string | null;
+            clock_id?: components["schemas"]["u64"] | null;
+            clock_name?: string | null;
+            enforce_rules: boolean;
+            /**
+             * Format: int64
+             * @description When the picked track last played; missing if never.
+             */
+            last_played_unix_ms?: number | null;
+            /** @description Applied: least recently played at step 10. */
+            method: components["schemas"]["Method"];
+            /**
+             * Format: int32
+             * @description Tracks in the slot's category.
+             */
+            pool: number;
+            /**
+             * Format: int32
+             * @description Of them, forbidden by restrictions.
+             */
+            restricted: number;
+            /** @description Slots passed over because nothing could be picked, even relaxed. */
+            skipped_slots: components["schemas"]["SkippedSlot"][];
+            /**
+             * Format: int32
+             * @description Index of the slot in the clock, from 0.
+             */
+            slot?: number | null;
+            slot_category_id?: components["schemas"]["u64"] | null;
+            /**
+             * Format: int32
+             * @description Relaxation step, 0 (none) to 10.
+             */
+            step: number;
+            step_description: string;
+            /**
+             * Format: double
+             * @description Weight of the picked track in its category.
+             */
+            weight: number;
+            /** @description Separation windows applied at this step. */
+            windows: components["schemas"]["Windows"];
+        };
         /** @description One side of a crossfade. */
         Fade: {
             /** @default linear */
@@ -1353,6 +1857,7 @@ export interface components {
             /** Format: int64 */
             id: number;
             plan?: components["schemas"]["OrganizePlan"] | null;
+            relations?: components["schemas"]["RelationsReport"] | null;
             report?: components["schemas"]["BatchReport"] | null;
             request: components["schemas"]["TaskRequest"];
             requested_by?: string | null;
@@ -1406,6 +1911,28 @@ export interface components {
              * @default -16
              */
             target_lufs: number;
+        };
+        MergeRequest: {
+            /**
+             * Format: int64
+             * @description The artist merged into this one, then deleted.
+             */
+            artist_id: number;
+        };
+        /**
+         * @description How a clock slot picks among the tracks its category allows.
+         * @enum {string}
+         */
+        Method: "least_recently_played" | "random" | "weighted";
+        /** @enum {string} */
+        Mode: "allow" | "ban";
+        MoveName: {
+            /**
+             * Format: int64
+             * @description The artist the name now belongs to; missing to make it an artist
+             *     of its own.
+             */
+            artist_id?: number | null;
         };
         MoveRequest: {
             /**
@@ -1591,6 +2118,12 @@ export interface components {
         Preferences: {
             theme: components["schemas"]["Theme"];
         };
+        PreviewRequest: {
+            /** @description Whether the clock loops across hours. */
+            looping?: boolean;
+            /** @description The slots as edited, saved or not. */
+            slots: components["schemas"]["ClockSlot"][];
+        };
         QueueEntry: {
             /**
              * Format: int64
@@ -1653,9 +2186,43 @@ export interface components {
             /** Format: int32 */
             start_ms: number;
         };
+        /** @description What a MusicBrainz relationships lookup found. */
+        RelationsReport: {
+            /**
+             * Format: int64
+             * @description Artists with a MusicBrainz ID looked up.
+             */
+            artists: number;
+            /**
+             * Format: int64
+             * @description Lookups that failed (tried again next time).
+             */
+            failed: number;
+            /**
+             * Format: int64
+             * @description New suggestions, between two artists of the station.
+             */
+            suggestions: number;
+        };
         ReleaseChoice: {
             recording_id: string;
             release_id: string;
+        };
+        RestrictionInput: {
+            enabled?: boolean;
+            note?: string | null;
+            rule: components["schemas"]["Rule"];
+            target: components["schemas"]["Target"];
+        };
+        RestrictionView: {
+            enabled: boolean;
+            /** Format: int64 */
+            id: number;
+            note?: string | null;
+            rule: components["schemas"]["Rule"];
+            target: components["schemas"]["Target"];
+            /** @description The track (`artist – title`), artist or category, for people. */
+            target_name?: string | null;
         };
         /** @description A release a track may be on, from AcoustID. */
         ReviewCandidate: {
@@ -1693,6 +2260,83 @@ export interface components {
          * @enum {string}
          */
         Role: "viewer" | "operator" | "admin";
+        /** @description A track rotation queued, and why. */
+        RotationPick: {
+            artist?: string | null;
+            explanation: components["schemas"]["Explanation"];
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            planned_at_unix_ms: number;
+            /**
+             * Format: int64
+             * @description When it started; missing until then, or if it never played.
+             */
+            played_at_unix_ms?: number | null;
+            title?: string | null;
+            /**
+             * Format: int64
+             * @description Missing once the track is deleted.
+             */
+            track_id?: number | null;
+        };
+        /** @description Station-wide rotation settings, stored under the `rotation` settings name. */
+        RotationSettings: {
+            /** @default null */
+            fallback_category_id: components["schemas"]["u64"] | null;
+            /**
+             * @default {
+             *       "album_min": 60,
+             *       "artist_min": 120,
+             *       "title_min": 240,
+             *       "track_min": 240
+             *     }
+             */
+            separation: components["schemas"]["Windows"];
+            /**
+             * @default {
+             *       "play_factor": 1,
+             *       "request_factor": 1
+             *     }
+             */
+            weights: components["schemas"]["WeightSettings"];
+        };
+        Rule: {
+            /** @description ISO 8601: 1 = Monday … 7 = Sunday. */
+            days: number[];
+            /**
+             * Format: int32
+             * @description 1 to 24, excluded. At or before `start_hour`, the hours run past
+             *     midnight and belong to the day they start on: Friday 22 to 2
+             *     covers Saturday 01:30.
+             */
+            end_hour: number;
+            /** @enum {string} */
+            kind: "daypart";
+            mode: components["schemas"]["Mode"];
+            /**
+             * Format: int32
+             * @description 0 to 23.
+             */
+            start_hour: number;
+        } | {
+            /** Format: date */
+            end: string;
+            /**
+             * @description Every year on these days and months (the years are ignored);
+             *     the range may run over the new year.
+             */
+            every_year: boolean;
+            /** @enum {string} */
+            kind: "date_range";
+            mode: components["schemas"]["Mode"];
+            /** Format: date */
+            start: string;
+        } | {
+            category_id: components["schemas"]["u64"];
+            /** @enum {string} */
+            kind: "not_after";
+        };
         /** @description Outcome of one scan, logged and served by `/api/v1/library/status`. */
         ScanReport: {
             /** Format: int64 */
@@ -1741,9 +2385,154 @@ export interface components {
             /** Format: int64 */
             updated: number;
         };
+        /** @description The clock running at an hour of the week. */
+        ScheduledHour: {
+            /** Format: int64 */
+            clock_id: number;
+            /**
+             * Format: int32
+             * @description ISO 8601: 1 = Monday … 7 = Sunday.
+             */
+            day_of_week: number;
+            /**
+             * Format: int32
+             * @description 0 to 23, station time.
+             */
+            hour: number;
+        };
+        /**
+         * @description Separation windows overridden by a category or a clock slot; missing
+         *     ones are inherited.
+         */
+        SeparationOverrides: {
+            /** Format: int32 */
+            album_min?: number | null;
+            /** Format: int32 */
+            artist_min?: number | null;
+            /** Format: int32 */
+            title_min?: number | null;
+            /** Format: int32 */
+            track_min?: number | null;
+        };
+        /**
+         * @description A separation rule.
+         * @enum {string}
+         */
+        SeparationRule: "track" | "title" | "artist" | "album";
+        SimulatedPick: {
+            explanation: components["schemas"]["Explanation"];
+            /** Format: int32 */
+            length_ms: number;
+            /** Format: int64 */
+            start_unix_ms: number;
+            track_id: components["schemas"]["u64"];
+        };
+        Simulation: {
+            /** Format: int64 */
+            end_unix_ms: number;
+            /**
+             * Format: int32
+             * @description Minutes nothing could be picked (restrictions forbade every track):
+             *     the engine's fallback directory would play.
+             */
+            gap_minutes: number;
+            picks: components["schemas"]["SimulatedPick"][];
+            /** Format: int64 */
+            start_unix_ms: number;
+            /**
+             * @description Picks per relaxation step, 0 to 10: every pick past step 0 is a
+             *     logged relaxation.
+             */
+            steps: number[];
+            violations: components["schemas"]["Violation"][];
+        };
+        SimulationReport: {
+            /** Format: int64 */
+            seed: number;
+            simulation: components["schemas"]["Simulation"];
+            /** @description The tracks picked. */
+            tracks: components["schemas"]["TrackLabel"][];
+        };
+        SimulationRequest: {
+            /**
+             * Format: int64
+             * @description Runs this clock at every hour instead of the schedule.
+             */
+            clock_id?: number | null;
+            /**
+             * Format: int32
+             * @description 1 to 168 (a week, the default).
+             */
+            hours?: number | null;
+            /**
+             * Format: int64
+             * @description To replay a simulation; random by default.
+             */
+            seed?: number | null;
+            /**
+             * Format: int64
+             * @description Now by default, after the plays so far.
+             */
+            start_unix_ms?: number | null;
+        };
         SkippedFile: {
             path: string;
             reason: string;
+        };
+        SkippedSlot: {
+            category_id: components["schemas"]["u64"];
+            /** Format: int32 */
+            slot: number;
+        };
+        /** @description A slot as it will sound. */
+        SlotPreview: {
+            /**
+             * Format: int32
+             * @description Their average playable length; missing for an empty category.
+             */
+            average_ms?: number | null;
+            /**
+             * @description Expected to start after the hour ends: it will not play (never for
+             *     a looping clock).
+             */
+            beyond_hour: boolean;
+            /**
+             * Format: double
+             * @description Times an hour of this clock calls the category.
+             */
+            calls_per_hour: number;
+            /** Format: int64 */
+            category_id: number;
+            category_name?: string | null;
+            color?: string | null;
+            /**
+             * Format: int64
+             * @description When the slot is expected to start, from the top of the hour.
+             */
+            expected_start_ms: number;
+            /**
+             * Format: int32
+             * @description Tracks the category needs so its tracks are not repeated within
+             *     the track window without relaxation.
+             */
+            needed_tracks: number;
+            /** @description The category has fewer tracks than it needs: expect relaxations. */
+            short: boolean;
+            /**
+             * Format: int32
+             * @description Tracks of the category rotation may pick (playable).
+             */
+            tracks: number;
+            /** @description Windows the slot applies (rotation settings, category, slot). */
+            windows: components["schemas"]["Windows"];
+        };
+        /** @description The station itself. */
+        StationSettings: {
+            /**
+             * @description IANA time zone the clocks and restrictions follow, e.g.
+             *     `Europe/Paris`. By default the server's (`TZ`), or UTC.
+             */
+            timezone: string;
         };
         Status: {
             /** @description The server clock's synchronization (the host's: containers share it). */
@@ -1760,6 +2549,10 @@ export interface components {
             service: string;
             version: string;
         };
+        SuggestionReview: {
+            /** @description `true` marks the artists similar; `false` dismisses the suggestion. */
+            accept: boolean;
+        };
         /** @enum {string} */
         SyncState: "unknown" | "synced" | "pending" | "failed";
         /** @description Whether the engine runs with the configuration stored in the database. */
@@ -1768,6 +2561,19 @@ export interface components {
             checked_at_unix_ms?: number | null;
             error?: string | null;
             state: components["schemas"]["SyncState"];
+        };
+        Target: {
+            id: components["schemas"]["u64"];
+            /** @enum {string} */
+            kind: "track";
+        } | {
+            id: components["schemas"]["u64"];
+            /** @enum {string} */
+            kind: "artist";
+        } | {
+            id: components["schemas"]["u64"];
+            /** @enum {string} */
+            kind: "category";
         };
         /** @description A task, as stored in `library_tasks.params`. The tag is also its `kind`. */
         TaskRequest: {
@@ -1794,6 +2600,9 @@ export interface components {
             track?: number | null;
             /** Format: int64 */
             track_id: number;
+        } | {
+            /** @enum {string} */
+            kind: "artist_relations";
         };
         /** @enum {string} */
         TaskStatus: "pending" | "running" | "done" | "failed";
@@ -1869,6 +2678,12 @@ export interface components {
             score?: number | null;
             /** @description `identified` or `needs_review`. */
             status: string;
+        };
+        TrackLabel: {
+            artist?: string | null;
+            /** Format: int64 */
+            id: number;
+            title?: string | null;
         };
         /**
          * @description Per-track overrides (`track_overrides`). Missing fields use the analysis
@@ -1969,6 +2784,33 @@ export interface components {
             password?: string | null;
             role?: components["schemas"]["Role"] | null;
         };
+        Violation: {
+            /** Format: int64 */
+            earlier_unix_ms: number;
+            /** @enum {string} */
+            kind: "separation";
+            /**
+             * Format: int32
+             * @description Index in the picks.
+             */
+            pick: number;
+            rule: components["schemas"]["SeparationRule"];
+            /** Format: int32 */
+            window_min: number;
+        } | {
+            /** @enum {string} */
+            kind: "restriction";
+            /** Format: int32 */
+            pick: number;
+            /** Format: int64 */
+            restriction_id: number;
+        } | {
+            expected?: components["schemas"]["u64"] | null;
+            /** @enum {string} */
+            kind: "category";
+            /** Format: int32 */
+            pick: number;
+        };
         Waveform: {
             /**
              * Format: float
@@ -1983,6 +2825,50 @@ export interface components {
             /** @description One byte per point, base64: the highest sample peak in the interval. */
             peaks: string;
         };
+        /** @description Weights move with plays and requests (multiplied by these factors). */
+        WeightSettings: {
+            /**
+             * Format: double
+             * @description Each play multiplies the track's weights by this, 0.5 to 1 (1: weights stay).
+             * @default 1
+             */
+            play_factor: number;
+            /**
+             * Format: double
+             * @description Each request multiplies the track's weights by this, 1 to 2 (1: weights stay).
+             * @default 1
+             */
+            request_factor: number;
+        };
+        /** @description Separation windows, in minutes; 0 turns a rule off. */
+        Windows: {
+            /**
+             * Format: int32
+             * @description Do not play the same album within.
+             * @default 60
+             */
+            album_min: number;
+            /**
+             * Format: int32
+             * @description Do not play the same artist (or a similar one) within.
+             * @default 120
+             */
+            artist_min: number;
+            /**
+             * Format: int32
+             * @description Do not play the same title (any version) within.
+             * @default 240
+             */
+            title_min: number;
+            /**
+             * Format: int32
+             * @description Do not play the same track within.
+             * @default 240
+             */
+            track_min: number;
+        };
+        /** Format: int64 */
+        u64: number;
     };
     responses: never;
     parameters: never;
@@ -1992,6 +2878,308 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    move_name: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoveName"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Artist"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_suggestions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtistSuggestion"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    look_up_relations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    review_suggestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuggestionReview"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_artists: {
+        parameters: {
+            query?: {
+                /** @description Matches any of the artist's names. */
+                q?: string;
+                /** @description 1 to 200, 50 by default. */
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtistPage"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_artist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Artist"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    patch_artist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtistPatch"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Artist"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    merge_artist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MergeRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Artist"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    add_similar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                other: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    remove_similar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                other: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     login: {
         parameters: {
             query?: never;
@@ -2265,6 +3453,184 @@ export interface operations {
         };
     };
     delete_category: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_clocks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClockView"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_clock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClockInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClockView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    preview_clock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClockPreview"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_clock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClockView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_clock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClockInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClockView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_clock: {
         parameters: {
             query?: never;
             header?: never;
@@ -3368,6 +4734,251 @@ export interface operations {
             };
         };
     };
+    list_restrictions: {
+        parameters: {
+            query?: {
+                /** @description `track`, `artist` or `category`. */
+                target?: string;
+                target_id?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestrictionView"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_restriction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestrictionInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestrictionView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_restriction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestrictionInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestrictionView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_restriction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_picks: {
+        parameters: {
+            query?: {
+                /** @description Picks before this one, for the next page. */
+                before?: number;
+                /** @description Only this track. */
+                track_id?: number;
+                /** @description 1 to 200, 50 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RotationPick"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    simulate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimulationRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulationReport"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduledHour"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduledHour"][];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduledHour"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_analysis: {
         parameters: {
             query?: never;
@@ -3588,6 +5199,122 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QueueSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_rotation_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RotationSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_rotation_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RotationSettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RotationSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_station: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StationSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_station: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StationSettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StationSettings"];
                 };
             };
             "4XX": {

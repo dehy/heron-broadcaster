@@ -12,7 +12,7 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use heron_core::library::{BatchReport, OrganizePlan, TaskRequest};
+use heron_core::library::{BatchReport, OrganizePlan, RelationsReport, TaskRequest};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
@@ -57,6 +57,8 @@ pub struct LibraryTask {
     pub plan: Option<OrganizePlan>,
     /// What a finished apply, undo or review did.
     pub report: Option<BatchReport>,
+    /// What a finished MusicBrainz relationships lookup found.
+    pub relations: Option<RelationsReport>,
     pub requested_by: Option<String>,
     pub created_at_unix_ms: i64,
     pub started_at_unix_ms: Option<i64>,
@@ -94,10 +96,15 @@ fn task(
         _ => TaskStatus::Pending,
     };
     let result = result.as_deref().filter(|_| status == TaskStatus::Done);
-    let (plan, report) = match (&request, result) {
-        (_, None) => (None, None),
-        (TaskRequest::OrganizePlan, Some(result)) => (serde_json::from_str(result).ok(), None),
-        (_, Some(result)) => (None, serde_json::from_str(result).ok()),
+    let (plan, report, relations) = match (&request, result) {
+        (_, None) => (None, None, None),
+        (TaskRequest::OrganizePlan, Some(result)) => {
+            (serde_json::from_str(result).ok(), None, None)
+        }
+        (TaskRequest::ArtistRelations, Some(result)) => {
+            (None, None, serde_json::from_str(result).ok())
+        }
+        (_, Some(result)) => (None, serde_json::from_str(result).ok(), None),
     };
     Ok(LibraryTask {
         id,
@@ -106,6 +113,7 @@ fn task(
         error,
         plan,
         report,
+        relations,
         requested_by,
         created_at_unix_ms: created,
         started_at_unix_ms: started,
@@ -123,7 +131,11 @@ async fn find_task(state: &AppState, id: u64) -> ApiResult<LibraryTask> {
 }
 
 /// Queues a task for heron-librarian.
-async fn ask(state: &AppState, user: &CurrentUser, request: TaskRequest) -> ApiResult<LibraryTask> {
+pub async fn ask(
+    state: &AppState,
+    user: &CurrentUser,
+    request: TaskRequest,
+) -> ApiResult<LibraryTask> {
     let params =
         serde_json::to_string(&request).map_err(|error| ApiError::Internal(error.to_string()))?;
     let id = sqlx::query("INSERT INTO library_tasks (kind, params, requested_by) VALUES (?, ?, ?)")

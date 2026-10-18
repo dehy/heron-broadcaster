@@ -238,3 +238,94 @@ async fn a_release_picked_on_the_review_screen() {
     assert_eq!(status, "needs_review");
     db.drop().await;
 }
+
+#[tokio::test]
+async fn musicbrainz_relationships_become_suggestions() {
+    let Some(db) = ScratchDatabase::create().await else {
+        return;
+    };
+    let pool = &db.pool;
+    let id = |n: u32| format!("00000000-0000-4000-8000-{n:012}");
+    let mut artists = Vec::new();
+    for (n, name) in [
+        (1, "Genesis"),
+        (2, "Phil Collins"),
+        (3, "Peter Gabriel"),
+        (4, "Brand X"),
+    ] {
+        let artist = sqlx::query("INSERT INTO artists (name, musicbrainz_id) VALUES (?, ?)")
+            .bind(name)
+            .bind(id(n))
+            .execute(pool)
+            .await
+            .unwrap()
+            .last_insert_id();
+        artists.push(artist);
+    }
+    let relation = |kind: &str, direction: &str, n: u32| {
+        json!({"type": kind, "direction": direction, "target-type": "artist",
+               "artist": {"id": id(n), "name": "?"}})
+    };
+    let mut state = MockState::default();
+    state.artists.insert(
+        id(1),
+        json!({"id": id(1), "relations": [
+            relation("member of band", "backward", 2),
+            relation("member of band", "backward", 3),
+            // Not on the station.
+            relation("member of band", "backward", 99),
+        ]}),
+    );
+    state.artists.insert(
+        id(2),
+        json!({"id": id(2), "relations": [
+            // The same link seen from the other side.
+            relation("member of band", "forward", 1),
+            relation("member of band", "forward", 4),
+            // Not a reason to keep them apart.
+            relation("producer", "forward", 3),
+        ]}),
+    );
+    // Peter Gabriel and Brand X are unknown to MusicBrainz (404).
+    let mock = Mock::start(state).await;
+    let (_dirs, roots) = temp_roots();
+    let runner = TaskRunner::new(pool.clone(), roots, mock.endpoints());
+    let task = ask(pool, &TaskRequest::ArtistRelations).await;
+    let (status, result, error) = run(&runner, pool, task).await;
+    assert_eq!(status, "done", "{error:?}");
+    assert_eq!(
+        result.unwrap(),
+        json!({"artists": 4, "suggestions": 3, "failed": 0})
+    );
+    let suggestions: Vec<(u64, u64, String)> = sqlx::query_as(
+        "SELECT artist_id, other_id, reason FROM artist_suggestions
+         WHERE source = 'musicbrainz' AND status = 'pending' ORDER BY artist_id, other_id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        suggestions,
+        [
+            (
+                artists[0],
+                artists[1],
+                "Phil Collins: member of band Genesis".to_owned()
+            ),
+            (
+                artists[0],
+                artists[2],
+                "Peter Gabriel: member of band Genesis".to_owned()
+            ),
+            (
+                artists[1],
+                artists[3],
+                "Phil Collins: member of band Brand X".to_owned()
+            ),
+        ]
+    );
+    // Each artist is looked up once.
+    let requests = mock.requests(common::Service::MusicBrainz);
+    assert_eq!(requests.len(), 4);
+    db.drop().await;
+}

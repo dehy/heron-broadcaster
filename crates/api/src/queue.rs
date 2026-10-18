@@ -4,38 +4,41 @@
 //!
 //! - Builds the tracks the engine plays from the database: path, tags, cue
 //!   points and crossfade point from the analysis, per-track overrides.
-//! - Keeps the queue from running dry (`queue.autofill`): until rotation and
-//!   clockwheels (M6), it adds the least recently played tracks.
+//! - Keeps the queue from running dry (`queue.autofill`) with the tracks
+//!   rotation picks (`heron-rotation`), each recorded in the selection log.
 //! - Follows the library: queued tracks whose file the librarian moved, or
 //!   whose cue points were changed, are updated; tracks whose file
 //!   disappeared are taken out of the queue.
 //!
 //! The engine holds the queue: when the API is down it plays what it has.
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use heron_core::playout::CrossfadeOverrides;
 use heron_core::{PlaySource, TrackOverrides, TrackPlayout};
 use heron_proto::engine as pb;
+use heron_rotation::{Play, Rng};
 use sqlx::{MySqlPool, QueryBuilder};
 use tokio::sync::Notify;
 
 use crate::engine::{EngineLink, PlayerState, source_to_proto};
 use crate::error::{ApiError, ApiResult};
+use crate::rotation::{self, SILENT_MS};
 use crate::settings::{self, QueueSettings};
 
 const TICK: Duration = Duration::from_secs(2);
 const FOLLOW_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Playable length under which an analyzed track counts as silent.
-const SILENT_MS: u32 = 1_000;
+/// Wait before trying again when rotation could pick nothing.
+const NOTHING_TO_PICK: Duration = Duration::from_secs(30);
 
 pub struct QueueManager {
     pool: MySqlPool,
     engine: Arc<EngineLink>,
     wake: Notify,
+    /// Rotation could pick nothing: no new try before then.
+    idle_until: Mutex<Option<Instant>>,
 }
 
 /// A library track as the engine needs it.
@@ -161,12 +164,30 @@ impl QueueManager {
             pool,
             engine,
             wake: Notify::new(),
+            idle_until: Mutex::new(None),
         })
     }
 
-    /// Checks the queue now (settings changed).
+    /// Checks the queue now (settings, library or rotation changed).
     pub fn wake(&self) {
+        if let Ok(mut idle) = self.idle_until.lock() {
+            *idle = None;
+        }
         self.wake.notify_one();
+    }
+
+    fn idle(&self) -> bool {
+        self.idle_until
+            .lock()
+            .ok()
+            .and_then(|idle| *idle)
+            .is_some_and(|until| Instant::now() < until)
+    }
+
+    fn rest(&self) {
+        if let Ok(mut idle) = self.idle_until.lock() {
+            *idle = Some(Instant::now() + NOTHING_TO_PICK);
+        }
     }
 
     async fn rows(&self, ids: &[u64]) -> ApiResult<Vec<TrackRow>> {
@@ -233,59 +254,68 @@ impl QueueManager {
         }
     }
 
-    /// Adds tracks until `min_queued` are waiting.
+    /// Adds the tracks rotation picks until `min_queued` are waiting.
     async fn fill(&self, state: &PlayerState) -> ApiResult<()> {
         let settings: QueueSettings =
             settings::load(&self.pool, QueueSettings::SETTINGS_NAME).await?;
         let waiting = state.waiting().count();
         let missing = (settings.min_queued as usize).saturating_sub(waiting);
-        if !settings.autofill || missing == 0 {
+        if !settings.autofill || missing == 0 || self.idle() {
             return Ok(());
         }
-        let busy: HashSet<u64> = state
-            .waiting()
-            .chain(state.decks.iter().filter_map(|deck| deck.entry.as_ref()))
-            .filter_map(|entry| entry.track.track_id)
-            .collect();
-        let ids = self.least_recently_played(missing, &busy).await?;
-        if ids.is_empty() {
-            tracing::debug!("autofill: no playable track in the library");
-            return Ok(());
-        }
-        let tracks = self.tracks(&ids, PlaySource::Rotation).await?;
-        self.engine.enqueue(tracks, None).await?;
-        tracing::info!(tracks = ids.len(), "autofill: queued tracks");
-        metrics::counter!("heron_api_autofill_tracks_total").increment(ids.len() as u64);
-        Ok(())
-    }
-
-    /// Playable tracks, never played first, then the least recently played.
-    async fn least_recently_played(
-        &self,
-        count: usize,
-        exclude: &HashSet<u64>,
-    ) -> ApiResult<Vec<u64>> {
-        let mut query = QueryBuilder::new(
-            "SELECT t.id FROM tracks t
-             JOIN track_analysis a ON a.track_id = t.id
-             LEFT JOIN track_overrides o ON o.track_id = t.id
-             LEFT JOIN (SELECT track_id, MAX(started_at) AS last_played FROM play_history
-                        WHERE track_id IS NOT NULL GROUP BY track_id) h ON h.track_id = t.id
-             WHERE t.enabled AND t.missing_since IS NULL
-               AND COALESCE(o.cue_out_ms, a.cue_out_ms) >= COALESCE(o.cue_in_ms, a.cue_in_ms) + ",
-        );
-        query.push_bind(SILENT_MS);
-        if !exclude.is_empty() {
-            query.push(" AND t.id NOT IN (");
-            let mut separated = query.separated(", ");
-            for id in exclude {
-                separated.push_bind(*id);
+        let library = rotation::load_library(&self.pool).await?;
+        let now = rotation::now_ms();
+        let history = rotation::load_history(&self.pool, &library, now).await?;
+        let (planned, mut at) = rotation::planned_starts(state, now);
+        let mut history = rotation::with_queue(&self.pool, &library, history, &planned).await?;
+        let mut last = rotation::last_position(&self.pool).await?;
+        let mut rng = Rng::new(rotation::seed());
+        let mut picks = Vec::new();
+        for _ in 0..missing {
+            let Some(pick) = heron_rotation::next(&library, &history, at, last.as_ref(), &mut rng)
+            else {
+                break;
+            };
+            let Some(track) = library.tracks.get(&pick.track) else {
+                break;
+            };
+            history.push(Play::of(track, at));
+            at += i64::from(track.length_ms);
+            if pick.position.is_some() {
+                last = pick.position;
             }
-            query.push(")");
+            picks.push(pick);
         }
-        query.push(" ORDER BY h.last_played IS NOT NULL, h.last_played, RAND() LIMIT ");
-        query.push_bind(u32::try_from(count).unwrap_or(u32::MAX));
-        Ok(query.build_query_scalar().fetch_all(&self.pool).await?)
+        if picks.is_empty() {
+            if library.tracks.is_empty() {
+                tracing::debug!("autofill: no playable track in the library");
+            } else {
+                tracing::warn!(
+                    "rotation: restrictions forbid every track for now, \
+                     the engine's fallback directory takes over"
+                );
+            }
+            self.rest();
+            return Ok(());
+        }
+        let ids: Vec<u64> = picks.iter().map(|pick| pick.track).collect();
+        let tracks = self.tracks(&ids, PlaySource::Rotation).await?;
+        let entry_ids = self.engine.enqueue(tracks, None).await?;
+        for (pick, entry_id) in picks.iter().zip(&entry_ids) {
+            let entry = (state.engine_started_at_unix_ms, *entry_id);
+            rotation::record_pick(&self.pool, pick, Some(entry)).await?;
+        }
+        tracing::info!(
+            tracks = ids.len(),
+            "autofill: queued the tracks rotation picked"
+        );
+        metrics::counter!("heron_api_autofill_tracks_total").increment(ids.len() as u64);
+        let relaxed = picks
+            .iter()
+            .filter(|pick| pick.explanation.step > 0)
+            .count();
+        metrics::counter!("heron_api_rotation_relaxed_total").increment(relaxed as u64);
+        Ok(())
     }
 
     /// Updates queued tracks whose file moved, and takes out those whose

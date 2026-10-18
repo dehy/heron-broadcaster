@@ -9,5 +9,18 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 
+[features]
+# OpenAPI schemas of the rules and explanations, for heron-api.
+openapi = ["dep:utoipa"]
+
+[dependencies]
+jiff.workspace = true
+serde.workspace = true
+unicode-normalization.workspace = true
+utoipa = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true

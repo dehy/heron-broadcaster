@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Categories: groups of tracks the clockwheels will call (M6).
+// Categories: groups of tracks the clocks call, with the separation
+// windows they override.
 
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
-import { type Category, api, done, unwrap } from "../api";
+import { type Category, type SeparationOverrides, api, done, unwrap } from "../api";
+import { SeparationEditor } from "../components/Separation";
 import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, Modal, PageHead } from "../components/ui";
 import { count } from "../lib/format";
+import { describeOverrides } from "../lib/rotation";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 
@@ -28,7 +31,7 @@ export function Categories() {
     <>
       <PageHead
         title="Categories"
-        description="Groups of tracks (current hits, recurrents, jingles…) that the clockwheels call. A track can be in several."
+        description="Groups of tracks (current hits, recurrents, gold…) that the clocks call. A track can be in several. A category can repeat its tracks sooner, or later, than the station's separation rules."
         actions={
           canEdit && (
             <button type="button" className="btn primary" onClick={() => setEditing("new")}>
@@ -47,6 +50,7 @@ export function Categories() {
               <tr>
                 <th>Name</th>
                 <th>Tracks</th>
+                <th>Separation</th>
                 <th>
                   <span className="visually-hidden">Actions</span>
                 </th>
@@ -64,6 +68,7 @@ export function Categories() {
                   <td className="num">
                     <Link to={`/library?category=${category.id}`}>{category.tracks.toLocaleString()}</Link>
                   </td>
+                  <td className="small muted">{describeOverrides(category.separation) || "station rules"}</td>
                   <td className="actions">
                     {canEdit && (
                       <>
@@ -106,9 +111,14 @@ export function Categories() {
 function CategoryDialog({ category, onClose }: { category: Category | null; onClose: () => void }) {
   const [name, setName] = useState(category?.name ?? "");
   const [color, setColor] = useState(category?.color ?? COLORS[0] ?? "#2f6fd6");
+  const [separation, setSeparation] = useState<SeparationOverrides>(category?.separation ?? {});
+  const rotation = useQuery({
+    queryKey: ["settings", "rotation"],
+    queryFn: () => unwrap(api.GET("/api/v1/settings/rotation")),
+  });
   const save = useAction(
     () => {
-      const body = { name, color };
+      const body = { name, color, separation };
       return category
         ? unwrap(api.PUT("/api/v1/categories/{id}", { params: { path: { id: category.id } }, body }))
         : unwrap(api.POST("/api/v1/categories", { body }));
@@ -155,6 +165,10 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
             <input type="color" value={color} onChange={(e) => setColor(e.target.value)} aria-label="Other color" />
           </div>
         </Field>
+        <fieldset>
+          <legend>Separation</legend>
+          <SeparationEditor value={separation} inherited={rotation.data?.separation} onChange={setSeparation} />
+        </fieldset>
       </form>
     </Modal>
   );

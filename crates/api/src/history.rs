@@ -7,6 +7,10 @@
 //! reconnection, the tracks still playing are matched with their open rows
 //! (or recorded, started when their position says), and the other open
 //! rows are closed without an end reason.
+//!
+//! A play of a track rotation picked is linked to its pick in the selection
+//! log, and carries its relaxation step (`relaxation_applied`). Plays and
+//! requests move the track's weights (`rotation.weights`).
 
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -14,6 +18,7 @@ use std::time::SystemTime;
 use axum::Json;
 use axum::extract::{Query, State};
 use heron_core::PlaySource;
+use heron_rotation::{MAX_WEIGHT, MIN_WEIGHT, RotationSettings};
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
 use tokio::sync::broadcast;
@@ -142,7 +147,65 @@ impl HistoryRecorder {
         .execute(&self.pool)
         .await?
         .last_insert_id();
+        if deck != DeckName::Fx {
+            self.link_pick(id, entry.entry_id).await?;
+            if let Some(track_id) = track_id {
+                self.reweigh(track_id, track.source).await?;
+            }
+        }
         Ok(id)
+    }
+
+    /// Links the play to the rotation pick it comes from, if any.
+    async fn link_pick(&self, play_id: u64, entry_id: u64) -> ApiResult<()> {
+        let linked = sqlx::query(
+            "UPDATE rotation_picks SET play_id = ?
+             WHERE engine_started_at = ? AND entry_id = ? AND play_id IS NULL",
+        )
+        .bind(play_id)
+        .bind(self.engine_started_at)
+        .bind(entry_id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        if linked > 0 {
+            sqlx::query(
+                "UPDATE play_history h JOIN rotation_picks p ON p.play_id = h.id
+                 SET h.relaxation_applied = JSON_OBJECT(
+                     'pick_id', p.id, 'step', p.step,
+                     'description', JSON_VALUE(p.explanation, '$.step_description'))
+                 WHERE h.id = ? AND p.step > 0",
+            )
+            .bind(play_id)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Plays lower the track's weights, requests raise them.
+    async fn reweigh(&self, track_id: u64, source: PlaySource) -> ApiResult<()> {
+        let settings: RotationSettings =
+            crate::settings::load(&self.pool, RotationSettings::SETTINGS_NAME).await?;
+        let factor = match source {
+            PlaySource::Request => settings.weights.request_factor,
+            PlaySource::Rotation | PlaySource::Manual => settings.weights.play_factor,
+            PlaySource::Fallback => return Ok(()),
+        };
+        if factor == 1.0 {
+            return Ok(());
+        }
+        sqlx::query(
+            "UPDATE track_categories SET weight = LEAST(GREATEST(weight * ?, ?), ?)
+             WHERE track_id = ?",
+        )
+        .bind(factor)
+        .bind(MIN_WEIGHT)
+        .bind(MAX_WEIGHT)
+        .bind(track_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// Matches what plays now with the open rows, after a reconnection.

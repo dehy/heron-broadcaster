@@ -25,6 +25,9 @@ pub enum TaskRequest {
         disc: Option<u32>,
         track: Option<u32>,
     },
+    /// Looks up the MusicBrainz relationships between the station's
+    /// artists ("member of", "is person", …) and suggests the links.
+    ArtistRelations,
 }
 
 impl TaskRequest {
@@ -35,6 +38,7 @@ impl TaskRequest {
             Self::OrganizeApply { .. } => "organize_apply",
             Self::Undo { .. } => "undo",
             Self::ReviewApply { .. } => "review_apply",
+            Self::ArtistRelations => "artist_relations",
         }
     }
 }
@@ -74,6 +78,18 @@ pub struct BatchReport {
     pub done: u64,
     /// Operations not done, with the reason.
     pub skipped: Vec<SkippedFile>,
+}
+
+/// What a MusicBrainz relationships lookup found.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RelationsReport {
+    /// Artists with a MusicBrainz ID looked up.
+    pub artists: u64,
+    /// New suggestions, between two artists of the station.
+    pub suggestions: u64,
+    /// Lookups that failed (tried again next time).
+    pub failed: u64,
 }
 
 #[cfg(test)]

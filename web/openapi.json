@@ -10,6 +10,446 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/artist-names/{id}": {
+      "put": {
+        "tags": [
+          "artists"
+        ],
+        "summary": "Moves a name to another artist (or to a new one): the tracks tagged\nwith it follow. Operators and admins.",
+        "operationId": "move_name",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artist"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artist-suggestions": {
+      "get": {
+        "tags": [
+          "artists"
+        ],
+        "summary": "Links waiting for review.",
+        "operationId": "list_suggestions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ArtistSuggestion"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artist-suggestions/musicbrainz": {
+      "post": {
+        "tags": [
+          "artists"
+        ],
+        "summary": "Asks heron-librarian to look up the MusicBrainz relationships (\"member\nof\", \"is person\", …) between the artists that have a MusicBrainz ID;\nthey become suggestions. Operators and admins.",
+        "operationId": "look_up_relations",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artist-suggestions/{id}": {
+      "post": {
+        "tags": [
+          "artists"
+        ],
+        "summary": "Accepts or dismisses a suggestion. Operators and admins.",
+        "operationId": "review_suggestion",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestionReview"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artists": {
+      "get": {
+        "tags": [
+          "artists"
+        ],
+        "summary": "Artists, by name.",
+        "operationId": "list_artists",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Matches any of the artist's names.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1 to 200, 50 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtistPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artists/{id}": {
+      "get": {
+        "tags": [
+          "artists"
+        ],
+        "operationId": "get_artist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artist"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "artists"
+        ],
+        "summary": "Renames an artist, or sets its MusicBrainz ID. Operators and admins.",
+        "operationId": "patch_artist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtistPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artist"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artists/{id}/merge": {
+      "post": {
+        "tags": [
+          "artists"
+        ],
+        "summary": "Merges another artist into this one: its names, tracks, similar\nartists and restrictions. Operators and admins.",
+        "operationId": "merge_artist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artist"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artists/{id}/similar/{other}": {
+      "put": {
+        "tags": [
+          "artists"
+        ],
+        "summary": "Marks two artists similar: separation treats them as the same artist.\nOperators and admins.",
+        "operationId": "add_similar",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "other",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "artists"
+        ],
+        "summary": "Operators and admins.",
+        "operationId": "remove_similar",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "other",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
@@ -293,7 +733,7 @@
         "tags": [
           "categories"
         ],
-        "summary": "Renames or recolors a category. Operators and admins.",
+        "summary": "Renames, recolors a category or changes its separation. Operators and\nadmins.",
         "operationId": "update_category",
         "parameters": [
           {
@@ -342,8 +782,235 @@
         "tags": [
           "categories"
         ],
-        "summary": "Deletes a category; its tracks stay in the library. Refused while a\nclock uses it. Operators and admins.",
+        "summary": "Deletes a category and its restrictions; its tracks stay in the\nlibrary. Refused while a clock uses it. Operators and admins.",
         "operationId": "delete_category",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clocks": {
+      "get": {
+        "tags": [
+          "rotation"
+        ],
+        "operationId": "list_clocks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ClockView"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Operators and admins.",
+        "operationId": "create_clock",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClockInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClockView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clocks/preview": {
+      "post": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "A clock as it will sound, from its slots (saved or not): expected\nstarts and lengths, and the categories running short.",
+        "operationId": "preview_clock",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClockPreview"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/clocks/{id}": {
+      "get": {
+        "tags": [
+          "rotation"
+        ],
+        "operationId": "get_clock",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClockView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Renames a clock and replaces its slots. Operators and admins.",
+        "operationId": "update_clock",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClockInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClockView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Deletes a clock; the hours it was scheduled at rotate the whole library\nuntil another clock is scheduled. Operators and admins.",
+        "operationId": "delete_clock",
         "parameters": [
           {
             "name": "id",
@@ -1718,6 +2385,358 @@
         }
       }
     },
+    "/api/v1/restrictions": {
+      "get": {
+        "tags": [
+          "rotation"
+        ],
+        "operationId": "list_restrictions",
+        "parameters": [
+          {
+            "name": "target",
+            "in": "query",
+            "description": "`track`, `artist` or `category`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RestrictionView"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Operators and admins.",
+        "operationId": "create_restriction",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestrictionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictionView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/restrictions/{id}": {
+      "put": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Operators and admins.",
+        "operationId": "update_restriction",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestrictionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictionView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Operators and admins.",
+        "operationId": "delete_restriction",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rotation/picks": {
+      "get": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "The selection log, most recent first.",
+        "operationId": "list_picks",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Picks before this one, for the next page.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "track_id",
+            "in": "query",
+            "description": "Only this track.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1 to 200, 50 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RotationPick"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rotation/simulate": {
+      "post": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Generates programming offline, without touching the queue, and checks\nit: separation as relaxed at each pick's step, restrictions always.\nOperators and admins.",
+        "operationId": "simulate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationReport"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedule": {
+      "get": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Which clock runs when; hours left out rotate the whole library.",
+        "operationId": "get_schedule",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScheduledHour"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Replaces the whole schedule. Operators and admins.",
+        "operationId": "put_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ScheduledHour"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScheduledHour"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/settings/analysis": {
       "get": {
         "tags": [
@@ -1965,6 +2984,137 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QueueSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/rotation": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Separation rules, the fallback category and weights.",
+        "operationId": "get_rotation_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotationSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Replaces the rotation settings (missing fields take the defaults).\nOperators and admins.",
+        "operationId": "put_rotation_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RotationSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotationSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/station": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "get_station",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StationSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Replaces the station settings. Admins only.",
+        "operationId": "put_station",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StationSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StationSettings"
                 }
               }
             }
@@ -2877,6 +4027,157 @@
           }
         }
       },
+      "Artist": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "tracks",
+          "names",
+          "similar"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "musicbrainz_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtistName"
+            }
+          },
+          "similar": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtistRef"
+            },
+            "description": "Separation treats these as the same artist."
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ArtistName": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "by_hand"
+        ],
+        "properties": {
+          "by_hand": {
+            "type": "boolean",
+            "description": "Moved to this artist by hand."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ArtistPage": {
+        "type": "object",
+        "required": [
+          "artists",
+          "total"
+        ],
+        "properties": {
+          "artists": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Artist"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ArtistPatch": {
+        "type": "object",
+        "properties": {
+          "musicbrainz_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`null` removes it."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name shown."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArtistRef": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ArtistSuggestion": {
+        "type": "object",
+        "required": [
+          "id",
+          "artist",
+          "other",
+          "source",
+          "reason"
+        ],
+        "properties": {
+          "artist": {
+            "$ref": "#/components/schemas/ArtistRef"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "other": {
+            "$ref": "#/components/schemas/ArtistRef"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "description": "`names` or `musicbrainz`."
+          }
+        }
+      },
       "Batch": {
         "type": "object",
         "required": [
@@ -2969,12 +4270,44 @@
           }
         }
       },
+      "Blocked": {
+        "type": "object",
+        "required": [
+          "track",
+          "title",
+          "artist",
+          "album"
+        ],
+        "properties": {
+          "album": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "artist": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "title": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "track": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "Category": {
         "type": "object",
         "required": [
           "id",
           "name",
-          "tracks"
+          "tracks",
+          "separation"
         ],
         "properties": {
           "color": {
@@ -2991,6 +4324,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "separation": {
+            "$ref": "#/components/schemas/SeparationOverrides",
+            "description": "Windows this category overrides; the others follow the rotation\nsettings (clock slots can override them again)."
           },
           "tracks": {
             "type": "integer",
@@ -3032,6 +4369,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "separation": {
+            "$ref": "#/components/schemas/SeparationOverrides",
+            "description": "None overridden by default."
           }
         },
         "additionalProperties": false
@@ -3063,6 +4404,82 @@
             "format": "float"
           }
         }
+      },
+      "ClockInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "slots"
+        ],
+        "properties": {
+          "looping": {
+            "type": "boolean",
+            "description": "Off by default: the clock starts over at each hour."
+          },
+          "name": {
+            "type": "string"
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClockSlot"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ClockPreview": {
+        "type": "object",
+        "required": [
+          "slots",
+          "duration_ms",
+          "runs_per_hour"
+        ],
+        "properties": {
+          "duration_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Expected length of the whole clock.",
+            "minimum": 0
+          },
+          "runs_per_hour": {
+            "type": "number",
+            "format": "double",
+            "description": "How many times the clock runs in an hour: more than 1 when it is\nshorter than the hour; under 1 for a looping clock longer than it."
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SlotPreview"
+            }
+          }
+        }
+      },
+      "ClockSlot": {
+        "type": "object",
+        "description": "How a slot calls its category.",
+        "required": [
+          "category_id"
+        ],
+        "properties": {
+          "category_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "enforce_rules": {
+            "type": "boolean",
+            "description": "Off, the slot skips the separation rules (restrictions still apply)."
+          },
+          "method": {
+            "$ref": "#/components/schemas/Method"
+          },
+          "separation": {
+            "$ref": "#/components/schemas/SeparationOverrides",
+            "description": "Windows this slot overrides, over its category's."
+          }
+        },
+        "additionalProperties": false
       },
       "ClockStatus": {
         "type": "object",
@@ -3096,6 +4513,41 @@
               "null"
             ],
             "description": "Why the clock cannot be trusted, for people. `None` when it is fine\nor unknown."
+          }
+        }
+      },
+      "ClockView": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "looping",
+          "slots",
+          "scheduled_hours"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "looping": {
+            "type": "boolean",
+            "description": "Carries on from its last slot across hours instead of starting over."
+          },
+          "name": {
+            "type": "string"
+          },
+          "scheduled_hours": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Hours of the week it is scheduled at."
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClockSlot"
+            }
           }
         }
       },
@@ -3540,6 +4992,147 @@
           }
         }
       },
+      "Explanation": {
+        "type": "object",
+        "description": "Why a track was picked: the selection log.",
+        "required": [
+          "at_unix_ms",
+          "method",
+          "enforce_rules",
+          "step",
+          "step_description",
+          "windows",
+          "pool",
+          "restricted",
+          "blocked",
+          "candidates",
+          "weight",
+          "skipped_slots"
+        ],
+        "properties": {
+          "at_unix_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the track is planned to start (Unix ms)."
+          },
+          "blocked": {
+            "$ref": "#/components/schemas/Blocked",
+            "description": "Tracks of the slot's category held back by each separation rule\nwith the rules as configured (the first rule that applies counts)."
+          },
+          "candidates": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Tracks the method chose among.",
+            "minimum": 0
+          },
+          "category_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/u64",
+                "description": "Category the track was picked from: the fallback category from\nstep 9; missing for the whole library."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "clock_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/u64",
+                "description": "Missing when no clock is scheduled: the whole library rotates."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clock_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enforce_rules": {
+            "type": "boolean"
+          },
+          "last_played_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When the picked track last played; missing if never."
+          },
+          "method": {
+            "$ref": "#/components/schemas/Method",
+            "description": "Applied: least recently played at step 10."
+          },
+          "pool": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Tracks in the slot's category.",
+            "minimum": 0
+          },
+          "restricted": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Of them, forbidden by restrictions.",
+            "minimum": 0
+          },
+          "skipped_slots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkippedSlot"
+            },
+            "description": "Slots passed over because nothing could be picked, even relaxed."
+          },
+          "slot": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Index of the slot in the clock, from 0.",
+            "minimum": 0
+          },
+          "slot_category_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/u64",
+                "description": "Category the slot calls."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "step": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Relaxation step, 0 (none) to 10.",
+            "minimum": 0
+          },
+          "step_description": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number",
+            "format": "double",
+            "description": "Weight of the picked track in its category."
+          },
+          "windows": {
+            "$ref": "#/components/schemas/Windows",
+            "description": "Separation windows applied at this step."
+          }
+        }
+      },
       "Fade": {
         "type": "object",
         "description": "One side of a crossfade.",
@@ -3764,6 +5357,17 @@
               }
             ]
           },
+          "relations": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RelationsReport",
+                "description": "What a finished MusicBrainz relationships lookup found."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "report": {
             "oneOf": [
               {
@@ -3929,6 +5533,52 @@
             "type": "number",
             "format": "double",
             "default": -16.0
+          }
+        },
+        "additionalProperties": false
+      },
+      "MergeRequest": {
+        "type": "object",
+        "required": [
+          "artist_id"
+        ],
+        "properties": {
+          "artist_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The artist merged into this one, then deleted.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "Method": {
+        "type": "string",
+        "description": "How a clock slot picks among the tracks its category allows.",
+        "enum": [
+          "least_recently_played",
+          "random",
+          "weighted"
+        ]
+      },
+      "Mode": {
+        "type": "string",
+        "enum": [
+          "allow",
+          "ban"
+        ]
+      },
+      "MoveName": {
+        "type": "object",
+        "properties": {
+          "artist_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The artist the name now belongs to; missing to make it an artist\nof its own.",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -4455,6 +6105,26 @@
         },
         "additionalProperties": false
       },
+      "PreviewRequest": {
+        "type": "object",
+        "required": [
+          "slots"
+        ],
+        "properties": {
+          "looping": {
+            "type": "boolean",
+            "description": "Whether the clock loops across hours."
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClockSlot"
+            },
+            "description": "The slots as edited, saved or not."
+          }
+        },
+        "additionalProperties": false
+      },
       "QueueEntry": {
         "type": "object",
         "required": [
@@ -4585,6 +6255,35 @@
           }
         }
       },
+      "RelationsReport": {
+        "type": "object",
+        "description": "What a MusicBrainz relationships lookup found.",
+        "required": [
+          "artists",
+          "suggestions",
+          "failed"
+        ],
+        "properties": {
+          "artists": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Artists with a MusicBrainz ID looked up.",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Lookups that failed (tried again next time).",
+            "minimum": 0
+          },
+          "suggestions": {
+            "type": "integer",
+            "format": "int64",
+            "description": "New suggestions, between two artists of the station.",
+            "minimum": 0
+          }
+        }
+      },
       "ReleaseChoice": {
         "type": "object",
         "required": [
@@ -4600,6 +6299,69 @@
           }
         },
         "additionalProperties": false
+      },
+      "RestrictionInput": {
+        "type": "object",
+        "required": [
+          "target",
+          "rule"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rule": {
+            "$ref": "#/components/schemas/Rule"
+          },
+          "target": {
+            "$ref": "#/components/schemas/Target"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RestrictionView": {
+        "type": "object",
+        "required": [
+          "id",
+          "target",
+          "rule",
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rule": {
+            "$ref": "#/components/schemas/Rule"
+          },
+          "target": {
+            "$ref": "#/components/schemas/Target"
+          },
+          "target_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The track (`artist – title`), artist or category, for people."
+          }
+        }
       },
       "ReviewCandidate": {
         "type": "object",
@@ -4731,6 +6493,193 @@
           "admin"
         ]
       },
+      "RotationPick": {
+        "type": "object",
+        "description": "A track rotation queued, and why.",
+        "required": [
+          "id",
+          "planned_at_unix_ms",
+          "explanation"
+        ],
+        "properties": {
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "explanation": {
+            "$ref": "#/components/schemas/Explanation"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "planned_at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "played_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When it started; missing until then, or if it never played."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "track_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Missing once the track is deleted.",
+            "minimum": 0
+          }
+        }
+      },
+      "RotationSettings": {
+        "type": "object",
+        "description": "Station-wide rotation settings, stored under the `rotation` settings name.",
+        "properties": {
+          "fallback_category_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/u64",
+                "description": "Where relaxation ends (steps 9 and 10). The whole library when unset."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "separation": {
+            "$ref": "#/components/schemas/Windows",
+            "default": {
+              "album_min": 60,
+              "artist_min": 120,
+              "title_min": 240,
+              "track_min": 240
+            }
+          },
+          "weights": {
+            "$ref": "#/components/schemas/WeightSettings",
+            "default": {
+              "play_factor": 1.0,
+              "request_factor": 1.0
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "Rule": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Days of the week and hours of the day.",
+            "required": [
+              "mode",
+              "days",
+              "start_hour",
+              "end_hour",
+              "kind"
+            ],
+            "properties": {
+              "days": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "description": "ISO 8601: 1 = Monday … 7 = Sunday."
+              },
+              "end_hour": {
+                "type": "integer",
+                "format": "int32",
+                "description": "1 to 24, excluded. At or before `start_hour`, the hours run past\nmidnight and belong to the day they start on: Friday 22 to 2\ncovers Saturday 01:30.",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "daypart"
+                ]
+              },
+              "mode": {
+                "$ref": "#/components/schemas/Mode"
+              },
+              "start_hour": {
+                "type": "integer",
+                "format": "int32",
+                "description": "0 to 23.",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Dates, both included.",
+            "required": [
+              "mode",
+              "start",
+              "end",
+              "every_year",
+              "kind"
+            ],
+            "properties": {
+              "end": {
+                "type": "string",
+                "format": "date"
+              },
+              "every_year": {
+                "type": "boolean",
+                "description": "Every year on these days and months (the years are ignored);\nthe range may run over the new year."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "date_range"
+                ]
+              },
+              "mode": {
+                "$ref": "#/components/schemas/Mode"
+              },
+              "start": {
+                "type": "string",
+                "format": "date"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Never directly after a track of this category.",
+            "required": [
+              "category_id",
+              "kind"
+            ],
+            "properties": {
+              "category_id": {
+                "$ref": "#/components/schemas/u64"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "not_after"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "ScanReport": {
         "type": "object",
         "description": "Outcome of one scan, logged and served by `/api/v1/library/status`.",
@@ -4818,6 +6767,224 @@
           }
         }
       },
+      "ScheduledHour": {
+        "type": "object",
+        "description": "The clock running at an hour of the week.",
+        "required": [
+          "day_of_week",
+          "hour",
+          "clock_id"
+        ],
+        "properties": {
+          "clock_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "day_of_week": {
+            "type": "integer",
+            "format": "int32",
+            "description": "ISO 8601: 1 = Monday … 7 = Sunday.",
+            "minimum": 0
+          },
+          "hour": {
+            "type": "integer",
+            "format": "int32",
+            "description": "0 to 23, station time.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "SeparationOverrides": {
+        "type": "object",
+        "description": "Separation windows overridden by a category or a clock slot; missing\nones are inherited.",
+        "properties": {
+          "album_min": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "artist_min": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "title_min": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "track_min": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "SeparationRule": {
+        "type": "string",
+        "description": "A separation rule.",
+        "enum": [
+          "track",
+          "title",
+          "artist",
+          "album"
+        ]
+      },
+      "SimulatedPick": {
+        "type": "object",
+        "required": [
+          "track_id",
+          "start_unix_ms",
+          "length_ms",
+          "explanation"
+        ],
+        "properties": {
+          "explanation": {
+            "$ref": "#/components/schemas/Explanation"
+          },
+          "length_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "start_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "track_id": {
+            "$ref": "#/components/schemas/u64"
+          }
+        }
+      },
+      "Simulation": {
+        "type": "object",
+        "required": [
+          "start_unix_ms",
+          "end_unix_ms",
+          "picks",
+          "gap_minutes",
+          "steps",
+          "violations"
+        ],
+        "properties": {
+          "end_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "gap_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Minutes nothing could be picked (restrictions forbade every track):\nthe engine's fallback directory would play.",
+            "minimum": 0
+          },
+          "picks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SimulatedPick"
+            }
+          },
+          "start_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "Picks per relaxation step, 0 to 10: every pick past step 0 is a\nlogged relaxation."
+          },
+          "violations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Violation"
+            }
+          }
+        }
+      },
+      "SimulationReport": {
+        "type": "object",
+        "required": [
+          "seed",
+          "simulation",
+          "tracks"
+        ],
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "simulation": {
+            "$ref": "#/components/schemas/Simulation"
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrackLabel"
+            },
+            "description": "The tracks picked."
+          }
+        }
+      },
+      "SimulationRequest": {
+        "type": "object",
+        "properties": {
+          "clock_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Runs this clock at every hour instead of the schedule.",
+            "minimum": 0
+          },
+          "hours": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "1 to 168 (a week, the default).",
+            "minimum": 0
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "To replay a simulation; random by default.",
+            "minimum": 0
+          },
+          "start_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Now by default, after the plays so far."
+          }
+        },
+        "additionalProperties": false
+      },
       "SkippedFile": {
         "type": "object",
         "required": [
@@ -4832,6 +6999,114 @@
             "type": "string"
           }
         }
+      },
+      "SkippedSlot": {
+        "type": "object",
+        "required": [
+          "slot",
+          "category_id"
+        ],
+        "properties": {
+          "category_id": {
+            "$ref": "#/components/schemas/u64"
+          },
+          "slot": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "SlotPreview": {
+        "type": "object",
+        "description": "A slot as it will sound.",
+        "required": [
+          "category_id",
+          "tracks",
+          "expected_start_ms",
+          "beyond_hour",
+          "windows",
+          "calls_per_hour",
+          "needed_tracks",
+          "short"
+        ],
+        "properties": {
+          "average_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Their average playable length; missing for an empty category.",
+            "minimum": 0
+          },
+          "beyond_hour": {
+            "type": "boolean",
+            "description": "Expected to start after the hour ends: it will not play (never for\na looping clock)."
+          },
+          "calls_per_hour": {
+            "type": "number",
+            "format": "double",
+            "description": "Times an hour of this clock calls the category."
+          },
+          "category_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "category_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expected_start_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the slot is expected to start, from the top of the hour.",
+            "minimum": 0
+          },
+          "needed_tracks": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Tracks the category needs so its tracks are not repeated within\nthe track window without relaxation.",
+            "minimum": 0
+          },
+          "short": {
+            "type": "boolean",
+            "description": "The category has fewer tracks than it needs: expect relaxations."
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Tracks of the category rotation may pick (playable).",
+            "minimum": 0
+          },
+          "windows": {
+            "$ref": "#/components/schemas/Windows",
+            "description": "Windows the slot applies (rotation settings, category, slot)."
+          }
+        }
+      },
+      "StationSettings": {
+        "type": "object",
+        "description": "The station itself.",
+        "required": [
+          "timezone"
+        ],
+        "properties": {
+          "timezone": {
+            "type": "string",
+            "description": "IANA time zone the clocks and restrictions follow, e.g.\n`Europe/Paris`. By default the server's (`TZ`), or UTC."
+          }
+        },
+        "additionalProperties": false
       },
       "Status": {
         "type": "object",
@@ -4869,6 +7144,19 @@
           }
         }
       },
+      "SuggestionReview": {
+        "type": "object",
+        "required": [
+          "accept"
+        ],
+        "properties": {
+          "accept": {
+            "type": "boolean",
+            "description": "`true` marks the artists similar; `false` dismisses the suggestion."
+          }
+        },
+        "additionalProperties": false
+      },
       "SyncState": {
         "type": "string",
         "enum": [
@@ -4903,6 +7191,64 @@
             "$ref": "#/components/schemas/SyncState"
           }
         }
+      },
+      "Target": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/u64"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "track"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/u64"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "artist"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/u64"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "category"
+                ]
+              }
+            }
+          }
+        ]
       },
       "TaskRequest": {
         "oneOf": [
@@ -5005,6 +7351,21 @@
                 "type": "integer",
                 "format": "int64",
                 "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Looks up the MusicBrainz relationships between the station's\nartists (\"member of\", \"is person\", …) and suggests the links.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "artist_relations"
+                ]
               }
             }
           }
@@ -5283,6 +7644,31 @@
           "status": {
             "type": "string",
             "description": "`identified` or `needs_review`."
+          }
+        }
+      },
+      "TrackLabel": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -5580,6 +7966,105 @@
         },
         "additionalProperties": false
       },
+      "Violation": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Played closer to an earlier play than its windows allow.",
+            "required": [
+              "pick",
+              "rule",
+              "earlier_unix_ms",
+              "window_min",
+              "kind"
+            ],
+            "properties": {
+              "earlier_unix_ms": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "separation"
+                ]
+              },
+              "pick": {
+                "type": "integer",
+                "format": "int32",
+                "description": "Index in the picks.",
+                "minimum": 0
+              },
+              "rule": {
+                "$ref": "#/components/schemas/SeparationRule"
+              },
+              "window_min": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Played where a restriction forbids it.",
+            "required": [
+              "pick",
+              "restriction_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "restriction"
+                ]
+              },
+              "pick": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "restriction_id": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Not from the category its slot and step call for.",
+            "required": [
+              "pick",
+              "kind"
+            ],
+            "properties": {
+              "expected": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/u64"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "category"
+                ]
+              },
+              "pick": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          }
+        ]
+      },
       "Waveform": {
         "type": "object",
         "required": [
@@ -5604,6 +8089,65 @@
             "description": "One byte per point, base64: the highest sample peak in the interval."
           }
         }
+      },
+      "WeightSettings": {
+        "type": "object",
+        "description": "Weights move with plays and requests (multiplied by these factors).",
+        "properties": {
+          "play_factor": {
+            "type": "number",
+            "format": "double",
+            "description": "Each play multiplies the track's weights by this, 0.5 to 1 (1: weights stay).",
+            "default": 1.0
+          },
+          "request_factor": {
+            "type": "number",
+            "format": "double",
+            "description": "Each request multiplies the track's weights by this, 1 to 2 (1: weights stay).",
+            "default": 1.0
+          }
+        },
+        "additionalProperties": false
+      },
+      "Windows": {
+        "type": "object",
+        "description": "Separation windows, in minutes; 0 turns a rule off.",
+        "properties": {
+          "album_min": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Do not play the same album within.",
+            "default": 60,
+            "minimum": 0
+          },
+          "artist_min": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Do not play the same artist (or a similar one) within.",
+            "default": 120,
+            "minimum": 0
+          },
+          "title_min": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Do not play the same title (any version) within.",
+            "default": 240,
+            "minimum": 0
+          },
+          "track_min": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Do not play the same track within.",
+            "default": 240,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "u64": {
+        "type": "integer",
+        "format": "int64",
+        "minimum": 0
       }
     },
     "securitySchemes": {
@@ -5654,6 +8198,14 @@
     {
       "name": "categories",
       "description": "Groups of tracks"
+    },
+    {
+      "name": "artists",
+      "description": "Artists, their names and similar artists"
+    },
+    {
+      "name": "rotation",
+      "description": "Clocks, the schedule, restrictions, the selection log and simulations"
     },
     {
       "name": "history",

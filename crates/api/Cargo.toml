@@ -23,7 +23,9 @@ heron-library.workspace = true
 # Checks encoder profiles and outputs before they are saved.
 heron-outputs.workspace = true
 heron-proto.workspace = true
+heron-rotation = { workspace = true, features = ["openapi"] }
 heron-service = { workspace = true, features = ["mysql", "openapi"] }
+jiff.workspace = true
 metrics.workspace = true
 notify.workspace = true
 # Reads passwords without echoing them.

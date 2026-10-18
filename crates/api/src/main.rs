@@ -7,8 +7,10 @@
 //! `docs/api.md`.
 
 mod app;
+mod artists;
 mod auth;
 mod categories;
+mod clocks;
 #[cfg(test)]
 mod e2e;
 mod engine;
@@ -20,6 +22,8 @@ mod live;
 mod outputs;
 mod player;
 mod queue;
+mod restrictions;
+mod rotation;
 mod settings;
 mod sync;
 mod tracks;
@@ -181,6 +185,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         history::HistoryRecorder::new(pool.clone()).run(history_events),
     ));
     tasks.push(tokio::spawn(Arc::clone(&queue).run()));
+    tasks.push(tokio::spawn(artists::run_linker(
+        pool.clone(),
+        Arc::clone(&queue),
+    )));
     tasks.push(tokio::spawn(Arc::clone(&sync).run()));
     tasks.push(tokio::spawn(users::purge_sessions(pool.clone())));
 
@@ -310,6 +318,10 @@ mod tests {
         for expected in [
             "analysis_jobs",
             "api_tokens",
+            "artist_names",
+            "artist_similar",
+            "artist_suggestions",
+            "artists",
             "categories",
             "clock_schedule",
             "clock_slots",
@@ -317,9 +329,12 @@ mod tests {
             "encoder_profiles",
             "outputs",
             "play_history",
+            "restrictions",
+            "rotation_picks",
             "sessions",
             "settings",
             "track_analysis",
+            "track_artists",
             "track_categories",
             "track_overrides",
             "tracks",

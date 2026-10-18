@@ -13,7 +13,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | M3 | [24/7 reliability](m3-reliability.md) | M2 | Not started |
 | M4 | [API & control plane](m4-api-control-plane.md) | M2 | Done |
 | M5 | [Web UI](m5-web-ui.md) | M4 | Done |
-| M6 | [Rotation & clockwheels](m6-rotation-clockwheels.md) | M4 | Not started |
+| M6 | [Rotation & clockwheels](m6-rotation-clockwheels.md) | M4 | Done |
 | M7 | [Webhooks & output API](m7-webhooks-output-api.md) | M4 | Not started |
 | M7b | [Listener statistics](m7b-listener-statistics.md) | M4 | Not started |
 | M8 | [Deck EQ](m8-deck-eq.md) | M2 | Not started |

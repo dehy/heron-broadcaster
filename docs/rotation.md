@@ -25,25 +25,29 @@ Artist separation compares **artists, not names**: see [Artists with several nam
 
 The same artist often appears under several names: solo name, band, side projects, spellings (`Neal Morse`, `The Neal Morse Band`). Comparing tag strings would play them back to back. So:
 
-- An **artist** has one or more **names**. Tracks are linked to artists through their tags: a name links the track to its artist.
+- An **artist** has one or more **names**. Tracks are linked to artists through their tags: a name links the track to its artist. Names are matched case-insensitively and ignoring accents and extra spaces (`NÉAL  MORSE` is `Neal Morse`); a name never seen before becomes a new artist.
+- The artist tag is split into several artists **on "featuring" only** (`feat.`, `ft.`, `featuring`), and artists featured in the title count too (`Get Lucky (feat. Pharrell Williams)`). `&`, `and`, commas and slashes never split a name: `Simon & Garfunkel` and `Earth, Wind & Fire` are one artist each.
 - A track can have several artists (featuring, duets, collaborations); artist separation applies to each of them.
-- Artists can be **grouped** (a band and its members' solo projects) so separation treats the group as one artist. Whether a group counts as one artist is a setting of the group.
-- Names are matched case-insensitively and ignoring accents and extra spaces; anything less obvious is linked by hand in the UI, never guessed silently.
-- When tracks are identified ([M1b](roadmap/m1b-library-management.md)), MusicBrainz artist IDs and relationships ("member of", "performs as") are offered as suggestions to review.
+- Artists can be marked **similar**: separation treats them as the same artist (a band and its members' solo projects, a duo and its singers). The link is between two artists and is not transitive: if Genesis is similar to Phil Collins and to Peter Gabriel, Collins and Gabriel can still follow each other. Similar links replace the artist groups sketched before M6.
+- Anything less obvious is done by hand in the UI, never guessed: a name moved to another artist (or split off as an artist of its own), two artists merged, two artists marked similar.
+- **Suggestions** wait for review and are never applied alone: a name made of known artists' names (`Simon & Garfunkel` when `Simon` is an artist), and MusicBrainz relationships between artists of the station ("member of band", "is person", "subgroup", "collaboration"), looked up on request by `heron-librarian` for the artists whose MusicBrainz ID the tags give ([M1b](roadmap/m1b-library-management.md) writes them).
+- Artists nothing refers to any more (no track, no hand-made link, restriction or MusicBrainz ID) are forgotten.
 
 ### Restrictions
 
-Restrictions are hard rules: unlike separation, **they are never relaxed**. They apply to a track, an artist or a category:
+Restrictions are hard rules: unlike separation, **they are never relaxed**. They apply to a track, an artist or a category (every track in it):
 
-- **dayparting:** allowed or banned on given days and hours (no explicit lyrics before 22:00, no long tracks during the morning show);
-- **date ranges:** seasonal content only in its season, or a track banned for a while;
-- **sequence:** a category never directly after another (no two jingles in a row, no ballad after a ballad).
+- **dayparting:** allowed or banned on given days and hours (no explicit lyrics before 22:00, no long tracks during the morning show). Hours that run past midnight belong to the day they start on: Friday 22:00 to 02:00 covers Saturday 01:30;
+- **date ranges:** seasonal content only in its season (optionally every year, the range running over the new year if needed), or a track banned for a while;
+- **sequence:** never directly after a track of a category (no two ballads in a row: the Ballads category, never after Ballads).
 
-When a slot finds no candidate that respects the restrictions, it goes through the relaxation steps of the separation rules, and then to the fallback category, still respecting the restrictions. The engine's fallback directory is the last resort.
+A **ban** forbids the track while it matches. **Allow** rules restrict the track to where they match: for each target and kind of rule, at least one must match (two dayparts allowed on a category add up; an allowed daypart on the category and one on the artist must both hold). Times are the track's planned start, in the station's time zone.
+
+When a slot finds no candidate that respects the restrictions, it goes through the relaxation steps of the separation rules, and then to the fallback category, still respecting the restrictions. If even the fallback has nothing allowed, the slot is skipped for the next one in the clock; if no slot can play, nothing is queued and the engine's fallback directory takes over.
 
 ### Queue depth
 
-Keep N tracks queued ahead (default 20).
+Keep N tracks queued ahead: `queue.min_queued` ([API – Queue manager](api.md#queue-manager)). The default stays 3 rather than the 20 first proposed: tracks are picked for their planned start, and a deep queue plans further ahead, so dayparting and the clock's slots drift with every skip or manual insert.
 
 ### Clockwheel
 
@@ -54,13 +58,20 @@ An ordered list of slots. Each slot **calls a category**, and how it calls it ma
 - an **enforce rules** flag;
 - separation overrides for this slot (see [Separation rules](#separation-rules)).
 
-Building good clocks has to be easy: the editor shows each hour as it will sound (slots, expected durations, categories running short), and a clock can be simulated before it goes on air.
+Building good clocks has to be easy: the editor shows each hour as it will sound (slots, expected starts from the categories' average lengths, categories running short of tracks for their track separation), and a clock can be simulated before it goes on air.
+
+How a clock runs:
+
+- Each station hour starts its clock at the **first slot**; slots run in order. A clock shorter than the hour **starts over**; slots expected after the end of the hour do not play (the next hour starts its own clock). The track playing at the top of the hour finishes: there is no hard sync yet.
+- A clock can instead **loop across hours**, like SAM Broadcaster's clockwheel: it carries on from its last slot whatever the hour, so it can be longer than an hour (a 27-line wheel of two hours plays every line). Scheduled again after another clock, it resumes where it stopped.
+- A slot that has nothing it may play, even relaxed, is skipped for the next one, and the pick says so.
+- Hours without a clock rotate the **whole library**: least recently played, rules enforced.
 
 Clockwheels are data stored in the database and edited in the UI. There is no scripting language (see [Locked decisions](decisions.md)).
 
 ### Weights
 
-Configurable weight reduction on play and increase on request.
+Each track has a weight in each of its categories (1 by default), used by weighted slots. Plays (rotation or manual) multiply the track's weights by `weights.play_factor` (0.5 to 1), requests by `weights.request_factor` (1 to 2); weights stay between 0.1 and 10. Both factors are 1 by default: weights stay as set until a station chooses otherwise.
 
 ### Rule relaxation
 
@@ -85,17 +96,19 @@ The rule listeners notice least is relaxed first, and each rule is **halved befo
 - Rotation tries the steps in order, stops at the first one that yields at least one candidate, then applies the slot's selection method to those candidates.
 - Track separation is never dropped inside the slot's own category: playing the exact same recording again is the most audible repeat.
 - Step 10 cannot fail while the fallback category has a track; picking the least recently played one still avoids an immediate repeat. If the fallback category is empty, the engine's fallback directory takes over.
-- Slots with **enforce rules** off skip the separation rules entirely. Restrictions still apply.
+- Slots with **enforce rules** off skip the separation rules entirely (step 0 without rules, then steps 9 and 10 only if restrictions leave nothing). Restrictions still apply.
+- Windows are those of the station (`rotation` settings), overridden by the slot's category, then by the slot; steps 1 to 8 relax those. Steps 9 and 10 use the fallback category's windows; without a fallback category set, the whole library is the fallback.
 - Every relaxed pick records its step in `play_history.relaxation_applied` and in the selection log.
 
 **Why artist before title** (the handoff proposed title first): repeating an artist within two hours is common and accepted on radio, while hearing the same song again, even in another version, is a clear repeat to listeners.
 
 ### Scheduling
 
-Clocks are assigned per hour and day of week (`clock_schedule` in the [data model](data-model.md)).
+Clocks are assigned per hour and day of week (`clock_schedule` in the [data model](data-model.md)), in the **station's time zone** (`station` settings, an IANA name such as `Europe/Paris`; the server's `TZ`, or UTC, by default). When the clocks go back, the repeated hour runs its clock again; when they go forward, the skipped hour is skipped.
 
 ## Rotation model
 
-- Rotation is a **pure function** of (library, play history, rules, current clock, current time).
-- It returns the next track plus an **explanation**: which slot, which rules and restrictions were applied, which were relaxed.
-- This makes it possible to **simulate** days of programming offline and test it without audio.
+- Rotation is a **pure function** of (library, play history, rules, current clock, current time), in the `heron-rotation` crate.
+- The history is what played on the decks (the FX player aside) as far back as the longest window looks, followed by the queue at its planned times: the queue manager picks each new track for when it should start.
+- It returns the next track plus an **explanation**: which clock and slot, the windows applied, the relaxation step, how many tracks each rule held back or restrictions forbade, how many were left to choose from. Each pick is kept in the **selection log** (`rotation_picks`); its play is linked to it and carries its step (`play_history.relaxation_applied`).
+- This makes it possible to **simulate** days of programming offline and test it without audio. A simulation is **audited** without trusting the log: each pick's windows are recomputed from its slot and step, and the pick is compared with every play before it, one by one; restrictions are checked again. Simulations run from the API (`POST /rotation/simulate`) and the web UI, and in the tests on a synthetic station over a week that crosses a daylight saving change.

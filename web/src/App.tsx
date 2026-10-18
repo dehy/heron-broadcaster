@@ -9,7 +9,9 @@ import { Link, match, navigate, useLocation } from "./lib/router";
 import { ME_KEY, UserContext, useCan, useMeQuery } from "./lib/session";
 import { applyTheme, storedTheme } from "./lib/theme";
 import { Account } from "./pages/Account";
+import { Artists } from "./pages/Artists";
 import { Categories } from "./pages/Categories";
+import { ClockEditor, Clocks } from "./pages/Clocks";
 import { Dashboard } from "./pages/Dashboard";
 import { History } from "./pages/History";
 import { Library } from "./pages/Library";
@@ -17,7 +19,10 @@ import { Login } from "./pages/Login";
 import { Outputs } from "./pages/Outputs";
 import { Playout } from "./pages/Playout";
 import { QueuePage } from "./pages/Queue";
+import { Restrictions } from "./pages/Restrictions";
 import { Review } from "./pages/Review";
+import { Rotation } from "./pages/Rotation";
+import { Schedule } from "./pages/Schedule";
 import { Settings } from "./pages/Settings";
 import { Track } from "./pages/Track";
 import { Users } from "./pages/Users";
@@ -70,8 +75,13 @@ const PAGES: Page[] = [
   { path: "/queue", label: "Queue", icon: "queue" },
   { path: "/history", label: "History", icon: "history" },
   { path: "/library", label: "Tracks", icon: "library", section: "Library" },
-  { path: "/categories", label: "Categories", icon: "tag" },
+  { path: "/artists", label: "Artists", icon: "mic" },
   { path: "/review", label: "Review & organize", icon: "review" },
+  { path: "/clocks", label: "Clocks", icon: "clock", section: "Programming" },
+  { path: "/schedule", label: "Schedule", icon: "calendar" },
+  { path: "/categories", label: "Categories", icon: "tag" },
+  { path: "/restrictions", label: "Restrictions", icon: "ban" },
+  { path: "/rotation", label: "Selection log", icon: "log" },
   { path: "/playout", label: "Crossfade & loudness", icon: "fade", section: "Station" },
   { path: "/outputs", label: "Outputs", icon: "output" },
   { path: "/settings", label: "Settings", icon: "settings" },
@@ -82,6 +92,10 @@ function route(pathname: string): ReactNode {
   const track = match("/library/:id", pathname);
   if (track) {
     return <Track id={Number(track.id)} />;
+  }
+  const clock = match("/clocks/:id", pathname);
+  if (clock) {
+    return <ClockEditor id={clock.id === "new" ? null : Number(clock.id)} />;
   }
   switch (pathname) {
     case "/":
@@ -94,6 +108,16 @@ function route(pathname: string): ReactNode {
       return <Library />;
     case "/categories":
       return <Categories />;
+    case "/artists":
+      return <Artists />;
+    case "/clocks":
+      return <Clocks />;
+    case "/schedule":
+      return <Schedule />;
+    case "/restrictions":
+      return <Restrictions />;
+    case "/rotation":
+      return <Rotation />;
     case "/review":
       return <Review />;
     case "/playout":

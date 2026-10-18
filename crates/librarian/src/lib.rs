@@ -13,6 +13,7 @@ pub mod identify;
 pub mod import;
 pub mod journal;
 pub mod organize;
+pub mod relations;
 pub mod review;
 pub mod tasks;
 
