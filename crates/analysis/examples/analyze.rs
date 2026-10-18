@@ -31,7 +31,7 @@ fn main() {
         match heron_analysis::analyze_file(Path::new(&file), &settings) {
             Ok(a) => println!(
                 "{file}\n  duration {:.1} s, {:.1} LUFS, peak {:.1} dBTP, cue-in {:.2} s, \
-                 cue-out {:.2} s (-{:.2} s), fade at -{:.2} s{} [{} ms]",
+                 cue-out {:.2} s (-{:.2} s), fade at -{:.2} s{}, {} [{} ms]",
                 f64::from(a.duration_ms) / 1000.0,
                 a.integrated_lufs.unwrap_or(f64::NAN),
                 a.true_peak_db.unwrap_or(f64::NAN),
@@ -44,6 +44,8 @@ fn main() {
                 } else {
                     ""
                 },
+                a.bpm
+                    .map_or("no tempo".to_owned(), |bpm| format!("{bpm} BPM")),
                 started.elapsed().as_millis(),
             ),
             Err(error) => println!("{file}\n  error: {error}"),

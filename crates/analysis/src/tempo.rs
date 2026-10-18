@@ -3,7 +3,8 @@
 //! Tempo (BPM) estimation, streamed with the rest of the analysis.
 //!
 //! 1. Onset strength every 10 ms: the spectral flux, how much louder each
-//!    frequency got since the previous frame (on a log scale), summed over
+//!    frequency got since the previous frame (on a log scale, against its
+//!    loudest neighbour there, so steady tones count for nothing), summed over
 //!    the whole spectrum and over the bass alone. Hi-hats dominate the
 //!    whole spectrum; the bass (kick drums, bass lines) marks the beat.
 //! 2. The autocorrelation of both, each relative to its mean, over the
@@ -34,8 +35,14 @@ const BASS_FREQUENCY: f64 = 200.0;
 /// Below this mean onset strength, the audio has no onsets to speak of
 /// (a steady tone, silence).
 const MIN_ONSET_STRENGTH: f64 = 1.0;
+/// How much the onsets must repeat at the beat period, relative to their
+/// energy (1: perfectly; drum patterns 0.75 and more, tones between
+/// silences 0.12): below, no tempo rather than a wrong one.
+const MIN_PERIODICITY: f64 = 0.2;
 /// Shortest audio a tempo is measured on.
 const MIN_SECONDS: f64 = 10.0;
+/// Onset strengths are smoothed over this long.
+const SMOOTHING_S: f64 = 0.05;
 /// Onset strengths are taken relative to their mean over this long.
 const LOCAL_MEAN_S: f64 = 0.5;
 /// Frequencies above this carry little rhythm.
@@ -52,6 +59,7 @@ pub struct TempoTracker {
     scratch: Vec<realfft::num_complex::Complex<f32>>,
     bins: usize,
     bass_bins: usize,
+    levels: Vec<f32>,
     previous: Vec<f32>,
     has_previous: bool,
     flux: Vec<f32>,
@@ -85,6 +93,7 @@ impl TempoTracker {
             spectrum,
             bins,
             bass_bins,
+            levels: vec![0.0; bins],
             previous: vec![0.0; bins],
             has_previous: false,
             flux: Vec::new(),
@@ -114,22 +123,29 @@ impl TempoTracker {
         {
             return;
         }
+        for (level, bin) in self.levels.iter_mut().zip(&self.spectrum[..self.bins]) {
+            *level = (1.0 + 100.0 * bin.norm()).ln();
+        }
         let (mut flux, mut bass) = (0.0, 0.0);
-        for (index, (bin, previous)) in self.spectrum[..self.bins]
-            .iter()
-            .zip(&mut self.previous)
-            .enumerate()
-        {
-            let level = (1.0 + 100.0 * bin.norm()).ln();
-            if self.has_previous {
-                let rise = (level - *previous).max(0.0);
+        if self.has_previous {
+            for (index, &level) in self.levels.iter().enumerate() {
+                // Against the loudest neighbour of the previous frame: a
+                // steady partial whose energy moves between neighbouring
+                // bins (leakage, vibrato) is no onset (SuperFlux).
+                let from = index.saturating_sub(1);
+                let to = (index + 2).min(self.bins);
+                let before = self.previous[from..to]
+                    .iter()
+                    .copied()
+                    .fold(f32::MIN, f32::max);
+                let rise = (level - before).max(0.0);
                 flux += rise;
                 if index < self.bass_bins {
                     bass += rise;
                 }
             }
-            *previous = level;
         }
+        std::mem::swap(&mut self.previous, &mut self.levels);
         self.has_previous = true;
         self.flux.push(flux);
         self.bass_flux.push(bass);
@@ -179,7 +195,7 @@ fn estimate(flux: &[f32], bass_flux: &[f32], hops_per_minute: f64) -> Option<f64
     }
     let (bass, bass_mean) = onsets(bass_flux, hop_s);
     // Both count the same, whatever their scale.
-    let onsets: Vec<f64> = all
+    let combined: Vec<f64> = all
         .iter()
         .zip(&bass)
         .map(|(all, bass)| {
@@ -191,6 +207,22 @@ fn estimate(flux: &[f32], bass_flux: &[f32], hops_per_minute: f64) -> Option<f64
                 }
         })
         .collect();
+    // Around their mean: steady noise (a lossy codec on a tone) repeats at
+    // every lag as much as at the beat, and must score nothing.
+    // Smoothed over 50 ms: lossy codecs leave a ripple every frame (23 to
+    // 26 ms) that repeats near every beat period too.
+    let reach = ((SMOOTHING_S / hop_s / 2.0).round() as usize).max(1);
+    let smoothed: Vec<f64> = (0..combined.len())
+        .map(|index| {
+            let (from, to) = (
+                index.saturating_sub(reach),
+                (index + reach + 1).min(combined.len()),
+            );
+            combined[from..to].iter().sum::<f64>() / (to - from) as f64
+        })
+        .collect();
+    let mean = smoothed.iter().sum::<f64>() / smoothed.len() as f64;
+    let onsets: Vec<f64> = smoothed.iter().map(|value| value - mean).collect();
 
     let longest_period = hops_per_minute / MIN_BPM;
     let max_lag = ((longest_period * MULTIPLES as f64).ceil() as usize + 2).min(onsets.len() / 2);
@@ -213,7 +245,7 @@ fn estimate(flux: &[f32], bass_flux: &[f32], hops_per_minute: f64) -> Option<f64
     };
 
     let steps = ((MAX_BPM - MIN_BPM) / BPM_STEP).round() as usize;
-    let (best_bpm, best_score) = (0..=steps)
+    let (best_bpm, _) = (0..=steps)
         .map(|step| {
             let bpm = MIN_BPM + step as f64 * BPM_STEP;
             let period = hops_per_minute / bpm;
@@ -233,10 +265,10 @@ fn estimate(flux: &[f32], bass_flux: &[f32], hops_per_minute: f64) -> Option<f64
                 best
             }
         });
-    // Nothing repeats more than chance: no tempo.
-    let mean_score = (1..=max_lag).map(|lag| acf[lag]).sum::<f64>() / max_lag as f64;
-    let weights: f64 = (1..=MULTIPLES).map(|k| 1.0 / k as f64).sum();
-    if best_score <= mean_score * weights * 0.5 {
+    // The beat must repeat: onsets that do not (a sound starting once,
+    // codec noise on a steady tone) score near 0, drums near 1.
+    let period = hops_per_minute / best_bpm;
+    if at(period) < MIN_PERIODICITY * energy {
         return None;
     }
     Some((best_bpm * 10.0).round() / 10.0)
@@ -325,5 +357,26 @@ mod tests {
             .collect();
         assert_eq!(tempo_of(&tone), None);
         assert_eq!(tempo_of(&vec![0.0; RATE as usize * 20]), None);
+        // A tone between silences, with some noise as lossy codecs add:
+        // onsets only where it starts, and noise.
+        let mut state = 0x9e37_79b9_u32;
+        // The frequencies of scripts/generate-test-library.sh.
+        for freq in (1..=24).map(|i| f64::from(220 + (i * 37) % 660)) {
+            let gated: Vec<f32> = (0..RATE as usize * 25)
+                .map(|n| {
+                    let t = n as f64 / f64::from(RATE);
+                    state ^= state << 13;
+                    state ^= state >> 17;
+                    state ^= state << 5;
+                    let noise = (state as f32 / u32::MAX as f32 - 0.5) * 0.002;
+                    if (2.0..22.0).contains(&t) {
+                        (0.3 * (std::f64::consts::TAU * freq * t).sin()) as f32 + noise
+                    } else {
+                        0.0
+                    }
+                })
+                .collect();
+            assert_eq!(tempo_of(&gated), None, "{freq} Hz");
+        }
     }
 }
