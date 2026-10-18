@@ -502,7 +502,9 @@ fn the_fallback_directory_plays_when_the_queue_runs_dry() {
 #[test]
 fn dead_air_without_anything_to_play() {
     let mut station = Station::new();
-    station.play(0.2);
+    station.play(1.0);
+    assert!(!station.player.dead_air(), "not before 5 s");
+    station.play(5.0);
     assert!(station.player.dead_air());
     let one = station.file("one.wav", 1.0);
     station.player.enqueue(vec![one], None).unwrap();

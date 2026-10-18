@@ -89,6 +89,17 @@ impl Engine {
         options: EngineOptions,
         runtime: tokio::runtime::Handle,
     ) -> Result<Arc<Self>, EngineError> {
+        // Present from the start, so dashboards and alerts see them before
+        // the first event.
+        for counter in [
+            "heron_engine_silence_skips_total",
+            "heron_engine_fallback_tracks_total",
+            "heron_engine_preload_failures_total",
+            "heron_engine_underrun_tracks_total",
+        ] {
+            metrics::counter!(counter).absolute(0);
+        }
+        metrics::gauge!("heron_engine_dead_air").set(0.0);
         let config = match EngineConfig::load(&options.state_dir) {
             Ok(config) => config,
             Err(error) => {

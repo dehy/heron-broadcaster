@@ -41,6 +41,10 @@ const FALLBACK_LEAD_MS: u32 = 30_000;
 const RESUME_FADE_MS: u32 = 500;
 /// A track this close to its end when the engine stopped is not resumed.
 const RESUME_MIN_LEFT_MS: u64 = 2_000;
+/// Nothing to play for this long is dead air: shorter gaps happen while
+/// the engine starts (before the API queues tracks or the fallback
+/// directory is scanned).
+const DEAD_AIR_AFTER_MS: u32 = 5_000;
 
 /// Opens the audio of a file between its cue points (in ms).
 pub type SourceLoader = fn(SourceFile, u32, u32) -> std::io::Result<Box<dyn AudioSource>>;
@@ -169,6 +173,8 @@ pub struct Player {
     fallback_entries: HashSet<u64>,
     /// Nothing on air, nothing to play: the stream carries silence.
     dead_air: bool,
+    /// Master frame since which there has been nothing to play.
+    idle_since: Option<u64>,
     /// The silence watchdog counts silence from this master frame on (the
     /// last track start, skip or resume).
     watch_from: u64,
@@ -204,6 +210,7 @@ impl Player {
             fallback: None,
             fallback_entries: HashSet::new(),
             dead_air: false,
+            idle_since: None,
             watch_from: 0,
             silence_skips: 0,
             changed: false,
@@ -685,7 +692,12 @@ impl Player {
     }
 
     fn update_dead_air(&mut self) {
-        let dead_air = self.on_air.is_none() && self.cued.is_none() && !self.paused;
+        let frame = self.mixer.status.frame.load(Ordering::Relaxed);
+        let idle = self.on_air.is_none() && self.cued.is_none() && !self.paused;
+        self.idle_since = idle.then(|| self.idle_since.unwrap_or(frame));
+        let dead_air = self
+            .idle_since
+            .is_some_and(|since| frame.saturating_sub(since) >= ms_to_frames(DEAD_AIR_AFTER_MS));
         if dead_air != self.dead_air {
             self.dead_air = dead_air;
             if dead_air {

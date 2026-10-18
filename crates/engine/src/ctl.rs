@@ -44,6 +44,11 @@ enum CtlCommand {
         /// Play them next instead of last.
         #[arg(long)]
         next: bool,
+        /// Play them whole, at their own level, as the API does with tracks
+        /// not analyzed yet. Silent files are accepted (to try the silence
+        /// watchdog).
+        #[arg(long)]
+        no_analysis: bool,
         files: Vec<PathBuf>,
     },
     /// Keep at least `--min` tracks queued, picked at random from the library
@@ -118,10 +123,18 @@ async fn execute(args: Args, library_dir: &Path) -> anyhow::Result<()> {
                 );
             }
         }
-        CtlCommand::Enqueue { next, files } => {
+        CtlCommand::Enqueue {
+            next,
+            no_analysis,
+            files,
+        } => {
             let mut tracks = Vec::new();
             for file in &files {
-                tracks.push(prepare(library_dir, file)?);
+                tracks.push(if no_analysis {
+                    prepare_unanalyzed(library_dir, file)?
+                } else {
+                    prepare(library_dir, file)?
+                });
             }
             let response = client
                 .enqueue(pb::EnqueueRequest {
@@ -271,8 +284,14 @@ fn describe(entry: Option<&pb::QueueEntry>) -> String {
     let Some(track) = &entry.track else {
         return format!("#{}", entry.entry_id);
     };
+    let source = match track.source() {
+        pb::PlaySource::Rotation => "rotation",
+        pb::PlaySource::Request => "request",
+        pb::PlaySource::Fallback => "fallback",
+        pb::PlaySource::Manual | pb::PlaySource::Unspecified => "manual",
+    };
     format!(
-        "#{} {} - {} [{}]",
+        "#{} {} - {} [{}] ({source})",
         entry.entry_id,
         track.artist.as_deref().unwrap_or("?"),
         track.title.as_deref().unwrap_or("?"),
@@ -280,8 +299,8 @@ fn describe(entry: Option<&pb::QueueEntry>) -> String {
     )
 }
 
-/// Builds the track message for a library file: tags and analysis.
-fn prepare(library_dir: &Path, file: &Path) -> anyhow::Result<pb::Track> {
+/// The absolute path of `file` and its path in the library.
+fn locate(library_dir: &Path, file: &Path) -> anyhow::Result<(PathBuf, LibraryPath)> {
     let absolute = if file.is_absolute() {
         file.to_path_buf()
     } else if file.exists() {
@@ -296,6 +315,25 @@ fn prepare(library_dir: &Path, file: &Path) -> anyhow::Result<pb::Track> {
             library_dir.display()
         )
     })?;
+    Ok((absolute, path))
+}
+
+/// The track message for a library file without analysis: played whole.
+fn prepare_unanalyzed(library_dir: &Path, file: &Path) -> anyhow::Result<pb::Track> {
+    let (absolute, path) = locate(library_dir, file)?;
+    Ok(pb::Track {
+        path: path.as_str().to_owned(),
+        title: absolute
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned()),
+        source: pb::PlaySource::Manual.into(),
+        ..pb::Track::default()
+    })
+}
+
+/// Builds the track message for a library file: tags and analysis.
+fn prepare(library_dir: &Path, file: &Path) -> anyhow::Result<pb::Track> {
+    let (absolute, path) = locate(library_dir, file)?;
     let analysis = heron_analysis::analyze_file(&absolute, &AnalysisSettings::default())
         .with_context(|| format!("cannot analyze {}", absolute.display()))?;
     if analysis.is_silent() {

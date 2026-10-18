@@ -357,6 +357,11 @@ fn check_playout(settings: &PlayoutSettings) -> ApiResult<()> {
             "loudness.max_gain_db must be between 0 and 40".to_owned(),
         ));
     }
+    if !(1_000..=600_000).contains(&settings.silence_watchdog.timeout_ms) {
+        return Err(ApiError::Invalid(
+            "silence_watchdog.timeout_ms must be between 1,000 and 600,000".to_owned(),
+        ));
+    }
     Ok(())
 }
 
