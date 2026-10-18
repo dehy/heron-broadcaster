@@ -36,6 +36,18 @@ See [Library management](library.md).
 | `track_tag_changes` | id, track_id, move_id, previous and applied tags (JSON), cover_embedded, created_at, undone_at |
 | `library_tasks` | id, kind (organize_plan, organize_apply, undo, review_apply, artist_relations), params (JSON, the request), status (pending, running, done, failed), result (JSON: the dry run's moves or the batch report), error, requested_by, created_at, started_at, finished_at — work the API asks of `heron-librarian` |
 
+## Buffer zone and trash
+
+Sketch, defined in [M5c](roadmap/m5c-track-management.md).
+
+| Table | Columns |
+|---|---|
+| `staged_files` | id, group_id (the files of one upload or one incoming folder), source (upload, incoming), staged_path, original_name, size, content_hash, uploaded_by, status (receiving, identifying, ready, importing, imported, discarded, failed), tags (JSON: the file's own), duration_ms, identification (status, reason, score, candidates, chosen release), planned_path, duplicate_of_track_id, error, created_at |
+| `tracks` (added) | deleted_at (in the trash until purged) |
+| `library_batches` (added) | kind `delete`, `purge` |
+| `library_moves` (added) | from_root `staging`, `trash` |
+| `library_tasks` (added) | kind `staging_import`, `delete`, `empty_trash` (restoring is an `undo`) |
+
 ## Categories
 
 | Table | Columns |
