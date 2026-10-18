@@ -6,8 +6,9 @@
 //! exactly the samples the analysis measured and cue points line up.
 
 use std::fs::File;
-use std::io::ErrorKind;
+use std::io::{Cursor, ErrorKind};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use heron_core::AnalysisSettings;
 use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
@@ -81,6 +82,8 @@ pub struct Block<'a> {
 /// producing any audio, it is decoded again without gapless trimming.
 pub struct Decoder {
     path: PathBuf,
+    /// The file's content, when it was read into memory beforehand.
+    contents: Option<Arc<[u8]>>,
     format: Box<dyn FormatReader>,
     decoder: Box<dyn AudioDecoder>,
     track_id: u32,
@@ -94,12 +97,22 @@ pub struct Decoder {
 
 impl Decoder {
     pub fn open(path: &Path) -> Result<Self, Error> {
-        Self::open_with(path, true)
+        Self::open_with(path, None, true)
     }
 
-    fn open_with(path: &Path, gapless: bool) -> Result<Self, Error> {
-        let file = File::open(path)?;
-        let stream = MediaSourceStream::new(Box::new(file), Default::default());
+    /// Decodes `contents`, the whole content of the file at `path`, read
+    /// beforehand: decoding then never waits for the disk. `path` gives the
+    /// format hint and names the file in logs.
+    pub fn from_memory(path: &Path, contents: Arc<[u8]>) -> Result<Self, Error> {
+        Self::open_with(path, Some(contents), true)
+    }
+
+    fn open_with(path: &Path, contents: Option<Arc<[u8]>>, gapless: bool) -> Result<Self, Error> {
+        let source: Box<dyn symphonia::core::io::MediaSource> = match &contents {
+            Some(contents) => Box::new(Cursor::new(Arc::clone(contents))),
+            None => Box::new(File::open(path)?),
+        };
+        let stream = MediaSourceStream::new(source, Default::default());
         let mut hint = Hint::new();
         if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
             hint.with_extension(extension);
@@ -125,6 +138,7 @@ impl Decoder {
             symphonia::default::get_codecs().make_audio_decoder(codec_params, &decoder_options)?;
         Ok(Self {
             path: path.to_path_buf(),
+            contents,
             format,
             decoder,
             track_id,
@@ -206,7 +220,7 @@ impl Decoder {
         }
         if self.frames == 0 && self.gapless {
             tracing::warn!(path = %self.path.display(), "no audio with gapless decoding, retrying without");
-            *self = Self::open_with(&self.path.clone(), false)?;
+            *self = Self::open_with(&self.path.clone(), self.contents.take(), false)?;
             return self.next_block();
         }
         Ok(None)
@@ -266,6 +280,22 @@ mod tests {
         }
         assert_eq!(samples, 2 * 72_000);
         assert_eq!(decoder.frames(), 72_000);
+    }
+
+    #[test]
+    fn decodes_from_memory_like_from_disk() {
+        let decode_all = |mut decoder: Decoder| {
+            let mut samples = Vec::new();
+            while let Some(block) = decoder.next_block().unwrap() {
+                samples.extend_from_slice(block.samples);
+            }
+            samples
+        };
+        let path = Path::new(MP3_FIXTURE);
+        let contents: Arc<[u8]> = std::fs::read(path).unwrap().into();
+        let from_memory = decode_all(Decoder::from_memory(path, contents).unwrap());
+        assert!(!from_memory.is_empty());
+        assert_eq!(from_memory, decode_all(Decoder::open(path).unwrap()));
     }
 
     const MP3_FIXTURE: &str = concat!(
