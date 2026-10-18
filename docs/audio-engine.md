@@ -1,6 +1,6 @@
 # Audio engine
 
-How `heron-engine`, the real-time playout process, works. Functional requirements for playout (decks, crossfading, Gap Killer, loudness) are in [Requirements](requirements.md#2-playout). Built in [M2](roadmap/m2-engine-core.md).
+How `heron-engine`, the real-time playout process, works. Functional requirements for playout (decks, crossfading, Gap Killer, loudness) are in [Requirements](requirements.md#2-playout). Built in [M2](roadmap/m2-engine-core.md); made to stay on air in [M3](roadmap/m3-reliability.md).
 
 ## Threads
 
@@ -18,7 +18,11 @@ How `heron-engine`, the real-time playout process, works. Functional requirement
 |---|---|---|
 | **Audio thread** | Renders the master bus 10 ms at a time against the clock: decks, fades, loudness gain, FX player | **No** |
 | Decode threads | One per loaded track: decode, resample to 48 kHz, cut at the cue points, buffer 10 s ahead | Yes |
-| Player (tokio task) | Owns the queue, loads tracks, plans transitions, handles the mixer's events every 10 ms | Yes |
+| Preload threads | One per upcoming track: read its file into memory ahead of time | Yes |
+| Player (tokio task) | Owns the queue, loads tracks, plans transitions, handles the mixer's events every 10 ms, runs the silence watchdog, saves the queue | Yes |
+| Fallback scanner | Scans the fallback directory every minute and analyzes new files | Yes |
+| Queue writer | Writes the saved queue to disk | Yes |
+| Watchdog | Exits the process when the audio thread is stuck for 10 s, so Docker restarts it | Yes |
 | Fan-out | Copies the master bus to every encoder (and the monitor) | Yes |
 | Encoder threads | One per encoder profile in use | Yes |
 | Output tasks | One per output: connect, stream, metadata, reconnect | Yes |
@@ -40,13 +44,18 @@ Every hop between them is bounded and **drops rather than blocks**, so nothing d
 
 ## Decoding
 
+### Preloading
+
+A track is decoded only 10 s ahead of its deck: without more, a library that becomes slow or unreachable (a network share) would stop the track on air within seconds. So the files of the next queued tracks (3 by default, `HERON_PRELOAD_TRACKS`) are read whole into memory, each by a thread of its own, long before they are cued. The track then decodes from memory and plays to the end even if its file is deleted or the library disappears. A file not read in time, or larger than 512 MiB, is read from disk as it plays; a file that cannot be read at all is skipped when its turn comes.
+
 Decode threads use the analysis' own decoder (`heron_analysis::Decoder`), so the engine plays exactly the samples the analysis measured and cue points line up:
 
 - gapless decoding, with the fallback for MP3s whose broken Xing/LAME header makes gapless trimming drop everything;
 - NaN and infinite samples replaced by silence, samples beyond ±4.0 (+12 dB) clamped as corrupt data;
 - resampled to 48 kHz (`heron_dsp::StreamResampler`, FFT, aligned with the input and exact in length);
 - mono played on both channels; surround reduced to its front left and right;
-- cut at the cue points after resampling, so positions in milliseconds mean the same as in the analysis.
+- cut at the cue points after resampling, so positions in milliseconds mean the same as in the analysis;
+- starting more than 30 s into the file (resuming after a restart), the audio before is decoded without being resampled, to get there in a fraction of the time, and resampling starts 1 s before on a frame that falls exactly on an output frame: the audio is the same as from the start.
 
 ## Transitions
 
@@ -88,6 +97,8 @@ Stored under `playout` in the `settings` table (JSON, missing fields take the de
 | `loudness.target_lufs` | −16 |
 | `loudness.max_gain_db` | 12 |
 | `loudness.peak_ceiling_dbtp` | −1 |
+| `silence_watchdog.enabled` | true |
+| `silence_watchdog.timeout_ms` | 20,000: longer than the analysis' longest silence inside a track (15 s) |
 
 The crossfade point itself (dB trigger, minimum and maximum fade time) is found at import, see [Import and analysis](analysis.md#crossfade-point).
 
@@ -95,7 +106,15 @@ The crossfade point itself (dB trigger, minimum and maximum fade time) is found 
 
 gRPC service `heron.engine.v1.Engine` ([engine.proto](../crates/proto/proto/heron/engine/v1/engine.proto)), on `HERON_GRPC_ADDR` (port 50051, inside the Docker network only): queue (enqueue, remove, clear, move, replace), skip, pause, resume, FX player, state, levels, a stream of track changes, playout settings and outputs. Tracks carry everything needed to play them: library path, tags, cue points, crossfade point, loudness, overrides, and the reason they play (rotation, manual…), carried back in the track changes for the play history. Queue positions count the waiting tracks: 0 is before the cued track.
 
-The engine keeps its playout settings and outputs in `HERON_STATE_DIR/config.json`, so it restarts streaming even when the API and the database are down. The queue lives in memory; keeping it across restarts comes with [M3](roadmap/m3-reliability.md).
+The engine keeps its state in `HERON_STATE_DIR`, so it restarts streaming even when the API and the database are down:
+
+| File | Contents | Written |
+|---|---|---|
+| `config.json` | Playout settings and outputs | When the API (or `ctl`) changes them |
+| `queue.json` | The track on air and its position, the cued track and the queue, pause, the next entry ID | When the queue changes, every 5 s while playing, and on shutdown |
+| `fallback.json` | Analyses of the fallback directory's files | After each analysis |
+
+Files are replaced atomically (written aside, synced, renamed). On start, the engine resumes the track on air where it was (fading in over 500 ms; a track less than 2 s from its end is not resumed), then plays the saved queue. Entry IDs are kept and new ones go on from the saved next ID, so the API's history and queue stay consistent. Tracks from the fallback directory are not saved. A clean stop (`docker compose restart`) saves the exact position; after a crash, the track resumes from the last periodic save, up to 5 s earlier.
 
 `heron-api` feeds the engine and keeps its configuration ([API and control plane](api.md)). `heron-engine ctl` is a command-line client, to inspect the engine or drive it without the API (the soak test does):
 
@@ -105,7 +124,7 @@ docker compose exec heron-engine heron-engine ctl watch
 docker compose exec heron-engine heron-engine ctl skip
 ```
 
-`ctl enqueue` and `ctl autofill` analyze files themselves to send their cue points. With the API running, outputs and settings set with `ctl set-outputs` and `ctl set-settings` are replaced by the API's within a minute.
+`ctl enqueue` and `ctl autofill` analyze files themselves to send their cue points (`ctl enqueue --no-analysis` plays a file whole, as the API does with tracks not analyzed yet). With the API running, outputs and settings set with `ctl set-outputs` and `ctl set-settings` are replaced by the API's within a minute.
 
 ## Signal quality
 
@@ -120,11 +139,24 @@ Every failure path ends with audio continuing, in this order:
 2. fallback directory;
 3. generated silence filler, as the very last resort (with an alert).
 
-In M2, a queued file that cannot be decoded is skipped before it starts; a file that fails mid-way ends there and the next track starts. When the queue runs dry, the engine streams silence. The fallback directory, the silence watchdog and the rest come with [M3 – 24/7 reliability](roadmap/m3-reliability.md). See [Requirements – Reliability](requirements.md#5-reliability-247).
+| Failure | What happens |
+|---|---|
+| A queued file is missing, unreadable or corrupt | Read ahead into memory when it is queued (it plays even if deleted later); if it cannot be read or decoded, it is skipped before it starts. A file that fails mid-way ends there and the next track starts. |
+| The library is slow or unreachable | The next tracks are already in memory ([Preloading](#preloading)). |
+| The queue runs dry (the API is down or cannot reach the engine, autofill is off, restrictions forbid every track) | A track from the **fallback directory** is cued, 30 s before the track on air ends or at once when nothing plays, so it starts with the planned transition. Anything queued replaces a cued fallback track. |
+| A track stays silent | The **silence watchdog** skips it after `silence_watchdog.timeout_ms` of silence (below −50 dBFS) on the master bus. If the next track is silent too, it skips to the fallback directory instead. Pauses do not count. |
+| Nothing to play at all | Silence is streamed (the outputs stay connected). After 5 s, the engine logs an error, sets `heron_engine_dead_air` and warns in `/healthz`. |
+| A stream server is down or restarted | The output reconnects with exponential backoff; the others are not affected. |
+| The audio thread is stuck | The process exits after 10 s; Docker restarts it and it resumes its saved queue. |
+| The engine restarts | It resumes the track on air and the queue ([Control interface](#control-interface)). |
+
+The fallback directory (`HERON_FALLBACK_DIR`, mounted read-only from `./data/fallback`) holds a few tracks that suit any hour: station IDs and evergreen music. Its files are scanned every minute (sub-folders too) and analyzed once in the background, like library tracks at import, so they play with their cue points, crossfades and loudness; the analyses are kept in `fallback.json`. A file not analyzed yet plays whole at its own level; silent and undecodable files are never picked. Every file plays once, in random order, before any plays again.
+
+The chaos tests (`scripts/chaos-test.sh`) check each of these on a running stack. See [Requirements – Reliability](requirements.md#5-reliability-247).
 
 ## Observability
 
-`/healthz` fails when the audio thread stops rendering. `/metrics`:
+`/healthz` fails when the audio thread stops rendering, and lists `warnings` when the server clock is not synchronized (or off by more than about 1 s) or there is nothing to play. `/metrics`:
 
 | Metric | Meaning |
 |---|---|
@@ -134,11 +166,20 @@ In M2, a queued file that cannot be decoded is skipped before it starts; a file 
 | `heron_engine_clock_resets_total` | Stalls longer than 1 s |
 | `heron_engine_underruns_total` | Blocks where a deck had no decoded audio |
 | `heron_engine_dropped_blocks_total` | Blocks the encoders did not take in time |
+| `heron_engine_silent_seconds` | How long the master bus has been silent (below −50 dBFS) |
+| `heron_engine_dead_air` | 1 when there is nothing to play |
+| `heron_engine_fallback_tracks_total`, `heron_engine_silence_skips_total` | Tracks started from the fallback directory, tracks skipped by the silence watchdog |
+| `heron_engine_preload_failures_total` | Queued tracks that could not be read ahead of time |
+| `heron_clock_synchronized`, `heron_clock_offset_seconds`, `heron_clock_estimated_error_seconds` | The server clock's synchronization, from the kernel (read-only `adjtimex`) |
 | `heron_output_connected`, `heron_output_bytes_total`, `heron_output_reconnects_total`, `heron_output_dropped_chunks_total` | Per output |
 | `heron_encoder_dropped_chunks_total` | Per encoder profile |
+
+Dashboards, alerts and the full list: [Monitoring](monitoring.md).
 
 ## Testability
 
 - Crossfades are rendered offline by the same mixer code and compared, sample by sample, with references computed independently (`crates/engine/src/mixer/tests.rs`).
 - The player is tested against real files with the mixer rendered offline.
+- The player is tested with the fallback directory, the silence watchdog, and a restart resuming the saved queue.
+- `scripts/chaos-test.sh` breaks a running stack (database, API, Icecast, deleted files, a silent file, engine restarts) while listening to the stream.
 - `scripts/soak-test.sh` plays the library to two Icecast servers for a given time and checks the clock kept time and nothing was lost; `scripts/check-streaming.sh` checks a Compose stack goes on air through the API (run in CI on amd64 and arm64).

@@ -140,14 +140,16 @@ heron-broadcaster/
 │   ├── dsp/        heron-dsp        resampling; later EQ, compressor, expander, limiter, crossovers, AGC chain
 │   ├── outputs/    heron-outputs    encoders, OutputSink trait + Icecast (later Shoutcast, HLS, file, pipe)
 │   ├── rotation/   heron-rotation   pure rotation: separation, restrictions, relaxation, clocks, selection, simulation
-│   ├── service/    heron-service    process plumbing: logging, /healthz, /metrics, shutdown, DB connect
-│   ├── engine/     heron-engine     binary: decks, mixer, pacing clock, decoding, player, gRPC server, ctl
+│   ├── service/    heron-service    process plumbing: logging, Sentry, /healthz, /metrics, clock sync, shutdown, DB connect
+│   ├── engine/     heron-engine     binary: decks, mixer, pacing clock, decoding, preloading, player, fallback, gRPC server, ctl
 │   ├── api/        heron-api        binary: axum, auth, queue manager, history, OpenAPI, webhooks, scanner
 │   ├── analyzer/   heron-analyzer   binary: analysis worker pool, job queue consumer
 │   └── librarian/  heron-librarian  binary: incoming folder, buffer zone, identification, layout, journaled moves, organize, trash, undo
 ├── web/                             React + Vite + TypeScript
 ├── migrations/                      sqlx migrations
 ├── docker/                          Dockerfiles
+├── monitoring/                      Prometheus, alert rules, Alertmanager, Grafana dashboard (docs/monitoring.md)
+├── scripts/                         test library, streaming, soak and chaos tests
 ├── docker-compose.yml
 ├── LICENSE                          AGPL-3.0
 └── README.md
