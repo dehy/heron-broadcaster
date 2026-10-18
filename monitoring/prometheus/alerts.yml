@@ -1,0 +1,189 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Alert rules for a Heron station. `critical`: listeners hear the problem
+# (or soon will); `warning`: the air is safe, something needs a look.
+# See docs/monitoring.md#alerts.
+
+groups:
+  - name: heron-air
+    rules:
+      - alert: HeronEngineDown
+        expr: up{job="heron-engine"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: The playout engine does not answer
+          description: >-
+            Prometheus cannot scrape heron-engine. The station is probably off
+            air. Check `docker compose ps heron-engine` and its logs.
+
+      - alert: HeronDeadAir
+        expr: heron_engine_dead_air == 1
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: Nothing to play, the stream carries silence
+          description: >-
+            The queue is empty and the fallback directory has no playable
+            track. Put tracks in the fallback directory, and check that
+            heron-api is up and that rotation can pick tracks.
+
+      - alert: HeronSilenceOnAir
+        expr: heron_engine_silent_seconds > 45 and on() heron_engine_paused == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value | humanizeDuration }} of silence on air"
+          description: >-
+            The master bus has been silent for longer than the silence
+            watchdog should allow. Is the watchdog disabled, or is every
+            queued and fallback track silent?
+
+      - alert: HeronOutputDisconnected
+        expr: heron_output_connected == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Output {{ $labels.output }} is not connected"
+          description: >-
+            The engine cannot stream to {{ $labels.output }} and keeps
+            retrying. Check the stream server and the output's settings
+            (Outputs page).
+
+      - alert: HeronAudioDropped
+        expr: increase(heron_engine_dropped_blocks_total[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: The encoders did not keep up, audio was lost
+          description: >-
+            {{ $value | humanize }} blocks of 10 ms were dropped in 10 minutes:
+            the machine is too busy for the encoders in use.
+
+  - name: heron-reliability
+    rules:
+      - alert: HeronFallbackPlaying
+        expr: increase(heron_engine_fallback_tracks_total[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: The queue ran dry, the fallback directory is on air
+          description: >-
+            heron-api may be down or unable to reach the engine, autofill may
+            be off, or restrictions forbid every track.
+
+      - alert: HeronSilenceSkips
+        expr: increase(heron_engine_silence_skips_total[30m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: The silence watchdog skipped silent tracks
+          description: >-
+            {{ $value | humanize }} tracks skipped in 30 minutes. The engine's
+            logs name them ("silence on air"): check their files and analysis.
+
+      - alert: HeronUnderruns
+        expr: increase(heron_engine_underruns_total[10m]) > 50
+        labels:
+          severity: warning
+        annotations:
+          summary: Decoding fell behind, silence was played
+          description: >-
+            {{ $value | humanize }} blocks of 10 ms without decoded audio in 10
+            minutes. The machine is overloaded, or the library is slow.
+
+      - alert: HeronOutputUnstable
+        expr: increase(heron_output_reconnects_total[30m]) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "Output {{ $labels.output }} keeps reconnecting"
+          description: "{{ $value | humanize }} reconnections in 30 minutes."
+
+      - alert: HeronPreloadFailures
+        expr: increase(heron_engine_preload_failures_total[30m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Queued tracks could not be read from the library
+          description: >-
+            The library may be unreachable (network share?) or files were
+            deleted. Tracks that cannot be read are skipped.
+
+      - alert: HeronClockStalled
+        expr: increase(heron_engine_clock_resets_total[1h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: The engine stalled for more than a second
+          description: >-
+            The machine was suspended, or the engine was starved of CPU.
+            Listeners heard a gap.
+
+      - alert: HeronClockNotSynchronized
+        expr: heron_clock_synchronized == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: The server clock is not synchronized
+          description: >-
+            Schedules follow the server clock. Check that NTP (chrony,
+            systemd-timesyncd) runs on the host.
+
+      - alert: HeronClockOff
+        expr: abs(heron_clock_offset_seconds) > 1 or heron_clock_estimated_error_seconds > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: The server clock may be off by more than a second
+
+  - name: heron-control-plane
+    rules:
+      - alert: HeronServiceDown
+        expr: up{job=~"heron-api|heron-analyzer|heron-librarian"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} does not answer"
+          description: >-
+            The air stays on (the engine plays its queue, then the fallback
+            directory), but the station cannot be controlled or fed.
+
+      - alert: HeronApiLostEngine
+        expr: heron_api_engine_connected == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: heron-api cannot reach the engine
+          description: The queue is not refilled; the fallback directory takes over when it runs dry.
+
+      - alert: HeronAnalysisFailing
+        expr: increase(heron_analysis_jobs_total{result=~"failed|error"}[1h]) > 10
+        labels:
+          severity: warning
+        annotations:
+          summary: Tracks fail analysis
+          description: "{{ $value | humanize }} failures in an hour: see the Library page and heron-analyzer's logs."
+
+      - alert: HeronLibraryScanFailing
+        expr: increase(heron_library_scans_total{result="error"}[2h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Library scans fail
+          description: Is the music directory mounted and readable?
+
+      - alert: HeronLoginFailures
+        expr: increase(heron_api_logins_total{result="failed"}[10m]) > 20
+        labels:
+          severity: warning
+        annotations:
+          summary: Many failed sign-ins
+          description: "{{ $value | humanize }} failed sign-ins in 10 minutes: someone may be guessing passwords."

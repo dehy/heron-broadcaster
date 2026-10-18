@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Where alerts go. Out of the box they are only shown (Grafana's alert list,
+# http://localhost:9093 when exposed): add a receiver to be notified.
+# Examples in docs/monitoring.md#notifications.
+
+route:
+  receiver: none
+  group_by: [alertname, output, job]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: none
