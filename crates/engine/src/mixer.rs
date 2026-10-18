@@ -30,6 +30,9 @@ const SHORT_FADE_FRAMES: u64 = 480;
 const PEAK_DECAY_DB_PER_S: f32 = 20.0;
 /// Time constant of the RMS meters.
 const RMS_TAU_S: f32 = 0.3;
+/// The master bus is silent below this peak level: −50 dBFS, the analysis'
+/// ceiling for silence.
+const SILENCE_LEVEL: f32 = 0.003_162_3;
 
 pub fn ms_to_frames(ms: u32) -> u64 {
     u64::from(ms) * u64::from(SAMPLE_RATE) / 1_000
@@ -154,6 +157,9 @@ pub struct LoadedTrack {
     pub source: Box<dyn AudioSource>,
     /// Frames from the cue-in to the cue-out.
     pub length: u64,
+    /// Frame (from the cue-in) where playback starts: 0, or where the track
+    /// was when the engine stopped. The source starts there.
+    pub start: u64,
     /// Linear gain (loudness normalization).
     pub gain: f32,
     pub fade_in: Option<FrameRamp>,
@@ -287,6 +293,9 @@ pub struct MixerStatus {
     pub decks: [DeckStatus; 3],
     pub master: MeterStatus,
     pub underruns: AtomicU64,
+    /// Frames of silence (below −50 dBFS) on the master bus up to now, 0
+    /// when the last block had sound. Read by the silence watchdog.
+    pub silent_frames: AtomicU64,
     /// Events or finished tracks that could not be handed to the control
     /// thread because its queues were full.
     pub overflows: AtomicU64,
@@ -314,8 +323,8 @@ impl Voice {
     fn new(track: Box<LoadedTrack>) -> Self {
         let stop_at = track.length;
         Self {
+            position: track.start.min(stop_at),
             track,
-            position: 0,
             fade_out: None,
             stop_at,
             end_reason: EndReason::Finished,
@@ -390,6 +399,7 @@ pub struct Mixer {
     last_main: usize,
     cued: Option<(Box<LoadedTrack>, FrameTransition)>,
     frame: u64,
+    silent_frames: u64,
     pause_gain: f32,
     paused: bool,
     frozen: bool,
@@ -414,6 +424,7 @@ impl Mixer {
             last_main: 1,
             cued: None,
             frame: 0,
+            silent_frames: 0,
             pause_gain: 1.0,
             paused: false,
             frozen: false,
@@ -487,6 +498,11 @@ impl Mixer {
             frame[0] = frame[0].clamp(-1.0, 1.0);
             frame[1] = frame[1].clamp(-1.0, 1.0);
             master.add(frame[0], frame[1]);
+        }
+        if master.peak[0].max(master.peak[1]) < SILENCE_LEVEL {
+            self.silent_frames += frames as u64;
+        } else {
+            self.silent_frames = 0;
         }
         self.publish(frames, &master);
     }
@@ -764,6 +780,9 @@ impl Mixer {
         let alpha = 1.0 - (-seconds / RMS_TAU_S).exp();
         let status = &self.status;
         status.frame.store(self.frame, Ordering::Relaxed);
+        status
+            .silent_frames
+            .store(self.silent_frames, Ordering::Relaxed);
         status.paused.store(self.paused, Ordering::Relaxed);
         let main_id = self.main_voice().map_or(0, |voice| voice.track.entry_id);
         status.on_air.store(main_id, Ordering::Relaxed);

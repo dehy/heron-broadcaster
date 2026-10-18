@@ -10,8 +10,11 @@ pub mod clock;
 pub mod config;
 pub mod decoder;
 pub mod engine;
+pub mod fallback;
 pub mod grpc;
 pub mod mixer;
 #[cfg(feature = "monitor")]
 pub mod monitor;
 pub mod player;
+pub mod preload;
+pub mod queue_file;

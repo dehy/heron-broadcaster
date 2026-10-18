@@ -86,6 +86,7 @@ fn track(entry_id: u64, frames: usize) -> Box<LoadedTrack> {
         entry_id,
         source: Box::new(VecSource::new(samples)),
         length: frames as u64,
+        start: 0,
         gain: 0.8,
         fade_in: Some(FrameRamp {
             start: 0,
@@ -173,6 +174,7 @@ fn the_mixer_does_not_allocate() {
                     entry_id: 7,
                     source: Box::new(Starved),
                     length: 48_000,
+                    start: 0,
                     gain: 1.0,
                     fade_in: None,
                 }),
@@ -204,7 +206,7 @@ fn the_mixer_does_not_allocate() {
 
 #[test]
 fn reading_decoded_tracks_does_not_allocate() {
-    use heron_engine::decoder::DecodedSource;
+    use heron_engine::decoder::{DecodedSource, SourceFile};
     use std::time::{Duration, Instant};
 
     let dir = tempfile::tempdir().unwrap();
@@ -221,7 +223,7 @@ fn reading_decoded_tracks_does_not_allocate() {
     }
     writer.finalize().unwrap();
 
-    let source = DecodedSource::spawn(path, 100, 900).unwrap();
+    let source = DecodedSource::spawn(SourceFile::on_disk(path), 100, 900).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while source.buffered_frames() < 800 * 48 {
         assert!(Instant::now() < deadline, "decoding is too slow");
@@ -233,6 +235,7 @@ fn reading_decoded_tracks_does_not_allocate() {
         entry_id: 1,
         source: Box::new(source),
         length: 800 * 48,
+        start: 0,
         gain: 1.0,
         fade_in: None,
     });

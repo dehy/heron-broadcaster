@@ -2728,6 +2728,13 @@ export interface components {
              *     }
              */
             loudness: components["schemas"]["LoudnessSettings"];
+            /**
+             * @default {
+             *       "enabled": true,
+             *       "timeout_ms": 20000
+             *     }
+             */
+            silence_watchdog: components["schemas"]["SilenceWatchdogSettings"];
         };
         /** @description What to change; what is left out stays as it is. */
         Preferences: {
@@ -2815,7 +2822,8 @@ export interface components {
         QueueEntry: {
             /**
              * Format: int64
-             * @description Assigned by the engine, unique until it restarts.
+             * @description Assigned by the engine. Never reused: a restarted engine resumes its
+             *     saved queue with the same IDs and goes on from there.
              */
             entry_id: number;
             track: components["schemas"]["QueuedTrack"];
@@ -3126,6 +3134,22 @@ export interface components {
          * @enum {string}
          */
         SeparationRule: "track" | "title" | "artist" | "album";
+        /**
+         * @description The engine's silence watchdog: after this long of silence on the master
+         *     bus (below −50 dBFS), it skips to the next track, then to the fallback
+         *     directory if the silence goes on.
+         */
+        SilenceWatchdogSettings: {
+            /** @default true */
+            enabled: boolean;
+            /**
+             * Format: int32
+             * @description Longer than the analysis' longest silence inside a track (15 s), so
+             *     it never cuts a track the analysis kept whole.
+             * @default 20000
+             */
+            timeout_ms: number;
+        };
         SimulatedPick: {
             explanation: components["schemas"]["Explanation"];
             /** Format: int32 */

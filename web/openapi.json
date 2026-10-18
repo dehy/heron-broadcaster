@@ -7720,6 +7720,13 @@
               "peak_ceiling_dbtp": -1.0,
               "target_lufs": -16.0
             }
+          },
+          "silence_watchdog": {
+            "$ref": "#/components/schemas/SilenceWatchdogSettings",
+            "default": {
+              "enabled": true,
+              "timeout_ms": 20000
+            }
           }
         },
         "additionalProperties": false
@@ -7891,7 +7898,7 @@
           "entry_id": {
             "type": "integer",
             "format": "int64",
-            "description": "Assigned by the engine, unique until it restarts.",
+            "description": "Assigned by the engine. Never reused: a restarted engine resumes its\nsaved queue with the same IDs and goes on from there.",
             "minimum": 0
           },
           "track": {
@@ -8629,6 +8636,24 @@
           "artist",
           "album"
         ]
+      },
+      "SilenceWatchdogSettings": {
+        "type": "object",
+        "description": "The engine's silence watchdog: after this long of silence on the master\nbus (below −50 dBFS), it skips to the next track, then to the fallback\ndirectory if the silence goes on.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Longer than the analysis' longest silence inside a track (15 s), so\nit never cuts a track the analysis kept whole.",
+            "default": 20000,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "SimulatedPick": {
         "type": "object",
