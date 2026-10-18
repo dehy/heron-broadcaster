@@ -18,6 +18,12 @@ use crate::Error;
 pub trait HealthCheck: Clone + Send + Sync + 'static {
     /// Returns `Err` with a short reason when the service is not healthy.
     fn check(&self) -> impl Future<Output = Result<(), String>> + Send;
+
+    /// Problems worth an operator's attention that do not make the service
+    /// unhealthy (an unsynchronized clock). Listed in `/healthz` as `warnings`.
+    fn warnings(&self) -> impl Future<Output = Vec<String>> + Send {
+        async { Vec::new() }
+    }
 }
 
 /// A service with no dependencies to check: healthy as long as it answers.
@@ -73,14 +79,19 @@ async fn healthz<H: HealthCheck>(State(state): State<OpsState<H>>) -> Response {
             "status": status,
         })
     };
-    match state.health.check().await {
-        Ok(()) => (StatusCode::OK, axum::Json(body("ok"))).into_response(),
+    let (status, mut payload) = match state.health.check().await {
+        Ok(()) => (StatusCode::OK, body("ok")),
         Err(reason) => {
             let mut payload = body("unavailable");
             payload["reason"] = reason.into();
-            (StatusCode::SERVICE_UNAVAILABLE, axum::Json(payload)).into_response()
+            (StatusCode::SERVICE_UNAVAILABLE, payload)
         }
+    };
+    let warnings = state.health.warnings().await;
+    if !warnings.is_empty() {
+        payload["warnings"] = warnings.into();
     }
+    (status, axum::Json(payload)).into_response()
 }
 
 async fn render_metrics<H: HealthCheck>(State(state): State<OpsState<H>>) -> impl IntoResponse {

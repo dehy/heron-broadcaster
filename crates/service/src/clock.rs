@@ -57,6 +57,23 @@ impl ClockStatus {
     }
 }
 
+impl ClockStatus {
+    /// Records `heron_clock_synchronized`, `heron_clock_offset_seconds` and
+    /// `heron_clock_estimated_error_seconds`. Nothing where the kernel's
+    /// state cannot be read.
+    pub fn record_metrics(&self) {
+        if let Some(synchronized) = self.synchronized {
+            metrics::gauge!("heron_clock_synchronized").set(f64::from(u8::from(synchronized)));
+        }
+        if let Some(offset_ms) = self.offset_ms {
+            metrics::gauge!("heron_clock_offset_seconds").set(offset_ms / 1_000.0);
+        }
+        if let Some(error_ms) = self.estimated_error_ms {
+            metrics::gauge!("heron_clock_estimated_error_seconds").set(error_ms / 1_000.0);
+        }
+    }
+}
+
 /// Reads the kernel's clock synchronization state.
 #[cfg(target_os = "linux")]
 pub fn status() -> ClockStatus {
