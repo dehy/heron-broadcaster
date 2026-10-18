@@ -42,8 +42,8 @@ use anyhow::Context;
 use app::{AppState, SERVICE};
 use auth::{Passwords, Role};
 use clap::{Parser, Subcommand};
-use heron_service::LogArgs;
 use heron_service::db::{self, DatabaseHealth, MIGRATOR};
+use heron_service::{LogArgs, MetricsArgs};
 use library::{Library, ScanOptions};
 
 #[derive(Debug, Parser)]
@@ -103,6 +103,9 @@ struct Cli {
 
     #[command(flatten)]
     log: LogArgs,
+
+    #[command(flatten)]
+    metrics: MetricsArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -152,7 +155,7 @@ fn main() -> anyhow::Result<()> {
 #[tokio::main]
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let _telemetry = heron_service::telemetry::init_tracing(&cli.log, SERVICE)?;
-    let metrics = heron_service::ops::install_metrics(SERVICE)?;
+    let metrics = heron_service::ops::install_metrics(SERVICE, &cli.metrics)?;
     let database_url = cli
         .database_url
         .context("HERON_DATABASE_URL (or --database-url) is required")?;

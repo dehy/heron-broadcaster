@@ -26,8 +26,8 @@ use heron_librarian::organize;
 use heron_librarian::staging::{self, Stager};
 use heron_librarian::tasks::TaskRunner;
 use heron_library::LibraryLock;
-use heron_service::LogArgs;
 use heron_service::db::{self, DatabaseHealth};
+use heron_service::{LogArgs, MetricsArgs};
 use sqlx::{MySqlPool, Row};
 
 const SERVICE: &str = "heron-librarian";
@@ -111,6 +111,9 @@ struct Cli {
 
     #[command(flatten)]
     log: LogArgs,
+
+    #[command(flatten)]
+    metrics: MetricsArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -200,7 +203,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 }
 
 async fn serve(cli: &Cli, pool: MySqlPool, roots: Roots) -> anyhow::Result<()> {
-    let metrics = heron_service::ops::install_metrics(SERVICE)?;
+    let metrics = heron_service::ops::install_metrics(SERVICE, &cli.metrics)?;
     let defaults = Endpoints::default();
     let endpoints = Endpoints {
         acoustid: cli.acoustid_url.clone().unwrap_or(defaults.acoustid),

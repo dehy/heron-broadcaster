@@ -16,7 +16,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use heron_engine::engine::{Engine, EngineHealth, EngineOptions};
 use heron_engine::grpc::EngineService;
-use heron_service::LogArgs;
+use heron_service::{LogArgs, MetricsArgs};
 
 const SERVICE: &str = "heron-engine";
 /// How long a shutdown waits for open connections to close.
@@ -73,6 +73,9 @@ struct Cli {
 
     #[command(flatten)]
     log: LogArgs,
+
+    #[command(flatten)]
+    metrics: MetricsArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -98,7 +101,7 @@ fn main() -> anyhow::Result<()> {
 #[tokio::main]
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let _telemetry = heron_service::telemetry::init_tracing(&cli.log, SERVICE)?;
-    let metrics = heron_service::ops::install_metrics(SERVICE)?;
+    let metrics = heron_service::ops::install_metrics(SERVICE, &cli.metrics)?;
 
     std::fs::create_dir_all(&cli.state_dir).with_context(|| {
         format!(
