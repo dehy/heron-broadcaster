@@ -1,22 +1,28 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Alert rules for a Heron station. `critical`: listeners hear the problem
-# (or soon will); `warning`: the air is safe, something needs a look.
-# See docs/monitoring.md#alerts.
+# Alert rules for Heron stations, for Prometheus, Mimir or Grafana Cloud.
+# `critical`: listeners hear the problem (or soon will); `warning`: the air
+# is safe, something needs a look. They work with metrics pushed by remote
+# write or scraped, as long as series carry `job` (the service) and
+# `station`. See docs/monitoring.md#alerts.
 
 groups:
   - name: heron-air
     rules:
+      # No metrics for a minute from an engine that sent some in the last 10.
       - alert: HeronEngineDown
-        expr: up{job="heron-engine"} == 0
+        expr: >-
+          max by (station) (max_over_time(heron_build_info{job="heron-engine"}[10m] offset 1m))
+          unless max by (station) (max_over_time(heron_build_info{job="heron-engine"}[1m]))
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: The playout engine does not answer
+          summary: "{{ $labels.station }}: the playout engine sends no metrics"
           description: >-
-            Prometheus cannot scrape heron-engine. The station is probably off
-            air. Check `docker compose ps heron-engine` and its logs.
+            heron-engine stopped pushing metrics (or answering scrapes). The
+            station is probably off air, or its network is down. Check
+            `docker compose ps heron-engine` and its logs.
 
       - alert: HeronDeadAir
         expr: heron_engine_dead_air == 1
@@ -145,12 +151,14 @@ groups:
   - name: heron-control-plane
     rules:
       - alert: HeronServiceDown
-        expr: up{job=~"heron-api|heron-analyzer|heron-librarian"} == 0
+        expr: >-
+          max by (station, job) (max_over_time(heron_build_info{job=~"heron-api|heron-analyzer|heron-librarian"}[10m] offset 1m))
+          unless max by (station, job) (max_over_time(heron_build_info{job=~"heron-api|heron-analyzer|heron-librarian"}[1m]))
         for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "{{ $labels.job }} does not answer"
+          summary: "{{ $labels.station }}: {{ $labels.job }} sends no metrics"
           description: >-
             The air stays on (the engine plays its queue, then the fallback
             directory), but the station cannot be controlled or fed.

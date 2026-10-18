@@ -1,90 +1,78 @@
 # Monitoring
 
-How to watch a Heron station: its metrics in **Prometheus and Grafana**, alerts when something goes wrong, health checks, logs, and error reports in **Sentry**.
+How to watch a Heron station from your own **Grafana** (self-hosted or Grafana Cloud): sending its metrics to Prometheus, importing the dashboard and the alert rules, health checks, logs, and error reports in **Sentry**.
 
-What Heron provides:
+Heron does not run Prometheus or Grafana itself. It provides:
 
 | | Where | Details |
 |---|---|---|
-| Metrics | `/metrics` on every Rust service (Prometheus text format) | [Metrics reference](#metrics-reference) |
+| Metrics, pushed | Every Rust service sends its metrics to a Prometheus-compatible database with remote write, when `HERON_METRICS_REMOTE_WRITE_URL` is set | [Sending the metrics](#sending-the-metrics) |
+| Metrics, scraped | `/metrics` on every Rust service (Prometheus text format) | [Scraping instead](#scraping-instead) |
+| Dashboard | [`monitoring/grafana/heron-dashboard.json`](../monitoring/grafana/heron-dashboard.json), to import | [The dashboard](#the-dashboard) |
+| Alert rules | [`monitoring/prometheus/alerts.yml`](../monitoring/prometheus/alerts.yml), to load | [Alerts](#alerts) |
 | Health | `/healthz` on every service, used by Docker's health checks | [Health checks](#health-checks) |
 | Logs | Standard output of each container, one JSON object per line | [Logs](#logs) |
 | Errors | Sentry, when `HERON_SENTRY_DSN` is set | [Sentry](#sentry) |
-| Ready-made monitoring | Prometheus, Alertmanager and Grafana with a Heron dashboard and alert rules: `docker compose --profile monitoring` | [Quick start](#quick-start-the-bundled-stack) |
 
-## Quick start: the bundled stack
+## Quick start with Grafana Cloud
 
-The Compose file has an optional `monitoring` profile. It adds Prometheus (scrapes every Heron service), Alertmanager (receives the alerts) and Grafana (dashboard), all configured from [`monitoring/`](../monitoring).
-
-1. Set a password for Grafana's `admin` user in `.env` (see `.env.example`):
-
-   ```sh
-   HERON_GRAFANA_ADMIN_PASSWORD=a-long-password
-   HERON_GRAFANA_PORT=3000        # optional
-   HERON_METRICS_RETENTION=30d    # optional: how long Prometheus keeps metrics
-   ```
-
-2. Start the stack with the profile:
+1. In your Grafana Cloud stack, open **Prometheus → Details** (*Connections → Data sources → grafanacloud-…-prom* in recent stacks). Note the **remote write endpoint** (`https://prometheus-prod-….grafana.net/api/prom/push`) and the **username / instance ID** (a number).
+2. Create an **access policy token** with the `metrics:write` scope (*Administration → Cloud access policies*, or *Generate now* on the same page).
+3. In the station's `.env`:
 
    ```sh
-   docker compose --profile monitoring up -d
+   HERON_STATION_NAME=radio1
+   HERON_METRICS_REMOTE_WRITE_URL=https://prometheus-prod-XX-prod-REGION.grafana.net/api/prom/push
+   HERON_METRICS_REMOTE_WRITE_USERNAME=123456
+   HERON_METRICS_REMOTE_WRITE_PASSWORD=glc_…
    ```
 
-   Add `--profile icecast` too when you use the local Icecast server.
+4. `docker compose up -d`. Each service logs `pushing metrics with remote write`.
+5. In Grafana: *Dashboards → New → Import*, upload `monitoring/grafana/heron-dashboard.json`, and pick your Prometheus data source ([details](#importing-the-dashboard)).
+6. Load the alert rules ([Alerts](#loading-the-alert-rules)) and set up a contact point.
 
-3. Open http://localhost:3000/ and sign in as `admin`. The **Heron Broadcaster** dashboard is the home page, also under *Dashboards → Heron*. Alerts are under *Alerting → Alert rules*, in the *Prometheus* data source.
+## Sending the metrics
 
-Nothing else is published: Prometheus (9090) and Alertmanager (9093) are only reachable inside the Compose network, through Grafana. To open them from the host, see [Publishing the ports](#publishing-the-metrics-ports).
+### Remote write
 
-The files:
+When `HERON_METRICS_REMOTE_WRITE_URL` is set, every Rust service (`heron-engine`, `heron-api`, `heron-analyzer`, `heron-librarian`) sends its metrics there every `HERON_METRICS_REMOTE_WRITE_INTERVAL` seconds, with [Prometheus remote write](https://prometheus.io/docs/specs/prw/remote_write_spec/) 1.0 (protobuf, snappy). Nothing needs to reach the station from outside: it only makes outgoing HTTPS requests, so it works behind NAT and firewalls.
 
-| File | Contents |
+| Variable | Default | Meaning |
+|---|---|---|
+| `HERON_METRICS_REMOTE_WRITE_URL` | empty: off | The remote write endpoint |
+| `HERON_METRICS_REMOTE_WRITE_USERNAME` | | Basic authentication user (Grafana Cloud: the instance ID). Empty: the password is sent as a bearer token |
+| `HERON_METRICS_REMOTE_WRITE_PASSWORD` | | Basic authentication password, or bearer token |
+| `HERON_METRICS_REMOTE_WRITE_INTERVAL` | `15` | Seconds between pushes |
+| `HERON_STATION_NAME` | `heron` | The `station` label of every metric: give each station its own name |
+
+Every series carries `job` (the service: `heron-engine`, `heron-api`…) and `station`. The dashboard and the alert rules rely on both.
+
+Where it can go:
+
+| Receiver | URL |
 |---|---|
-| `monitoring/prometheus/prometheus.yml` | What Prometheus scrapes (the engine every 5 s, the others every 15 s) |
-| `monitoring/prometheus/alerts.yml` | [Alert rules](#alerts) |
-| `monitoring/alertmanager/alertmanager.yml` | Where alerts go: nowhere until you add a [receiver](#notifications) |
-| `monitoring/grafana/provisioning/` | Grafana's data sources (Prometheus, Alertmanager) and dashboard folder |
-| `monitoring/grafana/dashboards/heron.json` | The [dashboard](#the-dashboard) |
+| Grafana Cloud | `https://prometheus-prod-….grafana.net/api/prom/push`, with the instance ID and an access policy token |
+| Prometheus 2.33 or later | `http://prometheus:9090/api/v1/write`, Prometheus started with `--web.enable-remote-write-receiver` |
+| Grafana Mimir | `http://mimir:8080/api/v1/push` (add `X-Scope-OrgID` through a proxy if multi-tenant) |
+| VictoriaMetrics | `http://victoriametrics:8428/api/v1/write` |
+| Thanos Receive | `http://thanos-receive:19291/api/v1/receive` |
 
-Configuration changes need a restart of the service concerned (`docker compose --profile monitoring restart prometheus`). A dashboard edited in Grafana is kept until Grafana restarts: to keep it, export it (*Share → Export*) over `heron.json`, or save it under another name.
+A push that fails is not retried: counters are totals, so the next push carries what was missed, and only graph resolution is lost during an outage. The first failure of an outage is logged as a warning (`cannot push metrics`), and recovery as `pushing metrics again`; `heron_remote_write_failures_total` counts failures. A wrong setting never stops a service: the engine keeps playing and logs `metrics are not pushed`.
 
-> On a Raspberry Pi, the monitoring stack takes about 300 MB of memory and some CPU every scrape. The engine comes first: on a small Pi, run Prometheus and Grafana on another machine and scrape the station from there (next section).
+### Scraping instead
 
-## Using your own Prometheus and Grafana
-
-### Scraping the services
-
-Each Rust service serves Prometheus metrics on `/metrics` and its health on `/healthz`, on its own port:
+If you prefer Prometheus to fetch the metrics, leave `HERON_METRICS_REMOTE_WRITE_URL` empty and scrape `/metrics` on each service:
 
 | Service | Port | Scrape interval |
 |---|---|---|
-| `heron-engine` | 8081 | 5 s (the air depends on it; short outages show) |
+| `heron-engine` | 8081 | 5 s (short outages show) |
 | `heron-api` | 8080 | 15 s |
 | `heron-analyzer` | 8082 | 15 s |
 | `heron-librarian` | 8083 | 15 s |
 
-There is no authentication on these ports: keep them inside the Compose network, or publish them on `127.0.0.1` or a private network only.
+[`monitoring/prometheus/scrape.yml`](../monitoring/prometheus/scrape.yml) has the jobs to add to `prometheus.yml`. Keep the job names, and set the `station` label on the targets.
 
-**Prometheus in the same Compose project or on the same Docker network.** Scrape the services by name. Use the job names below: the dashboard and the alert rules expect them.
-
-```yaml
-scrape_configs:
-  - job_name: heron-engine
-    scrape_interval: 5s
-    static_configs:
-      - targets: ["heron-engine:8081"]
-  - job_name: heron-api
-    static_configs:
-      - targets: ["heron-api:8080"]
-  - job_name: heron-analyzer
-    static_configs:
-      - targets: ["heron-analyzer:8082"]
-  - job_name: heron-librarian
-    static_configs:
-      - targets: ["heron-librarian:8083"]
-```
-
-A Prometheus running in another Compose project can join Heron's network (named `heron_default`):
+These ports have no authentication. A Prometheus in another Compose project can join Heron's network (`heron_default`):
 
 ```yaml
 # In the other project's docker-compose.yml
@@ -97,9 +85,7 @@ networks:
     external: true
 ```
 
-#### Publishing the metrics ports
-
-**Prometheus on the host or on another machine.** Publish the ports with a `docker-compose.override.yml` next to `docker-compose.yml` (Compose reads it automatically). Bind them to `127.0.0.1`, or to the address of a private network (VPN, LAN), never to the Internet:
+Otherwise, publish them with a `docker-compose.override.yml` next to `docker-compose.yml`, on `127.0.0.1` or a private network (VPN, LAN) only, never on the Internet:
 
 ```yaml
 services:
@@ -111,106 +97,59 @@ services:
     ports: ["127.0.0.1:9182:8082"]
   heron-librarian:
     ports: ["127.0.0.1:9183:8083"]
-  # With the monitoring profile: Prometheus' and Alertmanager's own pages.
-  prometheus:
-    ports: ["127.0.0.1:9090:9090"]
-  alertmanager:
-    ports: ["127.0.0.1:9093:9093"]
 ```
-
-Then scrape `127.0.0.1:9181` and so on, keeping the job names (`job_name: heron-engine`…).
-
-Several stations in one Prometheus or Grafana: give each a `station` label, with `external_labels` in its Prometheus (commented out in `monitoring/prometheus/prometheus.yml`), or with `labels` on its targets:
-
-```yaml
-    static_configs:
-      - targets: ["radio1.lan:9181"]
-        labels: { station: radio1 }
-```
-
-### Grafana Cloud (or any remote Prometheus)
-
-Run [Grafana Alloy](https://grafana.com/docs/alloy/latest/) next to the station, on Heron's network, to scrape the services and push the metrics with `remote_write`. A `config.alloy`:
-
-```alloy
-prometheus.scrape "heron_engine" {
-  job_name        = "heron-engine"
-  targets         = [{"__address__" = "heron-engine:8081"}]
-  scrape_interval = "5s"
-  forward_to      = [prometheus.remote_write.cloud.receiver]
-}
-
-prometheus.scrape "heron_services" {
-  // One job per service: the dashboard and the alerts use the job names.
-  job_name   = "heron-api"
-  targets    = [{"__address__" = "heron-api:8080"}]
-  forward_to = [prometheus.remote_write.cloud.receiver]
-}
-// …the same for heron-analyzer (8082) and heron-librarian (8083).
-
-prometheus.remote_write "cloud" {
-  external_labels = { station = "my-station" }
-  endpoint {
-    // From your Grafana Cloud stack: Prometheus → Details.
-    url = "https://prometheus-prod-XX-prod-REGION.grafana.net/api/prom/push"
-    basic_auth {
-      username = "123456"
-      password = sys.env("GRAFANA_CLOUD_TOKEN")
-    }
-  }
-}
-```
-
-```yaml
-# docker-compose.override.yml
-services:
-  alloy:
-    image: grafana/alloy:v1.11.0
-    restart: unless-stopped
-    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy"]
-    environment:
-      GRAFANA_CLOUD_TOKEN: ${GRAFANA_CLOUD_TOKEN}
-    volumes:
-      - ./config.alloy:/etc/alloy/config.alloy:ro
-```
-
-A self-hosted Prometheus can push the same way with its own `remote_write` section.
-
-### Importing the dashboard
-
-1. In Grafana: *Dashboards → New → Import*.
-2. Upload `monitoring/grafana/dashboards/heron.json` (or paste its content).
-3. Pick your Prometheus data source when asked, or later in the *Prometheus* drop-down at the top of the dashboard: every panel follows it.
-
-The dashboard's UID is `heron-station`; importing it again replaces it.
-
-### Loading the alert rules
-
-- **Prometheus:** copy `monitoring/prometheus/alerts.yml` next to your configuration and list it under `rule_files`. Check it with `promtool check rules alerts.yml`. Alerts go to the Alertmanager configured under `alerting`.
-- **Grafana Cloud or Mimir:** upload the file with [`mimirtool rules load alerts.yml`](https://grafana.com/docs/mimir/latest/manage/tools/mimirtool/), or recreate the rules you want as Grafana-managed alerts (*Alerting → Alert rules → New*), using the expressions of the file.
 
 ## The dashboard
 
-Rows, from top to bottom:
+### Importing the dashboard
 
-| Row | What it shows |
+1. In Grafana (12 or later, or Grafana Cloud): *Dashboards → New → Import*.
+2. Upload [`monitoring/grafana/heron-dashboard.json`](../monitoring/grafana/heron-dashboard.json), or paste its content, and choose a folder.
+3. Open it and pick your Prometheus data source in the **Prometheus** drop-down at the top; every panel follows it. The **Station** drop-down lists the stations sending metrics (all by default).
+
+The dashboard's UID is `heron-station`: importing a newer version replaces it (Grafana asks first). To keep your own changes, save a copy under another name.
+
+Provisioning it from files instead (self-hosted Grafana): put the JSON in a directory read by a [dashboard provider](https://grafana.com/docs/grafana/latest/administration/provisioning/#dashboards).
+
+### What it shows
+
+| Row | Panels |
 |---|---|
-| **On air** | Whether the engine answers, dead air, how long the master bus has been silent, outputs connected, tracks queued, whether the server clock is synchronized. Master level, each output's bitrate, fallback tracks and silence watchdog skips, pause and queue length over time. |
+| **On air** | Whether the engine sends metrics, dead air, how long the master bus has been silent, outputs connected, tracks queued, server clock synchronized. Master level, each output's bitrate, fallback tracks and silence watchdog skips per minute, pause and queue length. |
 | **Audio engine health** | Underruns (decoding fell behind), audio dropped by the engine, an encoder or an output, output reconnections, the pacing clock's lateness and drift, stalls, tracks that could not be preloaded. |
-| **Server clock** | The kernel's clock offset, estimated error and synchronization ([Requirements – Reliability](requirements.md#5-reliability-247)). |
-| **Control plane** | heron-api, its link to the engine, web clients connected, the analyzer and the librarian, library size, tracks queued by rotation and picks with relaxed rules, sign-ins. |
+| **Server clock** | The kernel's clock offset, estimated error and synchronization. |
+| **Control plane** | heron-api and its link to the engine, web clients, the analyzer and the librarian, library size, tracks queued by rotation and picks with relaxed rules, sign-ins. |
 | **Library** | Analysis jobs by result and time per track, imports and library scans. |
-| **Versions** | The version of every running service (`heron_build_info`). |
+| **Versions** | Every running service and its version, per station. |
 
-What healthy looks like: *Dead air* OK, *Silence* under a few seconds (pauses aside), every output connected, *Queue* 2 or more, *Clock drift* flat at 50 ms, underruns and dropped audio at zero, fallback tracks only when you expect them.
+Healthy: *Dead air* OK, *Silence* under a few seconds (pauses aside), every output connected, *Queue* 2 or more, *Clock drift* flat at 50 ms, underruns and dropped audio at zero, fallback tracks only when you expect them.
 
 ## Alerts
 
-Rules in `monitoring/prometheus/alerts.yml`. **Critical**: listeners hear the problem, or soon will. **Warning**: the air is safe, something needs a look.
+### Loading the alert rules
+
+[`monitoring/prometheus/alerts.yml`](../monitoring/prometheus/alerts.yml) is a standard Prometheus rule file. Check it with `promtool check rules alerts.yml`.
+
+- **Grafana Cloud, Mimir:** load it into the data source's ruler with [`mimirtool`](https://grafana.com/docs/mimir/latest/manage/tools/mimirtool/):
+
+  ```sh
+  mimirtool rules load monitoring/prometheus/alerts.yml \
+    --address=https://prometheus-prod-XX-prod-REGION.grafana.net \
+    --id=123456 --key=glc_…   # a token with the rules:write scope
+  ```
+
+  The rules then show in Grafana under *Alerting → Alert rules*, with the data source. They notify through Grafana Cloud's Alertmanager: set a contact point and a notification policy in *Alerting*. You can also recreate some of them as Grafana-managed rules (*Alerting → Alert rules → New*), using their expressions.
+- **Prometheus:** list the file under `rule_files` in `prometheus.yml`, and point `alerting` at your Alertmanager.
+
+Every rule works with pushed and scraped metrics, and alerts name the station.
+
+### The rules
+
+**Critical**: listeners hear the problem, or soon will. **Warning**: the air is safe, something needs a look.
 
 | Alert | Severity | Fires when | What to do |
 |---|---|---|---|
-| `HeronEngineDown` | critical | heron-engine does not answer for 1 min | `docker compose ps heron-engine`, `docker compose logs heron-engine`. The engine exits by itself when its audio thread is stuck and Docker restarts it: repeated restarts point at the machine. |
+| `HeronEngineDown` | critical | An engine that sent metrics in the last 10 min sent none for 1 min, for 1 min | The station is probably off air, or its network is down. `docker compose ps heron-engine`, `docker compose logs heron-engine`. The engine exits by itself when its audio thread is stuck and Docker restarts it: repeated restarts point at the machine. |
 | `HeronDeadAir` | critical | Nothing on air and nothing to play for 30 s | Put tracks in the fallback directory (`HERON_FALLBACK_DIR`). Check heron-api and that rotation can pick tracks (Rotation page). |
 | `HeronSilenceOnAir` | critical | The master bus is silent for 45 s, not paused | The silence watchdog is off, or every queued and fallback track is silent. |
 | `HeronOutputDisconnected` | critical | An output is not connected for 2 min | Check the stream server and the output's host, mount and password (Outputs page). The engine keeps retrying. |
@@ -223,66 +162,17 @@ Rules in `monitoring/prometheus/alerts.yml`. **Critical**: listeners hear the pr
 | `HeronClockStalled` | warning | The engine stalled for more than 1 s in the last hour | The machine was suspended or starved of CPU: listeners heard a gap. |
 | `HeronClockNotSynchronized` | warning | The kernel reports the clock unsynchronized for 10 min | Run NTP on the host (chrony, systemd-timesyncd). |
 | `HeronClockOff` | warning | The clock may be off by more than 1 s for 10 min | Same. |
-| `HeronServiceDown` | warning | heron-api, heron-analyzer or heron-librarian does not answer for 2 min | The air stays on; the station cannot be controlled or fed. |
+| `HeronServiceDown` | warning | heron-api, heron-analyzer or heron-librarian sent no metrics for 1 min, for 2 min | The air stays on; the station cannot be controlled or fed. |
 | `HeronApiLostEngine` | warning | heron-api cannot reach the engine for 2 min | The queue is not refilled; the fallback directory takes over when it runs dry. |
 | `HeronAnalysisFailing` | warning | More than 10 analyses failed in an hour | Library page, heron-analyzer's logs. |
 | `HeronLibraryScanFailing` | warning | A library scan failed in the last 2 h | Is the music directory mounted and readable? |
 | `HeronLoginFailures` | warning | More than 20 failed sign-ins in 10 min | Someone may be guessing passwords. |
 
-Thresholds are starting points: edit them in `alerts.yml` to suit the station.
-
-### Notifications
-
-Out of the box, alerts are only shown (Grafana's alert list). Add a receiver to `monitoring/alertmanager/alertmanager.yml` and make it the route's `receiver`, then `docker compose --profile monitoring restart alertmanager`. Check the file with `docker compose --profile monitoring exec alertmanager amtool check-config /etc/alertmanager/alertmanager.yml`.
-
-Email:
-
-```yaml
-route:
-  receiver: team
-receivers:
-  - name: team
-    email_configs:
-      - to: oncall@example.org
-        from: heron@example.org
-        smarthost: smtp.example.org:587
-        auth_username: heron@example.org
-        auth_password: "…"
-```
-
-Discord, Slack, Telegram, Microsoft Teams (one or several in the same receiver):
-
-```yaml
-receivers:
-  - name: team
-    discord_configs:
-      - webhook_url: https://discord.com/api/webhooks/…
-    slack_configs:
-      - api_url: https://hooks.slack.com/services/…
-        channel: "#radio"
-    telegram_configs:
-      - bot_token: "…"
-        chat_id: -1001234567890
-    msteamsv2_configs:
-      - webhook_url: https://…
-```
-
-Critical alerts only to a phone, everything to email:
-
-```yaml
-route:
-  receiver: email
-  routes:
-    - matchers: ['severity="critical"']
-      receiver: phone
-      continue: true
-```
-
-See [Alertmanager's configuration](https://prometheus.io/docs/alerting/latest/configuration/) for the other receivers (PagerDuty, Opsgenie, webhooks…).
+Thresholds are starting points: edit them to suit the station. `HeronEngineDown` and `HeronServiceDown` only know a station that has sent metrics in the last 10 minutes: a station that never started is not reported.
 
 ## Metrics reference
 
-Every service also exports `heron_build_info{service, version}` (always 1).
+Every service also exports `heron_build_info{service, version}` (always 1), and, when pushing, `heron_remote_write_failures_total`. Pushed series also carry `job` and `station`.
 
 ### heron-engine
 
@@ -341,7 +231,7 @@ Every service also exports `heron_build_info{service, version}` (always 1).
 |---|---|---|---|
 | `heron_librarian_imports_total` | counter | `result` (`identified`, `needs_review`, `unidentified`, `failed`) | Files imported from the incoming folder |
 
-Counters that only grow when something happens (`heron_engine_silence_skips_total`…) start at 0 when the engine starts, so `increase()` works from the first scrape.
+Counters that only grow when something happens (`heron_engine_silence_skips_total`…) start at 0 when the engine starts, so `increase()` works from the first sample.
 
 ## Health checks
 
@@ -359,7 +249,7 @@ Every service answers `GET /healthz` on its port:
 
 Every service restarts by itself (`restart: unless-stopped`). Docker does not restart a container only because it is unhealthy, so the engine exits on its own when its audio thread is stuck for 10 s: Docker then restarts it, and it resumes the queue it saved.
 
-From outside, an uptime monitor ([Uptime Kuma](https://github.com/louislam/uptime-kuma), Grafana Synthetic Monitoring, UptimeRobot…) should watch what listeners get: the stream URL itself (an HTTP check of `https://stream.example.org/live` expecting `200`, or Prometheus' [blackbox exporter](https://github.com/prometheus/blackbox_exporter)). It catches what the station cannot see from inside: DNS, TLS, the network, the stream server.
+From outside, watch what listeners get: an HTTP check of the stream URL (`https://stream.example.org/live` answering `200`) in Grafana Cloud's Synthetic Monitoring, [Uptime Kuma](https://github.com/louislam/uptime-kuma) or UptimeRobot. It catches what the station cannot see from inside (DNS, TLS, the network, the stream server), and a station that stopped sending metrics altogether.
 
 ## Logs
 
@@ -369,9 +259,9 @@ Containers log one JSON object per line (`HERON_LOG_FORMAT=json`), with `timesta
 {"timestamp":"2026-10-18T19:26:47.99Z","level":"WARN","message":"silence on air: skipping the track","entry_id":42,"path":"\"Artist/Album/01 Track.mp3\"","seconds":20,"to_fallback":false,"target":"heron_engine::player"}
 ```
 
-The level is set with `RUST_LOG` in `.env` (`info` by default; `heron_engine=debug,info` for more from the engine).
+The level is set with `RUST_LOG` in `.env` (`info` by default; `heron_engine=debug,info` for more from the engine). `docker compose logs -f heron-engine` follows one service.
 
-`docker compose logs -f heron-engine` follows one service. To search them in Grafana, ship them to [Loki](https://grafana.com/docs/loki/latest/) with Grafana Alloy:
+To search them in Grafana, send them to Loki (Grafana Cloud Logs or your own) with [Grafana Alloy](https://grafana.com/docs/alloy/latest/) running next to the station. A `config.alloy`:
 
 ```alloy
 discovery.docker "containers" {
@@ -384,6 +274,10 @@ discovery.relabel "heron" {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
     target_label  = "service"
   }
+  rule {
+    target_label = "station"
+    replacement  = "radio1"
+  }
 }
 
 loki.source.docker "heron" {
@@ -394,12 +288,32 @@ loki.source.docker "heron" {
 
 loki.write "default" {
   endpoint {
-    url = "http://loki:3100/loki/api/v1/push"
+    // Grafana Cloud: Loki → Details; your own: http://loki:3100/loki/api/v1/push
+    url = "https://logs-prod-XX.grafana.net/loki/api/v1/push"
+    basic_auth {
+      username = "654321"
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
   }
 }
 ```
 
-(mount `/var/run/docker.sock` read-only into the Alloy container). Useful queries:
+with Alloy in a `docker-compose.override.yml`, the Docker socket mounted read-only:
+
+```yaml
+services:
+  alloy:
+    image: grafana/alloy:v1.11.0
+    restart: unless-stopped
+    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy"]
+    environment:
+      GRAFANA_CLOUD_TOKEN: ${GRAFANA_CLOUD_TOKEN}
+    volumes:
+      - ./config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+Useful queries:
 
 ```logql
 {service="heron-engine"} | json | level="ERROR"
@@ -427,7 +341,7 @@ Errors and panics of every service, and JavaScript errors of the web interface, 
    HERON_SENTRY_ENVIRONMENT=production
    ```
 
-3. `docker compose up -d`. Each service logs `reporting errors to Sentry` at startup.
+3. `docker compose up -d`. Each service logs `reporting errors to Sentry` at startup; an invalid DSN is logged as an error and the service runs without Sentry.
 
 What is sent:
 
@@ -440,9 +354,8 @@ The web interface reads its DSN when the page loads, from `/config.js`, which `h
 
 Not provided yet, and worth adding for a station on air around the clock:
 
-- **Listeners**: listener counts per output and per track, from the stream servers ([M7b](roadmap/m7b-listener-statistics.md)). Until then, an [Icecast exporter](https://github.com/markuslindenberg/icecast_exporter) gives the current count to Prometheus.
-- **The host**: CPU, memory, disk, temperature (a Raspberry Pi throttles when hot) with [node_exporter](https://github.com/prometheus/node_exporter), and per-container use with [cAdvisor](https://github.com/google/cadvisor).
-- **MariaDB**: with [mysqld_exporter](https://github.com/prometheus/mysqld_exporter).
+- **Listeners**: listener counts per output and per track, from the stream servers ([M7b](roadmap/m7b-listener-statistics.md)).
+- **The host**: CPU, memory, disk, temperature (a Raspberry Pi throttles when hot). Grafana Alloy can collect them (`prometheus.exporter.unix`) and push them with the same remote write settings, as can [node_exporter](https://github.com/prometheus/node_exporter) when scraped.
 - **The stream from outside**: see [Health checks](#health-checks).
 - **Track changes as events**: webhooks on track start, end and skip ([M7](roadmap/m7-webhooks-output-api.md)) can post to a chat or annotate Grafana.
 
@@ -450,9 +363,10 @@ Not provided yet, and worth adding for a station on air around the clock:
 
 | Symptom | Cause |
 |---|---|
-| A target is *down* in Prometheus (*Status → Targets*) | The service is down, or Prometheus is not on its network: `docker compose --profile monitoring ps`. |
-| Dashboard panels say *No data* | Pick the right data source at the top of the dashboard. Output panels stay empty until an output is configured. |
+| `cannot push metrics` in the logs | Wrong URL or credentials (the log gives the server's answer: `401`, `404`…), or no outgoing HTTPS from the station. Grafana Cloud needs the *instance ID* as user and a token with `metrics:write`. |
+| A self-hosted Prometheus answers `404` to pushes | Start it with `--web.enable-remote-write-receiver`. |
+| The *Station* drop-down is empty | No metrics yet, or they lack the `station` label (scraping without the labels of `scrape.yml`). |
+| Panels say *No data* | Pick the right data source at the top of the dashboard. Output panels stay empty until an output is configured. |
 | Clock panels are empty | The clock state is read from the Linux kernel (in containers, the host's or Docker Desktop's VM's): nothing when the engine runs natively on macOS or Windows. |
-| No alerts in Grafana | *Alerting → Alert rules* lists them under the Prometheus data source; check `docker compose --profile monitoring logs prometheus` for rule errors. |
-| No notification | A receiver must be added to `alertmanager.yml` (none out of the box). |
-| Nothing in Sentry | Check the DSN, and that the service logged `reporting errors to Sentry`; the container needs outgoing HTTPS. |
+| `HeronEngineDown` never fires for a station | It only covers stations that sent metrics in the last 10 minutes; watch the stream from outside too. |
+| Nothing in Sentry | Check the DSN, and that the service logged `reporting errors to Sentry`; the station needs outgoing HTTPS. |

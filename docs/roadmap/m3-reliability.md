@@ -11,7 +11,7 @@ Already delivered in [M2](m2-engine-core.md): the queue lives in the engine's me
 - Persist the queue and resume playback on restart.
 - Docker restart policies and health checks.
 - Clock sync monitoring in `heron-engine`: `heron_clock_synchronized` and `heron_clock_offset_seconds` in `/metrics`, and a warning in `/healthz` when the clock is not synced or is off by more than about 1 s (see [Requirements – Reliability](../requirements.md#5-reliability-247)). The reading itself (`heron_service::clock`) was added in [M5](m5-web-ui.md), whose dashboard shows the warning through `GET /api/v1/status`.
-- Monitoring, added to the milestone on request: an optional `monitoring` Compose profile (Prometheus, Alertmanager, Grafana) with a Heron dashboard and alert rules, and a guide to adding Heron to any Prometheus and Grafana ([Monitoring](../monitoring.md)).
+- Monitoring, added to the milestone on request, for the station's own Grafana (self-hosted or Grafana Cloud; Heron runs neither Prometheus nor Grafana): every service pushes its metrics with Prometheus remote write, and Heron ships a dashboard to import and alert rules to load, with a guide ([Monitoring](../monitoring.md)).
 - Error reporting to Sentry from every Rust service and the web interface, off unless a DSN is set.
 
 ## What was built
@@ -21,7 +21,9 @@ Already delivered in [M2](m2-engine-core.md): the queue lives in the engine's me
 - **Silence watchdog:** after `silence_watchdog.timeout_ms` (20 s, a playout setting editable on the Crossfade & loudness page) below −50 dBFS, skips to the next track, then to the fallback directory if the next is silent too. Dead air (nothing to play for 5 s) is logged as an error, exported and listed in `/healthz`.
 - **Queue persistence:** `queue.json` saved on every change, every 5 s and at shutdown; a restart resumes the track on air at its position (fast skip to the position, 500 ms fade-in) and the queue, keeping entry IDs. On SIGTERM the queue is saved first and open gRPC streams get 2 s, so a restart takes about 2 s instead of Docker's 10 s timeout.
 - **Self-restart:** the engine exits when its audio thread is stuck for 10 s, so Docker's restart policy brings it back with its queue.
-- **Health and metrics:** `/healthz` lists `warnings` (clock, dead air) without failing; new engine metrics for silence, dead air, fallback, watchdog skips, preload failures and the clock; health checks on the monitoring services.
+- **Health and metrics:** `/healthz` lists `warnings` (clock, dead air) without failing; new engine metrics for silence, dead air, fallback, watchdog skips, preload failures and the clock.
+- **Remote write:** with `HERON_METRICS_REMOTE_WRITE_URL` set, every service pushes its metrics (remote write 1.0, basic or bearer authentication), labelled with `job` and `station`. A wrong setting is logged, never fatal. Every image now has CA certificates (HTTPS for remote write and Sentry).
+- **Dashboard and alerts:** `monitoring/grafana/heron-dashboard.json` (data source and station selectors) and `monitoring/prometheus/alerts.yml` (18 rules, working with pushed or scraped metrics).
 - **Tests:** player tests for the fallback directory, dead air, the watchdog (and pauses), and resuming after a restart; decoder tests for in-memory files and fast skipping; `scripts/chaos-test.sh`, also run in CI on amd64 and arm64.
 
 ## Known limitations
@@ -40,7 +42,7 @@ Already delivered in [M2](m2-engine-core.md): the queue lives in the engine's me
   - [x] inject a silent file (one 20 s silence, then the watchdog skips it).
 - [x] An engine restart resumes playback within a few seconds (clean restart and kill: back on Icecast after 1–2 s, the track on air resumed at its position).
 - [x] With time sync stopped on the host, `heron_clock_synchronized` drops to 0 and `/healthz` reports a clock warning (kernel status set to unsynchronized: metric 0, `/healthz` 200 with the warning; back to 1 once cleared).
-- [x] The Grafana dashboard shows the station from the bundled Prometheus; every query returns data; the alert rules load and fire (fallback, service down) during the chaos tests.
+- [x] Metrics pushed by remote write reach a Prometheus with every series labelled `job` and `station`; the dashboard imports into a separate Grafana (any data source name) and shows the station; the alert rules load, and `HeronEngineDown` fires 2 min after the engine stops and clears when it is back (`HeronFallbackPlaying` and `HeronServiceDown` fired during the chaos tests).
 - [x] With a DSN set, an error logged by a service reaches Sentry with its release, `service` tag and breadcrumbs.
 
 ## References

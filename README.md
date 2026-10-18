@@ -108,7 +108,7 @@ curl -b cookies -X POST -H 'X-Requested-With: curl' $api/player/skip
 | `mariadb` | Database | 3306 |
 | `icecast` | Optional local Icecast server (`--profile icecast`) | 8000, published on `HERON_ICECAST_PORT` (8010) |
 
-Every Rust service serves `/healthz` and `/metrics` (Prometheus) on its port. `docker compose --profile monitoring up -d` adds Prometheus, Alertmanager and Grafana with a ready-made dashboard and alert rules on http://localhost:3000/, and `HERON_SENTRY_DSN` reports errors to Sentry: see [Monitoring](docs/monitoring.md).
+Every Rust service serves `/healthz` and `/metrics` (Prometheus) on its port. With `HERON_METRICS_REMOTE_WRITE_URL` set, they also push their metrics to your Prometheus or Grafana Cloud (remote write); import `monitoring/grafana/heron-dashboard.json` into Grafana and load the alert rules of `monitoring/prometheus/alerts.yml`. `HERON_SENTRY_DSN` reports errors to Sentry. See [Monitoring](docs/monitoring.md).
 
 Put a few tracks in the fallback directory (`HERON_FALLBACK_DIR`, `./data/fallback` by default): the engine plays them when the queue runs dry, for example while the API is down.
 

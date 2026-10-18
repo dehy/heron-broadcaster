@@ -85,18 +85,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Prometheus configuration and alert rules
+      - name: Alert rules
         run: |
-          docker run --rm --entrypoint promtool -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" \
-            prom/prometheus:v3.7.0 check config /etc/prometheus/prometheus.yml
-      - name: Alertmanager configuration
-        run: |
-          docker run --rm --entrypoint amtool -v "$PWD/monitoring/alertmanager:/etc/alertmanager:ro" \
-            prom/alertmanager:v0.28.1 check-config /etc/alertmanager/alertmanager.yml
+          docker run --rm --entrypoint promtool -v "$PWD/monitoring/prometheus:/rules:ro" \
+            prom/prometheus:v3.7.0 check rules /rules/alerts.yml
       - name: Grafana dashboard is valid JSON
-        run: python3 -m json.tool monitoring/grafana/dashboards/heron.json >/dev/null
-      - name: Compose file with every profile
-        run: cp .env.example .env && docker compose --profile icecast --profile monitoring config -q
+        run: python3 -m json.tool monitoring/grafana/heron-dashboard.json >/dev/null
 
   compose:
     name: Docker Compose on ${{ matrix.arch }} (build, start, import, stream)

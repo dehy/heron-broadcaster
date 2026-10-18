@@ -1,7 +1,7 @@
 {
   "uid": "heron-station",
   "title": "Heron Broadcaster",
-  "description": "On-air state and health of a Heron Broadcaster station. See docs/monitoring.md.",
+  "description": "On-air state and health of Heron Broadcaster stations, from the metrics they push (remote write) or Prometheus scrapes. See docs/monitoring.md.",
   "tags": [
     "heron",
     "radio"
@@ -26,6 +26,29 @@
         "hide": 0,
         "refresh": 1,
         "regex": "",
+        "options": []
+      },
+      {
+        "type": "query",
+        "name": "station",
+        "label": "Station",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(heron_build_info, station)",
+          "refId": "StationVariable"
+        },
+        "definition": "label_values(heron_build_info, station)",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {},
+        "hide": 0,
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
         "options": []
       }
     ]
@@ -69,7 +92,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Whether Prometheus can scrape heron-engine.",
+      "description": "Whether heron-engine sent metrics in the last minute.",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -82,7 +105,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(up{job=\"heron-engine\"})",
+          "expr": "max(max_over_time(heron_build_info{station=~\"$station\",job=\"heron-engine\"}[1m])) or vector(0)",
           "refId": "A",
           "legendFormat": "__auto"
         }
@@ -152,7 +175,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(heron_engine_dead_air)",
+          "expr": "max(heron_engine_dead_air{station=~\"$station\"})",
           "refId": "A",
           "legendFormat": "__auto"
         }
@@ -222,7 +245,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(heron_engine_silent_seconds)",
+          "expr": "max(heron_engine_silent_seconds{station=~\"$station\"})",
           "refId": "A",
           "legendFormat": "__auto"
         }
@@ -286,7 +309,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(heron_output_connected)",
+          "expr": "sum(heron_output_connected{station=~\"$station\"})",
           "refId": "A",
           "legendFormat": "__auto"
         }
@@ -346,7 +369,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(heron_engine_queue_length)",
+          "expr": "max(heron_engine_queue_length{station=~\"$station\"})",
           "refId": "A",
           "legendFormat": "__auto"
         }
@@ -406,7 +429,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "min(heron_clock_synchronized)",
+          "expr": "min(heron_clock_synchronized{station=~\"$station\"})",
           "refId": "A",
           "legendFormat": "__auto"
         }
@@ -476,7 +499,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "20 * log10(clamp_min(heron_engine_master_peak, 0.00001))",
+          "expr": "20 * log10(clamp_min(heron_engine_master_peak{station=~\"$station\"}, 0.00001))",
           "refId": "A",
           "legendFormat": "peak"
         }
@@ -533,7 +556,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "8 * rate(heron_output_bytes_total[1m])",
+          "expr": "8 * rate(heron_output_bytes_total{station=~\"$station\"}[1m])",
           "refId": "A",
           "legendFormat": "{{output}}"
         }
@@ -588,7 +611,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "increase(heron_engine_fallback_tracks_total[$__interval])",
+          "expr": "increase(heron_engine_fallback_tracks_total{station=~\"$station\"}[$__interval])",
           "refId": "A",
           "legendFormat": "fallback tracks started"
         },
@@ -597,7 +620,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "increase(heron_engine_silence_skips_total[$__interval])",
+          "expr": "increase(heron_engine_silence_skips_total{station=~\"$station\"}[$__interval])",
           "refId": "B",
           "legendFormat": "silent tracks skipped"
         }
@@ -655,7 +678,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "heron_engine_paused",
+          "expr": "heron_engine_paused{station=~\"$station\"}",
           "refId": "A",
           "legendFormat": "paused"
         },
@@ -664,7 +687,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "heron_engine_queue_length",
+          "expr": "heron_engine_queue_length{station=~\"$station\"}",
           "refId": "B",
           "legendFormat": "queued"
         }
@@ -732,7 +755,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(heron_engine_underruns_total[$__rate_interval]) * 100",
+          "expr": "rate(heron_engine_underruns_total{station=~\"$station\"}[$__rate_interval]) * 100",
           "refId": "A",
           "legendFormat": "blocks without audio (%)"
         }
@@ -787,7 +810,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "increase(heron_engine_dropped_blocks_total[$__interval])",
+          "expr": "increase(heron_engine_dropped_blocks_total{station=~\"$station\"}[$__interval])",
           "refId": "A",
           "legendFormat": "blocks dropped (engine)"
         },
@@ -796,7 +819,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (profile) (increase(heron_encoder_dropped_chunks_total[$__interval]))",
+          "expr": "sum by (profile) (increase(heron_encoder_dropped_chunks_total{station=~\"$station\"}[$__interval]))",
           "refId": "B",
           "legendFormat": "encoder {{profile}}"
         },
@@ -805,7 +828,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (output) (increase(heron_output_dropped_chunks_total[$__interval]))",
+          "expr": "sum by (output) (increase(heron_output_dropped_chunks_total{station=~\"$station\"}[$__interval]))",
           "refId": "C",
           "legendFormat": "output {{output}}"
         }
@@ -863,7 +886,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "increase(heron_output_reconnects_total[$__interval])",
+          "expr": "increase(heron_output_reconnects_total{station=~\"$station\"}[$__interval])",
           "refId": "A",
           "legendFormat": "{{output}}"
         }
@@ -921,7 +944,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "heron_engine_clock_max_late_seconds",
+          "expr": "heron_engine_clock_max_late_seconds{station=~\"$station\"}",
           "refId": "A",
           "legendFormat": "worst block lateness"
         }
@@ -978,7 +1001,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "heron_engine_clock_drift_seconds",
+          "expr": "heron_engine_clock_drift_seconds{station=~\"$station\"}",
           "refId": "A",
           "legendFormat": "audio rendered - time elapsed"
         }
@@ -1033,7 +1056,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "increase(heron_engine_clock_resets_total[$__interval])",
+          "expr": "increase(heron_engine_clock_resets_total{station=~\"$station\"}[$__interval])",
           "refId": "A",
           "legendFormat": "stalls > 1 s"
         },
@@ -1042,7 +1065,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "increase(heron_engine_preload_failures_total[$__interval])",
+          "expr": "increase(heron_engine_preload_failures_total{station=~\"$station\"}[$__interval])",
           "refId": "B",
           "legendFormat": "tracks not preloaded"
         },
@@ -1051,7 +1074,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "increase(heron_engine_underrun_tracks_total[$__interval])",
+          "expr": "increase(heron_engine_underrun_tracks_total{station=~\"$station\"}[$__interval])",
           "refId": "C",
           "legendFormat": "tracks with underruns"
         }
@@ -1122,7 +1145,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "heron_clock_offset_seconds",
+          "expr": "heron_clock_offset_seconds{station=~\"$station\"}",
           "refId": "A",
           "legendFormat": "offset"
         },
@@ -1131,7 +1154,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "heron_clock_estimated_error_seconds",
+          "expr": "heron_clock_estimated_error_seconds{station=~\"$station\"}",
           "refId": "B",
           "legendFormat": "estimated error"
         }
@@ -1186,7 +1209,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "heron_clock_synchronized",
+          "expr": "heron_clock_synchronized{station=~\"$station\"}",
           "refId": "A",
           "legendFormat": "synchronized"
         }
@@ -1256,7 +1279,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(up{job=\"heron-api\"})",
+          "expr": "max(max_over_time(heron_build_info{station=~\"$station\",job=\"heron-api\"}[1m])) or vector(0)",
           "refId": "A",
           "legendFormat": "__auto"
         }
@@ -1326,7 +1349,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(heron_api_engine_connected)",
+          "expr": "max(heron_api_engine_connected{station=~\"$station\"})",
           "refId": "A",
           "legendFormat": "__auto"
         }
@@ -1396,7 +1419,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(heron_api_live_clients) or vector(0)",
+          "expr": "sum(heron_api_live_clients{station=~\"$station\"}) or vector(0)",
           "refId": "A",
           "legendFormat": "__auto"
         }
@@ -1452,7 +1475,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(up{job=\"heron-analyzer\"})",
+          "expr": "max(max_over_time(heron_build_info{station=~\"$station\",job=\"heron-analyzer\"}[1m])) or vector(0)",
           "refId": "A",
           "legendFormat": "__auto"
         }
@@ -1522,7 +1545,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(up{job=\"heron-librarian\"})",
+          "expr": "max(max_over_time(heron_build_info{station=~\"$station\",job=\"heron-librarian\"}[1m])) or vector(0)",
           "refId": "A",
           "legendFormat": "__auto"
         }
@@ -1592,7 +1615,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(heron_library_files)",
+          "expr": "max(heron_library_files{station=~\"$station\"})",
           "refId": "A",
           "legendFormat": "__auto"
         }
@@ -1648,7 +1671,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "increase(heron_api_autofill_tracks_total[$__interval])",
+          "expr": "increase(heron_api_autofill_tracks_total{station=~\"$station\"}[$__interval])",
           "refId": "A",
           "legendFormat": "tracks queued by autofill"
         },
@@ -1657,7 +1680,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "increase(heron_api_rotation_relaxed_total[$__interval])",
+          "expr": "increase(heron_api_rotation_relaxed_total{station=~\"$station\"}[$__interval])",
           "refId": "B",
           "legendFormat": "picks with relaxed rules"
         }
@@ -1715,7 +1738,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (result) (increase(heron_api_logins_total[$__interval]))",
+          "expr": "sum by (result) (increase(heron_api_logins_total{station=~\"$station\"}[$__interval]))",
           "refId": "A",
           "legendFormat": "{{result}}"
         }
@@ -1786,7 +1809,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (result) (increase(heron_analysis_jobs_total[$__interval]))",
+          "expr": "sum by (result) (increase(heron_analysis_jobs_total{station=~\"$station\"}[$__interval]))",
           "refId": "A",
           "legendFormat": "{{result}}"
         }
@@ -1844,7 +1867,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "heron_analysis_seconds{quantile=\"0.5\"}",
+          "expr": "heron_analysis_seconds{station=~\"$station\",quantile=\"0.5\"}",
           "refId": "A",
           "legendFormat": "median"
         },
@@ -1853,7 +1876,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "heron_analysis_seconds{quantile=\"0.99\"}",
+          "expr": "heron_analysis_seconds{station=~\"$station\",quantile=\"0.99\"}",
           "refId": "B",
           "legendFormat": "p99"
         }
@@ -1908,7 +1931,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (result) (increase(heron_librarian_imports_total[$__interval]))",
+          "expr": "sum by (result) (increase(heron_librarian_imports_total{station=~\"$station\"}[$__interval]))",
           "refId": "A",
           "legendFormat": "import {{result}}"
         },
@@ -1917,7 +1940,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (result) (increase(heron_library_scans_total[$__interval]))",
+          "expr": "sum by (result) (increase(heron_library_scans_total{station=~\"$station\"}[$__interval]))",
           "refId": "B",
           "legendFormat": "scan {{result}}"
         }
@@ -1987,7 +2010,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "heron_build_info",
+          "expr": "heron_build_info{station=~\"$station\"}",
           "refId": "A",
           "legendFormat": "__auto",
           "instant": true,

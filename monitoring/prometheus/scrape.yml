@@ -1,43 +1,30 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Prometheus for a Heron station: scrapes the /metrics endpoint of every
-# Heron service on the Compose network. See docs/monitoring.md.
-
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-  # Several stations in one Grafana: name this one (docs/monitoring.md).
-  # external_labels:
-  #   station: my-station
-
-rule_files:
-  - /etc/prometheus/alerts.yml
-
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: ["alertmanager:9093"]
+# For a Prometheus that scrapes Heron instead of receiving its metrics by
+# remote write: add these jobs to its prometheus.yml. Keep the job names and
+# the `station` label: the dashboard and the alert rules use them.
+# Targets by service name work from a Prometheus on Heron's Docker network
+# (heron_default); otherwise publish the ports (docs/monitoring.md).
 
 scrape_configs:
-  # The playout engine: the most important one. Scraped more often, so a
-  # short outage still shows on the graphs.
+  # The playout engine, scraped more often: short outages show.
   - job_name: heron-engine
     scrape_interval: 5s
     static_configs:
       - targets: ["heron-engine:8081"]
+        labels: { station: heron }
 
   - job_name: heron-api
     static_configs:
       - targets: ["heron-api:8080"]
+        labels: { station: heron }
 
   - job_name: heron-analyzer
     static_configs:
       - targets: ["heron-analyzer:8082"]
+        labels: { station: heron }
 
   - job_name: heron-librarian
     static_configs:
       - targets: ["heron-librarian:8083"]
-
-  - job_name: prometheus
-    static_configs:
-      - targets: ["localhost:9090"]
+        labels: { station: heron }
