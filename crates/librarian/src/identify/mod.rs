@@ -313,6 +313,30 @@ impl Identifier {
             .and_then(|release| release.tags(recording_id, disc, track)))
     }
 
+    /// The programming details of the recordings on a release: album,
+    /// record label, catalog number, ISRC, first release year and genres,
+    /// by recording ID. `None` if MusicBrainz does not know the release.
+    pub async fn release_details(
+        &self,
+        release_id: &str,
+    ) -> Result<Option<HashMap<String, RecordingDetails>>, IdentifyError> {
+        let url = format!("{}/release/{release_id}", self.endpoints.musicbrainz);
+        let response = self
+            .send("MusicBrainz", &self.musicbrainz, || {
+                self.http.get(&url).query(&[
+                    ("inc", "labels recordings isrcs genres release-groups"),
+                    ("fmt", "json"),
+                ])
+            })
+            .await;
+        let release: MbReleaseDetails = match response {
+            Ok(response) => response.json().await?,
+            Err(IdentifyError::Service { status: 404, .. }) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        Ok(Some(release.recordings()))
+    }
+
     /// The artists `id` is related to on MusicBrainz: relationship type
     /// (`member of band`, `is person`, …) and the other artist's ID, in
     /// MusicBrainz's direction. Empty if MusicBrainz does not know it.
@@ -543,6 +567,155 @@ struct MbArtist {
     id: String,
 }
 
+// MusicBrainz release lookups for programming details
+// (`inc=labels recordings isrcs genres release-groups`).
+
+/// What MusicBrainz says about a recording on a release.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RecordingDetails {
+    pub album: Option<String>,
+    pub record_label: Option<String>,
+    pub catalog_number: Option<String>,
+    pub isrc: Option<String>,
+    pub first_release_year: Option<u16>,
+    /// Most voted first.
+    pub genres: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbReleaseDetails {
+    title: Option<String>,
+    date: Option<String>,
+    #[serde(rename = "label-info", default)]
+    label_info: Vec<MbLabelInfo>,
+    #[serde(default)]
+    genres: Vec<MbGenre>,
+    #[serde(rename = "release-group")]
+    release_group: Option<MbGroupDetails>,
+    #[serde(default)]
+    media: Vec<MbMediumDetails>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbLabelInfo {
+    #[serde(rename = "catalog-number")]
+    catalog_number: Option<String>,
+    label: Option<MbLabel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbLabel {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbGenre {
+    name: String,
+    #[serde(default)]
+    count: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbGroupDetails {
+    #[serde(rename = "first-release-date")]
+    first_release_date: Option<String>,
+    #[serde(default)]
+    genres: Vec<MbGenre>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbMediumDetails {
+    #[serde(default)]
+    tracks: Vec<MbTrackDetails>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbTrackDetails {
+    recording: MbRecordingDetails,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbRecordingDetails {
+    id: String,
+    #[serde(default)]
+    isrcs: Vec<String>,
+    #[serde(rename = "first-release-date")]
+    first_release_date: Option<String>,
+    #[serde(default)]
+    genres: Vec<MbGenre>,
+}
+
+/// The year a date (`1997-05-21`, `1997`) starts with.
+fn year(date: Option<&str>) -> Option<u16> {
+    let year = date?.get(..4)?;
+    year.bytes()
+        .all(|byte| byte.is_ascii_digit())
+        .then(|| year.parse().ok())
+        .flatten()
+        .filter(|&year| year > 0)
+}
+
+/// Genre names, most voted first, without duplicates.
+fn genre_names<'a>(lists: impl IntoIterator<Item = &'a [MbGenre]>) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for list in lists {
+        let mut list: Vec<&MbGenre> = list.iter().collect();
+        list.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
+        for genre in list {
+            if !names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&genre.name))
+            {
+                names.push(genre.name.clone());
+            }
+        }
+    }
+    names.truncate(10);
+    names
+}
+
+impl MbReleaseDetails {
+    fn recordings(&self) -> HashMap<String, RecordingDetails> {
+        let label = self.label_info.iter().find(|info| info.label.is_some());
+        let group = self.release_group.as_ref();
+        let release_year = year(group.and_then(|group| group.first_release_date.as_deref()))
+            .or_else(|| year(self.date.as_deref()));
+        let empty: &[MbGenre] = &[];
+        self.media
+            .iter()
+            .flat_map(|medium| &medium.tracks)
+            .map(|track| {
+                let recording = &track.recording;
+                let details = RecordingDetails {
+                    album: self.title.as_deref().and_then(heron_library::tags::clean),
+                    record_label: label
+                        .and_then(|info| info.label.as_ref())
+                        .and_then(|label| heron_library::tags::clean(&label.name)),
+                    catalog_number: label
+                        .and_then(|info| info.catalog_number.as_deref())
+                        .and_then(heron_library::tags::clean)
+                        .map(|number| number.chars().take(255).collect()),
+                    isrc: recording
+                        .isrcs
+                        .iter()
+                        .find(|isrc| isrc.len() == 12 && isrc.is_ascii())
+                        .cloned(),
+                    // A recording's first release is earlier than or the
+                    // same as the album's (hits on compilations).
+                    first_release_year: year(recording.first_release_date.as_deref())
+                        .or(release_year),
+                    genres: genre_names([
+                        recording.genres.as_slice(),
+                        self.genres.as_slice(),
+                        group.map_or(empty, |group| group.genres.as_slice()),
+                    ]),
+                };
+                (recording.id.clone(), details)
+            })
+            .collect()
+    }
+}
+
 // MusicBrainz artist lookups (`inc=artist-rels`).
 #[derive(Debug, Deserialize)]
 struct MbArtistRelations {
@@ -616,5 +789,41 @@ impl MbRelease {
                 album_artist: album_artist_id,
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn release_details_by_recording() {
+        let json = r#"{
+            "id": "r1", "title": "Greatest Hits", "date": "2005-03-01",
+            "label-info": [
+                {"catalog-number": null, "label": null},
+                {"catalog-number": "CAT 42", "label": {"name": "Columbia"}}
+            ],
+            "genres": [{"name": "pop", "count": 2}, {"name": "rock", "count": 5}],
+            "release-group": {"first-release-date": "2005", "genres": [{"name": "Rock", "count": 9}]},
+            "media": [{"tracks": [
+                {"recording": {"id": "rec1", "isrcs": ["USRC17607839"],
+                               "first-release-date": "1975-06-01",
+                               "genres": [{"name": "disco", "count": 1}]}},
+                {"recording": {"id": "rec2"}}
+            ]}]
+        }"#;
+        let release: MbReleaseDetails = serde_json::from_str(json).unwrap();
+        let recordings = release.recordings();
+        let first = &recordings["rec1"];
+        assert_eq!(first.album.as_deref(), Some("Greatest Hits"));
+        assert_eq!(first.record_label.as_deref(), Some("Columbia"));
+        assert_eq!(first.catalog_number.as_deref(), Some("CAT 42"));
+        assert_eq!(first.isrc.as_deref(), Some("USRC17607839"));
+        assert_eq!(first.first_release_year, Some(1975));
+        assert_eq!(first.genres, ["disco", "rock", "pop"]);
+        let second = &recordings["rec2"];
+        assert_eq!(second.isrc, None);
+        assert_eq!(second.first_release_year, Some(2005));
     }
 }

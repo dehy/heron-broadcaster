@@ -19,11 +19,15 @@
 //! 4. Remove the original of a copy (`done`).
 //!
 //! Callers hold the [`heron_library::LibraryLock`] around each operation.
+//!
+//! A tag write also records how to rebuild the file as it was
+//! ([`crate::restore`]), so undoing it gives back the same bytes.
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use heron_analysis::Chromaprint;
+use heron_core::library::FieldValues;
 use heron_core::{FileStamp, LibraryPath};
 use heron_library::Tags;
 use heron_library::tags::{self, Cover};
@@ -31,6 +35,7 @@ use serde::Serialize;
 use sqlx::{MySqlPool, Row};
 
 use crate::fsops;
+use crate::restore::{self, Delta};
 
 /// The library and the incoming folder, as mounted in this container.
 #[derive(Clone, Debug)]
@@ -121,9 +126,56 @@ pub struct Identification {
 /// Tags to write, with the ones they replace (kept to undo the change).
 #[derive(Clone, Debug)]
 pub struct Retag {
-    pub previous: Tags,
-    pub applied: Tags,
+    pub change: TagChange,
     pub cover: RetagCover,
+    /// Undoing a change: the file is rebuilt as it was before it, byte for
+    /// byte, instead of having the tags written.
+    pub restore: Option<Box<Delta>>,
+}
+
+// One per file operation: not worth boxing.
+#[allow(clippy::large_enum_variant)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TagChange {
+    /// The tags identification writes ([`Tags`]).
+    Tags { previous: Tags, applied: Tags },
+    /// Fields edited from the browser: only these are written.
+    Fields {
+        previous: FieldValues,
+        applied: FieldValues,
+    },
+}
+
+impl TagChange {
+    /// The value of `track_tag_changes.kind`.
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Tags { .. } => "tags",
+            Self::Fields { .. } => "fields",
+        }
+    }
+
+    /// The `previous` and `applied` columns.
+    fn json(&self) -> (String, String) {
+        let json = |value: Result<String, serde_json::Error>| value.unwrap_or_default();
+        match self {
+            Self::Tags { previous, applied } => (
+                json(serde_json::to_string(previous)),
+                json(serde_json::to_string(applied)),
+            ),
+            Self::Fields { previous, applied } => (
+                json(serde_json::to_string(previous)),
+                json(serde_json::to_string(applied)),
+            ),
+        }
+    }
+
+    fn write(&self, path: &Path, cover: Cover<'_>) -> Result<(), tags::TagError> {
+        match self {
+            Self::Tags { applied, .. } => tags::write(path, applied, cover),
+            Self::Fields { applied, .. } => tags::write_fields(path, applied),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -171,6 +223,8 @@ pub enum BatchKind {
     Undo,
     /// A release picked on the review screen.
     Review,
+    /// Tags edited from the browser.
+    Edit,
 }
 
 impl BatchKind {
@@ -180,6 +234,7 @@ impl BatchKind {
             Self::Organize => "organize",
             Self::Undo => "undo",
             Self::Review => "review",
+            Self::Edit => "edit",
         }
     }
 }
@@ -252,15 +307,16 @@ pub async fn execute(pool: &MySqlPool, roots: &Roots, op: Operation) -> Result<u
     if transferred.is_ok() {
         crash_point("transferred");
     }
+    let read_details = op.retag.is_some() || matches!(op.subject, Subject::New(_));
     match transferred {
         Ok(Transfer::Renamed) => {
-            finish(pool, move_id, track_id, &op.to, &to, applied(&op), "done").await?;
+            finish(pool, move_id, track_id, &op.to, &to, read_details, "done").await?;
         }
         Ok(Transfer::Copied) => {
             if in_place {
-                finish(pool, move_id, track_id, &op.to, &to, applied(&op), "done").await?;
+                finish(pool, move_id, track_id, &op.to, &to, read_details, "done").await?;
             } else {
-                finish(pool, move_id, track_id, &op.to, &to, applied(&op), "moved").await?;
+                finish(pool, move_id, track_id, &op.to, &to, read_details, "moved").await?;
                 crash_point("finished");
                 remove_original(&from)?;
                 crash_point("removed");
@@ -277,10 +333,6 @@ pub async fn execute(pool: &MySqlPool, roots: &Roots, op: Operation) -> Result<u
         fsops::remove_empty_dirs(parent, op.from.root(roots));
     }
     Ok(track_id)
-}
-
-fn applied(op: &Operation) -> Option<&Tags> {
-    op.retag.as_ref().map(|retag| &retag.applied)
 }
 
 /// The hidden file a copy is written to, next to its target.
@@ -362,14 +414,17 @@ async fn record(pool: &MySqlPool, op: &Operation, copy: bool) -> Result<(u64, u6
     };
 
     if let Some(retag) = &op.retag {
+        let (previous, applied) = retag.change.json();
         sqlx::query(
-            "INSERT INTO track_tag_changes (track_id, move_id, previous, applied, cover_embedded)
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO track_tag_changes
+                 (track_id, move_id, kind, previous, applied, cover_embedded)
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(track_id)
         .bind(move_id)
-        .bind(serde_json::to_string(&retag.previous).unwrap_or_default())
-        .bind(serde_json::to_string(&retag.applied).unwrap_or_default())
+        .bind(retag.change.kind())
+        .bind(previous)
+        .bind(applied)
         .bind(matches!(retag.cover, RetagCover::Embed(_)))
         .execute(&mut *tx)
         .await?;
@@ -468,25 +523,20 @@ async fn transfer(
     let temp_abs = temp.resolve(&roots.library);
     let retag = op.retag.clone();
     let (from_owned, temp_owned) = (from.to_path_buf(), temp_abs.clone());
-    let content_hash = blocking(move || -> Result<[u8; 32], OpError> {
-        fsops::copy_verified(&from_owned, &temp_owned)?;
-        if let Some(retag) = &retag {
-            let cover = match &retag.cover {
-                RetagCover::Keep => Cover::Keep,
-                RetagCover::Embed(jpeg) => Cover::Embed(jpeg),
-                RetagCover::Remove => Cover::Remove,
-            };
-            tags::write(&temp_owned, &retag.applied, cover)?;
-            fsops::sync_file(&temp_owned)?;
-        }
-        Ok(fsops::full_hash(&temp_owned)?)
-    })
-    .await?;
+    let (content_hash, delta) =
+        blocking(move || write_copy(&from_owned, &temp_owned, retag.as_ref())).await?;
     sqlx::query("UPDATE library_moves SET content_hash = ? WHERE id = ?")
         .bind(&content_hash[..])
         .bind(move_id)
         .execute(pool)
         .await?;
+    if let Some(delta) = delta {
+        sqlx::query("UPDATE track_tag_changes SET restore = ? WHERE move_id = ?")
+            .bind(delta)
+            .bind(move_id)
+            .execute(pool)
+            .await?;
+    }
 
     // The original changed while it was copied: the copy is not the file.
     if FileStamp::from_metadata(&std::fs::metadata(from)?) != source {
@@ -510,19 +560,88 @@ async fn transfer(
     Ok(Transfer::Copied)
 }
 
-/// Step 3: the track points at the file in place, with its new stamp.
+/// Writes the copy of `from` at `temp`: the file with its new tags, or
+/// rebuilt as it was (undo). Returns the copy's hash, and the delta that
+/// rebuilds `from` from it, when the tags changed and the files are small
+/// enough.
+fn write_copy(
+    from: &Path,
+    temp: &Path,
+    retag: Option<&Retag>,
+) -> Result<([u8; 32], Option<Vec<u8>>), OpError> {
+    let Some(retag) = retag else {
+        return Ok((fsops::copy_verified(from, temp)?, None));
+    };
+    let small = std::fs::metadata(from)?.len() <= restore::MAX_FILE_BYTES;
+    match &retag.restore {
+        Some(delta) => {
+            let current = std::fs::read(from)?;
+            let rebuilt = delta
+                .apply(&current)
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            write_new(temp, &rebuilt)?;
+        }
+        None => {
+            fsops::copy_verified(from, temp)?;
+            let cover = match &retag.cover {
+                RetagCover::Keep => Cover::Keep,
+                RetagCover::Embed(jpeg) => Cover::Embed(jpeg),
+                RetagCover::Remove => Cover::Remove,
+            };
+            retag.change.write(temp, cover)?;
+        }
+    }
+    fsops::sync_file(temp)?;
+    let written = fsops::full_hash(temp)?;
+    let delta = if small && std::fs::metadata(temp)?.len() <= restore::MAX_FILE_BYTES {
+        let (original, new) = (std::fs::read(from)?, std::fs::read(temp)?);
+        let delta = Delta::compute(&original, &new).to_bytes();
+        if delta.len() <= restore::MAX_DELTA_BYTES {
+            Some(delta)
+        } else {
+            tracing::warn!(path = %from.display(), bytes = delta.len(),
+                "the tag change rewrote too much of the file: undoing it will write the tags back");
+            None
+        }
+    } else {
+        None
+    };
+    Ok((written, delta))
+}
+
+/// Writes `bytes` into the new file `path` (which must not exist).
+fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+/// Step 3: the track points at the file in place, with its new stamp, and
+/// the tags and properties read from it when they may have changed.
 async fn finish(
     pool: &MySqlPool,
     move_id: u64,
     track_id: u64,
     to: &LibraryPath,
     to_abs: &Path,
-    applied: Option<&Tags>,
+    read_details: bool,
     status: &str,
 ) -> Result<(), OpError> {
     let stamp = FileStamp::from_metadata(&std::fs::metadata(to_abs)?);
     let path = to_abs.to_path_buf();
     let hash = blocking(move || heron_library::content_hash(&path)).await?;
+    let details = if read_details {
+        let path = to_abs.to_path_buf();
+        let read = blocking(move || Ok::<_, std::io::Error>(tags::read(&path))).await?;
+        read.map_err(|error| tracing::warn!(path = %to, %error, "cannot read the tags back"))
+            .ok()
+    } else {
+        None
+    };
     let mut tx = pool.begin().await?;
     sqlx::query(
         "UPDATE tracks SET path = ?, file_hash = ?, file_size = ?, file_mtime_us = ?,
@@ -536,18 +655,8 @@ async fn finish(
     .bind(track_id)
     .execute(&mut *tx)
     .await?;
-    if let Some(tags) = applied {
-        sqlx::query(
-            "UPDATE tracks SET title = ?, artist = ?, album = ?, musicbrainz_artist_id = ?
-             WHERE id = ?",
-        )
-        .bind(&tags.title)
-        .bind(&tags.artist)
-        .bind(&tags.album)
-        .bind(tags.musicbrainz.first_artist())
-        .bind(track_id)
-        .execute(&mut *tx)
-        .await?;
+    if let Some(details) = &details {
+        heron_library::details::save(&mut *tx, track_id, details).await?;
     }
     sqlx::query("UPDATE library_moves SET status = ?, error = NULL WHERE id = ?")
         .bind(status)
@@ -684,7 +793,7 @@ pub async fn recover(pool: &MySqlPool, roots: &Roots) -> Result<Recovery, OpErro
         let from_abs = origin.resolve(roots);
         let to_abs = to.resolve(&roots.library);
         let in_place = origin == Origin::Library(to.clone());
-        let applied = applied_tags(pool, move_id).await?;
+        let read_details = matches!(origin, Origin::Incoming(_)) || retagged(pool, move_id).await?;
         let matches_copy = |path: &Path| match &content_hash {
             Some(hash) => fsops::full_hash(path).is_ok_and(|actual| actual[..] == hash[..]),
             None => false,
@@ -718,16 +827,7 @@ pub async fn recover(pool: &MySqlPool, roots: &Roots) -> Result<Recovery, OpErro
             (true, Some(track_id)) => {
                 let leftover = !in_place && from_exists;
                 let status = if leftover { "moved" } else { "done" };
-                finish(
-                    pool,
-                    move_id,
-                    track_id,
-                    &to,
-                    &to_abs,
-                    applied.as_ref(),
-                    status,
-                )
-                .await?;
+                finish(pool, move_id, track_id, &to, &to_abs, read_details, status).await?;
                 if leftover {
                     remove_original(&from_abs)?;
                     set_status(pool, move_id, "done", None).await?;
@@ -753,13 +853,14 @@ fn same(a: &Path, b: &Path) -> bool {
     fsops::same_file(a, b).unwrap_or(false)
 }
 
-async fn applied_tags(pool: &MySqlPool, move_id: u64) -> Result<Option<Tags>, sqlx::Error> {
-    let applied: Option<String> =
-        sqlx::query_scalar("SELECT CAST(applied AS CHAR) FROM track_tag_changes WHERE move_id = ?")
+/// Whether the move wrote tags.
+async fn retagged(pool: &MySqlPool, move_id: u64) -> Result<bool, sqlx::Error> {
+    let found: Option<i32> =
+        sqlx::query_scalar("SELECT 1 FROM track_tag_changes WHERE move_id = ?")
             .bind(move_id)
             .fetch_optional(pool)
             .await?;
-    Ok(applied.and_then(|json| serde_json::from_str(&json).ok()))
+    Ok(found.is_some())
 }
 
 /// Runs file I/O on a blocking thread.

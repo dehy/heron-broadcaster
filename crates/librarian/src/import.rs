@@ -25,7 +25,7 @@ use crate::identify::matching::Candidate;
 use crate::identify::{Endpoints, FileToIdentify, Identified, Identifier};
 use crate::journal::{
     self, BatchKind, Identification, IdentificationStatus, NewTrack, OpError, Operation, Origin,
-    Retag, RetagCover, Roots, Subject,
+    Retag, RetagCover, Roots, Subject, TagChange,
 };
 use crate::layout::{FileFacts, Layout};
 use crate::{fsops, organize};
@@ -357,8 +357,11 @@ impl Importer {
                 .and_then(|release| covers.get(release))
                 .filter(|_| settings.embed_cover && !file.read.has_cover);
             let retag = (tags != own || cover.is_some()).then(|| Retag {
-                previous: own.clone(),
-                applied: tags.clone(),
+                change: TagChange::Tags {
+                    previous: own.clone(),
+                    applied: tags.clone(),
+                },
+                restore: None,
                 cover: cover.map_or(RetagCover::Keep, |jpeg| RetagCover::Embed(jpeg.clone())),
             });
 

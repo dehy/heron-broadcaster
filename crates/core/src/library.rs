@@ -30,6 +30,24 @@ pub enum TaskRequest {
     /// Looks up the MusicBrainz relationships between the station's
     /// artists ("member of", "is person", …) and suggests the links.
     ArtistRelations,
+    /// Writes tags into the files of `track_ids`, as one batch: the fields
+    /// of `set` take the same value on every track (`null` removes the
+    /// field), the fields of `from_details` each track's programming
+    /// details (ISRC, record label, BPM, mood). Other fields are kept.
+    EditTags {
+        track_ids: Vec<u64>,
+        #[serde(default)]
+        set: FieldValues,
+        #[serde(default)]
+        from_details: Vec<TagField>,
+    },
+    /// Fetches the programming details of identified tracks from
+    /// MusicBrainz (album, record label, ISRC, first release year, genres):
+    /// every one, or only those never fetched.
+    MusicbrainzDetails {
+        #[serde(default)]
+        all: bool,
+    },
 }
 
 impl TaskRequest {
@@ -41,6 +59,8 @@ impl TaskRequest {
             Self::Undo { .. } => "undo",
             Self::ReviewApply { .. } => "review_apply",
             Self::ArtistRelations => "artist_relations",
+            Self::EditTags { .. } => "edit_tags",
+            Self::MusicbrainzDetails { .. } => "musicbrainz_details",
         }
     }
 }
@@ -220,6 +240,15 @@ mod tests {
         assert_eq!(json["kind"], request.kind());
         let plan: TaskRequest = serde_json::from_str(r#"{"kind": "organize_plan"}"#).unwrap();
         assert_eq!(plan, TaskRequest::OrganizePlan);
+        let edit: TaskRequest = serde_json::from_str(
+            r#"{"kind": "edit_tags", "track_ids": [1], "set": {"genre": "Jazz", "year": null}}"#,
+        )
+        .unwrap();
+        let TaskRequest::EditTags { set, .. } = edit else {
+            panic!("{edit:?}");
+        };
+        assert_eq!(set[&TagField::Genre].as_deref(), Some("Jazz"));
+        assert_eq!(set[&TagField::Year], None);
     }
 
     #[test]
