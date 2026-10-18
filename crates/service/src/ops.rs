@@ -36,9 +36,18 @@ impl HealthCheck for AlwaysHealthy {
     }
 }
 
-/// Installs the Prometheus recorder and records `heron_build_info`.
-pub fn install_metrics(service: &'static str) -> Result<PrometheusHandle, Error> {
+/// Installs the Prometheus recorder, records `heron_build_info` and, when
+/// configured, starts pushing the metrics with remote write (a bad remote
+/// write configuration is logged, not fatal). Call it from the Tokio runtime.
+pub fn install_metrics(
+    service: &'static str,
+    remote_write: &crate::MetricsArgs,
+) -> Result<PrometheusHandle, Error> {
     let handle = PrometheusBuilder::new().install_recorder()?;
+    // Monitoring must never keep a service (the engine above all) from running.
+    if let Err(error) = crate::remote_write::spawn(handle.clone(), service, remote_write) {
+        tracing::error!(%error, "metrics are not pushed");
+    }
     metrics::gauge!(
         "heron_build_info",
         "service" => service,

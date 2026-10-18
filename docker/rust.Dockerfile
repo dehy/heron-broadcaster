@@ -24,7 +24,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM debian:trixie-slim AS runtime
 LABEL org.opencontainers.image.source="https://github.com/dehy/heron-broadcaster" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later"
-RUN useradd --system --uid 10001 --user-group --no-create-home heron
+# CA certificates for HTTPS: Sentry and metrics remote write in every
+# service; AcoustID, MusicBrainz and the Cover Art Archive in the librarian.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --user-group --no-create-home heron
 USER heron
 
 FROM runtime AS heron-engine
@@ -56,12 +61,6 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=3 \
 ENTRYPOINT ["heron-analyzer"]
 
 FROM runtime AS heron-librarian
-# CA certificates for AcoustID, MusicBrainz and the Cover Art Archive (HTTPS).
-USER root
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-USER heron
 COPY --from=builder /out/heron-librarian /usr/local/bin/heron-librarian
 ENV HERON_HTTP_ADDR=0.0.0.0:8083
 EXPOSE 8083

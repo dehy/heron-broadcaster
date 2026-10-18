@@ -64,14 +64,22 @@ pub struct Telemetry {
 
 /// Installs the global `tracing` subscriber, and Sentry when configured.
 pub fn init_tracing(args: &LogArgs, service: &'static str) -> Result<Telemetry, Error> {
+    // A bad DSN is logged once logging works, never fatal: error reporting
+    // must not keep a service (the engine above all) from running.
+    let mut invalid_dsn = None;
     let sentry = args
         .sentry_dsn
         .as_deref()
-        .filter(|dsn| !dsn.trim().is_empty())
-        .map(|dsn| -> Result<_, Error> {
-            let dsn = dsn
-                .parse::<sentry::types::Dsn>()
-                .map_err(|error| Error::Tracing(format!("invalid HERON_SENTRY_DSN: {error}")))?;
+        .map(str::trim)
+        .filter(|dsn| !dsn.is_empty())
+        .and_then(|dsn| match dsn.parse::<sentry::types::Dsn>() {
+            Ok(dsn) => Some(dsn),
+            Err(error) => {
+                invalid_dsn = Some(error.to_string());
+                None
+            }
+        })
+        .map(|dsn| {
             let mut options = sentry::ClientOptions::new()
                 .release(format!("{service}@{}", env!("CARGO_PKG_VERSION")))
                 .environment(args.sentry_environment.clone())
@@ -84,9 +92,8 @@ pub fn init_tracing(args: &LogArgs, service: &'static str) -> Result<Telemetry, 
             }
             let guard = sentry::init(options);
             sentry::configure_scope(|scope| scope.set_tag("service", service));
-            Ok(guard)
-        })
-        .transpose()?;
+            guard
+        });
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let output = match args.log_format {
@@ -104,6 +111,9 @@ pub fn init_tracing(args: &LogArgs, service: &'static str) -> Result<Telemetry, 
         .map_err(|error| Error::Tracing(error.to_string()))?;
     if sentry.is_some() {
         tracing::info!(environment = %args.sentry_environment, "reporting errors to Sentry");
+    }
+    if let Some(error) = invalid_dsn {
+        tracing::error!(%error, "invalid HERON_SENTRY_DSN: errors are not reported to Sentry");
     }
     Ok(Telemetry { _sentry: sentry })
 }
