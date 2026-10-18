@@ -18,6 +18,8 @@ use prost::Message;
 
 use crate::Error;
 
+const DEFAULT_INTERVAL: Duration = Duration::from_secs(15);
+
 /// Remote write options shared by every binary.
 #[derive(Clone, clap::Args)]
 pub struct MetricsArgs {
@@ -41,14 +43,14 @@ pub struct MetricsArgs {
     )]
     pub remote_write_password: Option<String>,
 
-    /// Seconds between pushes.
+    /// Seconds between pushes. Read leniently: an invalid value means 15.
     #[arg(
         long,
         env = "HERON_METRICS_REMOTE_WRITE_INTERVAL",
-        default_value_t = 15,
+        default_value = "15",
         global = true
     )]
-    pub remote_write_interval: u64,
+    pub remote_write_interval: String,
 
     /// Name of the station: the `station` label of the metrics pushed.
     #[arg(
@@ -126,7 +128,16 @@ pub fn spawn(
     let url = reqwest::Url::parse(url)
         .map_err(|error| Error::RemoteWrite(format!("invalid URL: {error}")))?;
     let host = url.host_str().unwrap_or_default().to_owned();
-    let interval = Duration::from_secs(args.remote_write_interval.max(1));
+    let interval = match args.remote_write_interval.trim().parse::<u64>() {
+        Ok(seconds) if seconds > 0 => Duration::from_secs(seconds),
+        _ => {
+            tracing::error!(
+                value = %args.remote_write_interval,
+                "invalid HERON_METRICS_REMOTE_WRITE_INTERVAL (whole seconds): using 15"
+            );
+            DEFAULT_INTERVAL
+        }
+    };
     let client = reqwest::Client::builder()
         .timeout(interval.min(Duration::from_secs(10)))
         .user_agent(concat!("heron/", env!("CARGO_PKG_VERSION")))

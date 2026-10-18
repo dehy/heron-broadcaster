@@ -27,6 +27,24 @@ pub fn lower_current_thread(nice: i32) -> Result<(), String> {
     imp::lower(nice.min(19))
 }
 
+/// Like [`lower_current_thread`], from a setting (`HERON_NICE`) read
+/// leniently: a value that is not a niceness from 0 to 19 is reported and
+/// [`BACKGROUND_NICE`] used instead.
+pub fn lower_current_thread_to(setting: &str) -> Result<(), String> {
+    match setting.trim().parse::<i32>() {
+        Ok(nice) if (0..=19).contains(&nice) => lower_current_thread(nice),
+        _ => {
+            let lowered = lower_current_thread(BACKGROUND_NICE);
+            let invalid =
+                format!("invalid HERON_NICE {setting:?} (0 to 19): using {BACKGROUND_NICE}");
+            Err(match lowered {
+                Ok(()) => invalid,
+                Err(error) => format!("{invalid}; {error}"),
+            })
+        }
+    }
+}
+
 /// The calling thread's niceness, `None` off Linux.
 pub fn current_nice() -> Option<i32> {
     imp::current_nice()

@@ -56,13 +56,8 @@ struct Cli {
 
     /// Niceness, 0 to 19 (0 leaves it as is). The workers yield the CPU and
     /// the disk to the engine; they also get the lowest best-effort I/O priority.
-    #[arg(
-        long,
-        env = "HERON_NICE",
-        default_value_t = heron_service::priority::BACKGROUND_NICE,
-        global = true
-    )]
-    nice: i32,
+    #[arg(long, env = "HERON_NICE", default_value = "10", global = true)]
+    nice: String,
 
     #[command(flatten)]
     log: LogArgs,
@@ -86,7 +81,7 @@ fn main() -> anyhow::Result<()> {
         }
         None => {
             // Before the runtime starts: its threads inherit the priority.
-            let lowered = heron_service::priority::lower_current_thread(cli.nice);
+            let lowered = heron_service::priority::lower_current_thread_to(&cli.nice);
             run(cli, lowered)
         }
     }
@@ -99,7 +94,9 @@ async fn run(cli: Cli, lowered: Result<(), String>) -> anyhow::Result<()> {
         Ok(()) => {
             tracing::info!(nice = ?heron_service::priority::current_nice(), "priority lowered")
         }
-        Err(error) => tracing::warn!(%error, "cannot lower the priority"),
+        Err(problem) => {
+            tracing::warn!(nice = ?heron_service::priority::current_nice(), "priority: {problem}")
+        }
     }
     let metrics = heron_service::ops::install_metrics(SERVICE, &cli.metrics)?;
     let database_url = cli
