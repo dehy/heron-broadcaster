@@ -38,7 +38,7 @@ const CHUNK: usize = 1_000;
 
 /// Some tracks: these IDs, or every track matching the filters.
 #[derive(Clone, Debug, Default, Deserialize, ToSchema)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct TrackSelection {
     pub track_ids: Option<Vec<u64>>,
     /// The filters of `GET /tracks` (sorting and pages aside).
@@ -375,7 +375,7 @@ pub struct TagEdit {
     /// Fields set to the same value on every track; `null` removes the
     /// field. Fields left out keep each track's value.
     #[serde(default)]
-    #[schema(value_type = Object)]
+    #[schema(value_type = std::collections::HashMap<String, Option<String>>)]
     pub set: FieldValues,
     /// Programming details written from each track's own values (ISRC,
     /// record label, BPM, mood); tracks without the value keep the file's.

@@ -37,6 +37,7 @@ pub enum TaskRequest {
     EditTags {
         track_ids: Vec<u64>,
         #[serde(default)]
+        #[cfg_attr(feature = "openapi", schema(value_type = std::collections::HashMap<String, Option<String>>))]
         set: FieldValues,
         #[serde(default)]
         from_details: Vec<TagField>,

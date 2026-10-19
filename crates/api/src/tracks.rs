@@ -83,7 +83,7 @@ pub enum TrackSort {
 /// Which tracks: the filters of `GET /tracks`, also used to select tracks
 /// for the actions on a selection. Lists of IDs are comma-separated.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, IntoParams, ToSchema)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct TrackQuery {
     /// Words found in the title, artist, album, album artist, genre or path.
@@ -123,7 +123,7 @@ pub struct TrackQuery {
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema, sqlx::FromRow)]
-pub struct TrackLabel {
+pub struct LabelRef {
     pub id: u64,
     pub name: String,
     pub color: Option<String>,
@@ -165,7 +165,7 @@ pub struct TrackSummary {
     pub mood: Option<String>,
     pub sound_code: Option<String>,
     #[sqlx(skip)]
-    pub labels: Vec<TrackLabel>,
+    pub labels: Vec<LabelRef>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -536,13 +536,13 @@ async fn add_labels(pool: &sqlx::MySqlPool, tracks: &mut [TrackSummary]) -> ApiR
     query.push(") ORDER BY l.name");
     let rows: Vec<(u64, u64, String, Option<String>)> =
         query.build_query_as().fetch_all(pool).await?;
-    let mut by_track: std::collections::HashMap<u64, Vec<TrackLabel>> =
+    let mut by_track: std::collections::HashMap<u64, Vec<LabelRef>> =
         std::collections::HashMap::new();
     for (track_id, id, name, color) in rows {
         by_track
             .entry(track_id)
             .or_default()
-            .push(TrackLabel { id, name, color });
+            .push(LabelRef { id, name, color });
     }
     for track in tracks {
         track.labels = by_track.remove(&track.id).unwrap_or_default();
