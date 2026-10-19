@@ -861,6 +861,27 @@ async fn web_ui_routes() {
     assert_eq!(admin.get("/auth/me").await["theme"], "dark");
     assert_eq!(viewer.get("/auth/me").await["theme"], "system");
 
+    // And the language: changing one preference keeps the other.
+    assert_eq!(me["language"], "system");
+    let (status, me) = admin
+        .send(Method::PUT, "/auth/preferences", json!({"language": "fr"}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(
+        (&me["language"], &me["theme"]),
+        (&json!("fr"), &json!("dark"))
+    );
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/auth/preferences",
+            json!({"language": "French"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(admin.get("/auth/me").await["language"], "fr");
+    assert_eq!(viewer.get("/auth/me").await["language"], "system");
+
     // The server clock, for the dashboard.
     let status = station.client().get("/status").await;
     assert!(status["clock"].is_object());

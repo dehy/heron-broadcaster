@@ -125,7 +125,7 @@ See [M7b](roadmap/m7b-listener-statistics.md). Sketch, defined with that milesto
 |---|---|
 | `webhooks` | to be defined |
 | `webhook_deliveries` | to be defined |
-| `users` | id, username, password_hash (Argon2id), role (viewer, operator, admin), enabled, theme (system, light, dark: the web UI's), last_login_at, created_at, updated_at |
+| `users` | id, username, password_hash (Argon2id), role (viewer, operator, admin), enabled, theme (system, light, dark: the web UI's), language (system or a language tag: the web UI's), last_login_at, created_at, updated_at |
 | `sessions` | token_hash (BLAKE3 of the cookie's token), user_id, created_at, last_seen_at, expires_at (30 days after the last use) |
 | `api_tokens` | id, user_id, name, token_hash, created_at, last_used_at, expires_at, revoked_at |
 

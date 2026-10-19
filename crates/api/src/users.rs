@@ -42,6 +42,9 @@ pub struct User {
     pub role: Role,
     pub enabled: bool,
     pub theme: Theme,
+    /// The web UI's language: a language tag (`en`, `fr`…), or `system` to
+    /// follow the browser's languages.
+    pub language: String,
     pub last_login_at_unix_ms: Option<i64>,
     pub created_at_unix_ms: i64,
 }
@@ -75,19 +78,21 @@ impl Theme {
     }
 }
 
-type UserRow = (u64, String, String, bool, String, Option<i64>, i64);
+type UserRow = (u64, String, String, bool, String, String, Option<i64>, i64);
 
-const USER_COLUMNS: &str = "id, username, CAST(role AS CHAR), enabled, CAST(theme AS CHAR),
+const USER_COLUMNS: &str =
+    "id, username, CAST(role AS CHAR), enabled, CAST(theme AS CHAR), language,
     CAST(UNIX_TIMESTAMP(last_login_at) * 1000 AS SIGNED),
     CAST(UNIX_TIMESTAMP(created_at) * 1000 AS SIGNED)";
 
-fn user((id, username, role, enabled, theme, last_login, created): UserRow) -> User {
+fn user((id, username, role, enabled, theme, language, last_login, created): UserRow) -> User {
     User {
         id,
         username,
         role: Role::parse(&role).unwrap_or(Role::Viewer),
         enabled,
         theme: Theme::parse(&theme),
+        language,
         last_login_at_unix_ms: last_login,
         created_at_unix_ms: created,
     }
@@ -240,13 +245,41 @@ async fn me(user: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<
     Ok(Json(find_user(&state.pool, user.id).await?))
 }
 
+/// What to change; what is left out stays as it is.
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
-    pub theme: Theme,
+    #[serde(default)]
+    pub theme: Option<Theme>,
+    /// A language tag (`en`, `fr`…) or `system`. The API does not know which
+    /// languages the web UI has: it falls back on the browser's for one it
+    /// lacks.
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
-/// Saves your preferences: the web UI's theme.
+/// `system`, or a language tag: a 2 or 3 letter language and optional
+/// subtags (`fr`, `pt-BR`), up to 16 characters.
+fn check_language(language: &str) -> ApiResult<()> {
+    let mut parts = language.split('-');
+    let primary = parts.next().unwrap_or_default();
+    let valid = language == "system"
+        || (language.len() <= 16
+            && (2..=3).contains(&primary.len())
+            && primary.chars().all(|c| c.is_ascii_lowercase())
+            && parts.all(|part| {
+                (1..=8).contains(&part.len()) && part.chars().all(|c| c.is_ascii_alphanumeric())
+            }));
+    if valid {
+        Ok(())
+    } else {
+        Err(ApiError::Invalid(format!(
+            "unknown language {language:?}: use `system` or a language tag such as `en` or `fr`"
+        )))
+    }
+}
+
+/// Saves your preferences: the web UI's theme and language.
 #[utoipa::path(put, path = "/auth/preferences", tag = "auth",
     request_body = Preferences,
     responses((status = 200, body = User), (status = "4XX", body = ErrorBody)))]
@@ -255,11 +288,18 @@ async fn set_preferences(
     State(state): State<AppState>,
     Json(preferences): Json<Preferences>,
 ) -> ApiResult<Json<User>> {
-    sqlx::query("UPDATE users SET theme = ? WHERE id = ?")
-        .bind(preferences.theme.as_str())
-        .bind(user.id)
-        .execute(&state.pool)
-        .await?;
+    if let Some(language) = &preferences.language {
+        check_language(language)?;
+    }
+    sqlx::query(
+        "UPDATE users SET theme = COALESCE(?, theme), language = COALESCE(?, language)
+         WHERE id = ?",
+    )
+    .bind(preferences.theme.map(Theme::as_str))
+    .bind(preferences.language)
+    .bind(user.id)
+    .execute(&state.pool)
+    .await?;
     Ok(Json(find_user(&state.pool, user.id).await?))
 }
 
@@ -556,6 +596,30 @@ pub async fn purge_sessions(pool: MySqlPool) {
             Ok(0) => {}
             Ok(purged) => tracing::debug!(purged, "expired sessions removed"),
             Err(error) => tracing::warn!(%error, "cannot remove expired sessions"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn languages_are_tags() {
+        for language in ["system", "en", "fr", "pt-BR", "zh-Hant-TW", "gsw"] {
+            assert!(check_language(language).is_ok(), "{language}");
+        }
+        for language in [
+            "",
+            "e",
+            "EN",
+            "fr_FR",
+            "french",
+            "fr-",
+            "en-abcdefghi",
+            "a-b-c-d-e-f-g-h",
+        ] {
+            assert!(check_language(language).is_err(), "{language}");
         }
     }
 }
