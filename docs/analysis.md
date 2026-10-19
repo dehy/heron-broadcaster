@@ -17,12 +17,13 @@ The scanner runs inside `heron-api`:
 - **When:** at startup, after file system events (debounced 5 s), and every `HERON_SCAN_INTERVAL` seconds (default 3600) as a safety net for file systems that do not report changes (NFS, SMB). Set `HERON_LIBRARY_WATCH=false` where watching does not work.
 - **What it picks up:** `mp3 m4a mp4 aac flac ogg oga opus wav aif aiff`, case-insensitive. Hidden files and folders are skipped, including macOS `._` resource forks.
 - **Change detection:** each track stores the file's size and mtime. An unchanged file is not opened again, so rescanning 1,000 unchanged tracks takes under 100 ms locally.
-- **New or changed files:** the scanner reads the tags (title, artist, album, duration, via `lofty`) and a **content hash**: BLAKE3 of the size plus the first and last 64 KiB. Reading whole files would double the I/O of an import, which hurts on network shares.
+- **New or changed files:** the scanner reads the tags (title, artist, album, album artist, genre, year, track and disc numbers, MusicBrainz recording and release, duration, via `lofty`), the audio properties (codec, bitrate, CBR or VBR from the MP3 frame headers, lossless formats as such; sample rate, channels) and a **content hash**: BLAKE3 of the size plus the first and last 64 KiB. Reading whole files would double the I/O of an import, which hurts on network shares.
 - **Files still being copied:** files modified less than `HERON_IMPORT_SETTLE` seconds ago (default 5) are left for the next scan.
 - **Moves and renames:** a new path whose content hash matches a track that vanished is treated as a move. The track keeps its ID, categories, history and analysis.
 - **Deleted files:** the track is marked `missing_since` and keeps its categories and history. It comes back if the file reappears. If the library directory is empty while tracks are known, nothing is marked missing: an unmounted volume must not "lose" the library.
 - **Paths** are stored relative to the library root with `/` separators, so every service can mount the library wherever it likes.
 - **Changed files** lose their analysis and are analyzed again.
+- **Tracks scanned by an older scanner** (`details_version`) are read again at the next scan for the details it did not read (bitrate, genre, …), without being analyzed again.
 - **Files written by the librarian** (moved or re-tagged) are found unchanged: it records their new path and stamp itself. A scan holds the library lock, so it never runs in the middle of a move, and it skips files of a move a crashed librarian has not finished. See [Library management](library.md#coordination-with-the-scanner).
 
 After (and during) a scan, every present track whose analysis is missing, made by another algorithm version, or made with other settings, is queued.
@@ -73,8 +74,19 @@ Audio is measured in **5 ms frames** (RMS of all channels), which is the time re
 | `cue_out_ms` | End of the last non-silent frame, ignoring blips, or the start of a long internal silence |
 | `has_internal_silence` | A silence longer than `max_internal_silence_ms` ends the track there (hidden tracks) |
 | `fade_out_start_ms` | Crossfade point, see below |
+| `bpm` | Tempo, see below |
 
 A track with no audible content has `cue_out_ms <= cue_in_ms` and is never played.
+
+### Tempo
+
+The tempo (BPM) is measured with the rest, on the whole track:
+
+1. Every 10 ms, the spectral flux: how much louder each frequency got since the previous frame, on a log scale, against the loudest neighbouring frequency of that frame (SuperFlux), so steady tones count for nothing. Summed over the whole spectrum, where hi-hats dominate, and over the bass (below 200 Hz), where kick drums and bass lines mark the beat; each relative to its mean, smoothed over 50 ms.
+2. The autocorrelation of that onset curve: a steady beat repeats every beat period.
+3. The tempo between 60 and 200 BPM (0.05 BPM steps) whose beat and its multiples (two to four beats, counting less) repeat best, weighted towards 120 BPM, which settles most half or double tempo doubts.
+
+Tracks shorter than 10 s, or whose onsets do not repeat (at the beat, at least 0.2 of their energy; drum patterns reach 0.75 and more), get no tempo rather than a wrong one. Generated drum patterns from 72 to 150 BPM are measured within 0.5 %; outside that range, a pattern repeating every two beats (a backbeat) can be measured at half or double tempo. Programmers correct it by hand: the tempo set by hand replaces the measured one.
 
 ### What counts as silence
 

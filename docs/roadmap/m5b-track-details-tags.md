@@ -41,10 +41,19 @@ What music schedulers sort and separate by, filled in from where each one is rel
 
 ## Acceptance criteria
 
-- [ ] The library sorts and filters by date added, last played, play count and bitrate; the counts match the play history (skipped plays under the threshold excluded).
-- [ ] Identified tracks get their album, label, ISRC, first release year and era from MusicBrainz; BPM is measured within 2 % on test tracks of known tempo; mood and sound code are set on a selection in one action.
-- [ ] A label is added to and removed from 1,000 selected tracks in one action, and the library filters by labels combined with its other filters.
-- [ ] Tags edited on a selection are written to the files and undone byte for byte; the tracks keep their ID, analysis, categories and history.
+- [x] The library sorts and filters by date added, last played, play count and bitrate; the counts match the play history (skipped plays under the threshold excluded).
+- [x] Identified tracks get their album, label, ISRC, first release year and era from MusicBrainz; BPM is measured within 2 % on test tracks of known tempo; mood and sound code are set on a selection in one action.
+- [x] A label is added to and removed from 1,000 selected tracks in one action, and the library filters by labels combined with its other filters.
+- [x] Tags edited on a selection are written to the files and undone byte for byte; the tracks keep their ID, analysis, categories and history.
+
+## Notes
+
+- The date added is when the scanner first found the file (`tracks.created_at`).
+- "Not played for N days" includes tracks never played.
+- The year of first release comes from MusicBrainz, else the year tag, so unidentified tracks get an era too.
+- Programming details are written into the files on request, from the tag editor ("also write each track's programming details"), not on every change.
+- Tempos are measured within 0.5 % on generated drum patterns from 72 to 150 BPM; beyond, a backbeat can give half or double the tempo, corrected by hand. Audio whose onsets do not repeat gets no tempo.
+- MusicBrainz details were tried on a real release (kept as a fixture); the lookups themselves are tested against a mock of MusicBrainz.
 
 ## References
 

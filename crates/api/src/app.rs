@@ -27,8 +27,8 @@ use crate::library::{Library, LibraryStatus};
 use crate::queue::QueueManager;
 use crate::sync::ConfigSync;
 use crate::{
-    artists, categories, clocks, history, librarian, live, outputs, player, restrictions, rotation,
-    settings, tracks, users,
+    artists, categories, clocks, history, labels, librarian, live, outputs, player, restrictions,
+    rotation, selection, settings, tracks, users,
 };
 
 pub const SERVICE: &str = "heron-api";
@@ -64,6 +64,7 @@ pub struct AppState {
         (name = "queue", description = "The tracks waiting to play"),
         (name = "library", description = "Tracks, their analysis and overrides; review, organization and undo through heron-librarian"),
         (name = "categories", description = "Groups of tracks"),
+        (name = "labels", description = "Keywords on tracks, to sort the library"),
         (name = "artists", description = "Artists, their names and similar artists"),
         (name = "rotation", description = "Clocks, the schedule, restrictions, the selection log and simulations"),
         (name = "history", description = "What was played"),
@@ -97,6 +98,8 @@ fn api() -> OpenApiRouter<AppState> {
         .merge(users::router())
         .merge(player::router())
         .merge(tracks::router())
+        .merge(selection::router())
+        .merge(labels::router())
         .merge(librarian::router())
         .merge(categories::router())
         .merge(artists::router())

@@ -8,18 +8,20 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use heron_core::LibraryPath;
-use heron_core::library::{BatchReport, OrganizePlan, PlannedMove, SkippedFile};
+use heron_core::library::{BatchReport, FieldValues, OrganizePlan, PlannedMove, SkippedFile};
 use heron_library::tags;
 use heron_library::{LibraryLock, Tags};
 use sqlx::{MySqlPool, Row};
 
+use crate::fsops;
 use crate::journal::{
-    self, BatchKind, OpError, Operation, Origin, Retag, RetagCover, Roots, Subject,
+    self, BatchKind, OpError, Operation, Origin, Retag, RetagCover, Roots, Subject, TagChange,
 };
 use crate::layout::{self, FileFacts, Layout};
+use crate::restore::Delta;
 
 /// Operations run per library lock, so scans can run in between.
-const LOCK_CHUNK: usize = 50;
+pub(crate) const LOCK_CHUNK: usize = 50;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -186,7 +188,7 @@ pub async fn apply(pool: &MySqlPool, roots: &Roots, plan: &Plan) -> Result<Repor
     Ok(report)
 }
 
-fn record_outcome(
+pub(crate) fn record_outcome(
     report: &mut Report,
     path: &str,
     outcome: Result<u64, OpError>,
@@ -232,8 +234,9 @@ pub async fn undo(pool: &MySqlPool, roots: &Roots, batch: u64) -> Result<Report,
 
     let rows = sqlx::query(
         "SELECT m.id, m.track_id, CAST(m.from_root AS CHAR) AS from_root, m.from_path,
-                m.to_path, t.path AS current_path, c.id AS change_id,
-                CAST(c.previous AS CHAR) AS previous, c.cover_embedded
+                m.to_path, m.content_hash, t.path AS current_path, c.id AS change_id,
+                CAST(c.kind AS CHAR) AS kind, CAST(c.previous AS CHAR) AS previous,
+                c.cover_embedded, c.restore
          FROM library_moves m
          JOIN tracks t ON t.id = m.track_id
          LEFT JOIN track_tag_changes c ON c.move_id = m.id AND c.undone_at IS NULL
@@ -272,22 +275,15 @@ pub async fn undo(pool: &MySqlPool, roots: &Roots, batch: u64) -> Result<Report,
             let retag = match change_id {
                 None => None,
                 Some(_) => {
-                    let previous: String = row.try_get("previous")?;
-                    let cover_embedded: bool = row.try_get("cover_embedded")?;
-                    let now = tags::read(&current.resolve(&roots.library))
-                        .map(|read| read.tags)
-                        .unwrap_or_default();
-                    let previous: Tags = serde_json::from_str(&previous).unwrap_or_default();
-                    // Done already, by an undo interrupted before recording it.
-                    (now != previous).then_some(Retag {
-                        previous: now,
-                        applied: previous,
-                        cover: if cover_embedded {
-                            RetagCover::Remove
-                        } else {
-                            RetagCover::Keep
-                        },
-                    })
+                    let change = RecordedChange {
+                        kind: row.try_get("kind")?,
+                        previous: row.try_get("previous")?,
+                        cover_embedded: row.try_get("cover_embedded")?,
+                        restore: row.try_get("restore")?,
+                        written: row.try_get("content_hash")?,
+                    };
+                    let path = current.resolve(&roots.library);
+                    tokio::task::spawn_blocking(move || change.undo(&path)).await?
                 }
             };
             let outcome = if to == current && retag.is_none() {
@@ -342,6 +338,74 @@ pub async fn undo(pool: &MySqlPool, roots: &Roots, batch: u64) -> Result<Report,
         "batch undone"
     );
     Ok(report)
+}
+
+/// A tag change as recorded, to undo it.
+struct RecordedChange {
+    kind: String,
+    previous: String,
+    cover_embedded: bool,
+    restore: Option<Vec<u8>>,
+    /// Hash of the file the change wrote.
+    written: Option<Vec<u8>>,
+}
+
+impl RecordedChange {
+    /// What undoing the change writes into the file at `path`: the file as
+    /// it was, byte for byte, when it is still the one the change wrote;
+    /// otherwise the previous tags. `None` when it is undone already.
+    fn undo(self, path: &Path) -> Option<Retag> {
+        let delta = self
+            .restore
+            .as_deref()
+            .and_then(|bytes| Delta::from_bytes(bytes).ok());
+        let change = if self.kind == "fields" {
+            let previous: FieldValues = serde_json::from_str(&self.previous).unwrap_or_default();
+            let now = tags::read_fields(path, previous.keys().copied()).unwrap_or_default();
+            TagChange::Fields {
+                previous: now,
+                applied: previous,
+            }
+        } else {
+            let previous: Tags = serde_json::from_str(&self.previous).unwrap_or_default();
+            let now = tags::read(path).map(|read| read.tags).unwrap_or_default();
+            TagChange::Tags {
+                previous: now,
+                applied: previous,
+            }
+        };
+        if let Some(delta) = delta
+            && let Ok(hash) = fsops::full_hash(path)
+        {
+            // Done already, by an undo interrupted before recording it.
+            if hash == delta.original_hash() {
+                return None;
+            }
+            if self.written.as_deref() == Some(&hash[..]) {
+                return Some(Retag {
+                    change,
+                    cover: RetagCover::Keep,
+                    restore: Some(Box::new(delta)),
+                });
+            }
+        }
+        // Changed again since (or recorded before M5b): the previous tags
+        // are written back, which may not give the same bytes.
+        let done = match &change {
+            TagChange::Tags { previous, applied } => previous == applied,
+            TagChange::Fields { previous, applied } => previous == applied,
+        };
+        let cover = if self.cover_embedded {
+            RetagCover::Remove
+        } else {
+            RetagCover::Keep
+        };
+        (!done).then_some(Retag {
+            change,
+            cover,
+            restore: None,
+        })
+    }
 }
 
 #[cfg(test)]

@@ -1115,6 +1115,7 @@ dependencies = [
  "heron-core",
  "heron-service",
  "hound",
+ "realfft",
  "rusty-chromaprint",
  "serde_json",
  "sqlx",

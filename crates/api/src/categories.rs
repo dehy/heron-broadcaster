@@ -78,18 +78,22 @@ impl CategoryInput {
                 "names are 1 to 255 characters".to_owned(),
             ));
         }
-        let color = match self.color.as_deref().map(str::trim) {
-            None | Some("") => None,
-            Some(color)
-                if color.len() == 7
-                    && color.starts_with('#')
-                    && color[1..].chars().all(|c| c.is_ascii_hexdigit()) =>
-            {
-                Some(color.to_ascii_lowercase())
-            }
-            Some(_) => return Err(ApiError::Invalid("colors are written #rrggbb".to_owned())),
-        };
-        Ok((name.to_owned(), color))
+        Ok((name.to_owned(), check_color(self.color.as_deref())?))
+    }
+}
+
+/// A color as stored: `#rrggbb`, or none.
+pub fn check_color(color: Option<&str>) -> ApiResult<Option<String>> {
+    match color.map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(color)
+            if color.len() == 7
+                && color.starts_with('#')
+                && color[1..].chars().all(|c| c.is_ascii_hexdigit()) =>
+        {
+            Ok(Some(color.to_ascii_lowercase()))
+        }
+        Some(_) => Err(ApiError::Invalid("colors are written #rrggbb".to_owned())),
     }
 }
 

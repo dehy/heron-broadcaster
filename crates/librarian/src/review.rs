@@ -15,7 +15,7 @@ use heron_library::{LibraryLock, Tags};
 use crate::identify::{Identifier, IdentifyError};
 use crate::import;
 use crate::journal::{
-    self, BatchKind, OpError, Operation, Origin, Retag, RetagCover, Roots, Subject,
+    self, BatchKind, OpError, Operation, Origin, Retag, RetagCover, Roots, Subject, TagChange,
 };
 use crate::layout::{FileFacts, Layout};
 use crate::organize;
@@ -109,8 +109,11 @@ pub async fn apply(
         .as_ref()
         .filter(|_| settings.embed_cover && !read.has_cover);
     let retag = (applied != own || embed.is_some()).then(|| Retag {
-        previous: own.clone(),
-        applied: applied.clone(),
+        change: TagChange::Tags {
+            previous: own.clone(),
+            applied: applied.clone(),
+        },
+        restore: None,
         cover: embed.map_or(RetagCover::Keep, |jpeg| RetagCover::Embed(jpeg.clone())),
     });
 

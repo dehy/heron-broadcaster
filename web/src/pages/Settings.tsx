@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Station settings: autofill, rotation, time zone, analysis and library
-// management.
+// Station settings: autofill, rotation, time zone, programming details,
+// analysis and library management.
 
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { type Schemas, api, unwrap } from "../api";
-import { Card, ErrorView, Field, Loading, NumberInput, PageHead } from "../components/ui";
-import { type PlainKey, rich, t } from "../i18n";
+import { Card, ErrorView, Field, Icon, Loading, NumberInput, PageHead } from "../components/ui";
+import { type PlainKey, number, rich, t } from "../i18n";
 import { WINDOW_FIELDS } from "../lib/rotation";
 import { Link } from "../lib/router";
 import { useCategories } from "./Clocks";
@@ -20,6 +20,7 @@ export function Settings() {
       <QueueCard />
       <RotationCard />
       <StationCard />
+      <ProgrammingCard />
       <LibraryCard />
       <AnalysisCard />
     </>
@@ -281,6 +282,217 @@ function StationCard() {
         </Field>
       )}
     </SettingsCard>
+  );
+}
+
+/** A scale typed as `soft, medium, hard`. */
+function ScaleInput({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string[];
+  onChange: (value: string[]) => void;
+  disabled: boolean;
+}) {
+  const [text, setText] = useState(value.join(", "));
+  useEffect(() => {
+    setText((current) => (split(current).join(",") === value.join(",") ? current : value.join(", ")));
+  }, [value]);
+  return (
+    <input
+      className="input"
+      value={text}
+      disabled={disabled}
+      onChange={(event) => {
+        setText(event.target.value);
+        onChange(split(event.target.value));
+      }}
+    />
+  );
+}
+
+function split(text: string): string[] {
+  return text
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function ProgrammingCard() {
+  const canEdit = useCan("operator");
+  const settings = useQuery({
+    queryKey: ["settings", "programming"],
+    queryFn: () => unwrap(api.GET("/api/v1/settings/programming")),
+  });
+  const save = useAction(
+    (body: Schemas["ProgrammingSettings"]) => unwrap(api.PUT("/api/v1/settings/programming", { body })),
+    { success: t("categories.saved"), invalidate: [["settings", "programming"], ["tracks"], ["track"]] },
+  );
+  const details = useAction(
+    (all: boolean) => unwrap(api.POST("/api/v1/library/musicbrainz-details", { body: { all } })),
+    { invalidate: [["library-tasks"]] },
+  );
+  const tasks = useQuery({
+    queryKey: ["library-tasks"],
+    queryFn: () => unwrap(api.GET("/api/v1/library/tasks", { params: { query: { limit: 50 } } })),
+    refetchInterval: (query) =>
+      query.state.data?.some(
+        (task) =>
+          task.request.kind === "musicbrainz_details" && (task.status === "pending" || task.status === "running"),
+      )
+        ? 2000
+        : false,
+  });
+  const lookup = tasks.data?.find((task) => task.request.kind === "musicbrainz_details");
+  if (settings.isPending) {
+    return <Loading />;
+  }
+  if (settings.isError) {
+    return <ErrorView error={settings.error} />;
+  }
+  return (
+    <>
+      <SettingsCard
+        title={t("settings.programming")}
+        description={t("settings.programmingHelp")}
+        value={settings.data}
+        save={(value) => save.mutate(value)}
+        saving={save.isPending}
+        canEdit={canEdit}
+      >
+        {(draft, set) => (
+          <>
+            <div className="form-grid">
+              <Field label={t("settings.minPlay")} hint={t("settings.minPlayHint")}>
+                <NumberInput
+                  value={draft.min_play_s}
+                  min={0}
+                  max={3600}
+                  step={1}
+                  suffix="s"
+                  disabled={!canEdit}
+                  onChange={(min_play_s) => set({ min_play_s })}
+                />
+              </Field>
+              <Field label={t("settings.moods")} hint={t("settings.scaleHint")}>
+                <ScaleInput value={draft.moods} disabled={!canEdit} onChange={(moods) => set({ moods })} />
+              </Field>
+              <Field label={t("settings.soundCodes")} hint={t("settings.scaleHint")}>
+                <ScaleInput
+                  value={draft.sound_codes}
+                  disabled={!canEdit}
+                  onChange={(sound_codes) => set({ sound_codes })}
+                />
+              </Field>
+            </div>
+            <fieldset className="stack">
+              <legend>{t("settings.eras")}</legend>
+              {draft.eras.length === 0 && (
+                <p className="muted small" style={{ margin: 0 }}>
+                  {t("settings.erasHelp")}
+                </p>
+              )}
+              {draft.eras.map((era, index) => {
+                const change = (changes: Partial<Schemas["Era"]>) =>
+                  set({ eras: draft.eras.map((e, i) => (i === index ? { ...e, ...changes } : e)) });
+                const year = (value: string) => (value.trim() === "" ? null : Number(value));
+                return (
+                  <div key={index} className="row" style={{ flexWrap: "nowrap" }}>
+                    <input
+                      className="input"
+                      aria-label={t("settings.era")}
+                      value={era.name}
+                      disabled={!canEdit}
+                      onChange={(event) => change({ name: event.target.value })}
+                    />
+                    <input
+                      className="input num"
+                      type="number"
+                      aria-label={t("settings.eraFrom")}
+                      placeholder={t("settings.eraFromPlaceholder")}
+                      value={era.from_year ?? ""}
+                      disabled={!canEdit}
+                      onChange={(event) => change({ from_year: year(event.target.value) })}
+                    />
+                    <input
+                      className="input num"
+                      type="number"
+                      aria-label={t("settings.eraTo")}
+                      placeholder={t("settings.eraToPlaceholder")}
+                      value={era.to_year ?? ""}
+                      disabled={!canEdit}
+                      onChange={(event) => change({ to_year: year(event.target.value) })}
+                    />
+                    {canEdit && (
+                      <button
+                        type="button"
+                        className="btn ghost small icon danger"
+                        aria-label={t("settings.removeEra", { name: era.name })}
+                        onClick={() => set({ eras: draft.eras.filter((_, i) => i !== index) })}
+                      >
+                        <Icon name="close" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              {canEdit && (
+                <div>
+                  <button
+                    type="button"
+                    className="btn small"
+                    onClick={() => set({ eras: [...draft.eras, { name: "", from_year: null, to_year: null }] })}
+                  >
+                    <Icon name="plus" size={14} /> {t("settings.addEra")}
+                  </button>
+                </div>
+              )}
+            </fieldset>
+          </>
+        )}
+      </SettingsCard>
+      <Card title={t("settings.musicbrainz")}>
+        <div className="stack">
+          <p className="muted small" style={{ margin: 0 }}>
+            {t("settings.musicbrainzHelp")}
+          </p>
+          {canEdit && (
+            <div className="row">
+              <button type="button" className="btn" disabled={details.isPending} onClick={() => details.mutate(false)}>
+                {t("settings.lookUpNew")}
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={details.isPending}
+                onClick={() => details.mutate(true)}
+              >
+                {t("settings.lookUpAll")}
+              </button>
+            </div>
+          )}
+          {lookup && (
+            <p className="small" style={{ margin: 0 }}>
+              {lookup.status === "pending" && t("settings.lookupPending")}
+              {lookup.status === "running" && t("settings.lookupRunning")}
+              {lookup.status === "failed" && (
+                <span className="bad">{t("selection.failed", { error: lookup.error ?? "" })}</span>
+              )}
+              {lookup.status === "done" &&
+                lookup.details &&
+                t("settings.lookupDone", {
+                  releases: number(lookup.details.releases),
+                  tracks: number(lookup.details.tracks),
+                })}
+              {lookup.status === "done" &&
+                (lookup.details?.failed ?? 0) > 0 &&
+                t("settings.lookupFailed", { count: lookup.details?.failed ?? 0 })}
+            </p>
+          )}
+        </div>
+      </Card>
+    </>
   );
 }
 

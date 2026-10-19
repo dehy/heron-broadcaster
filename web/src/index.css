@@ -801,6 +801,31 @@ table.table {
   flex: none;
 }
 
+/* A label on a track. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.chip .swatch {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+}
+
+.chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
 .dot {
   display: inline-block;
   width: 0.55rem;
@@ -1379,4 +1404,38 @@ ul.steps .bar {
   height: 0.6rem;
   border-radius: 3px;
   background: var(--accent);
+}
+
+/* A drop-down panel (the library's columns). */
+.menu {
+  position: relative;
+}
+
+.menu > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.menu-panel {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  min-width: 12rem;
+  margin-top: 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.filters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 0.75rem;
+  align-items: end;
 }

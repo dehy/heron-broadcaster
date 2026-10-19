@@ -21,6 +21,7 @@ const ICONS = {
   queue: "M3 6h13M3 12h13M3 18h9M19 15v6M16 18h6",
   library: "M4 4h4v16H4zM10 4h4v16h-4zM16.5 4.5l3.8 1 -3.9 15-3.8-1z",
   tag: "M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9zM7.5 7.5h.01",
+  label: "M6 3h12v18l-6-4-6 4z",
   review: "M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9",
   history: "M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2",
   fade: "M3 6c6 0 9 12 18 12M3 18c9 0 12-12 18-12",

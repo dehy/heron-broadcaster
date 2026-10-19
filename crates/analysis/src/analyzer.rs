@@ -7,6 +7,7 @@ use ebur128::{EbuR128, Mode};
 use heron_core::AnalysisSettings;
 
 use crate::Error;
+use crate::tempo::TempoTracker;
 
 /// Length of one level frame, the time resolution of every detected point.
 pub const FRAME_MS: f64 = 5.0;
@@ -40,6 +41,8 @@ pub struct Analysis {
     /// A silence longer than the configured maximum was found and the track
     /// is cut there (`cue_out_ms` is the start of that silence).
     pub has_internal_silence: bool,
+    /// Tempo, `None` when no steady beat was found.
+    pub bpm: Option<f64>,
     pub waveform: Waveform,
 }
 
@@ -88,6 +91,7 @@ pub struct Analyzer {
     waveform_fill: usize,
     waveform_peak: f32,
     waveform: Vec<u8>,
+    tempo: TempoTracker,
 }
 
 impl Analyzer {
@@ -114,6 +118,7 @@ impl Analyzer {
             waveform_fill: 0,
             waveform_peak: 0.0,
             waveform: Vec::new(),
+            tempo: TempoTracker::new(rate),
         })
     }
 
@@ -138,9 +143,12 @@ impl Analyzer {
             if self.frame_fill == self.frame_len {
                 self.close_level_frame();
             }
+            let mut mono = 0.0;
             for &sample in frame {
                 self.waveform_peak = self.waveform_peak.max(sample.abs());
+                mono += sample;
             }
+            self.tempo.push(mono / self.channels as f32);
             self.waveform_fill += 1;
             if self.waveform_fill == self.waveform_len {
                 self.close_waveform_point();
@@ -198,6 +206,11 @@ impl Analyzer {
             Some(reference) => detect(&self.levels, reference, frame_ms, duration_ms, settings),
             None => Points::default(),
         };
+        let bpm = if points.cue_out_ms > points.cue_in_ms {
+            self.tempo.finish()
+        } else {
+            None
+        };
         Ok(Analysis {
             duration_ms,
             integrated_lufs,
@@ -206,6 +219,7 @@ impl Analyzer {
             cue_out_ms: points.cue_out_ms,
             fade_out_start_ms: points.fade_out_start_ms,
             has_internal_silence: points.has_internal_silence,
+            bpm,
             waveform: Waveform {
                 interval_ms: WAVEFORM_INTERVAL_MS,
                 peaks: self.waveform,

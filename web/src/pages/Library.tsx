@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// The library: search, filters, sorting, pages, and queuing.
+// The library: search, filters, sorting, pages, the columns shown, and
+// actions on a selection (queue, labels, categories, programming, tags).
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import {
+  type Schemas,
   type TrackFilter,
   type TrackSort,
   type TrackSummary,
@@ -13,14 +15,26 @@ import {
   query,
   unwrap,
 } from "../api";
+import {
+  CategoryDialog,
+  LabelChip,
+  LabelsDialog,
+  ProgrammingDialog,
+  type Selection,
+  TagsDialog,
+  useLabels,
+  useProgrammingSettings,
+} from "../components/SelectionActions";
 import { useDebounced } from "../components/TrackSearch";
 import { Card, Empty, ErrorView, Icon, Loading, PageHead } from "../components/ui";
-import { type PlainKey, t } from "../i18n";
+import { type PlainKey, number, t } from "../i18n";
 import { ago, duration } from "../lib/format";
 import { Link, setSearch, useLocation } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 
 const PAGE = 50;
+/** Files in one tag edit, at most (the API's limit). */
+const MAX_TAG_EDIT = 10_000;
 
 const FILTERS: { value: TrackFilter | ""; label: PlainKey }[] = [
   { value: "", label: "library.filter.all" },
@@ -36,20 +50,137 @@ const SORTS: { value: TrackSort; label: PlainKey }[] = [
   { value: "artist", label: "library.sort.artist" },
   { value: "title", label: "library.sort.title" },
   { value: "album", label: "library.sort.album" },
+  { value: "genre", label: "library.sort.genre" },
   { value: "added", label: "library.sort.added" },
   { value: "last_played", label: "library.sort.lastPlayed" },
+  { value: "play_count", label: "library.sort.playCount" },
+  { value: "bitrate", label: "library.sort.bitrate" },
+  { value: "duration", label: "library.sort.duration" },
+  { value: "year", label: "library.sort.year" },
+  { value: "bpm", label: "library.sort.bpm" },
+  { value: "mood", label: "library.sort.mood" },
+  { value: "sound_code", label: "library.sort.soundCode" },
 ];
+
+type Column =
+  | "album"
+  | "genre"
+  | "length"
+  | "added"
+  | "last_played"
+  | "plays"
+  | "bitrate"
+  | "year"
+  | "era"
+  | "bpm"
+  | "mood"
+  | "sound_code"
+  | "labels";
+
+const COLUMNS: { value: Column; label: PlainKey }[] = [
+  { value: "album", label: "library.sort.album" },
+  { value: "genre", label: "library.column.genre" },
+  { value: "length", label: "library.length" },
+  { value: "added", label: "library.column.added" },
+  { value: "last_played", label: "library.lastPlayed" },
+  { value: "plays", label: "library.column.plays" },
+  { value: "bitrate", label: "library.column.bitrate" },
+  { value: "year", label: "library.column.year" },
+  { value: "era", label: "library.column.era" },
+  { value: "bpm", label: "library.column.bpm" },
+  { value: "mood", label: "library.column.mood" },
+  { value: "sound_code", label: "library.column.soundCode" },
+  { value: "labels", label: "library.column.labels" },
+];
+
+const DEFAULT_COLUMNS: Column[] = ["album", "length", "last_played", "plays", "labels"];
+const COLUMNS_KEY = "heron.library.columns";
+
+function storedColumns(): Column[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(COLUMNS_KEY) ?? "null");
+    if (Array.isArray(stored)) {
+      return COLUMNS.map((c) => c.value).filter((c) => stored.includes(c));
+    }
+  } catch {
+    // Unreadable or blocked storage: the defaults.
+  }
+  return DEFAULT_COLUMNS;
+}
+
+function useColumns(): [Column[], (column: Column, shown: boolean) => void] {
+  const [columns, setColumns] = useState(storedColumns);
+  const toggle = (column: Column, shown: boolean) =>
+    setColumns((current) => {
+      const next = COLUMNS.map((c) => c.value).filter((c) => (c === column ? shown : current.includes(c)));
+      try {
+        localStorage.setItem(COLUMNS_KEY, JSON.stringify(next));
+      } catch {
+        // Not remembered.
+      }
+      return next;
+    });
+  return [columns, toggle];
+}
+
+/** The filters of the URL, as the API takes them. */
+function filtersOf(search: URLSearchParams, q: string) {
+  const whole = (name: string) => {
+    const value = Number(search.get(name));
+    return search.get(name) && Number.isFinite(value) && value >= 0 ? value : undefined;
+  };
+  const text = (name: string) => search.get(name) || undefined;
+  return query({
+    q,
+    filter: text("filter") as TrackFilter | undefined,
+    category_id: whole("category"),
+    labels_all: text("labels_all"),
+    labels_any: text("labels_any"),
+    labels_none: text("labels_none"),
+    never_played: search.get("never_played") === "true" ? true : undefined,
+    not_played_days: whole("not_played_days"),
+    added_days: whole("added_days"),
+    bitrate_below: whole("bitrate_below"),
+    era: text("era"),
+    mood: text("mood"),
+    sound_code: text("sound_code"),
+    genre: text("genre"),
+  });
+}
+
+/** Filters of the URL beyond search, show and category. */
+const MORE_FILTERS = [
+  "labels_all",
+  "labels_any",
+  "labels_none",
+  "never_played",
+  "not_played_days",
+  "added_days",
+  "bitrate_below",
+  "era",
+  "mood",
+  "sound_code",
+  "genre",
+];
+
+type Dialog = "labels" | "category" | "programming" | "tags" | null;
 
 export function Library() {
   const { search } = useLocation();
-  const canQueue = useCan("operator");
+  const canEdit = useCan("operator");
   const filter = (search.get("filter") ?? "") as TrackFilter | "";
   const sort = (search.get("sort") ?? "artist") as TrackSort;
+  const desc = search.get("desc") === "true";
   const category = search.get("category") ?? "";
   const page = Math.max(0, Number(search.get("page") ?? 0) || 0);
   const [text, setText] = useState(search.get("q") ?? "");
   const q = useDebounced(text.trim(), 300);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Every track matching the filters, on every page.
+  const [allMatching, setAllMatching] = useState(false);
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [columns, toggleColumn] = useColumns();
+  const [moreOpen, setMoreOpen] = useState(() => MORE_FILTERS.some((name) => search.get(name)));
 
   useEffect(() => {
     if (q !== (search.get("q") ?? "")) {
@@ -57,29 +188,32 @@ export function Library() {
     }
   }, [q, search]);
 
+  const filters = filtersOf(search, q);
+  const filterKey = JSON.stringify(filters);
+  // Other filters start another selection.
+  useEffect(() => {
+    setSelected(new Set());
+    setAllMatching(false);
+  }, [filterKey]);
+
   const categories = useQuery({
     queryKey: ["categories"],
     queryFn: () => unwrap(api.GET("/api/v1/categories")),
   });
+  const labels = useLabels();
+  const programming = useProgrammingSettings();
   const status = useQuery({
     queryKey: ["library-status"],
     queryFn: ({ signal }) => fetchLibraryStatus(signal),
     refetchInterval: 10_000,
   });
   const tracks = useQuery({
-    queryKey: ["tracks", { q, filter, sort, category, page }],
+    queryKey: ["tracks", { ...filters, sort, desc, page }],
     queryFn: ({ signal }) =>
       unwrap(
         api.GET("/api/v1/tracks", {
           params: {
-            query: query({
-              q,
-              filter: filter || undefined,
-              sort,
-              category_id: category ? Number(category) : undefined,
-              limit: PAGE,
-              offset: page * PAGE,
-            }),
+            query: { ...filters, ...query({ sort, desc: desc || undefined }), limit: PAGE, offset: page * PAGE },
           },
           signal,
         }),
@@ -102,7 +236,8 @@ export function Library() {
   const items = tracks.data?.items ?? [];
   const total = tracks.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE));
-  const toggle = (id: number) =>
+  const toggle = (id: number) => {
+    setAllMatching(false);
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(id)) {
@@ -112,7 +247,15 @@ export function Library() {
       }
       return next;
     });
-  const allSelected = items.length > 0 && items.every((track) => selected.has(track.id));
+  };
+  const pageSelected = items.length > 0 && items.every((track) => selected.has(track.id));
+  const selection: Selection = allMatching ? { filters } : { track_ids: [...selected] };
+  const selectedCount = allMatching ? total : selected.size;
+  const clear = () => {
+    setSelected(new Set());
+    setAllMatching(false);
+  };
+  const shown = COLUMNS.filter((c) => columns.includes(c.value));
 
   return (
     <>
@@ -160,41 +303,102 @@ export function Library() {
                 ))}
               </select>
             </label>
-            <label>
-              <span className="visually-hidden">{t("library.sortBy")}</span>
-              <select
-                className="input"
-                value={sort}
-                onChange={(event) => setSearch({ sort: event.target.value, page: undefined })}
+            <span className="row" style={{ flexWrap: "nowrap" }}>
+              <label>
+                <span className="visually-hidden">{t("library.sortBy")}</span>
+                <select
+                  className="input"
+                  value={sort}
+                  onChange={(event) => setSearch({ sort: event.target.value, page: undefined })}
+                >
+                  {SORTS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {t("library.sortOption", { sort: t(option.label) })}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="btn ghost small"
+                aria-pressed={desc}
+                title={t("library.reverseHelp")}
+                onClick={() => setSearch({ desc: desc ? undefined : "true", page: undefined })}
               >
-                {SORTS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {t("library.sortOption", { sort: t(option.label) })}
-                  </option>
-                ))}
-              </select>
-            </label>
+                {desc ? t("library.reversed") : t("library.reverse")}
+              </button>
+            </span>
+            <button
+              type="button"
+              className="btn ghost small"
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen((open) => !open)}
+            >
+              {t("library.moreFilters")}
+            </button>
+            <ColumnsMenu columns={columns} onToggle={toggleColumn} />
           </div>
         </div>
-        {canQueue && selected.size > 0 && (
+        {moreOpen && <MoreFilters search={search} labels={labels.data ?? []} programming={programming.data} />}
+        {selectedCount > 0 && (
           <div className="card-head" style={{ background: "var(--accent-soft)" }}>
-            <span>{t("library.selected", { count: selected.size })}</span>
+            <span>
+              {allMatching
+                ? t("library.allMatching", { count: total })
+                : t("library.selected", { count: selected.size })}
+              {!allMatching && pageSelected && total > items.length && (
+                <>
+                  {" · "}
+                  <button type="button" className="link-button" onClick={() => setAllMatching(true)}>
+                    {t("library.selectAllMatching", { count: total })}
+                  </button>
+                </>
+              )}
+            </span>
             <div className="row">
-              <button
-                type="button"
-                className="btn small"
-                onClick={() => enqueue.mutate({ ids: [...selected], next: true })}
-              >
-                <Icon name="next" size={14} /> {t("queue.playNext")}
-              </button>
-              <button
-                type="button"
-                className="btn small"
-                onClick={() => enqueue.mutate({ ids: [...selected], next: false })}
-              >
-                <Icon name="plus" size={14} /> {t("library.addToQueue")}
-              </button>
-              <button type="button" className="btn small ghost" onClick={() => setSelected(new Set())}>
+              {canEdit && !allMatching && (
+                <>
+                  <button
+                    type="button"
+                    className="btn small"
+                    onClick={() => enqueue.mutate({ ids: [...selected], next: true })}
+                  >
+                    <Icon name="next" size={14} /> {t("queue.playNext")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn small"
+                    onClick={() => enqueue.mutate({ ids: [...selected], next: false })}
+                  >
+                    <Icon name="plus" size={14} /> {t("library.addToQueue")}
+                  </button>
+                </>
+              )}
+              {canEdit && (
+                <>
+                  <button type="button" className="btn small" onClick={() => setDialog("labels")}>
+                    {t("library.labelsAction")}
+                  </button>
+                  <button type="button" className="btn small" onClick={() => setDialog("category")}>
+                    {t("library.categoryAction")}
+                  </button>
+                  <button type="button" className="btn small" onClick={() => setDialog("programming")}>
+                    {t("library.programmingAction")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn small"
+                    disabled={selectedCount > MAX_TAG_EDIT}
+                    title={
+                      selectedCount > MAX_TAG_EDIT ? t("library.tagsLimit", { max: MAX_TAG_EDIT }) : undefined
+                    }
+                    onClick={() => setDialog("tags")}
+                  >
+                    <Icon name="edit" size={14} /> {t("library.tagsAction")}
+                  </button>
+                </>
+              )}
+              <button type="button" className="btn small ghost" onClick={clear}>
                 {t("queuePage.clear")}
               </button>
             </div>
@@ -212,23 +416,24 @@ export function Library() {
             <table className="table">
               <thead>
                 <tr>
-                  {canQueue && (
-                    <th style={{ width: "2rem" }}>
-                      <input
-                        type="checkbox"
-                        aria-label={t("library.selectPage")}
-                        checked={allSelected}
-                        onChange={() =>
-                          setSelected(allSelected ? new Set() : new Set(items.map((track) => track.id)))
-                        }
-                      />
-                    </th>
-                  )}
+                  <th style={{ width: "2rem" }}>
+                    <input
+                      type="checkbox"
+                      aria-label={t("library.selectPage")}
+                      checked={pageSelected || allMatching}
+                      onChange={() => {
+                        setAllMatching(false);
+                        setSelected(pageSelected ? new Set() : new Set(items.map((track) => track.id)));
+                      }}
+                    />
+                  </th>
                   <th>{t("library.sort.title")}</th>
                   <th className="hide-narrow">{t("library.sort.artist")}</th>
-                  <th className="hide-narrow">{t("library.sort.album")}</th>
-                  <th>{t("library.length")}</th>
-                  <th className="hide-narrow">{t("library.lastPlayed")}</th>
+                  {shown.map((c) => (
+                    <th key={c.value} className={c.value === "length" ? undefined : "hide-narrow"}>
+                      {t(c.label)}
+                    </th>
+                  ))}
                   <th>
                     <span className="visually-hidden">{t("library.actions")}</span>
                   </th>
@@ -239,8 +444,9 @@ export function Library() {
                   <Row
                     key={track.id}
                     track={track}
-                    canQueue={canQueue}
-                    selected={selected.has(track.id)}
+                    columns={shown.map((c) => c.value)}
+                    canQueue={canEdit}
+                    selected={allMatching || selected.has(track.id)}
                     onToggle={() => toggle(track.id)}
                     onQueue={(next) => enqueue.mutate({ ids: [track.id], next })}
                     onArtist={setText}
@@ -274,7 +480,154 @@ export function Library() {
           </div>
         )}
       </Card>
+      <LabelsDialog
+        open={dialog === "labels"}
+        onClose={() => setDialog(null)}
+        selection={selection}
+        tracks={selectedCount}
+      />
+      <CategoryDialog
+        open={dialog === "category"}
+        onClose={() => setDialog(null)}
+        selection={selection}
+        tracks={selectedCount}
+      />
+      <ProgrammingDialog
+        open={dialog === "programming"}
+        onClose={() => setDialog(null)}
+        selection={selection}
+        tracks={selectedCount}
+      />
+      <TagsDialog
+        open={dialog === "tags"}
+        onClose={() => setDialog(null)}
+        selection={selection}
+        tracks={selectedCount}
+      />
     </>
+  );
+}
+
+function ColumnsMenu({ columns, onToggle }: { columns: Column[]; onToggle: (column: Column, shown: boolean) => void }) {
+  return (
+    <details className="menu">
+      <summary className="btn ghost small">{t("library.columns")}</summary>
+      <div className="menu-panel stack">
+        {COLUMNS.map((column) => (
+          <label key={column.value} className="check">
+            <input
+              type="checkbox"
+              checked={columns.includes(column.value)}
+              onChange={(event) => onToggle(column.value, event.target.checked)}
+            />
+            {t(column.label)}
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+/** Decades offered when the station has no eras of its own. */
+const DECADES = ["50s", "60s", "70s", "80s", "90s", "2000s", "2010s", "2020s"];
+
+function MoreFilters({
+  search,
+  labels,
+  programming,
+}: {
+  search: URLSearchParams;
+  labels: Schemas["Label"][];
+  programming: Schemas["ProgrammingSettings"] | undefined;
+}) {
+  const value = (name: string) => search.get(name) ?? "";
+  const set = (name: string, next: string | undefined) => setSearch({ [name]: next || undefined, page: undefined });
+  const labelSelect = (name: string, title: string) => (
+    <label className="field">
+      <span>{title}</span>
+      <select
+        className="input"
+        multiple
+        size={Math.min(4, Math.max(2, labels.length))}
+        value={value(name).split(",").filter(Boolean)}
+        onChange={(event) => set(name, [...event.target.selectedOptions].map((option) => option.value).join(","))}
+      >
+        {labels.map((label) => (
+          <option key={label.id} value={label.id}>
+            {label.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+  const numberField = (name: string, title: string, unit: string) => (
+    <label className="field">
+      <span>{title}</span>
+      <span className="row" style={{ flexWrap: "nowrap" }}>
+        <input
+          className="input num"
+          type="number"
+          min={0}
+          value={value(name)}
+          onChange={(event) => set(name, event.target.value)}
+        />
+        <span className="muted small">{unit}</span>
+      </span>
+    </label>
+  );
+  const choice = (name: string, title: string, values: string[]) => (
+    <label className="field">
+      <span>{title}</span>
+      <select className="input" value={value(name)} onChange={(event) => set(name, event.target.value)}>
+        <option value="">{t("library.any")}</option>
+        {values.map((v) => (
+          <option key={v} value={v}>
+            {v}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+  const eras = programming?.eras.length ? programming.eras.map((era) => era.name) : DECADES;
+  return (
+    <div className="card-body stack">
+      <div className="filters-grid">
+        {labels.length > 0 && (
+          <>
+            {labelSelect("labels_any", t("library.labelsAny"))}
+            {labelSelect("labels_all", t("library.labelsAll"))}
+            {labelSelect("labels_none", t("library.labelsNone"))}
+          </>
+        )}
+        {numberField("not_played_days", t("library.notPlayedFor"), t("library.days"))}
+        {numberField("added_days", t("library.addedInLast"), t("library.days"))}
+        {numberField("bitrate_below", t("library.bitrateBelow"), "kbps")}
+        {choice("era", t("library.column.era"), eras)}
+        {choice("mood", t("library.column.mood"), programming?.moods ?? [])}
+        {choice("sound_code", t("library.column.soundCode"), programming?.sound_codes ?? [])}
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={value("never_played") === "true"}
+            onChange={(event) => set("never_played", event.target.checked ? "true" : undefined)}
+          />
+          {t("library.neverPlayed")}
+        </label>
+      </div>
+      {MORE_FILTERS.some((name) => search.get(name)) && (
+        <div>
+          <button
+            type="button"
+            className="btn small ghost"
+            onClick={() =>
+              setSearch({ ...Object.fromEntries(MORE_FILTERS.map((name) => [name, undefined])), page: undefined })
+            }
+          >
+            {t("library.clearFilters")}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -330,8 +683,19 @@ function TrackState({ track }: { track: TrackSummary }) {
   return null;
 }
 
+/** `128 kbps VBR`, `1411 kbps FLAC`. */
+export function bitrate(track: Pick<TrackSummary, "bitrate_kbps" | "bitrate_mode" | "codec">): string {
+  if (!track.bitrate_kbps) {
+    return track.codec ?? "–";
+  }
+  const mode = track.bitrate_mode === "lossless" ? (track.codec ?? "") : (track.bitrate_mode ?? "").toUpperCase();
+  const kbps = t("library.kbps", { kbps: track.bitrate_kbps });
+  return mode ? `${kbps} ${mode}` : kbps;
+}
+
 function Row({
   track,
+  columns,
   canQueue,
   selected,
   onToggle,
@@ -339,6 +703,7 @@ function Row({
   onArtist,
 }: {
   track: TrackSummary;
+  columns: Column[];
   canQueue: boolean;
   selected: boolean;
   onToggle: () => void;
@@ -347,19 +712,38 @@ function Row({
 }) {
   const playable = !track.missing && !track.silent;
   const file = track.path.split("/").pop() ?? track.path;
+  const none = <span className="muted">–</span>;
+  const cells: Record<Column, ReactNode> = {
+    album: track.album ?? none,
+    genre: track.genre ?? none,
+    length: <span className="num">{duration(track.duration_ms)}</span>,
+    added: <span className="muted small">{ago(track.added_at_unix_ms)}</span>,
+    last_played: <span className="muted small">{ago(track.last_played_at_unix_ms)}</span>,
+    plays: <span className="num">{number(track.play_count)}</span>,
+    bitrate: <span className="small">{bitrate(track)}</span>,
+    year: track.year ?? none,
+    era: track.era ?? none,
+    bpm: <span className="num">{track.bpm !== null && track.bpm !== undefined ? number(track.bpm) : "–"}</span>,
+    mood: track.mood ?? none,
+    sound_code: track.sound_code ?? none,
+    labels: (
+      <span className="chips">
+        {track.labels.map((label) => (
+          <LabelChip key={label.id} label={label} />
+        ))}
+      </span>
+    ),
+  };
   return (
     <tr>
-      {canQueue && (
-        <td>
-          <input
-            type="checkbox"
-            aria-label={t("library.select", { name: track.title ?? file })}
-            checked={selected}
-            onChange={onToggle}
-            disabled={!playable}
-          />
-        </td>
-      )}
+      <td>
+        <input
+          type="checkbox"
+          aria-label={t("library.select", { name: track.title ?? file })}
+          checked={selected}
+          onChange={onToggle}
+        />
+      </td>
       <td className="title-cell">
         <div className="row" style={{ flexWrap: "nowrap" }}>
           <Link to={`/library/${track.id}`} className="ellipsis">
@@ -379,14 +763,18 @@ function Row({
             {track.artist}
           </button>
         ) : (
-          <span className="muted">–</span>
+          none
         )}
       </td>
-      <td className="hide-narrow ellipsis" style={{ maxWidth: "14rem" }}>
-        {track.album ?? <span className="muted">–</span>}
-      </td>
-      <td className="num">{duration(track.duration_ms)}</td>
-      <td className="hide-narrow muted small">{ago(track.last_played_at_unix_ms)}</td>
+      {columns.map((column) => (
+        <td
+          key={column}
+          className={column === "length" ? undefined : "hide-narrow ellipsis"}
+          style={column === "album" || column === "genre" ? { maxWidth: "14rem" } : undefined}
+        >
+          {cells[column]}
+        </td>
+      ))}
       <td className="actions">
         {canQueue && playable && (
           <>

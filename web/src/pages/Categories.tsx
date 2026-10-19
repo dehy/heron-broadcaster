@@ -6,6 +6,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { type Category, type SeparationOverrides, api, done, unwrap } from "../api";
+import { useLabels } from "../components/SelectionActions";
 import { SeparationEditor } from "../components/Separation";
 import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, Modal, PageHead } from "../components/ui";
 import { number, rich, t } from "../i18n";
@@ -13,7 +14,7 @@ import { describeOverrides } from "../lib/rotation";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 
-const COLORS = ["#2f6fd6", "#b4549a", "#1d7a3e", "#b07a00", "#c62828", "#0b6e66", "#6b4fbb", "#5f6268"];
+export const COLORS = ["#2f6fd6", "#b4549a", "#1d7a3e", "#b07a00", "#c62828", "#0b6e66", "#6b4fbb", "#5f6268"];
 
 export function Categories() {
   const canEdit = useCan("operator");
@@ -22,6 +23,7 @@ export function Categories() {
     queryFn: () => unwrap(api.GET("/api/v1/categories")),
   });
   const [editing, setEditing] = useState<Category | "new" | null>(null);
+  const [filling, setFilling] = useState<Category | null>(null);
   const remove = useAction(
     (id: number) => done(api.DELETE("/api/v1/categories/{id}", { params: { path: { id } } })),
     { success: t("categories.deleted"), invalidate: [["categories"]] },
@@ -80,6 +82,14 @@ export function Categories() {
                         >
                           <Icon name="edit" />
                         </button>
+                        <button
+                          type="button"
+                          className="btn ghost small"
+                          title={t("categories.fillHelp")}
+                          onClick={() => setFilling(category)}
+                        >
+                          {t("categories.fill")}
+                        </button>
                         <ConfirmButton
                           className="btn ghost small icon danger"
                           title={t("categories.delete", { name: category.name })}
@@ -106,6 +116,7 @@ export function Categories() {
         )}
       </Card>
       {editing && <CategoryDialog category={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
+      {filling && <FillDialog category={filling} onClose={() => setFilling(null)} />}
     </>
   );
 }
@@ -172,6 +183,70 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
           <SeparationEditor value={separation} inherited={rotation.data?.separation} onChange={setSeparation} />
         </fieldset>
       </form>
+    </Modal>
+  );
+}
+
+/** Puts every track with a label in the category. */
+function FillDialog({ category, onClose }: { category: Category; onClose: () => void }) {
+  const labels = useLabels();
+  const [label, setLabel] = useState("");
+  const fill = useAction(
+    () =>
+      unwrap(
+        api.POST("/api/v1/tracks/categories", {
+          body: {
+            selection: { filters: { labels_any: label } },
+            add: [{ category_id: category.id, weight: 1 }],
+          },
+        }),
+      ),
+    {
+      success: (result) => t("categories.filled", { count: result.tracks, name: category.name }),
+      invalidate: [["categories"], ["tracks"], ["track"]],
+      onSuccess: onClose,
+    },
+  );
+  return (
+    <Modal
+      title={t("categories.fillTitle", { name: category.name })}
+      open
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onClose}>
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!label || fill.isPending}
+            onClick={() => fill.mutate(undefined)}
+          >
+            {t("categories.fillButton")}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        {labels.data?.length === 0 ? (
+          <p>{rich("categories.fillNoLabel", { link: <Link to="/labels">{t("categories.createLabel")}</Link> })}</p>
+        ) : (
+          <Field label={t("categories.fillLabel")}>
+            <select className="input" value={label} onChange={(event) => setLabel(event.target.value)}>
+              <option value="">{t("selection.choose")}</option>
+              {labels.data?.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {t("categories.labelOption", { name: l.name, tracks: number(l.tracks) })}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        <p className="muted small" style={{ margin: 0 }}>
+          {rich("categories.fillNote", { link: <Link to="/library">{t("categories.libraryLink")}</Link> })}
+        </p>
+      </div>
     </Modal>
   );
 }

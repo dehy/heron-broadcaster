@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // One track: waveform with its cue and fade points, preview, per-track
-// overrides, categories, analysis and plays.
+// overrides, categories, programming details and labels, analysis, file
+// and plays, and its tags edited.
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -15,6 +16,13 @@ import {
   unwrap,
 } from "../api";
 import { FadeEditor } from "../components/FadeEditor";
+import {
+  LabelChip,
+  LabelsDialog,
+  ProgrammingDialog,
+  TagsDialog,
+  type TagValues,
+} from "../components/SelectionActions";
 import { type Marker, type Region, WaveformView, useWaveform } from "../components/Waveform";
 import {
   Banner,
@@ -28,11 +36,12 @@ import {
   PageHead,
   Segmented,
 } from "../components/ui";
-import { rich, t } from "../i18n";
+import { number, rich, t } from "../i18n";
 import { ago, bytes, dateTime, db, duration, parseDuration, trackName } from "../lib/format";
 import { endingLabel } from "../lib/labels";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
+import { bitrate } from "./Library";
 
 /** Whether overrides change anything (every field unset). */
 function isDefault(overrides: TrackOverrides): boolean {
@@ -103,6 +112,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   const audio = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [playhead, setPlayhead] = useState<number | null>(null);
+  const [editingTags, setEditingTags] = useState(false);
 
   useEffect(() => {
     setDraft(normalize(track.overrides));
@@ -270,6 +280,11 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
                   </button>
                 </>
               )}
+              {!track.missing && (
+                <button type="button" className="btn" onClick={() => setEditingTags(true)}>
+                  <Icon name="edit" /> {t("track.editTags")}
+                </button>
+              )}
               <button
                 type="button"
                 className="btn"
@@ -284,7 +299,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
       />
       {track.missing && (
         <Banner kind="bad">
-          {t("track.missingSince", { date: dateTime(track.missing_since_unix_ms) })}
+          {t("track.missingSince", { date: dateTime(track.file.missing_since_unix_ms) })}
         </Banner>
       )}
       {track.silent && <Banner kind="bad">{t("track.silent")}</Banner>}
@@ -395,12 +410,147 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
           saving={saveOverrides.isPending}
         />
         <div className="stack">
+          <ProgrammingCard track={track} canEdit={canEdit} />
           <CategoriesCard track={track} canEdit={canEdit} />
           <DetailsCard track={track} />
-          <PlaysCard trackId={track.id} />
+          <PlaysCard track={track} />
         </div>
       </div>
+      <TagsDialog
+        open={editingTags}
+        onClose={() => setEditingTags(false)}
+        selection={{ track_ids: [track.id] }}
+        tracks={1}
+        current={currentTags(track)}
+        genres={track.musicbrainz?.genres ?? []}
+      />
     </>
+  );
+}
+
+/** What the scanner read from the file, to start a tag edit from. */
+function currentTags(track: TrackDetail): TagValues {
+  return {
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    album_artist: track.album_artist,
+    year: track.file.year_tag,
+    genre: track.genre,
+    track: track.file.track_number,
+    disc: track.file.disc_number,
+  };
+}
+
+function ProgrammingCard({ track, canEdit }: { track: TrackDetail; canEdit: boolean }) {
+  const [dialog, setDialog] = useState<"labels" | "programming" | null>(null);
+  const measured = track.analysis?.bpm;
+  const mb = track.musicbrainz;
+  const bpm = (value: number | null | undefined) =>
+    value === null || value === undefined ? "–" : number(value);
+  return (
+    <Card
+      title={t("track.programming")}
+      actions={
+        canEdit && (
+          <>
+            <button type="button" className="btn small" onClick={() => setDialog("labels")}>
+              {t("library.column.labels")}
+            </button>
+            <button type="button" className="btn small" onClick={() => setDialog("programming")}>
+              {t("track.programmingEdit")}
+            </button>
+          </>
+        )
+      }
+    >
+      <dl className="facts small">
+        <dt>{t("library.column.labels")}</dt>
+        <dd>
+          {track.labels.length === 0 ? (
+            <span className="muted">{t("track.noLabel")}</span>
+          ) : (
+            <span className="chips">
+              {track.labels.map((label) => (
+                <Link key={label.id} to={`/library?labels_any=${label.id}`}>
+                  <LabelChip label={label} />
+                </Link>
+              ))}
+            </span>
+          )}
+        </dd>
+        <dt>{t("library.column.era")}</dt>
+        <dd>
+          {track.era ?? "–"}
+          {track.year && (
+            <span className="muted">
+              {" "}
+              {mb?.first_release_year
+                ? t("track.firstReleased", { year: track.year })
+                : t("track.yearTag", { year: track.year })}
+            </span>
+          )}
+        </dd>
+        <dt>{t("library.column.bpm")}</dt>
+        <dd>
+          {bpm(track.bpm)}
+          {track.bpm_by_hand !== null && track.bpm_by_hand !== undefined ? (
+            <span className="muted">
+              {" "}
+              {measured ? t("track.bpmByHandMeasured", { bpm: number(measured) }) : t("track.bpmByHand")}
+            </span>
+          ) : (
+            measured && <span className="muted"> {t("track.bpmMeasured")}</span>
+          )}
+        </dd>
+        <dt>{t("library.column.mood")}</dt>
+        <dd>{track.mood ?? "–"}</dd>
+        <dt>{t("library.column.soundCode")}</dt>
+        <dd>{track.sound_code ?? "–"}</dd>
+        {mb ? (
+          <>
+            <dt>{t("library.sort.album")}</dt>
+            <dd>{mb.album ?? "–"}</dd>
+            <dt>{t("selection.recordLabel")}</dt>
+            <dd>
+              {mb.record_label ?? "–"}
+              {mb.catalog_number && <span className="muted"> · {mb.catalog_number}</span>}
+            </dd>
+            <dt>{t("selection.isrc")}</dt>
+            <dd>
+              <code>{mb.isrc ?? "–"}</code>
+            </dd>
+            {mb.genres.length > 0 && (
+              <>
+                <dt>{t("track.genres")}</dt>
+                <dd title={t("track.genresHelp")}>{mb.genres.join(", ")}</dd>
+              </>
+            )}
+            <dt>MusicBrainz</dt>
+            <dd className="muted">{t("track.lookedUp", { ago: ago(mb.fetched_at_unix_ms) })}</dd>
+          </>
+        ) : (
+          <>
+            <dt>MusicBrainz</dt>
+            <dd className="muted">
+              {track.file.musicbrainz_release_id ? t("track.notLookedUp") : t("track.notIdentified")}
+            </dd>
+          </>
+        )}
+      </dl>
+      <LabelsDialog
+        open={dialog === "labels"}
+        onClose={() => setDialog(null)}
+        selection={{ track_ids: [track.id] }}
+        tracks={1}
+      />
+      <ProgrammingDialog
+        open={dialog === "programming"}
+        onClose={() => setDialog(null)}
+        selection={{ track_ids: [track.id] }}
+        tracks={1}
+      />
+    </Card>
   );
 }
 
@@ -767,8 +917,21 @@ function DetailsCard({ track }: { track: TrackDetail }) {
         <dd>{analysis ? dateTime(analysis.analyzed_at_unix_ms) : "–"}</dd>
         <dt>{t("library.length")}</dt>
         <dd className="num">{duration(track.duration_ms, true)}</dd>
+        <dt>{t("track.format")}</dt>
+        <dd>
+          {bitrate(track)}
+          {track.file.sample_rate && ` · ${t("track.kilohertz", { rate: track.file.sample_rate / 1000 })}`}
+          {track.file.channels &&
+            ` · ${
+              track.file.channels === 1
+                ? t("track.mono")
+                : track.file.channels === 2
+                  ? t("track.stereo")
+                  : t("track.channels", { count: track.file.channels })
+            }`}
+        </dd>
         <dt>{t("track.size")}</dt>
-        <dd>{bytes(track.file_size)}</dd>
+        <dd>{bytes(track.file.size)}</dd>
         <dt>{t("track.added")}</dt>
         <dd>{dateTime(track.added_at_unix_ms)}</dd>
         <dt>{t("track.identification")}</dt>
@@ -794,14 +957,25 @@ function DetailsCard({ track }: { track: TrackDetail }) {
   );
 }
 
-function PlaysCard({ trackId }: { trackId: number }) {
+function PlaysCard({ track }: { track: TrackDetail }) {
+  const trackId = track.id;
   const plays = useQuery({
     queryKey: ["history", "track", trackId],
     queryFn: () =>
       unwrap(api.GET("/api/v1/history", { params: { query: { track_id: trackId, limit: 10 } } })),
   });
   return (
-    <Card title={t("track.recentPlays")} flush>
+    <Card
+      title={t("track.recentPlays")}
+      flush
+      actions={
+        <span className="muted small">
+          {track.last_played_at_unix_ms
+            ? t("track.playCountLast", { count: track.play_count, ago: ago(track.last_played_at_unix_ms) })
+            : t("track.playCount", { count: track.play_count })}
+        </span>
+      }
+    >
       {plays.isError && <ErrorView error={plays.error} />}
       {plays.data?.length === 0 && <Empty>{t("track.neverPlayed")}</Empty>}
       <ul className="list">

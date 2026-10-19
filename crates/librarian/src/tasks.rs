@@ -2,10 +2,13 @@
 
 //! Work asked through the API (`library_tasks`), which cannot write files:
 //! organize dry runs and applies, undos, releases picked on the review
-//! screen, and MusicBrainz relationships between artists. Tasks run one at a time, in order; their results are stored as
-//! JSON for the API to show.
+//! screen, MusicBrainz relationships between artists, tag edits and
+//! MusicBrainz programming details. Tasks run one at a time, in order;
+//! their results are stored as JSON for the API to show.
+//!
+//! Between tasks, new identified tracks get their MusicBrainz details.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use heron_core::library::{OrganizePlan, TaskRequest};
 use sqlx::MySqlPool;
@@ -15,10 +18,13 @@ use crate::identify::{Endpoints, Identifier};
 use crate::journal::Roots;
 use crate::layout::Layout;
 use crate::review::{self, Choice};
-use crate::{import, organize, relations};
+use crate::{edit, import, musicbrainz, organize, relations};
 
 /// Wait between looks at the table when there is nothing to do.
 const POLL: Duration = Duration::from_secs(1);
+
+/// Wait between background MusicBrainz details passes.
+const DETAILS_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct TaskRunner {
     pool: MySqlPool,
@@ -51,11 +57,18 @@ impl TaskRunner {
         {
             tracing::warn!(%error, "cannot close interrupted library tasks");
         }
+        let mut details_due = Instant::now();
         while !*stopped.borrow() {
             match self.run_next().await {
                 Ok(true) => continue,
                 Ok(false) => {}
                 Err(error) => tracing::warn!(%error, "cannot read library tasks"),
+            }
+            if Instant::now() >= details_due {
+                details_due = Instant::now() + DETAILS_INTERVAL;
+                if let Err(error) = self.new_details().await {
+                    tracing::warn!(%error, "cannot fetch MusicBrainz details");
+                }
             }
             tokio::select! {
                 () = tokio::time::sleep(POLL) => {}
@@ -151,12 +164,43 @@ impl TaskRunner {
                 json(review::apply(&self.pool, &self.roots, &identifier, &settings, &choice).await)
             }
             TaskRequest::ArtistRelations => {
-                // MusicBrainz needs no AcoustID key.
-                let identifier = Identifier::new(self.endpoints.clone(), String::new(), 1.0)
-                    .map_err(|error| error.to_string())?;
-                json(relations::look_up(&self.pool, &identifier).await)
+                json(relations::look_up(&self.pool, &self.musicbrainz()?).await)
+            }
+            TaskRequest::EditTags {
+                track_ids,
+                set,
+                from_details,
+            } => json(edit::apply(&self.pool, &self.roots, track_ids, set, from_details).await),
+            TaskRequest::MusicbrainzDetails { all } => {
+                json(musicbrainz::look_up(&self.pool, &self.musicbrainz()?, *all, None).await)
             }
         }
+    }
+
+    /// A MusicBrainz client (MusicBrainz needs no AcoustID key).
+    fn musicbrainz(&self) -> Result<Identifier, String> {
+        Identifier::new(self.endpoints.clone(), String::new(), 1.0)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Fetches the MusicBrainz details of tracks that have none yet, once
+    /// the station asked for them.
+    async fn new_details(&self) -> Result<(), String> {
+        if !musicbrainz::background_enabled(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(());
+        }
+        musicbrainz::look_up(
+            &self.pool,
+            &self.musicbrainz()?,
+            false,
+            Some(musicbrainz::BACKGROUND_RELEASES),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string())
     }
 
     /// The plan of a finished dry run, not applied by another task.

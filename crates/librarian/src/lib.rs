@@ -8,12 +8,15 @@
 //! It is the only service with write access to the library and the
 //! incoming folder.
 
+pub mod edit;
 pub mod fsops;
 pub mod identify;
 pub mod import;
 pub mod journal;
+pub mod musicbrainz;
 pub mod organize;
 pub mod relations;
+pub mod restore;
 pub mod review;
 pub mod tasks;
 
