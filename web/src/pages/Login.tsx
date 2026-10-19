@@ -2,8 +2,9 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
-import { api, errorMessage, unwrap } from "../api";
+import { ApiError, api, errorMessage, unwrap } from "../api";
 import { Banner, Field, Logo } from "../components/ui";
+import { t } from "../i18n";
 import { ME_KEY } from "../lib/session";
 
 export function Login() {
@@ -14,7 +15,7 @@ export function Login() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    document.title = "Sign in · Heron Broadcaster";
+    document.title = t("app.title", { page: t("login.title") });
   }, []);
 
   const submit = async (event: FormEvent) => {
@@ -27,7 +28,12 @@ export function Login() {
       );
       client.setQueryData(ME_KEY, user);
     } catch (failure) {
-      setError(errorMessage(failure));
+      // A wrong username or password answers 401, like a missing session.
+      setError(
+        failure instanceof ApiError && failure.code === "unauthorized"
+          ? t("login.wrong")
+          : errorMessage(failure),
+      );
       setBusy(false);
     }
   };
@@ -40,10 +46,10 @@ export function Login() {
             <Logo size={30} /> Heron Broadcaster
           </div>
           <p className="muted" style={{ margin: 0 }}>
-            Keeping the air on, 24/7.
+            {t("login.tagline")}
           </p>
           {error && <Banner kind="bad">{error}</Banner>}
-          <Field label="Username">
+          <Field label={t("login.username")}>
             <input
               className="input"
               autoComplete="username"
@@ -53,7 +59,7 @@ export function Login() {
               autoFocus
             />
           </Field>
-          <Field label="Password">
+          <Field label={t("login.password")}>
             <input
               className="input"
               type="password"
@@ -64,10 +70,10 @@ export function Login() {
             />
           </Field>
           <button type="submit" className="btn primary big" disabled={busy}>
-            {busy ? "Signing in…" : "Sign in"}
+            {busy ? t("login.signingIn") : t("login.title")}
           </button>
           <p className="muted small" style={{ margin: 0 }}>
-            The first admin is created on the server:{" "}
+            {t("login.firstAdmin")}{" "}
             <code>heron-api user add admin --role admin</code>
           </p>
         </div>

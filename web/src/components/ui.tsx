@@ -12,6 +12,7 @@ import {
   useState,
 } from "react";
 import { errorMessage } from "../api";
+import { t } from "../i18n";
 
 // Icons (24 px grid, stroked) ---------------------------------------------
 
@@ -139,7 +140,7 @@ export function PageHead({
   actions?: ReactNode;
 }) {
   useEffect(() => {
-    document.title = `${title} · Heron Broadcaster`;
+    document.title = t("app.title", { page: title });
   }, [title]);
   return (
     <header className="page-head">
@@ -161,7 +162,7 @@ export function Banner({ kind, children }: { kind: "warn" | "bad"; children: Rea
   );
 }
 
-export function Loading({ label = "Loading…" }: { label?: string }) {
+export function Loading({ label = t("ui.loading") }: { label?: string }) {
   return (
     <div className="empty row" style={{ justifyContent: "center" }}>
       <span className="spinner" aria-hidden="true" /> {label}
@@ -332,7 +333,7 @@ export function Modal({
         <>
           <div className="modal-head">
             <h2 id="modal-title">{title}</h2>
-            <button type="button" className="btn ghost icon" onClick={onClose} aria-label="Close">
+            <button type="button" className="btn ghost icon" onClick={onClose} aria-label={t("ui.close")}>
               <Icon name="close" />
             </button>
           </div>
@@ -376,13 +377,13 @@ export function ConfirmButton({
         {children}
       </button>
       <Modal
-        title="Are you sure?"
+        title={t("ui.areYouSure")}
         open={open}
         onClose={() => setOpen(false)}
         footer={
           <>
             <button type="button" className="btn" onClick={() => setOpen(false)}>
-              Cancel
+              {t("ui.cancel")}
             </button>
             <button
               type="button"

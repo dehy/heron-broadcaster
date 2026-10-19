@@ -6,6 +6,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { type PointerEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, api, unwrap } from "../api";
+import { t } from "../i18n";
 import { duration } from "../lib/format";
 
 export interface WaveformData {
@@ -204,7 +205,7 @@ export function WaveformView({
       />
       {!data && (
         <div className="empty" style={{ position: "absolute", inset: 0, padding: "4rem 1rem" }}>
-          No waveform yet: it is drawn when the track is analyzed.
+          {t("waveform.none")}
         </div>
       )}
       {markers.filter((marker) => visible(marker.ms)).map((marker) => (
@@ -262,8 +263,8 @@ function MarkerLine({
         type="button"
         className="flag"
         style={{ border: 0, font: "inherit", top: `${(marker.row ?? 0) * 1.4}rem` }}
-        title={`${marker.label}: ${duration(marker.ms, true)}${editable ? " (drag, or use the arrow keys)" : ""}`}
-        aria-label={`${marker.label} at ${duration(marker.ms, true)}`}
+        title={t(editable ? "waveform.markerEditable" : "waveform.marker", { name: marker.label, time: duration(marker.ms, true) })}
+        aria-label={t("waveform.markerAt", { name: marker.label, time: duration(marker.ms, true) })}
         disabled={!editable}
         onPointerDown={down}
         onPointerMove={move}

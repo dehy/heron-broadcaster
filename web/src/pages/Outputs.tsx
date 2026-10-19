@@ -18,6 +18,7 @@ import {
   NumberInput,
   PageHead,
 } from "../components/ui";
+import { number, t } from "../i18n";
 import { bytes, clockTime } from "../lib/format";
 import { useLive } from "../lib/live";
 import { useAction, useCan } from "../lib/session";
@@ -27,21 +28,22 @@ type Encoder = Schemas["EncoderKind"];
 type Kind = Schemas["OutputKind"];
 
 // Built in so far; the others arrive in M10 and the engine refuses them.
-const ENCODERS: { value: Encoder; label: string; available: boolean }[] = [
-  { value: "mp3", label: "MP3 (LAME)", available: true },
-  { value: "aac", label: "AAC-LC", available: false },
-  { value: "opus", label: "Opus", available: false },
-  { value: "vorbis", label: "Vorbis", available: false },
-  { value: "external_ffmpeg", label: "External FFmpeg", available: false },
+// Labels are functions: some are words of the current language.
+const ENCODERS: { value: Encoder; label: () => string; available: boolean }[] = [
+  { value: "mp3", label: () => "MP3 (LAME)", available: true },
+  { value: "aac", label: () => "AAC-LC", available: false },
+  { value: "opus", label: () => "Opus", available: false },
+  { value: "vorbis", label: () => "Vorbis", available: false },
+  { value: "external_ffmpeg", label: () => t("outputs.externalFfmpeg"), available: false },
 ];
 
-const KINDS: { value: Kind; label: string; available: boolean }[] = [
-  { value: "icecast", label: "Icecast", available: true },
-  { value: "shoutcast_v1", label: "Shoutcast v1", available: false },
-  { value: "shoutcast_v2", label: "Shoutcast v2", available: false },
-  { value: "hls", label: "HLS", available: false },
-  { value: "file", label: "File", available: false },
-  { value: "pipe", label: "Pipe", available: false },
+const KINDS: { value: Kind; label: () => string; available: boolean }[] = [
+  { value: "icecast", label: () => "Icecast", available: true },
+  { value: "shoutcast_v1", label: () => "Shoutcast v1", available: false },
+  { value: "shoutcast_v2", label: () => "Shoutcast v2", available: false },
+  { value: "hls", label: () => "HLS", available: false },
+  { value: "file", label: () => t("outputs.kind.file"), available: false },
+  { value: "pipe", label: () => t("outputs.kind.pipe"), available: false },
 ];
 
 const MP3_BITRATES = [32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
@@ -59,11 +61,11 @@ export function Outputs() {
   const [editingProfile, setEditingProfile] = useState<EncoderProfileView | "new" | null>(null);
   const removeOutput = useAction(
     (id: number) => done(api.DELETE("/api/v1/outputs/{id}", { params: { path: { id } } })),
-    { success: "Output deleted", invalidate: [["outputs"], ["encoder-profiles"]] },
+    { success: t("outputs.deleted"), invalidate: [["outputs"], ["encoder-profiles"]] },
   );
   const removeProfile = useAction(
     (id: number) => done(api.DELETE("/api/v1/encoder-profiles/{id}", { params: { path: { id } } })),
-    { success: "Profile deleted", invalidate: [["encoder-profiles"]] },
+    { success: t("outputs.profileDeleted"), invalidate: [["encoder-profiles"]] },
   );
   const toggle = useAction(
     (output: OutputView) =>
@@ -94,30 +96,30 @@ export function Outputs() {
   return (
     <>
       <PageHead
-        title="Outputs"
-        description="Where the station streams. Outputs sharing an encoder profile share one encoding."
+        title={t("nav.outputs")}
+        description={t("outputs.description")}
         actions={
           isAdmin && (
             <button type="button" className="btn primary" onClick={() => setEditingOutput("new")}>
-              <Icon name="plus" /> New output
+              <Icon name="plus" /> {t("outputs.new")}
             </button>
           )
         }
       />
-      <Card title="Outputs" flush>
+      <Card title={t("nav.outputs")} flush>
         {outputs.data.length === 0 ? (
-          <Empty>No output yet: add the stream server listeners connect to.</Empty>
+          <Empty>{t("outputs.none")}</Empty>
         ) : (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th className="hide-narrow">Server</th>
-                  <th className="hide-narrow">Encoding</th>
-                  <th>State</th>
+                  <th>{t("categories.name")}</th>
+                  <th className="hide-narrow">{t("outputs.server")}</th>
+                  <th className="hide-narrow">{t("outputs.encoding")}</th>
+                  <th>{t("review.state")}</th>
                   <th>
-                    <span className="visually-hidden">Actions</span>
+                    <span className="visually-hidden">{t("library.actions")}</span>
                   </th>
                 </tr>
               </thead>
@@ -129,7 +131,7 @@ export function Outputs() {
                     <tr key={output.id}>
                       <td>
                         <div>{output.name}</div>
-                        <div className="muted small">{KINDS.find((k) => k.value === output.kind)?.label}</div>
+                        <div className="muted small">{KINDS.find((k) => k.value === output.kind)?.label()}</div>
                       </td>
                       <td className="hide-narrow mono small">
                         {typeof config.host === "string"
@@ -141,7 +143,7 @@ export function Outputs() {
                         <OutputState status={status} />
                         {status?.state === "connected" && status.connected_since_unix_ms && (
                           <div className="muted small">
-                            since {clockTime(status.connected_since_unix_ms)}, {bytes(status.bytes_sent)}
+                            {t("outputs.since", { time: clockTime(status.connected_since_unix_ms), sent: bytes(status.bytes_sent) })}
                           </div>
                         )}
                         {status?.error && <div className="bad small">{status.error}</div>}
@@ -150,21 +152,21 @@ export function Outputs() {
                         {isAdmin && (
                           <>
                             <button type="button" className="btn small" onClick={() => toggle.mutate(output)}>
-                              {output.enabled ? "Disable" : "Enable"}
+                              {output.enabled ? t("track.disable") : t("track.enable")}
                             </button>
                             <button
                               type="button"
                               className="btn ghost small icon"
-                              aria-label={`Edit ${output.name}`}
+                              aria-label={t("categories.edit", { name: output.name })}
                               onClick={() => setEditingOutput(output)}
                             >
                               <Icon name="edit" />
                             </button>
                             <ConfirmButton
                               className="btn ghost small icon danger"
-                              title={`Delete ${output.name}`}
-                              confirm="Delete"
-                              question={<p>Stop streaming to {output.name} and delete it?</p>}
+                              title={t("categories.delete", { name: output.name })}
+                              confirm={t("categories.deleteButton")}
+                              question={<p>{t("outputs.deleteQuestion", { name: output.name })}</p>}
                               onConfirm={() => removeOutput.mutate(output.id)}
                             >
                               <Icon name="trash" />
@@ -182,11 +184,11 @@ export function Outputs() {
       </Card>
 
       <Card
-        title="Encoder profiles"
+        title={t("outputs.profiles")}
         actions={
           isAdmin && (
             <button type="button" className="btn small" onClick={() => setEditingProfile("new")}>
-              <Icon name="plus" size={14} /> New profile
+              <Icon name="plus" size={14} /> {t("outputs.newProfile")}
             </button>
           )
         }
@@ -195,11 +197,11 @@ export function Outputs() {
         <table className="table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Encoding</th>
-              <th>Outputs</th>
+              <th>{t("categories.name")}</th>
+              <th>{t("outputs.encoding")}</th>
+              <th>{t("nav.outputs")}</th>
               <th>
-                <span className="visually-hidden">Actions</span>
+                <span className="visually-hidden">{t("library.actions")}</span>
               </th>
             </tr>
           </thead>
@@ -208,24 +210,24 @@ export function Outputs() {
               <tr key={profile.id}>
                 <td>{profile.name}</td>
                 <td className="small">{describeProfile(profile)}</td>
-                <td className="num">{profile.outputs}</td>
+                <td className="num">{number(profile.outputs)}</td>
                 <td className="actions">
                   {isAdmin && (
                     <>
                       <button
                         type="button"
                         className="btn ghost small icon"
-                        aria-label={`Edit ${profile.name}`}
+                        aria-label={t("categories.edit", { name: profile.name })}
                         onClick={() => setEditingProfile(profile)}
                       >
                         <Icon name="edit" />
                       </button>
                       <ConfirmButton
                         className="btn ghost small icon danger"
-                        title={profile.outputs > 0 ? "Used by outputs" : `Delete ${profile.name}`}
+                        title={profile.outputs > 0 ? t("outputs.profileUsed") : t("categories.delete", { name: profile.name })}
                         disabled={profile.outputs > 0}
-                        confirm="Delete"
-                        question={<p>Delete the profile {profile.name}?</p>}
+                        confirm={t("categories.deleteButton")}
+                        question={<p>{t("outputs.deleteProfileQuestion", { name: profile.name })}</p>}
                         onConfirm={() => removeProfile.mutate(profile.id)}
                       >
                         <Icon name="trash" />
@@ -257,22 +259,25 @@ export function Outputs() {
 }
 
 function describeProfile(profile: EncoderProfileView): string {
-  const encoder = ENCODERS.find((e) => e.value === profile.encoder)?.label ?? profile.encoder;
+  const encoder = ENCODERS.find((e) => e.value === profile.encoder)?.label() ?? profile.encoder;
   const options = profile.options as Record<string, unknown>;
   const mode = typeof options.mode === "string" ? ` ${options.mode.toUpperCase()}` : "";
-  const bitrate = profile.bitrate_kbps ? ` ${profile.bitrate_kbps} kbps` : "";
-  const channels = profile.channels === 1 ? "mono" : "stereo";
-  return `${encoder}${mode}${bitrate}, ${(profile.sample_rate / 1000).toFixed(1)} kHz ${channels}`;
+  const bitrate = profile.bitrate_kbps ? ` ${t("outputs.kbps", { rate: profile.bitrate_kbps })}` : "";
+  const rate = t("outputs.khz", {
+    rate: number(profile.sample_rate / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+  });
+  const channels = profile.channels === 1 ? t("outputs.mono") : t("outputs.stereo");
+  return `${encoder}${mode}${bitrate}, ${rate} ${channels}`;
 }
 
 function SaveFooter({ form, onClose, busy }: { form: string; onClose: () => void; busy: boolean }) {
   return (
     <>
       <button type="button" className="btn" onClick={onClose}>
-        Cancel
+        {t("common.cancel")}
       </button>
       <button type="submit" form={form} className="btn primary" disabled={busy}>
-        Save
+        {t("common.save")}
       </button>
     </>
   );
@@ -336,7 +341,7 @@ function OutputDialog({
         : unwrap(api.POST("/api/v1/outputs", { body: input }));
     },
     {
-      success: "Saved: the engine applies it within seconds",
+      success: t("outputs.saved"),
       invalidate: [["outputs"], ["encoder-profiles"], ["engine"]],
       onSuccess: onClose,
     },
@@ -358,7 +363,7 @@ function OutputDialog({
 
   return (
     <Modal
-      title={output ? `Edit ${output.name}` : "New output"}
+      title={output ? t("categories.edit", { name: output.name }) : t("outputs.new")}
       open
       wide
       onClose={onClose}
@@ -366,20 +371,19 @@ function OutputDialog({
     >
       <form id="output-form" className="stack" onSubmit={submit}>
         <div className="form-grid">
-          <Field label="Name">
+          <Field label={t("categories.name")}>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
           </Field>
-          <Field label="Kind">
+          <Field label={t("outputs.kind")}>
             <select className="input" value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
               {KINDS.map((k) => (
                 <option key={k.value} value={k.value} disabled={!k.available && k.value !== output?.kind}>
-                  {k.label}
-                  {k.available ? "" : " (coming later)"}
+                  {k.available ? k.label() : t("outputs.comingLater", { name: k.label() })}
                 </option>
               ))}
             </select>
           </Field>
-          <Field label="Encoder profile">
+          <Field label={t("outputs.profile")}>
             <select className="input" value={profile} onChange={(e) => setProfile(Number(e.target.value))}>
               {profiles.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -391,30 +395,30 @@ function OutputDialog({
         </div>
         <div className="row">
           <label className="check">
-            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enabled
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> {t("outputs.enabled")}
           </label>
           <label className="check">
-            <input type="checkbox" checked={metadata} onChange={(e) => setMetadata(e.target.checked)} /> Send
-            now-playing titles
+            <input type="checkbox" checked={metadata} onChange={(e) => setMetadata(e.target.checked)} />{" "}
+            {t("outputs.metadata")}
           </label>
         </div>
         {kind === "icecast" ? (
           <fieldset>
-            <legend>Icecast server</legend>
+            <legend>{t("outputs.icecastServer")}</legend>
             <div className="form-grid">
-              <Field label="Host">
+              <Field label={t("outputs.host")}>
                 <input className="input" value={text(config.host)} onChange={(e) => set("host", e.target.value)} required />
               </Field>
-              <Field label="Port">
+              <Field label={t("outputs.port")}>
                 <NumberInput value={Number(config.port ?? 8000)} min={1} max={65535} step={1} onChange={(v) => set("port", v)} />
               </Field>
-              <Field label="Mount point" hint="Starts with /">
+              <Field label={t("outputs.mount")} hint={t("outputs.mountHint")}>
                 <input className="input" value={text(config.mount)} onChange={(e) => set("mount", e.target.value)} required pattern="/.*" />
               </Field>
-              <Field label="Username">
+              <Field label={t("login.username")}>
                 <input className="input" value={text(config.username)} onChange={(e) => set("username", e.target.value)} />
               </Field>
-              <Field label="Password" hint={passwordSet ? "Leave empty to keep the current one" : undefined}>
+              <Field label={t("login.password")} hint={passwordSet ? t("outputs.keepPassword") : undefined}>
                 <input
                   className="input"
                   type="password"
@@ -427,26 +431,26 @@ function OutputDialog({
               </Field>
             </div>
             <div className="form-grid" style={{ marginTop: "0.9rem" }}>
-              <Field label="Station name">
+              <Field label={t("outputs.stationName")}>
                 <input className="input" value={text(config.name)} onChange={(e) => set("name", e.target.value)} />
               </Field>
-              <Field label="Genre">
+              <Field label={t("outputs.genre")}>
                 <input className="input" value={text(config.genre)} onChange={(e) => set("genre", e.target.value)} />
               </Field>
-              <Field label="Website">
+              <Field label={t("outputs.website")}>
                 <input className="input" type="url" value={text(config.url)} onChange={(e) => set("url", e.target.value)} />
               </Field>
-              <Field label="Description">
+              <Field label={t("outputs.descriptionField")}>
                 <input className="input" value={text(config.description)} onChange={(e) => set("description", e.target.value)} />
               </Field>
             </div>
             <label className="check" style={{ marginTop: "0.75rem" }}>
               <input type="checkbox" checked={config.public === true} onChange={(e) => set("public", e.target.checked)} />
-              List the stream in public directories
+              {t("outputs.public")}
             </label>
           </fieldset>
         ) : (
-          <Field label="Settings (JSON)" hint="See docs/outputs.md for this kind's settings">
+          <Field label={t("outputs.json")} hint={t("outputs.jsonHint")}>
             <textarea className="input" value={json} onChange={(e) => setJson(e.target.value)} rows={8} />
           </Field>
         )}
@@ -484,7 +488,7 @@ function ProfileDialog({ profile, onClose }: { profile: EncoderProfileView | nul
         ? unwrap(api.PUT("/api/v1/encoder-profiles/{id}", { params: { path: { id: profile.id } }, body }))
         : unwrap(api.POST("/api/v1/encoder-profiles", { body }));
     },
-    { success: "Saved", invalidate: [["encoder-profiles"], ["engine"]], onSuccess: onClose },
+    { success: t("categories.saved"), invalidate: [["encoder-profiles"], ["engine"]], onSuccess: onClose },
   );
   const row = (label: string, control: ReactNode, hint?: string) => (
     <Field label={label} hint={hint}>
@@ -493,7 +497,7 @@ function ProfileDialog({ profile, onClose }: { profile: EncoderProfileView | nul
   );
   return (
     <Modal
-      title={profile ? `Edit ${profile.name}` : "New encoder profile"}
+      title={profile ? t("categories.edit", { name: profile.name }) : t("outputs.newProfileTitle")}
       open
       onClose={onClose}
       footer={<SaveFooter form="profile-form" onClose={onClose} busy={save.isPending} />}
@@ -508,47 +512,48 @@ function ProfileDialog({ profile, onClose }: { profile: EncoderProfileView | nul
       >
         {profile && profile.outputs > 0 && (
           <Banner kind="warn">
-            {profile.outputs} outputs use this profile: they reconnect with the new encoding.
+            {t("outputs.profileInUse", { count: profile.outputs })}
           </Banner>
         )}
         <div className="form-grid">
-          {row("Name", <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />)}
+          {row(t("categories.name"), <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />)}
           {row(
-            "Encoder",
+            t("outputs.encoder"),
             <select className="input" value={encoder} onChange={(e) => setEncoder(e.target.value as Encoder)}>
               {ENCODERS.map((e) => (
                 <option key={e.value} value={e.value} disabled={!e.available && e.value !== profile?.encoder}>
-                  {e.label}
-                  {e.available ? "" : " (coming later)"}
+                  {e.available ? e.label() : t("outputs.comingLater", { name: e.label() })}
                 </option>
               ))}
             </select>,
           )}
           {row(
-            mode === "vbr" ? "Bitrate (VBR: ignored)" : "Bitrate",
+            mode === "vbr" ? t("outputs.bitrateVbr") : t("outputs.bitrate"),
             <select className="input" value={bitrate} onChange={(e) => setBitrate(Number(e.target.value))}>
               {MP3_BITRATES.map((b) => (
                 <option key={b} value={b}>
-                  {b} kbps
+                  {t("outputs.kbps", { rate: b })}
                 </option>
               ))}
             </select>,
           )}
           {row(
-            "Sample rate",
+            t("outputs.sampleRate"),
             <select className="input" value={sampleRate} onChange={(e) => setSampleRate(Number(e.target.value))}>
               {SAMPLE_RATES.map((rate) => (
                 <option key={rate} value={rate}>
-                  {(rate / 1000).toFixed(rate % 1000 ? 2 : 0)} kHz
+                  {t("outputs.khz", {
+                    rate: number(rate / 1000, { minimumFractionDigits: rate % 1000 ? 2 : 0, maximumFractionDigits: 2 }),
+                  })}
                 </option>
               ))}
             </select>,
           )}
           {row(
-            "Channels",
+            t("outputs.channels"),
             <select className="input" value={channels} onChange={(e) => setChannels(Number(e.target.value))}>
-              <option value={2}>Stereo</option>
-              <option value={1}>Mono</option>
+              <option value={2}>{t("outputs.stereoOption")}</option>
+              <option value={1}>{t("outputs.monoOption")}</option>
             </select>,
           )}
         </div>
@@ -557,23 +562,23 @@ function ProfileDialog({ profile, onClose }: { profile: EncoderProfileView | nul
             <legend>MP3</legend>
             <div className="form-grid">
               {row(
-                "Mode",
+                t("outputs.mode"),
                 <select className="input" value={mode} onChange={(e) => setMode(e.target.value)}>
-                  <option value="cbr">Constant bitrate</option>
-                  <option value="vbr">Variable bitrate</option>
+                  <option value="cbr">{t("outputs.cbr")}</option>
+                  <option value="vbr">{t("outputs.vbr")}</option>
                 </select>,
-                "CBR keeps the bitrate shown in directories exact",
+                t("outputs.cbrHint"),
               )}
               {row(
-                "Algorithm quality",
+                t("outputs.quality"),
                 <NumberInput value={quality} min={0} max={9} step={1} onChange={setQuality} />,
-                "0 is best and slowest",
+                t("outputs.qualityHint"),
               )}
               {mode === "vbr" &&
                 row(
-                  "VBR quality",
+                  t("outputs.vbrQuality"),
                   <NumberInput value={vbrQuality} min={0} max={9} step={1} onChange={setVbrQuality} />,
-                  "0 is best",
+                  t("outputs.vbrQualityHint"),
                 )}
             </div>
           </fieldset>

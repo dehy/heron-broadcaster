@@ -6,18 +6,13 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { type Play, api, query, unwrap } from "../api";
 import { Card, Empty, ErrorView, Loading, PageHead } from "../components/ui";
+import { t } from "../i18n";
 import { clockTime, duration, fullDate } from "../lib/format";
+import { endingLabel, sourceLabel } from "../lib/labels";
 import { useLive } from "../lib/live";
 import { Link } from "../lib/router";
 
 const PAGE = 100;
-
-const ENDINGS: Record<string, string> = {
-  finished: "Played",
-  skipped: "Skipped",
-  stopped: "Stopped",
-  replaced: "Replaced",
-};
 
 export function History() {
   const [withFx, setWithFx] = useState(false);
@@ -43,29 +38,29 @@ export function History() {
   return (
     <>
       <PageHead
-        title="History"
-        description={`Every play, as the engine reported it, in station time (${station.data?.timezone ?? "…"}).`}
+        title={t("nav.history")}
+        description={t("history.description", { zone: station.data?.timezone ?? "…" })}
         actions={
           <label className="check">
             <input type="checkbox" checked={withFx} onChange={(e) => setWithFx(e.target.checked)} />
-            Show the FX player
+            {t("history.showFx")}
           </label>
         }
       />
       <Card flush>
         {plays.isPending && <Loading />}
         {plays.isError && <ErrorView error={plays.error} />}
-        {plays.data && rows.length === 0 && <Empty>Nothing played yet.</Empty>}
+        {plays.data && rows.length === 0 && <Empty>{t("history.empty")}</Empty>}
         {rows.length > 0 && (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Started</th>
-                  <th>Track</th>
-                  <th className="hide-narrow">Deck</th>
-                  <th className="hide-narrow">Source</th>
-                  <th>Played</th>
+                  <th>{t("history.started")}</th>
+                  <th>{t("history.track")}</th>
+                  <th className="hide-narrow">{t("history.deck")}</th>
+                  <th className="hide-narrow">{t("history.source")}</th>
+                  <th>{t("history.played")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -85,7 +80,7 @@ export function History() {
               disabled={plays.isFetchingNextPage}
               onClick={() => void plays.fetchNextPage()}
             >
-              Earlier plays
+              {t("history.earlier")}
             </button>
           </div>
         )}
@@ -112,7 +107,7 @@ function DayRows({ day, plays }: { day: string; plays: Play[] }) {
         </th>
       </tr>
       {plays.map((play) => {
-        const name = [play.artist, play.title].filter(Boolean).join(" – ") || "Unknown track";
+        const name = [play.artist, play.title].filter(Boolean).join(" – ") || t("history.unknownTrack");
         return (
           <tr key={play.id}>
             <td className="num">{clockTime(play.started_at_unix_ms)}</td>
@@ -120,13 +115,13 @@ function DayRows({ day, plays }: { day: string; plays: Play[] }) {
               {play.track_id ? <Link to={`/library/${play.track_id}`}>{name}</Link> : name}
             </td>
             <td className="hide-narrow">{play.deck.toUpperCase()}</td>
-            <td className="hide-narrow">{play.source === "rotation" ? "Autofill" : play.source}</td>
+            <td className="hide-narrow">{sourceLabel(play.source)}</td>
             <td>
               {play.ended_at_unix_ms === null || play.ended_at_unix_ms === undefined ? (
-                <span className="badge accent">On air</span>
+                <span className="badge accent">{t("nav.onAir")}</span>
               ) : (
                 <span className={play.end_reason === "skipped" ? "warn" : ""}>
-                  {play.end_reason ? ENDINGS[play.end_reason] : "Ended"}
+                  {endingLabel(play.end_reason)}
                   {play.played_ms !== null && play.played_ms !== undefined && (
                     <span className="muted num"> · {duration(play.played_ms)}</span>
                   )}

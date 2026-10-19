@@ -5,14 +5,14 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { type Artist, api, query, unwrap } from "../api";
-import { count } from "../lib/format";
+import { t } from "../i18n";
 import { useDebounced } from "./TrackSearch";
 import { ErrorView, Icon } from "./ui";
 
 export function ArtistPicker({
   actions,
   exclude = [],
-  placeholder = "Search artists",
+  placeholder = t("artistPicker.search"),
 }: {
   /** Buttons for each result. */
   actions: (artist: Artist) => ReactNode;
@@ -45,14 +45,15 @@ export function ArtistPicker({
       {results.isError && <ErrorView error={results.error} />}
       {q && results.data && (
         <ul className="list">
-          {found.length === 0 && <li className="empty">No artist found.</li>}
+          {found.length === 0 && <li className="empty">{t("artistPicker.none")}</li>}
           {found.map((artist) => (
             <li key={artist.id} className="queue-item">
               <div className="meta">
                 <div className="ellipsis">{artist.name}</div>
                 <div className="muted small ellipsis">
-                  {count(artist.tracks, "track")}
-                  {artist.names.length > 1 && ` · also ${artist.names.filter((n) => n.name !== artist.name).map((n) => n.name).join(", ")}`}
+                  {t("common.tracks", { count: artist.tracks })}
+                  {artist.names.length > 1 &&
+                    ` · ${t("artistPicker.also", { names: artist.names.filter((n) => n.name !== artist.name).map((n) => n.name).join(", ") })}`}
                 </div>
               </div>
               <div className="row" style={{ flexWrap: "nowrap" }}>

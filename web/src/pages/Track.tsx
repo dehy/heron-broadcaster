@@ -28,7 +28,9 @@ import {
   PageHead,
   Segmented,
 } from "../components/ui";
+import { rich, t } from "../i18n";
 import { ago, bytes, dateTime, db, duration, parseDuration, trackName } from "../lib/format";
+import { endingLabel } from "../lib/labels";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 
@@ -125,11 +127,11 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   const saveOverrides = useAction(
     (overrides: TrackOverrides) =>
       unwrap(api.PUT("/api/v1/tracks/{id}/overrides", { params: { path: { id: track.id } }, body: overrides })),
-    { success: "Saved: queued entries follow within seconds", invalidate: [["track", track.id]] },
+    { success: t("track.saved"), invalidate: [["track", track.id]] },
   );
   const clearOverrides = useAction(
     () => done(api.DELETE("/api/v1/tracks/{id}/overrides", { params: { path: { id: track.id } } })),
-    { success: "Back to the analysis and station settings", invalidate: [["track", track.id]] },
+    { success: t("track.cleared"), invalidate: [["track", track.id]] },
   );
   const setEnabled = useAction(
     (enabled: boolean) =>
@@ -143,7 +145,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
           body: next ? { track_ids: [track.id], position: 0 } : { track_ids: [track.id] },
         }),
       ),
-    { success: "Queued" },
+    { success: t("queuePage.queued") },
   );
 
   const { length, cueIn, cueOut } = effectiveCues(track, draft);
@@ -170,7 +172,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   const markers: Marker[] = [
     {
       id: "cue_in",
-      label: "Cue in",
+      label: t("track.cueIn"),
       ms: cueIn,
       color: "var(--good)",
       ...(canEdit && {
@@ -179,7 +181,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
     },
     {
       id: "cue_out",
-      label: "Cue out",
+      label: t("track.cueOut"),
       ms: cueOut,
       color: "var(--bad)",
       end: true,
@@ -191,7 +193,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   if (mixPoint !== null) {
     markers.push({
       id: "mix",
-      label: "Next starts",
+      label: t("transition.nextStarts"),
       ms: mixPoint,
       color: "var(--accent)",
       end: true,
@@ -216,7 +218,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
       startMs: mixPoint,
       endMs: Math.min(cueOut, mixPoint + fadeOut.time_ms),
       color: getVar("--bad"),
-      label: "Fade-out",
+      label: t("track.fadeOut"),
     });
   }
   if (fadeIn?.enabled && crossfades) {
@@ -224,7 +226,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
       startMs: cueIn,
       endMs: Math.min(cueOut, cueIn + fadeIn.time_ms),
       color: getVar("--good"),
-      label: "Fade-in",
+      label: t("track.fadeIn"),
     });
   }
 
@@ -251,7 +253,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
         title={track.title ?? trackName(track)}
         description={
           <>
-            {[track.artist, track.album].filter(Boolean).join(" · ") || "No tags"} ·{" "}
+            {[track.artist, track.album].filter(Boolean).join(" · ") || t("track.noTags")} ·{" "}
             <code>{track.path}</code>
           </>
         }
@@ -261,10 +263,10 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
               {!track.missing && !track.silent && (
                 <>
                   <button type="button" className="btn" onClick={() => enqueue.mutate(true)}>
-                    <Icon name="next" /> Play next
+                    <Icon name="next" /> {t("queue.playNext")}
                   </button>
                   <button type="button" className="btn" onClick={() => enqueue.mutate(false)}>
-                    <Icon name="plus" /> Queue
+                    <Icon name="plus" /> {t("track.queue")}
                   </button>
                 </>
               )}
@@ -272,9 +274,9 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
                 type="button"
                 className="btn"
                 onClick={() => setEnabled.mutate(!track.enabled)}
-                title={track.enabled ? "Never picked by autofill or the rotation" : undefined}
+                title={track.enabled ? t("track.disableHelp") : undefined}
               >
-                {track.enabled ? "Disable" : "Enable"}
+                {track.enabled ? t("track.disable") : t("track.enable")}
               </button>
             </>
           )
@@ -282,31 +284,32 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
       />
       {track.missing && (
         <Banner kind="bad">
-          The file has been missing since {dateTime(track.missing_since_unix_ms)}: the track is not
-          played.
+          {t("track.missingSince", { date: dateTime(track.missing_since_unix_ms) })}
         </Banner>
       )}
-      {track.silent && <Banner kind="bad">The analysis found nothing audible: the track is not played.</Banner>}
-      {!track.enabled && <Banner kind="warn">Disabled: autofill and the rotation never pick it.</Banner>}
+      {track.silent && <Banner kind="bad">{t("track.silent")}</Banner>}
+      {!track.enabled && <Banner kind="warn">{t("track.disabled")}</Banner>}
       {track.identification?.status === "needs_review" && (
         <Banner kind="warn">
-          Its identification needs review ({track.identification.reason}).{" "}
-          <Link to="/review">Review it</Link>
+          {rich("track.needsReview", {
+            reason: track.identification.reason,
+            link: <Link to="/review">{t("track.reviewIt")}</Link>,
+          })}
         </Banner>
       )}
 
       <Card
-        title="Waveform"
+        title={t("track.waveform")}
         actions={
           <>
             <Segmented
-              label="Zoom"
+              label={t("track.zoom")}
               value={zoom}
               onChange={setZoom}
               options={[
-                { value: "whole", label: "Whole" },
-                { value: "intro", label: "Intro" },
-                { value: "outro", label: "Outro" },
+                { value: "whole", label: t("track.whole") },
+                { value: "intro", label: t("track.intro") },
+                { value: "outro", label: t("track.outro") },
               ]}
             />
             {!track.missing && (
@@ -316,17 +319,17 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
                   className="btn small"
                   onClick={() => (playing ? audio.current?.pause() : playFrom(playhead ?? cueIn))}
                 >
-                  <Icon name={playing ? "pause" : "play"} size={14} /> {playing ? "Pause" : "Listen"}
+                  <Icon name={playing ? "pause" : "play"} size={14} /> {playing ? t("dashboard.pause") : t("track.listen")}
                 </button>
                 <button type="button" className="btn small" onClick={() => playFrom(cueIn)}>
-                  From the cue-in
+                  {t("track.fromCueIn")}
                 </button>
                 <button
                   type="button"
                   className="btn small"
                   onClick={() => playFrom(Math.max(0, (mixPoint ?? cueOut) - 5_000))}
                 >
-                  The ending
+                  {t("track.ending")}
                 </button>
               </>
             )}
@@ -349,21 +352,21 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
           )}
           <div className="legend muted">
             <span>
-              <span className="swatch" style={{ background: "var(--good)" }} /> Cue in{" "}
+              <span className="swatch" style={{ background: "var(--good)" }} /> {t("track.cueIn")}{" "}
               <strong className="num">{duration(cueIn, true)}</strong>
             </span>
             <span>
-              <span className="swatch" style={{ background: "var(--bad)" }} /> Cue out{" "}
+              <span className="swatch" style={{ background: "var(--bad)" }} /> {t("track.cueOut")}{" "}
               <strong className="num">{duration(cueOut, true)}</strong>
             </span>
             <span>
-              <span className="swatch" style={{ background: "var(--accent)" }} /> Next track starts{" "}
+              <span className="swatch" style={{ background: "var(--accent)" }} /> {t("track.nextTrackStarts")}{" "}
               <strong className="num">
-                {mixPoint !== null ? duration(mixPoint, true) : "after the cue-out"}
+                {mixPoint !== null ? duration(mixPoint, true) : t("track.afterCueOut")}
               </strong>
             </span>
-            <span>Plays {duration(cueOut - cueIn)}</span>
-            {canEdit && <span>Drag the flags to change the points, then save.</span>}
+            <span>{t("track.plays", { duration: duration(cueOut - cueIn) })}</span>
+            {canEdit && <span>{t("track.dragHelp")}</span>}
           </div>
           <audio
             ref={audio}
@@ -483,22 +486,22 @@ function OverridesCard({
     setDraft((d) => ({ ...d, crossfade: { ...d.crossfade, ...changes } }));
   return (
     <Card
-      title="Playout of this track"
+      title={t("track.playout")}
       actions={
         canEdit && (
           <>
             {hasOverrides && !dirty && (
               <button type="button" className="btn small" onClick={onClear}>
-                <Icon name="undo" size={14} /> Use the defaults
+                <Icon name="undo" size={14} /> {t("track.useDefaults")}
               </button>
             )}
             {dirty && (
               <button type="button" className="btn small" onClick={onRevert}>
-                Revert
+                {t("track.revert")}
               </button>
             )}
             <button type="button" className="btn small primary" disabled={!dirty || saving} onClick={onSave}>
-              Save
+              {t("common.save")}
             </button>
           </>
         )
@@ -506,11 +509,10 @@ function OverridesCard({
     >
       <div className="stack">
         <p className="muted small" style={{ margin: 0 }}>
-          Empty fields use the analysis and the station's{" "}
-          <Link to="/playout">crossfade settings</Link>.
+          {rich("track.emptyFields", { link: <Link to="/playout">{t("track.crossfadeSettings")}</Link> })}
         </p>
         <div className="form-grid">
-          <Field label="Cue in" hint={`Analysis: ${duration(analysis?.cue_in_ms ?? 0, true)}`}>
+          <Field label={t("track.cueIn")} hint={t("track.analysisValue", { value: duration(analysis?.cue_in_ms ?? 0, true) })}>
             <CueInput
               value={draft.cue_in_ms}
               placeholder={analysis?.cue_in_ms ?? 0}
@@ -519,8 +521,8 @@ function OverridesCard({
             />
           </Field>
           <Field
-            label="Cue out"
-            hint={`Analysis: ${duration(analysis?.cue_out_ms ?? track.duration_ms ?? 0, true)}`}
+            label={t("track.cueOut")}
+            hint={t("track.analysisValue", { value: duration(analysis?.cue_out_ms ?? track.duration_ms ?? 0, true) })}
           >
             <CueInput
               value={draft.cue_out_ms}
@@ -529,7 +531,7 @@ function OverridesCard({
               onChange={(ms) => setDraft((d) => ({ ...d, cue_out_ms: ms }))}
             />
           </Field>
-          <Field label="Gap Killer" hint="Off plays the whole file">
+          <Field label={t("track.gapKiller")} hint={t("track.gapKillerHelp")}>
             <select
               className="input"
               value={tri(draft.gap_killer_enabled)}
@@ -538,24 +540,23 @@ function OverridesCard({
                 setDraft((d) => ({ ...d, gap_killer_enabled: fromTri(event.target.value as Tri) }))
               }
             >
-              <option value="default">Station default (on)</option>
-              <option value="on">On</option>
-              <option value="off">Off</option>
+              <option value="default">{t("track.stationDefaultOn")}</option>
+              <option value="on">{t("track.on")}</option>
+              <option value="off">{t("track.off")}</option>
             </select>
           </Field>
         </div>
 
         <fieldset>
-          <legend>Into the next track</legend>
+          <legend>{t("track.intoNext")}</legend>
           <div className="stack">
             {shortTrack && (
               <p className="muted small" style={{ margin: 0 }}>
-                Shorter than {duration(station?.min_track_ms ?? 0)}: played back to back, never
-                crossfaded.
+                {t("track.shortTrack", { duration: duration(station?.min_track_ms ?? 0) })}
               </p>
             )}
             <div className="form-grid">
-              <Field label="Crossfade">
+              <Field label={t("track.crossfade")}>
                 <select
                   className="input"
                   value={cf.crossfade === false ? "off" : "default"}
@@ -564,11 +565,11 @@ function OverridesCard({
                     setCrossfade({ crossfade: event.target.value === "off" ? false : null })
                   }
                 >
-                  <option value="default">Crossfade</option>
-                  <option value="off">Back to back</option>
+                  <option value="default">{t("track.crossfade")}</option>
+                  <option value="off">{t("track.backToBack")}</option>
                 </select>
               </Field>
-              <Field label="Next track starts">
+              <Field label={t("track.nextTrackStarts")}>
                 <select
                   className="input"
                   value={cf.mode ?? "default"}
@@ -579,13 +580,15 @@ function OverridesCard({
                     })
                   }
                 >
-                  <option value="default">Station default ({station?.mode === "fixed" ? "fixed" : "automatic"})</option>
-                  <option value="auto">At the analysis' crossfade point</option>
-                  <option value="fixed">A fixed time before the cue-out</option>
+                  <option value="default">
+                    {station?.mode === "fixed" ? t("track.stationDefaultFixed") : t("track.stationDefaultAuto")}
+                  </option>
+                  <option value="auto">{t("track.modeAuto")}</option>
+                  <option value="fixed">{t("track.modeFixed")}</option>
                 </select>
               </Field>
               {(cf.mode ?? station?.mode) === "fixed" && (
-                <Field label="Before the cue-out">
+                <Field label={t("track.beforeCueOut")}>
                   <NumberInput
                     value={(cf.fixed_ms ?? station?.fixed_ms ?? 2000) / 1000}
                     min={0}
@@ -599,7 +602,7 @@ function OverridesCard({
               )}
             </div>
             <OverrideFade
-              label="Fade-out of this track"
+              label={t("track.fadeOutOfTrack")}
               kind="out"
               value={cf.fade_out}
               station={station?.fade_out}
@@ -609,9 +612,9 @@ function OverridesCard({
           </div>
         </fieldset>
         <fieldset>
-          <legend>Out of the previous track</legend>
+          <legend>{t("track.outOfPrevious")}</legend>
           <OverrideFade
-            label="Fade-in of this track"
+            label={t("track.fadeInOfTrack")}
             kind="in"
             value={cf.fade_in}
             station={station?.fade_in}
@@ -648,7 +651,7 @@ function OverrideFade({
           disabled={disabled || !station}
           onChange={(event) => onChange(event.target.checked && station ? { ...station } : null)}
         />
-        {label}: {value === null ? "station setting" : "set for this track"}
+        {value === null ? t("track.fadeStation", { fade: label }) : t("track.fadeOwn", { fade: label })}
       </label>
       {value !== null && <FadeEditor value={value} onChange={onChange} kind={kind} disabled={disabled} />}
     </div>
@@ -670,11 +673,11 @@ function CategoriesCard({ track, canEdit }: { track: TrackDetail; canEdit: boole
     (c) => !track.categories.some((assigned) => assigned.category_id === c.id),
   );
   return (
-    <Card title="Categories" actions={<Link to="/categories" className="btn small">Manage</Link>}>
+    <Card title={t("nav.categories")} actions={<Link to="/categories" className="btn small">{t("track.manage")}</Link>}>
       <div className="stack">
         {track.categories.length === 0 && (
           <p className="muted" style={{ margin: 0 }}>
-            In no category.
+            {t("track.noCategory")}
           </p>
         )}
         <ul className="list">
@@ -685,8 +688,8 @@ function CategoriesCard({ track, canEdit }: { track: TrackDetail; canEdit: boole
                 {category.name}
               </span>
               <span className="row">
-                <label className="row small muted" title="Chance of being picked within the category">
-                  Weight
+                <label className="row small muted" title={t("track.weightHelp")}>
+                  {t("track.weight")}
                   <span style={{ width: "5rem" }}>
                     <NumberInput
                       value={category.weight}
@@ -707,7 +710,7 @@ function CategoriesCard({ track, canEdit }: { track: TrackDetail; canEdit: boole
                   <button
                     type="button"
                     className="btn ghost small icon danger"
-                    aria-label={`Remove from ${category.name}`}
+                    aria-label={t("track.removeFrom", { category: category.name })}
                     onClick={() =>
                       save.mutate(current.filter((c) => c.category_id !== category.category_id))
                     }
@@ -721,7 +724,7 @@ function CategoriesCard({ track, canEdit }: { track: TrackDetail; canEdit: boole
         </ul>
         {canEdit && available.length > 0 && (
           <label>
-            <span className="visually-hidden">Add to a category</span>
+            <span className="visually-hidden">{t("track.addCategory")}</span>
             <select
               className="input"
               value=""
@@ -729,7 +732,7 @@ function CategoriesCard({ track, canEdit }: { track: TrackDetail; canEdit: boole
                 save.mutate([...current, { category_id: Number(event.target.value), weight: 1 }])
               }
             >
-              <option value="">Add to a category…</option>
+              <option value="">{t("track.addCategoryOption")}</option>
               {available.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -746,29 +749,29 @@ function CategoriesCard({ track, canEdit }: { track: TrackDetail; canEdit: boole
 function DetailsCard({ track }: { track: TrackDetail }) {
   const analysis = track.analysis;
   return (
-    <Card title="Analysis and file">
+    <Card title={t("track.details")}>
       <dl className="facts small">
-        <dt>Loudness</dt>
-        <dd>{analysis ? db(analysis.integrated_lufs, "LUFS") : "Not analyzed yet"}</dd>
-        <dt>True peak</dt>
+        <dt>{t("track.loudness")}</dt>
+        <dd>{analysis ? db(analysis.integrated_lufs, "LUFS") : t("track.notAnalyzed")}</dd>
+        <dt>{t("track.truePeak")}</dt>
         <dd>{analysis ? db(analysis.true_peak_db, "dBTP") : "–"}</dd>
-        <dt>Normalization</dt>
+        <dt>{t("track.normalization")}</dt>
         <dd>{db(track.playout.gain_db)}</dd>
         {analysis?.has_internal_silence && (
           <>
-            <dt>Silence</dt>
-            <dd className="warn">A long silence inside: the track ends there.</dd>
+            <dt>{t("track.silence")}</dt>
+            <dd className="warn">{t("track.internalSilence")}</dd>
           </>
         )}
-        <dt>Analyzed</dt>
+        <dt>{t("track.analyzed")}</dt>
         <dd>{analysis ? dateTime(analysis.analyzed_at_unix_ms) : "–"}</dd>
-        <dt>Length</dt>
+        <dt>{t("library.length")}</dt>
         <dd className="num">{duration(track.duration_ms, true)}</dd>
-        <dt>Size</dt>
+        <dt>{t("track.size")}</dt>
         <dd>{bytes(track.file_size)}</dd>
-        <dt>Added</dt>
+        <dt>{t("track.added")}</dt>
         <dd>{dateTime(track.added_at_unix_ms)}</dd>
-        <dt>Identification</dt>
+        <dt>{t("track.identification")}</dt>
         <dd>
           {track.identification?.status === "identified" && track.identification.release_mbid ? (
             <a
@@ -776,14 +779,14 @@ function DetailsCard({ track }: { track: TrackDetail }) {
               target="_blank"
               rel="noreferrer"
             >
-              MusicBrainz release
+              {t("track.musicbrainzRelease")}
             </a>
           ) : track.identification?.status === "needs_review" ? (
-            <span className="warn">Needs review</span>
+            <span className="warn">{t("library.filter.needsReview")}</span>
           ) : track.identification?.status === "kept" ? (
-            "Reviewed: its own tags"
+            t("track.reviewedOwnTags")
           ) : (
-            "Its own tags"
+            t("track.ownTags")
           )}
         </dd>
       </dl>
@@ -798,15 +801,15 @@ function PlaysCard({ trackId }: { trackId: number }) {
       unwrap(api.GET("/api/v1/history", { params: { query: { track_id: trackId, limit: 10 } } })),
   });
   return (
-    <Card title="Recent plays" flush>
+    <Card title={t("track.recentPlays")} flush>
       {plays.isError && <ErrorView error={plays.error} />}
-      {plays.data?.length === 0 && <Empty>Never played.</Empty>}
+      {plays.data?.length === 0 && <Empty>{t("track.neverPlayed")}</Empty>}
       <ul className="list">
         {plays.data?.map((play) => (
           <li key={play.id} className="queue-item">
             <span className="meta">{dateTime(play.started_at_unix_ms)}</span>
             <span className="muted small">
-              {play.end_reason ?? (play.ended_at_unix_ms ? "" : "playing")}
+              {play.ended_at_unix_ms ? endingLabel(play.end_reason) : t("track.playing")}
               {play.played_ms ? ` · ${duration(play.played_ms)}` : ""} · {ago(play.started_at_unix_ms)}
             </span>
           </li>

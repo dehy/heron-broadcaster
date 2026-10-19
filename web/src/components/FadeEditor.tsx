@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type { Fade, FadeCurve } from "../api";
+import { type PlainKey, t } from "../i18n";
 import { Field, NumberInput } from "./ui";
 
-export const CURVES: { value: FadeCurve; label: string }[] = [
-  { value: "linear", label: "Linear" },
-  { value: "s_curve", label: "S-curve" },
-  { value: "logarithmic", label: "Logarithmic (holds, then drops)" },
-  { value: "exponential", label: "Exponential (drops, then trails)" },
+export const CURVES: { value: FadeCurve; label: PlainKey }[] = [
+  { value: "linear", label: "fade.linear" },
+  { value: "s_curve", label: "fade.sCurve" },
+  { value: "logarithmic", label: "fade.logarithmic" },
+  { value: "exponential", label: "fade.exponential" },
 ];
 
 /** One side of a crossfade: on or off, its curve, length and level. */
@@ -31,10 +32,10 @@ export function FadeEditor({
           disabled={disabled}
           onChange={(event) => onChange({ ...value, enabled: event.target.checked })}
         />
-        {kind === "out" ? "Fade the outgoing track out" : "Fade the incoming track in"}
+        {kind === "out" ? t("fade.outgoing") : t("fade.incoming")}
       </label>
       <div className="form-grid">
-        <Field label="Curve">
+        <Field label={t("fade.curve")}>
           <select
             className="input"
             value={value.curve}
@@ -43,12 +44,12 @@ export function FadeEditor({
           >
             {CURVES.map((curve) => (
               <option key={curve.value} value={curve.value}>
-                {curve.label}
+                {t(curve.label)}
               </option>
             ))}
           </select>
         </Field>
-        <Field label="Length" hint={kind === "out" ? "From when the next track starts" : "From the cue-in"}>
+        <Field label={t("fade.length")} hint={kind === "out" ? t("fade.lengthOut") : t("fade.lengthIn")}>
           <NumberInput
             value={value.time_ms / 1000}
             min={0}
@@ -59,7 +60,7 @@ export function FadeEditor({
             onChange={(seconds) => onChange({ ...value, time_ms: Math.round(seconds * 1000) })}
           />
         </Field>
-        <Field label={kind === "out" ? "Down to" : "Up from"} hint="0 % is silence">
+        <Field label={kind === "out" ? t("fade.downTo") : t("fade.upFrom")} hint={t("fade.silence")}>
           <NumberInput
             value={value.level_pct}
             min={0}

@@ -6,6 +6,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { type TrackSummary, api, query, unwrap } from "../api";
+import { t } from "../i18n";
 import { duration, trackName } from "../lib/format";
 import { ErrorView, Icon } from "./ui";
 
@@ -21,7 +22,7 @@ export function useDebounced<T>(value: T, ms = 250): T {
 
 export function TrackSearch({
   actions,
-  placeholder = "Search title, artist, album or file",
+  placeholder = t("trackSearch.placeholder"),
   playableOnly = true,
   limit = 8,
 }: {
@@ -54,7 +55,7 @@ export function TrackSearch({
   return (
     <div className="stack">
       <label className="row" style={{ flexWrap: "nowrap" }}>
-        <span className="visually-hidden">Search tracks</span>
+        <span className="visually-hidden">{t("trackSearch.label")}</span>
         <Icon name="search" />
         <input
           className="input"
@@ -67,7 +68,7 @@ export function TrackSearch({
       {results.isError && <ErrorView error={results.error} />}
       {results.data && (
         <ul className="list">
-          {results.data.items.length === 0 && <li className="empty">No playable track found.</li>}
+          {results.data.items.length === 0 && <li className="empty">{t("trackSearch.none")}</li>}
           {results.data.items.map((track) => (
             <li key={track.id} className="queue-item">
               <div className="meta">
@@ -85,7 +86,7 @@ export function TrackSearch({
       )}
       {!q && results.data && results.data.items.length > 0 && (
         <p className="muted small" style={{ margin: 0 }}>
-          Showing the least recently played tracks. Type to search.
+          {t("trackSearch.hint")}
         </p>
       )}
     </div>

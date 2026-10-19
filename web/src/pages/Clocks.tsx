@@ -48,8 +48,9 @@ import {
   Modal,
   PageHead,
 } from "../components/ui";
-import { count, duration } from "../lib/format";
-import { METHOD_OPTIONS, describeOverrides } from "../lib/rotation";
+import { number, rich, t } from "../i18n";
+import { duration } from "../lib/format";
+import { METHODS_LIST, describeOverrides, methodLabel, stepLabel } from "../lib/rotation";
 import { Link, navigate } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 
@@ -70,17 +71,12 @@ export function Clocks() {
   return (
     <>
       <PageHead
-        title="Clocks"
-        description={
-          <>
-            A clock is an hour of programming: slots in order, each calling a category. The{" "}
-            <Link to="/schedule">schedule</Link> says which clock runs when.
-          </>
-        }
+        title={t("nav.clocks")}
+        description={rich("clocks.description", { link: <Link to="/schedule">{t("clocks.scheduleLink")}</Link> })}
         actions={
           canEdit && (
             <button type="button" className="btn primary" onClick={() => navigate("/clocks/new")}>
-              <Icon name="plus" /> New clock
+              <Icon name="plus" /> {t("clocks.new")}
             </button>
           )
         }
@@ -89,16 +85,16 @@ export function Clocks() {
         {clocks.isPending && <Loading />}
         {clocks.isError && <ErrorView error={clocks.error} />}
         {clocks.data?.length === 0 && (
-          <Empty>No clock yet: every hour rotates the whole library, least recently played first.</Empty>
+          <Empty>{t("clocks.none")}</Empty>
         )}
         {clocks.data && clocks.data.length > 0 && (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Slots</th>
-                  <th>Scheduled</th>
+                  <th>{t("categories.name")}</th>
+                  <th>{t("clocks.slots")}</th>
+                  <th>{t("clocks.scheduled")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -109,14 +105,14 @@ export function Clocks() {
                       {clock.looping && (
                         <>
                           {" "}
-                          <span className="badge" title="Carries on across hours">
-                            Loops
+                          <span className="badge" title={t("clocks.loopsHelp")}>
+                            {t("clocks.loops")}
                           </span>
                         </>
                       )}
                     </td>
                     <td>
-                      <span className="slot-strip" title={`${clock.slots.length} slots`}>
+                      <span className="slot-strip" title={t("clocks.slotCount", { count: clock.slots.length })}>
                         {clock.slots.map((slot, index) => (
                           <span
                             key={index}
@@ -125,14 +121,14 @@ export function Clocks() {
                             style={{ background: byId.get(slot.category_id)?.color ?? "var(--wave)" }}
                           />
                         ))}
-                        {clock.slots.length === 0 && <span className="muted small">empty</span>}
+                        {clock.slots.length === 0 && <span className="muted small">{t("clocks.empty")}</span>}
                       </span>
                     </td>
                     <td className="num">
                       {clock.scheduled_hours === 0 ? (
-                        <span className="muted">not scheduled</span>
+                        <span className="muted">{t("clocks.notScheduled")}</span>
                       ) : (
-                        count(clock.scheduled_hours, "hour") + " a week"
+                        t("clocks.hoursAWeek", { count: clock.scheduled_hours })
                       )}
                     </td>
                   </tr>
@@ -201,7 +197,7 @@ function Editor({ clock }: { clock: ClockView | null }) {
         : unwrap(api.POST("/api/v1/clocks", { body }));
     },
     {
-      success: "Clock saved",
+      success: t("clocks.saved"),
       invalidate: [["clocks"]],
       onSuccess: (saved) => {
         if (!clock) {
@@ -212,7 +208,7 @@ function Editor({ clock }: { clock: ClockView | null }) {
   );
   const remove = useAction(
     () => done(api.DELETE("/api/v1/clocks/{id}", { params: { path: { id: clock?.id ?? 0 } } })),
-    { success: "Clock deleted", invalidate: [["clocks"], ["schedule"]], onSuccess: () => navigate("/clocks") },
+    { success: t("clocks.deleted"), invalidate: [["clocks"], ["schedule"]], onSuccess: () => navigate("/clocks") },
   );
 
   const sensors = useSensors(
@@ -241,24 +237,19 @@ function Editor({ clock }: { clock: ClockView | null }) {
   return (
     <>
       <PageHead
-        title={clock ? clock.name : "New clock"}
-        description={<Link to="/clocks">All clocks</Link>}
+        title={clock ? clock.name : t("clocks.new")}
+        description={<Link to="/clocks">{t("clocks.all")}</Link>}
         actions={
           canEdit && (
             <>
               {clock && (
                 <ConfirmButton
                   className="btn danger"
-                  confirm="Delete"
-                  question={
-                    <p>
-                      Delete <strong>{clock.name}</strong>? The hours it is scheduled at rotate the whole library
-                      until another clock is scheduled.
-                    </p>
-                  }
+                  confirm={t("categories.deleteButton")}
+                  question={<p>{rich("clocks.deleteQuestion", { name: <strong>{clock.name}</strong> })}</p>}
                   onConfirm={() => remove.mutate(undefined)}
                 >
-                  <Icon name="trash" /> Delete
+                  <Icon name="trash" /> {t("categories.deleteButton")}
                 </ConfirmButton>
               )}
               <button
@@ -267,7 +258,7 @@ function Editor({ clock }: { clock: ClockView | null }) {
                 disabled={!dirty || !name.trim() || save.isPending}
                 onClick={() => save.mutate(undefined)}
               >
-                Save
+                {t("common.save")}
               </button>
             </>
           )
@@ -275,9 +266,9 @@ function Editor({ clock }: { clock: ClockView | null }) {
       />
       <div className="grid sidebar-right">
         <div className="stack">
-          <Card title="Slots" flush>
+          <Card title={t("clocks.slots")} flush>
             <div className="card-pad">
-              <Field label="Name">
+              <Field label={t("categories.name")}>
                 <input
                   className="input"
                   value={name}
@@ -293,25 +284,25 @@ function Editor({ clock }: { clock: ClockView | null }) {
                   disabled={!canEdit}
                   onChange={(event) => setLooping(event.target.checked)}
                 />
-                Loop across hours
+                {t("clocks.loop")}
               </label>
               <p className="muted small" style={{ margin: "0.25rem 0 0" }}>
                 {looping
-                  ? "The clock carries on from its last slot whatever the hour, like a SAM Broadcaster clockwheel: it can be longer than an hour."
-                  : "Each hour starts the clock from its first slot; slots that do not fit in the hour are dropped."}
+                  ? t("clocks.loopHelp")
+                  : t("clocks.noLoopHelp")}
               </p>
             </div>
             {categories.data?.length === 0 && (
               <Banner kind="warn">
-                Slots call categories: <Link to="/categories">create some</Link> first.
+                {rich("clocks.needCategories", { link: <Link to="/categories">{t("clocks.createSome")}</Link> })}
               </Banner>
             )}
             {slots.length === 0 ? (
-              <Empty>No slot yet.</Empty>
+              <Empty>{t("clocks.noSlot")}</Empty>
             ) : (
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
                 <SortableContext items={slots.map((slot) => slot.key)} strategy={verticalListSortingStrategy}>
-                  <ol className="list" aria-label="Slots">
+                  <ol className="list" aria-label={t("clocks.slots")}>
                     {slots.map((slot, index) => (
                       <SlotRow
                         key={slot.key}
@@ -348,9 +339,9 @@ function Editor({ clock }: { clock: ClockView | null }) {
                     ]);
                   }}
                 >
-                  <Icon name="plus" /> Add a slot
+                  <Icon name="plus" /> {t("clocks.addSlot")}
                 </button>
-                <span className="muted small">Drag the slots to reorder them.</span>
+                <span className="muted small">{t("clocks.dragHelp")}</span>
               </div>
             )}
           </Card>
@@ -362,17 +353,17 @@ function Editor({ clock }: { clock: ClockView | null }) {
       </div>
       {editingSlot && (
         <Modal
-          title={`Slot ${slots.indexOf(editingSlot) + 1}: separation`}
+          title={t("clocks.slotSeparation", { slot: slots.indexOf(editingSlot) + 1 })}
           open
           onClose={() => setSeparating(null)}
           footer={
             <button type="button" className="btn primary" onClick={() => setSeparating(null)}>
-              Done
+              {t("clocks.done")}
             </button>
           }
         >
           <p className="muted small">
-            Override the windows of {byId.get(editingSlot.category_id)?.name ?? "the category"} for this slot only.
+            {t("clocks.overrideHelp", { category: byId.get(editingSlot.category_id)?.name ?? t("clocks.theCategory") })}
           </p>
           <SeparationEditor
             value={editingSlot.separation ?? {}}
@@ -425,7 +416,7 @@ function SlotRow({
         <button
           type="button"
           className="btn ghost small icon handle"
-          aria-label={`Move slot ${index + 1}`}
+          aria-label={t("clocks.moveSlot", { slot: index + 1 })}
           {...attributes}
           {...listeners}
         >
@@ -438,7 +429,7 @@ function SlotRow({
         <div className="row">
           <select
             className="input"
-            aria-label={`Category of slot ${index + 1}`}
+            aria-label={t("clocks.slotCategory", { slot: index + 1 })}
             value={slot.category_id}
             disabled={!canEdit}
             onChange={(event) => onChange({ category_id: Number(event.target.value) })}
@@ -451,53 +442,52 @@ function SlotRow({
           </select>
           <select
             className="input"
-            aria-label={`Selection method of slot ${index + 1}`}
+            aria-label={t("clocks.slotMethod", { slot: index + 1 })}
             value={slot.method}
             disabled={!canEdit}
             onChange={(event) => onChange({ method: event.target.value as Method })}
           >
-            {METHOD_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
+            {METHODS_LIST.map((method) => (
+              <option key={method} value={method}>
+                {methodLabel(method)}
               </option>
             ))}
           </select>
-          <label className="check small" title="Off: separation rules are skipped (restrictions still apply)">
+          <label className="check small" title={t("clocks.enforceHelp")}>
             <input
               type="checkbox"
               checked={slot.enforce_rules}
               disabled={!canEdit}
               onChange={(event) => onChange({ enforce_rules: event.target.checked })}
             />
-            Enforce rules
+            {t("clocks.enforce")}
           </label>
         </div>
         <div className="row small muted" style={{ gap: "0.4rem" }}>
           {preview && (
             <>
-              <span className="num" title="Expected start, from the top of the hour">
+              <span className="num" title={t("clocks.expectedStart")}>
                 +{duration(preview.expected_start_ms)}
               </span>
               <span>·</span>
               <span>
-                {count(preview.tracks, "track")}
                 {preview.average_ms !== null && preview.average_ms !== undefined
-                  ? `, ${duration(preview.average_ms)} on average`
-                  : ""}
+                  ? t("clocks.tracksAverage", { count: preview.tracks, average: duration(preview.average_ms) })
+                  : t("common.tracks", { count: preview.tracks })}
               </span>
               {preview.short && (
                 <span
                   className="badge warn"
-                  title={`Needs about ${preview.needed_tracks} tracks not to repeat within its track window`}
+                  title={t("clocks.neededTracks", { count: preview.needed_tracks })}
                 >
-                  Running short
+                  {t("clocks.runningShort")}
                 </span>
               )}
-              {preview.beyond_hour && <span className="badge">After the hour: not played</span>}
+              {preview.beyond_hour && <span className="badge">{t("clocks.afterHour")}</span>}
             </>
           )}
           <button type="button" className="link-button" onClick={onSeparation}>
-            {overrides ? `Separation: ${overrides}` : canEdit ? "Override separation" : "Separation"}
+            {overrides ? t("clocks.separationValue", { windows: overrides }) : canEdit ? t("clocks.overrideSeparation") : t("categories.separation")}
           </button>
         </div>
       </div>
@@ -505,7 +495,7 @@ function SlotRow({
         <button
           type="button"
           className="btn ghost small icon danger"
-          aria-label={`Remove slot ${index + 1}`}
+          aria-label={t("clocks.removeSlot", { slot: index + 1 })}
           onClick={onRemove}
         >
           <Icon name="trash" />
@@ -542,14 +532,14 @@ function HourCard({
   const short = preview?.slots.filter((slot) => slot.short) ?? [];
   const span = looping && preview ? Math.max(HOUR_MS, preview.duration_ms) : HOUR_MS;
   return (
-    <Card title={looping ? "The loop" : "The hour"}>
+    <Card title={looping ? t("clocks.theLoop") : t("clocks.theHour")}>
       {!preview ? (
         <Loading />
       ) : slots.length === 0 ? (
-        <Empty>Add slots to see the hour.</Empty>
+        <Empty>{t("clocks.addSlotsToSee")}</Empty>
       ) : (
         <div className="stack">
-          <div className="hour-bar" role="img" aria-label={looping ? "Slots over one round of the loop" : "Slots over the hour"}>
+          <div className="hour-bar" role="img" aria-label={looping ? t("clocks.barLoop") : t("clocks.barHour")}>
             {preview.slots.map((slot, index) => {
               const start = slot.expected_start_ms;
               if (start >= span) {
@@ -560,7 +550,7 @@ function HourCard({
                 <span
                   key={index}
                   className="segment"
-                  title={`${index + 1}. ${categories.get(slot.category_id)?.name ?? "?"} at +${duration(start)}`}
+                  title={t("clocks.segment", { slot: index + 1, category: categories.get(slot.category_id)?.name ?? "?", start: duration(start) })}
                   style={{
                     left: `${(start / span) * 100}%`,
                     width: `${(length / span) * 100}%`,
@@ -572,7 +562,7 @@ function HourCard({
             {preview.duration_ms > 0 && preview.duration_ms < span && (
               <span
                 className="segment repeat"
-                title="The clock starts over"
+                title={t("clocks.startsOverHelp")}
                 style={{ left: `${(preview.duration_ms / span) * 100}%`, right: 0 }}
               />
             )}
@@ -583,36 +573,32 @@ function HourCard({
             ))}
           </div>
           <dl className="facts">
-            <dt>{looping ? "One round" : "Expected length"}</dt>
+            <dt>{looping ? t("clocks.oneRound") : t("clocks.expectedLength")}</dt>
             <dd className="num">{duration(preview.duration_ms)}</dd>
             {preview.runs_per_hour > 1 && (
               <>
-                <dt>Starts over</dt>
-                <dd>{preview.runs_per_hour.toFixed(1)} times an hour</dd>
+                <dt>{t("clocks.startsOver")}</dt>
+                <dd>{t("clocks.timesAnHour", { times: number(preview.runs_per_hour, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })}</dd>
               </>
             )}
             {!looping && preview.duration_ms > HOUR_MS && (
               <>
-                <dt>Past the hour</dt>
-                <dd>
-                  {count(preview.slots.filter((s) => s.beyond_hour).length, "slot")} will not play: the next hour
-                  starts its own clock. Make the clock loop across hours to play them all.
-                </dd>
+                <dt>{t("clocks.pastHour")}</dt>
+                <dd>{t("clocks.pastHourHelp", { count: preview.slots.filter((s) => s.beyond_hour).length })}</dd>
               </>
             )}
           </dl>
           {short.length > 0 && (
             <Banner kind="warn">
-              {[...new Set(short.map((slot) => categories.get(slot.category_id)?.name ?? "A category"))].join(", ")}{" "}
-              {short.length === 1 ? "has" : "have"} too few tracks for {short.length === 1 ? "its" : "their"} track
-              separation: expect relaxed rules.
+              {t("clocks.tooFew", {
+                count: short.length,
+                names: [...new Set(short.map((slot) => categories.get(slot.category_id)?.name ?? t("clocks.aCategory")))].join(", "),
+              })}
             </Banner>
           )}
           <p className="muted small" style={{ margin: 0 }}>
-            Lengths are the categories' averages; real tracks vary.{" "}
-            {looping
-              ? "The loop carries on across hours, from where it stopped."
-              : "Each new hour starts its clock from the first slot."}
+            {t("clocks.lengthsHelp")}{" "}
+            {looping ? t("clocks.loopCarriesOn") : t("clocks.hourStarts")}
           </p>
         </div>
       )}
@@ -635,27 +621,27 @@ function SimulateCard({ clockId, dirty }: { clockId: number; dirty: boolean }) {
   const start = report?.simulation.start_unix_ms ?? 0;
   return (
     <Card
-      title="Simulation"
+      title={t("clocks.simulation")}
       actions={
         <button
           type="button"
           className="btn small"
           disabled={dirty || simulate.isPending}
-          title={dirty ? "Save the clock first" : undefined}
+          title={dirty ? t("clocks.saveFirst") : undefined}
           onClick={() => simulate.mutate(undefined)}
         >
-          {simulate.isPending ? "Simulating…" : "Simulate an hour"}
+          {simulate.isPending ? t("clocks.simulating") : t("clocks.simulateHour")}
         </button>
       }
     >
       {!report ? (
         <p className="muted small" style={{ margin: 0 }}>
-          Picks an hour of this clock from the library and the history, without touching the queue.
+          {t("clocks.simulateHelp")}
         </p>
       ) : (
         <div className="stack">
           {report.simulation.violations.length > 0 && (
-            <Banner kind="bad">{count(report.simulation.violations.length, "rule")} broken: please report it.</Banner>
+            <Banner kind="bad">{t("clocks.rulesBroken", { count: report.simulation.violations.length })}</Banner>
           )}
           <ol className="list compact">
             {report.simulation.picks.map((pick, index) => {
@@ -665,12 +651,12 @@ function SimulateCard({ clockId, dirty }: { clockId: number; dirty: boolean }) {
                   <span className="num muted small">+{duration(pick.start_unix_ms - start)}</span>
                   <span className="ellipsis" style={{ flex: 1 }}>
                     <Link to={`/library/${pick.track_id}`}>
-                      {track ? `${track.artist ?? "?"} – ${track.title ?? "?"}` : `Track ${pick.track_id}`}
+                      {track ? `${track.artist ?? "?"} – ${track.title ?? "?"}` : t("clocks.trackNumber", { id: String(pick.track_id) })}
                     </Link>
                   </span>
                   {pick.explanation.step > 0 && (
-                    <span className="badge warn" title={pick.explanation.step_description}>
-                      Relaxed {pick.explanation.step}
+                    <span className="badge warn" title={stepLabel(pick.explanation.step)}>
+                      {t("clocks.relaxed", { step: pick.explanation.step })}
                     </span>
                   )}
                 </li>
@@ -678,7 +664,7 @@ function SimulateCard({ clockId, dirty }: { clockId: number; dirty: boolean }) {
             })}
           </ol>
           <p className="muted small" style={{ margin: 0 }}>
-            Random and weighted slots pick differently each time.
+            {t("clocks.randomHelp")}
           </p>
         </div>
       )}

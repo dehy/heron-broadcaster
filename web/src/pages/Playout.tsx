@@ -20,6 +20,7 @@ import {
   PageHead,
   Segmented,
 } from "../components/ui";
+import { t } from "../i18n";
 import { db, trackName } from "../lib/format";
 import { useLive } from "../lib/live";
 import { useAction, useCan } from "../lib/session";
@@ -50,7 +51,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
   const save = useAction(
     (settings: PlayoutSettings) => unwrap(api.PUT("/api/v1/settings/playout", { body: settings })),
-    { success: "Saved: the engine uses them from the next transition", invalidate: [["settings", "playout"]] },
+    { success: t("playout.saved"), invalidate: [["settings", "playout"]] },
   );
   const crossfade = draft.crossfade;
   const loudness = draft.loudness;
@@ -63,14 +64,14 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
   return (
     <>
       <PageHead
-        title="Crossfade & loudness"
-        description="How tracks hand over to each other, and how loud they play."
+        title={t("nav.playout")}
+        description={t("playout.description")}
         actions={
           isAdmin && (
             <>
               {dirty && (
                 <button type="button" className="btn" onClick={() => setDraft(saved)}>
-                  Revert
+                  {t("track.revert")}
                 </button>
               )}
               <button
@@ -79,7 +80,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
                 disabled={!dirty || save.isPending}
                 onClick={() => save.mutate(draft)}
               >
-                Save
+                {t("common.save")}
               </button>
             </>
           )
@@ -87,28 +88,28 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
       />
       <Preview settings={draft} />
       <div className="grid two">
-        <Card title="Crossfade">
+        <Card title={t("track.crossfade")}>
           <div className="stack">
-            <Field label="The next track starts">
+            <Field label={t("playout.nextStarts")}>
               <Segmented
-                label="The next track starts"
+                label={t("playout.nextStarts")}
                 value={crossfade.mode}
                 disabled={disabled}
                 onChange={(mode) => setCrossfade({ mode })}
                 options={[
-                  { value: "auto", label: "At the crossfade point" },
-                  { value: "fixed", label: "A fixed time before the end" },
+                  { value: "auto", label: t("playout.auto") },
+                  { value: "fixed", label: t("playout.fixed") },
                 ]}
               />
             </Field>
             <p className="muted small" style={{ margin: 0 }}>
               {crossfade.mode === "auto"
-                ? "The analysis finds each track's crossfade point, after its last loud moment (see the analysis settings)."
-                : "Every track hands over the same time before its cue-out."}
+                ? t("playout.autoHelp")
+                : t("playout.fixedHelp")}
             </p>
             <div className="form-grid">
               {crossfade.mode === "fixed" && (
-                <Field label="Before the cue-out">
+                <Field label={t("track.beforeCueOut")}>
                   <NumberInput
                     value={crossfade.fixed_ms / 1000}
                     min={0}
@@ -120,7 +121,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
                   />
                 </Field>
               )}
-              <Field label="No crossfade up to" hint="Jingles and IDs play back to back">
+              <Field label={t("playout.minTrack")} hint={t("playout.minTrackHint")}>
                 <NumberInput
                   value={crossfade.min_track_ms / 1000}
                   min={0}
@@ -131,7 +132,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
                   onChange={(s) => setCrossfade({ min_track_ms: Math.round(s * 1000) })}
                 />
               </Field>
-              <Field label="Fade on skip">
+              <Field label={t("playout.skipFade")}>
                 <NumberInput
                   value={crossfade.skip_fade_ms / 1000}
                   min={0}
@@ -144,7 +145,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
               </Field>
             </div>
             <fieldset>
-              <legend>Fade-out</legend>
+              <legend>{t("track.fadeOut")}</legend>
               <FadeEditor
                 kind="out"
                 value={crossfade.fade_out}
@@ -153,7 +154,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
               />
             </fieldset>
             <fieldset>
-              <legend>Fade-in</legend>
+              <legend>{t("track.fadeIn")}</legend>
               <FadeEditor
                 kind="in"
                 value={crossfade.fade_in}
@@ -163,7 +164,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
             </fieldset>
           </div>
         </Card>
-        <Card title="Loudness">
+        <Card title={t("track.loudness")}>
           <div className="stack">
             <label className="check">
               <input
@@ -172,10 +173,10 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
                 disabled={disabled}
                 onChange={(event) => setLoudness({ enabled: event.target.checked })}
               />
-              Bring every track to the same loudness (EBU R128)
+              {t("playout.normalize")}
             </label>
             <div className="form-grid">
-              <Field label="Target" hint="-16 LUFS suits most streams; -14 is louder">
+              <Field label={t("playout.target")} hint={t("playout.targetHint")}>
                 <NumberInput
                   value={loudness.target_lufs}
                   min={-40}
@@ -186,7 +187,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
                   onChange={(target_lufs) => setLoudness({ target_lufs })}
                 />
               </Field>
-              <Field label="Most boost" hint="For quiet tracks">
+              <Field label={t("playout.maxGain")} hint={t("playout.maxGainHint")}>
                 <NumberInput
                   value={loudness.max_gain_db}
                   min={0}
@@ -197,7 +198,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
                   onChange={(max_gain_db) => setLoudness({ max_gain_db })}
                 />
               </Field>
-              <Field label="Peak ceiling" hint="Boosts never push peaks above it">
+              <Field label={t("playout.ceiling")} hint={t("playout.ceilingHint")}>
                 <NumberInput
                   value={loudness.peak_ceiling_dbtp}
                   min={-12}
@@ -210,7 +211,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
               </Field>
             </div>
             <p className="muted small" style={{ margin: 0 }}>
-              There is no limiter yet, so a boost that would clip is reduced instead.
+              {t("playout.noLimiter")}
             </p>
           </div>
         </Card>
@@ -278,10 +279,10 @@ function Preview({ settings }: { settings: PlayoutSettings }) {
 
   return (
     <Card
-      title="Preview"
+      title={t("playout.preview")}
       actions={
         <span className="muted small">
-          Updates as you change the settings. Nothing is saved or played.
+          {t("playout.previewHelp")}
         </span>
       }
     >
@@ -290,25 +291,25 @@ function Preview({ settings }: { settings: PlayoutSettings }) {
           <button type="button" className="btn small" onClick={() => setPicking("outgoing")}>
             <span className="swatch" style={{ background: "var(--deck-a)" }} />
             <span className="ellipsis" style={{ maxWidth: "18rem" }}>
-              {outgoing?.name ?? "Pick the outgoing track"}
+              {outgoing?.name ?? t("playout.pickOutgoing")}
             </span>
           </button>
-          <span className="muted">into</span>
+          <span className="muted">{t("playout.into")}</span>
           <button type="button" className="btn small" onClick={() => setPicking("incoming")}>
             <span className="swatch" style={{ background: "var(--deck-b)" }} />
             <span className="ellipsis" style={{ maxWidth: "18rem" }}>
-              {incoming?.name ?? "Pick the incoming track"}
+              {incoming?.name ?? t("playout.pickIncoming")}
             </span>
           </button>
           {preview.data && (
             <span className="muted small">
-              Gains {db(preview.data.outgoing.gain_db)} and {db(preview.data.incoming.gain_db)}
+              {t("playout.gains", { outgoing: db(preview.data.outgoing.gain_db), incoming: db(preview.data.incoming.gain_db) })}
             </span>
           )}
         </div>
         {preview.isError && <ErrorView error={preview.error} />}
         {!outgoing || !incoming ? (
-          <Empty>Pick two analyzed tracks to see their transition.</Empty>
+          <Empty>{t("playout.pickTwo")}</Empty>
         ) : preview.data ? (
           <TransitionGraph
             preview={preview.data}
@@ -320,14 +321,14 @@ function Preview({ settings }: { settings: PlayoutSettings }) {
         )}
       </div>
       <Modal
-        title={picking === "outgoing" ? "Outgoing track" : "Incoming track"}
+        title={picking === "outgoing" ? t("playout.outgoingTrack") : t("playout.incomingTrack")}
         open={picking !== null}
         onClose={() => setPicking(null)}
       >
         <TrackSearch
           actions={(track) => (
             <button type="button" className="btn small primary" onClick={() => choose(track)}>
-              Pick
+              {t("restrictions.pick")}
             </button>
           )}
         />

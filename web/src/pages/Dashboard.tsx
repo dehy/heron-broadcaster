@@ -10,7 +10,9 @@ import { StereoMeter, LineMeter } from "../components/Meter";
 import { QueueList } from "../components/QueueList";
 import { TrackSearch } from "../components/TrackSearch";
 import { Card, ConfirmButton, Empty, Icon, Modal, PageHead } from "../components/ui";
+import { type PlainKey, number, rich, t } from "../i18n";
 import { ago, bytes, clockTime, duration, trackName } from "../lib/format";
+import { sourceLabel } from "../lib/labels";
 import { positionNow, useLive } from "../lib/live";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
@@ -47,13 +49,13 @@ export function Dashboard() {
   const canOperate = useCan("operator");
   const [fxOpen, setFxOpen] = useState(false);
 
-  const skip = useAction(() => done(api.POST("/api/v1/player/skip")), { success: "Skipped" });
+  const skip = useAction(() => done(api.POST("/api/v1/player/skip")), { success: t("dashboard.skipped") });
   const pause = useAction(() => done(api.POST("/api/v1/player/pause")));
   const resume = useAction(() => done(api.POST("/api/v1/player/resume")));
   const stopFx = useAction(() => done(api.DELETE("/api/v1/player/fx")));
   const playFx = useAction(
     (trackId: number) => unwrap(api.POST("/api/v1/player/fx", { body: { track_id: trackId } })),
-    { success: "Playing on the FX player", onSuccess: () => setFxOpen(false) },
+    { success: t("dashboard.fxPlaying"), onSuccess: () => setFxOpen(false) },
   );
 
   const decks = player?.decks.filter((deck) => deck.deck !== "fx") ?? [];
@@ -63,7 +65,7 @@ export function Dashboard() {
   return (
     <>
       <PageHead
-        title="On air"
+        title={t("nav.onAir")}
         actions={
           canOperate &&
           player && (
@@ -74,16 +76,16 @@ export function Dashboard() {
                   className="btn primary big"
                   onClick={() => resume.mutate(undefined)}
                 >
-                  <Icon name="play" /> Resume
+                  <Icon name="play" /> {t("dashboard.resume")}
                 </button>
               ) : (
                 <ConfirmButton
                   className="btn big"
-                  confirm="Pause"
-                  question="Pausing puts silence on the air until you resume."
+                  confirm={t("dashboard.pause")}
+                  question={t("dashboard.pauseQuestion")}
                   onConfirm={() => pause.mutate(undefined)}
                 >
-                  <Icon name="pause" /> Pause
+                  <Icon name="pause" /> {t("dashboard.pause")}
                 </ConfirmButton>
               )}
               <button
@@ -92,7 +94,7 @@ export function Dashboard() {
                 disabled={skip.isPending || !decks.some((deck) => deck.on_air)}
                 onClick={() => skip.mutate(undefined)}
               >
-                <Icon name="skip" /> Skip
+                <Icon name="skip" /> {t("dashboard.skip")}
               </button>
             </>
           )
@@ -101,14 +103,14 @@ export function Dashboard() {
 
       {player?.paused && (
         <div className="banner warn" role="status">
-          <Icon name="pause" /> The player is paused: the station is silent.
+          <Icon name="pause" /> {t("dashboard.paused")}
         </div>
       )}
 
       <div className="grid sidebar-right">
         <div className="stack">
           <div className="decks">
-            {player === undefined && <Card><Empty>Connecting…</Empty></Card>}
+            {player === undefined && <Card><Empty>{t("queue.connecting")}</Empty></Card>}
             {decks.map((deck) => (
               <Deck
                 key={deck.deck}
@@ -120,8 +122,8 @@ export function Dashboard() {
           </div>
 
           <Card
-            title="Up next"
-            actions={<Link to="/queue" className="btn small">Edit the queue</Link>}
+            title={t("dashboard.upNext")}
+            actions={<Link to="/queue" className="btn small">{t("dashboard.editQueue")}</Link>}
             flush
           >
             <QueueList limit={6} />
@@ -129,16 +131,19 @@ export function Dashboard() {
         </div>
 
         <div className="stack">
-          <Card title="Levels">
+          <Card title={t("dashboard.levels")}>
             <div className="row" style={{ alignItems: "flex-start", gap: "1.5rem" }}>
-              <StereoMeter levels={levels?.master ?? null} label="Master" />
+              <StereoMeter levels={levels?.master ?? null} label={t("dashboard.master")} />
               <div className="stack" style={{ flex: 1, minWidth: "8rem" }}>
                 {(["deck_a", "deck_b", "fx"] as const).map((key) => (
                   <div key={key} className="stack" style={{ gap: "0.2rem" }}>
                     <span className="small muted">
-                      {key === "fx" ? "FX player" : `Deck ${key.slice(-1).toUpperCase()}`}
+                      {key === "fx" ? t("dashboard.fxPlayer") : t("dashboard.deck", { deck: key.slice(-1).toUpperCase() })}
                     </span>
-                    <LineMeter levels={levels?.[key] ?? null} label={key} />
+                    <LineMeter
+                      levels={levels?.[key] ?? null}
+                      label={key === "fx" ? t("dashboard.fxPlayer") : t("dashboard.deck", { deck: key.slice(-1).toUpperCase() })}
+                    />
                   </div>
                 ))}
               </div>
@@ -146,17 +151,17 @@ export function Dashboard() {
           </Card>
 
           <Card
-            title="FX player"
+            title={t("dashboard.fxPlayer")}
             actions={
               canOperate && (
                 <>
                   {fxPlaying && (
                     <button type="button" className="btn small" onClick={() => stopFx.mutate(undefined)}>
-                      <Icon name="stop" size={14} /> Stop
+                      <Icon name="stop" size={14} /> {t("dashboard.stop")}
                     </button>
                   )}
                   <button type="button" className="btn small" onClick={() => setFxOpen(true)}>
-                    <Icon name="bolt" size={14} /> Play over
+                    <Icon name="bolt" size={14} /> {t("dashboard.playOver")}
                   </button>
                 </>
               )
@@ -166,7 +171,7 @@ export function Dashboard() {
               <FxState deck={fx} />
             ) : (
               <p className="muted small" style={{ margin: 0 }}>
-                Jingles and sweepers played over the music, without stopping it.
+                {t("dashboard.fxHelp")}
               </p>
             )}
           </Card>
@@ -176,9 +181,9 @@ export function Dashboard() {
         </div>
       </div>
 
-      <Modal title="Play on the FX player" open={fxOpen} onClose={() => setFxOpen(false)}>
+      <Modal title={t("dashboard.fxTitle")} open={fxOpen} onClose={() => setFxOpen(false)}>
         <TrackSearch
-          placeholder="Search jingles, IDs, sweepers…"
+          placeholder={t("dashboard.fxSearch")}
           actions={(track) => (
             <button
               type="button"
@@ -186,7 +191,7 @@ export function Dashboard() {
               disabled={playFx.isPending}
               onClick={() => playFx.mutate(track.id)}
             >
-              <Icon name="play" size={14} /> Play
+              <Icon name="play" size={14} /> {t("dashboard.play")}
             </button>
           )}
         />
@@ -218,22 +223,22 @@ function Deck({
     <section
       className={deck.on_air ? "card deck on-air" : "card deck"}
       style={{ ["--deck-color" as string]: DECK_COLORS[deck.deck] }}
-      aria-label={`Deck ${DECK_NAMES[deck.deck]}`}
+      aria-label={t("dashboard.deck", { deck: DECK_NAMES[deck.deck] ?? deck.deck })}
     >
       <div className="card-body stack">
         <div className="row between" style={{ flexWrap: "nowrap" }}>
           <div className="row" style={{ flexWrap: "nowrap", minWidth: 0 }}>
             <span className="deck-label">{DECK_NAMES[deck.deck]}</span>
             {deck.on_air ? (
-              <span className="on-air-pill">ON AIR</span>
+              <span className="on-air-pill">{t("app.onAirBadge")}</span>
             ) : track ? (
-              <span className="badge accent">Next</span>
+              <span className="badge accent">{t("dashboard.next")}</span>
             ) : (
-              <span className="badge">Empty</span>
+              <span className="badge">{t("dashboard.empty")}</span>
             )}
           </div>
           {track && (
-            <span className="badge">{track.source === "rotation" ? "Autofill" : track.source}</span>
+            <span className="badge">{sourceLabel(track.source)}</span>
           )}
         </div>
         {track ? (
@@ -252,7 +257,7 @@ function Deck({
             </div>
             {cued ? (
               <div className="deck-times">
-                <span className="muted">Starts at its cue-in</span>
+                <span className="muted">{t("dashboard.startsAtCueIn")}</span>
                 <span className="remaining">{duration(cueOut - (track.cue_in_ms ?? 0))}</span>
               </div>
             ) : (
@@ -260,7 +265,7 @@ function Deck({
                 <div
                   className="progress"
                   role="progressbar"
-                  aria-label="Position"
+                  aria-label={t("dashboard.position")}
                   aria-valuemin={0}
                   aria-valuemax={Math.round(cueOut / 1000)}
                   aria-valuenow={Math.round(position / 1000)}
@@ -276,7 +281,7 @@ function Deck({
           </>
         ) : (
           <p className="muted" style={{ margin: 0 }}>
-            Nothing loaded.
+            {t("dashboard.nothingLoaded")}
           </p>
         )}
       </div>
@@ -303,21 +308,22 @@ function FxState({ deck }: { deck: DeckState }) {
   );
 }
 
-const OUTPUT_STATES: Record<string, { label: string; dot: string }> = {
-  connected: { label: "Connected", dot: "good" },
-  connecting: { label: "Connecting", dot: "warn" },
-  reconnecting: { label: "Reconnecting", dot: "bad" },
-  stopped: { label: "Stopped", dot: "" },
+const OUTPUT_STATES: Record<string, { label: PlainKey; dot: string }> = {
+  connected: { label: "output.connected", dot: "good" },
+  connecting: { label: "output.connecting", dot: "warn" },
+  reconnecting: { label: "output.reconnecting", dot: "bad" },
+  stopped: { label: "output.stopped", dot: "" },
 };
 
 export function OutputState({ status }: { status: OutputStatus | null | undefined }) {
   if (!status) {
-    return <span className="badge">Not running</span>;
+    return <span className="badge">{t("output.notRunning")}</span>;
   }
-  const state = OUTPUT_STATES[status.state] ?? { label: status.state, dot: "" };
+  const known = OUTPUT_STATES[status.state];
+  const state = known ? { label: t(known.label), dot: known.dot } : { label: status.state, dot: "" };
   return (
     <span className="row small" style={{ gap: "0.35rem", flexWrap: "nowrap" }}>
-      <span className={`dot ${state.dot}`} /> {status.enabled ? state.label : "Disabled"}
+      <span className={`dot ${state.dot}`} /> {status.enabled ? state.label : t("output.disabled")}
     </span>
   );
 }
@@ -325,13 +331,13 @@ export function OutputState({ status }: { status: OutputStatus | null | undefine
 function OutputsCard({ outputs }: { outputs: OutputStatus[] }) {
   return (
     <Card
-      title="Outputs"
-      actions={<Link to="/outputs" className="btn small">Configure</Link>}
+      title={t("nav.outputs")}
+      actions={<Link to="/outputs" className="btn small">{t("dashboard.configure")}</Link>}
       flush
     >
       {outputs.length === 0 ? (
         <Empty>
-          No output: nobody hears the station. <Link to="/outputs">Add one</Link>
+          {rich("dashboard.noOutput", { link: <Link to="/outputs">{t("dashboard.addOutput")}</Link> })}
         </Empty>
       ) : (
         <ul className="list">
@@ -344,12 +350,12 @@ function OutputsCard({ outputs }: { outputs: OutputStatus[] }) {
                 </div>
                 <div className="muted small">
                   {output.state === "connected" && output.connected_since_unix_ms
-                    ? `Since ${clockTime(output.connected_since_unix_ms)} · ${bytes(output.bytes_sent)} sent`
+                    ? t("dashboard.outputSince", { time: clockTime(output.connected_since_unix_ms), sent: bytes(output.bytes_sent) })
                     : output.error
                       ? <span className="bad">{output.error}</span>
                       : null}
                   {output.dropped_chunks > 0 && (
-                    <span className="warn"> · {output.dropped_chunks} chunks dropped</span>
+                    <span className="warn"> · {t("dashboard.dropped", { count: output.dropped_chunks })}</span>
                   )}
                 </div>
               </div>
@@ -370,23 +376,23 @@ function EngineCard() {
   });
   const sync = engine.data?.config.state;
   return (
-    <Card title="Engine">
+    <Card title={t("dashboard.engine")}>
       <dl className="facts small">
-        <dt>Running since</dt>
+        <dt>{t("dashboard.runningSince")}</dt>
         <dd>{player ? ago(player.engine_started_at_unix_ms) : "–"}</dd>
-        <dt>Configuration</dt>
+        <dt>{t("dashboard.configuration")}</dt>
         <dd className={sync === "failed" ? "bad" : sync === "synced" ? "good" : "muted"}>
           {sync === "synced"
-            ? "In sync"
+            ? t("dashboard.inSync")
             : sync === "pending"
-              ? "Waiting for the engine"
+              ? t("dashboard.waitingEngine")
               : sync === "failed"
-                ? "Refused"
-                : "Unknown"}
+                ? t("dashboard.refused")
+                : t("dashboard.unknown")}
         </dd>
-        <dt>Underruns</dt>
+        <dt>{t("dashboard.underruns")}</dt>
         <dd className={player && player.underruns > 0 ? "warn num" : "num"}>
-          {player?.underruns ?? "–"}
+          {player ? number(player.underruns) : "–"}
         </dd>
       </dl>
     </Card>

@@ -3,7 +3,7 @@
 // The library: search, filters, sorting, pages, and queuing.
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
   type TrackFilter,
   type TrackSort,
@@ -15,28 +15,29 @@ import {
 } from "../api";
 import { useDebounced } from "../components/TrackSearch";
 import { Card, Empty, ErrorView, Icon, Loading, PageHead } from "../components/ui";
+import { type PlainKey, t } from "../i18n";
 import { ago, duration } from "../lib/format";
 import { Link, setSearch, useLocation } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 
 const PAGE = 50;
 
-const FILTERS: { value: TrackFilter | ""; label: string }[] = [
-  { value: "", label: "All tracks" },
-  { value: "playable", label: "Playable" },
-  { value: "unanalyzed", label: "Not analyzed" },
-  { value: "silent", label: "Silent" },
-  { value: "missing", label: "Missing files" },
-  { value: "disabled", label: "Disabled" },
-  { value: "needs_review", label: "Needs review" },
+const FILTERS: { value: TrackFilter | ""; label: PlainKey }[] = [
+  { value: "", label: "library.filter.all" },
+  { value: "playable", label: "library.filter.playable" },
+  { value: "unanalyzed", label: "library.filter.unanalyzed" },
+  { value: "silent", label: "library.filter.silent" },
+  { value: "missing", label: "library.filter.missing" },
+  { value: "disabled", label: "library.filter.disabled" },
+  { value: "needs_review", label: "library.filter.needsReview" },
 ];
 
-const SORTS: { value: TrackSort; label: string }[] = [
-  { value: "artist", label: "Artist" },
-  { value: "title", label: "Title" },
-  { value: "album", label: "Album" },
-  { value: "added", label: "Recently added" },
-  { value: "last_played", label: "Least recently played" },
+const SORTS: { value: TrackSort; label: PlainKey }[] = [
+  { value: "artist", label: "library.sort.artist" },
+  { value: "title", label: "library.sort.title" },
+  { value: "album", label: "library.sort.album" },
+  { value: "added", label: "library.sort.added" },
+  { value: "last_played", label: "library.sort.lastPlayed" },
 ];
 
 export function Library() {
@@ -93,7 +94,7 @@ export function Library() {
       ),
     {
       success: (result) =>
-        result.entry_ids.length === 1 ? "Queued" : `${result.entry_ids.length} tracks queued`,
+        result.entry_ids.length === 1 ? t("queuePage.queued") : t("library.queued", { count: result.entry_ids.length }),
       onSuccess: () => setSelected(new Set()),
     },
   );
@@ -115,23 +116,23 @@ export function Library() {
 
   return (
     <>
-      <PageHead title="Tracks" description={<LibrarySummary status={status.data} />} />
+      <PageHead title={t("nav.tracks")} description={<LibrarySummary status={status.data} />} />
       <Card flush>
         <div className="card-head">
           <div className="row" style={{ flex: 1 }}>
             <label className="row" style={{ flex: "1 1 16rem", flexWrap: "nowrap" }}>
               <Icon name="search" />
-              <span className="visually-hidden">Search</span>
+              <span className="visually-hidden">{t("library.search")}</span>
               <input
                 className="input"
                 type="search"
-                placeholder="Title, artist, album or file"
+                placeholder={t("library.searchPlaceholder")}
                 value={text}
                 onChange={(event) => setText(event.target.value)}
               />
             </label>
             <label>
-              <span className="visually-hidden">Show</span>
+              <span className="visually-hidden">{t("library.show")}</span>
               <select
                 className="input"
                 value={filter}
@@ -139,19 +140,19 @@ export function Library() {
               >
                 {FILTERS.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {t(option.label)}
                   </option>
                 ))}
               </select>
             </label>
             <label>
-              <span className="visually-hidden">Category</span>
+              <span className="visually-hidden">{t("library.category")}</span>
               <select
                 className="input"
                 value={category}
                 onChange={(event) => setSearch({ category: event.target.value, page: undefined })}
               >
-                <option value="">Any category</option>
+                <option value="">{t("library.anyCategory")}</option>
                 {categories.data?.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -160,7 +161,7 @@ export function Library() {
               </select>
             </label>
             <label>
-              <span className="visually-hidden">Sort by</span>
+              <span className="visually-hidden">{t("library.sortBy")}</span>
               <select
                 className="input"
                 value={sort}
@@ -168,7 +169,7 @@ export function Library() {
               >
                 {SORTS.map((option) => (
                   <option key={option.value} value={option.value}>
-                    Sort: {option.label}
+                    {t("library.sortOption", { sort: t(option.label) })}
                   </option>
                 ))}
               </select>
@@ -177,24 +178,24 @@ export function Library() {
         </div>
         {canQueue && selected.size > 0 && (
           <div className="card-head" style={{ background: "var(--accent-soft)" }}>
-            <span>{selected.size} selected</span>
+            <span>{t("library.selected", { count: selected.size })}</span>
             <div className="row">
               <button
                 type="button"
                 className="btn small"
                 onClick={() => enqueue.mutate({ ids: [...selected], next: true })}
               >
-                <Icon name="next" size={14} /> Play next
+                <Icon name="next" size={14} /> {t("queue.playNext")}
               </button>
               <button
                 type="button"
                 className="btn small"
                 onClick={() => enqueue.mutate({ ids: [...selected], next: false })}
               >
-                <Icon name="plus" size={14} /> Add to the queue
+                <Icon name="plus" size={14} /> {t("library.addToQueue")}
               </button>
               <button type="button" className="btn small ghost" onClick={() => setSelected(new Set())}>
-                Clear
+                {t("queuePage.clear")}
               </button>
             </div>
           </div>
@@ -205,7 +206,7 @@ export function Library() {
             <ErrorView error={tracks.error} />
           </div>
         )}
-        {tracks.data && items.length === 0 && <Empty>No track matches.</Empty>}
+        {tracks.data && items.length === 0 && <Empty>{t("library.noMatch")}</Empty>}
         {items.length > 0 && (
           <div className="table-wrap">
             <table className="table">
@@ -215,7 +216,7 @@ export function Library() {
                     <th style={{ width: "2rem" }}>
                       <input
                         type="checkbox"
-                        aria-label="Select the whole page"
+                        aria-label={t("library.selectPage")}
                         checked={allSelected}
                         onChange={() =>
                           setSelected(allSelected ? new Set() : new Set(items.map((track) => track.id)))
@@ -223,13 +224,13 @@ export function Library() {
                       />
                     </th>
                   )}
-                  <th>Title</th>
-                  <th className="hide-narrow">Artist</th>
-                  <th className="hide-narrow">Album</th>
-                  <th>Length</th>
-                  <th className="hide-narrow">Last played</th>
+                  <th>{t("library.sort.title")}</th>
+                  <th className="hide-narrow">{t("library.sort.artist")}</th>
+                  <th className="hide-narrow">{t("library.sort.album")}</th>
+                  <th>{t("library.length")}</th>
+                  <th className="hide-narrow">{t("library.lastPlayed")}</th>
                   <th>
-                    <span className="visually-hidden">Actions</span>
+                    <span className="visually-hidden">{t("library.actions")}</span>
                   </th>
                 </tr>
               </thead>
@@ -257,10 +258,10 @@ export function Library() {
               disabled={page === 0}
               onClick={() => setSearch({ page: page - 1 || undefined })}
             >
-              Previous
+              {t("library.previous")}
             </button>
             <span className="muted small num">
-              Page {page + 1} of {pages} · {total.toLocaleString()} tracks
+              {t("library.page", { page: page + 1, pages })} · {t("common.tracks", { count: total })}
             </span>
             <button
               type="button"
@@ -268,7 +269,7 @@ export function Library() {
               disabled={page + 1 >= pages}
               onClick={() => setSearch({ page: page + 1 })}
             >
-              Next
+              {t("dashboard.next")}
             </button>
           </div>
         )}
@@ -283,38 +284,48 @@ function LibrarySummary({ status }: { status: Awaited<ReturnType<typeof fetchLib
   }
   const queue = status.analysis_queue;
   const analyzing = queue.pending + queue.running;
+  const parts: ReactNode[] = [
+    t("common.tracks", { count: status.tracks }),
+    t("library.analyzed", { count: status.analyzed }),
+  ];
+  if (analyzing > 0) {
+    parts.push(t("library.analyzing", { count: analyzing }));
+  }
+  if (status.missing > 0) {
+    parts.push(<Link to="/library?filter=missing">{t("library.missing", { count: status.missing })}</Link>);
+  }
+  if (status.silent > 0) {
+    parts.push(<Link to="/library?filter=silent">{t("library.silent", { count: status.silent })}</Link>);
+  }
+  if (queue.failed > 0) {
+    parts.push(t("library.unreadable", { count: queue.failed }));
+  }
   return (
     <>
-      {status.tracks.toLocaleString()} tracks, {status.analyzed.toLocaleString()} analyzed
-      {analyzing > 0 && <>, {analyzing.toLocaleString()} being analyzed</>}
-      {status.missing > 0 && (
-        <>
-          , <Link to="/library?filter=missing">{status.missing} missing</Link>
-        </>
-      )}
-      {status.silent > 0 && (
-        <>
-          , <Link to="/library?filter=silent">{status.silent} silent</Link>
-        </>
-      )}
-      {queue.failed > 0 && <>, {queue.failed} unreadable</>}
-      {status.last_scan && <>. Last scan {ago(status.last_scan.finished_at_unix * 1000)}</>}.
+      {parts.map((part, index) => (
+        <span key={index}>
+          {index > 0 && t("library.separator")}
+          {part}
+        </span>
+      ))}
+      {status.last_scan && t("library.lastScan", { ago: ago(status.last_scan.finished_at_unix * 1000) })}
+      {t("library.end")}
     </>
   );
 }
 
 function TrackState({ track }: { track: TrackSummary }) {
   if (track.missing) {
-    return <span className="badge bad">Missing</span>;
+    return <span className="badge bad">{t("library.state.missing")}</span>;
   }
   if (!track.enabled) {
-    return <span className="badge">Disabled</span>;
+    return <span className="badge">{t("library.state.disabled")}</span>;
   }
   if (!track.analyzed) {
-    return <span className="badge warn">Not analyzed</span>;
+    return <span className="badge warn">{t("library.state.unanalyzed")}</span>;
   }
   if (track.silent) {
-    return <span className="badge bad">Silent</span>;
+    return <span className="badge bad">{t("library.state.silent")}</span>;
   }
   return null;
 }
@@ -342,7 +353,7 @@ function Row({
         <td>
           <input
             type="checkbox"
-            aria-label={`Select ${track.title ?? file}`}
+            aria-label={t("library.select", { name: track.title ?? file })}
             checked={selected}
             onChange={onToggle}
             disabled={!playable}
@@ -362,7 +373,7 @@ function Row({
           <button
             type="button"
             className="link-button"
-            title={`Search ${track.artist}`}
+            title={t("library.searchArtist", { artist: track.artist })}
             onClick={() => onArtist(track.artist ?? "")}
           >
             {track.artist}
@@ -382,8 +393,8 @@ function Row({
             <button
               type="button"
               className="btn ghost small icon"
-              title="Play next"
-              aria-label={`Play ${track.title ?? file} next`}
+              title={t("queue.playNext")}
+              aria-label={t("queue.playNamedNext", { name: track.title ?? file })}
               onClick={() => onQueue(true)}
             >
               <Icon name="next" />
@@ -391,8 +402,8 @@ function Row({
             <button
               type="button"
               className="btn ghost small icon"
-              title="Add to the queue"
-              aria-label={`Add ${track.title ?? file} to the queue`}
+              title={t("library.addToQueue")}
+              aria-label={t("library.addNamed", { name: track.title ?? file })}
               onClick={() => onQueue(false)}
             >
               <Icon name="plus" />
