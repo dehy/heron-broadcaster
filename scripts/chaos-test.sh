@@ -35,6 +35,9 @@ icecast=http://localhost:$HERON_ICECAST_PORT
 music=$(setting HERON_MUSIC_DIR ./data/music)
 ffmpeg_image=linuxserver/ffmpeg:7.1.1
 work=$(mktemp -d)
+# The silent file of step 5: a name of its own, removed only once created.
+silence=chaos-silence-$$.wav
+silence_created=
 failures=0
 
 # Puts back the library files step 4 moved away. Fails, keeping them in the
@@ -55,7 +58,9 @@ restore_deleted() {
 # On any exit, the library is left as it was found.
 cleanup() {
     status=$?
-    rm -f -- "${music:?}/chaos-silence.wav"
+    if [ -n "$silence_created" ]; then
+        rm -f -- "${music:?}/${silence:?}"
+    fi
     if restore_deleted; then
         rm -rf "${work:?}"
     else
@@ -230,9 +235,15 @@ main() {
 
     step "5. A silent file queued"
     skips=$(metric heron_engine_silence_skips_total)
-    docker run --rm -v "$(cd "$music" && pwd):/out" --entrypoint ffmpeg "$ffmpeg_image" -loglevel error -nostdin -y \
-        -f lavfi -i anullsrc=r=44100:cl=stereo:d=90 -c:a pcm_s16le /out/chaos-silence.wav
-    ctl enqueue --next --no-analysis chaos-silence.wav >/dev/null
+    # Never touch a file of the library: refuse if the name is taken.
+    if [ -e "$music/$silence" ]; then
+        echo "$music/$silence exists: not overwriting it" >&2
+        exit 1
+    fi
+    docker run --rm -v "$(cd "$music" && pwd):/out" --entrypoint ffmpeg "$ffmpeg_image" -loglevel error -nostdin -n \
+        -f lavfi -i anullsrc=r=44100:cl=stereo:d=90 -c:a pcm_s16le "/out/$silence"
+    silence_created=1
+    ctl enqueue --next --no-analysis "$silence" >/dev/null
     ctl skip >/dev/null
     start_listening 50
     check_listening 25 || true
@@ -242,7 +253,8 @@ main() {
         fail "expected one silence of about 20 s, got ${longest} s"
     fi
     echo "  silence skips: ${skips:-0} -> $(metric heron_engine_silence_skips_total)"
-    rm -f -- "${music:?}/chaos-silence.wav"
+    rm -f -- "${music:?}/${silence:?}"
+    silence_created=
 
     step "6. heron-engine restarted"
     for how in restart kill; do
