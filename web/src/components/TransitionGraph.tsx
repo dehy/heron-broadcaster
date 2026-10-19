@@ -4,6 +4,7 @@
 
 import type { TransitionPreview } from "../api";
 import { incomingGain, outgoingGain } from "../lib/fade";
+import { t } from "../i18n";
 import { duration } from "../lib/format";
 import type { WaveformData } from "./Waveform";
 
@@ -78,7 +79,7 @@ export function TransitionGraph({
         className="graph"
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`The next track starts ${duration(out.cue_out_ms - preview.next_start_ms, true)} before the outgoing one ends`}
+        aria-label={t("transition.graphLabel", { time: duration(out.cue_out_ms - preview.next_start_ms, true) })}
       >
         {ticks.map((gain) => (
           <g key={gain}>
@@ -133,21 +134,21 @@ export function TransitionGraph({
       </svg>
       <figcaption className="legend muted">
         <span>
-          <span className="swatch" style={{ background: "var(--deck-a)" }} /> Outgoing
+          <span className="swatch" style={{ background: "var(--deck-a)" }} /> {t("transition.outgoing")}
         </span>
         <span>
-          <span className="swatch" style={{ background: "var(--deck-b)" }} /> Incoming
+          <span className="swatch" style={{ background: "var(--deck-b)" }} /> {t("transition.incoming")}
         </span>
         <span>
-          <span className="swatch" style={{ background: "var(--accent)" }} /> Next starts
+          <span className="swatch" style={{ background: "var(--accent)" }} /> {t("transition.nextStarts")}
         </span>
         <span>
-          <span className="swatch" style={{ background: "var(--bad)" }} /> Cue out
+          <span className="swatch" style={{ background: "var(--bad)" }} /> {t("transition.cueOut")}
         </span>
         <span>
           {preview.overlap_ms > 0
-            ? `Both play for ${duration(preview.overlap_ms, true)}`
-            : "Back to back, no overlap"}
+            ? t("transition.overlap", { time: duration(preview.overlap_ms, true) })
+            : t("transition.noOverlap")}
         </span>
       </figcaption>
     </figure>

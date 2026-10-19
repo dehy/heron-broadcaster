@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { ApiError } from "./api";
 import { App } from "./App";
 import { ToastProvider } from "./components/ui";
+import { startLanguage } from "./i18n";
 import "./index.css";
 
 const queries = new QueryClient({
@@ -25,12 +26,15 @@ if (!root) {
   throw new Error("missing #root element");
 }
 
-createRoot(root).render(
-  <StrictMode>
-    <QueryClientProvider client={queries}>
-      <ToastProvider>
-        <App />
-      </ToastProvider>
-    </QueryClientProvider>
-  </StrictMode>,
+// The language this browser remembers is loaded before the first paint.
+void startLanguage().then(() =>
+  createRoot(root).render(
+    <StrictMode>
+      <QueryClientProvider client={queries}>
+        <ToastProvider>
+          <App />
+        </ToastProvider>
+      </QueryClientProvider>
+    </StrictMode>,
+  ),
 );

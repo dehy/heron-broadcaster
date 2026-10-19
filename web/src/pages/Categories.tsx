@@ -8,7 +8,7 @@ import { type FormEvent, useState } from "react";
 import { type Category, type SeparationOverrides, api, done, unwrap } from "../api";
 import { SeparationEditor } from "../components/Separation";
 import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, Modal, PageHead } from "../components/ui";
-import { count } from "../lib/format";
+import { number, rich, t } from "../i18n";
 import { describeOverrides } from "../lib/rotation";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
@@ -24,18 +24,18 @@ export function Categories() {
   const [editing, setEditing] = useState<Category | "new" | null>(null);
   const remove = useAction(
     (id: number) => done(api.DELETE("/api/v1/categories/{id}", { params: { path: { id } } })),
-    { success: "Category deleted", invalidate: [["categories"]] },
+    { success: t("categories.deleted"), invalidate: [["categories"]] },
   );
 
   return (
     <>
       <PageHead
-        title="Categories"
-        description="Groups of tracks (current hits, recurrents, gold…) that the clocks call. A track can be in several. A category can repeat its tracks sooner, or later, than the station's separation rules."
+        title={t("nav.categories")}
+        description={t("categories.description")}
         actions={
           canEdit && (
             <button type="button" className="btn primary" onClick={() => setEditing("new")}>
-              <Icon name="plus" /> New category
+              <Icon name="plus" /> {t("categories.new")}
             </button>
           )
         }
@@ -43,16 +43,16 @@ export function Categories() {
       <Card flush>
         {categories.isPending && <Loading />}
         {categories.isError && <ErrorView error={categories.error} />}
-        {categories.data?.length === 0 && <Empty>No category yet.</Empty>}
+        {categories.data?.length === 0 && <Empty>{t("categories.none")}</Empty>}
         {categories.data && categories.data.length > 0 && (
           <table className="table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Tracks</th>
-                <th>Separation</th>
+                <th>{t("categories.name")}</th>
+                <th>{t("nav.tracks")}</th>
+                <th>{t("categories.separation")}</th>
                 <th>
-                  <span className="visually-hidden">Actions</span>
+                  <span className="visually-hidden">{t("library.actions")}</span>
                 </th>
               </tr>
             </thead>
@@ -66,28 +66,30 @@ export function Categories() {
                     </span>
                   </td>
                   <td className="num">
-                    <Link to={`/library?category=${category.id}`}>{category.tracks.toLocaleString()}</Link>
+                    <Link to={`/library?category=${category.id}`}>{number(category.tracks)}</Link>
                   </td>
-                  <td className="small muted">{describeOverrides(category.separation) || "station rules"}</td>
+                  <td className="small muted">{describeOverrides(category.separation) || t("categories.stationRules")}</td>
                   <td className="actions">
                     {canEdit && (
                       <>
                         <button
                           type="button"
                           className="btn ghost small icon"
-                          aria-label={`Edit ${category.name}`}
+                          aria-label={t("categories.edit", { name: category.name })}
                           onClick={() => setEditing(category)}
                         >
                           <Icon name="edit" />
                         </button>
                         <ConfirmButton
                           className="btn ghost small icon danger"
-                          title={`Delete ${category.name}`}
-                          confirm="Delete"
+                          title={t("categories.delete", { name: category.name })}
+                          confirm={t("categories.deleteButton")}
                           question={
                             <p>
-                              Delete <strong>{category.name}</strong>? Its {count(category.tracks, "track")} stay
-                              in the library.
+                              {rich("categories.deleteQuestion", {
+                                name: <strong>{category.name}</strong>,
+                                count: category.tracks,
+                              })}
                             </p>
                           }
                           onConfirm={() => remove.mutate(category.id)}
@@ -123,7 +125,7 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
         ? unwrap(api.PUT("/api/v1/categories/{id}", { params: { path: { id: category.id } }, body }))
         : unwrap(api.POST("/api/v1/categories", { body }));
     },
-    { success: "Saved", invalidate: [["categories"]], onSuccess: onClose },
+    { success: t("categories.saved"), invalidate: [["categories"]], onSuccess: onClose },
   );
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -131,42 +133,42 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
   };
   return (
     <Modal
-      title={category ? `Edit ${category.name}` : "New category"}
+      title={category ? t("categories.edit", { name: category.name }) : t("categories.new")}
       open
       onClose={onClose}
       footer={
         <>
           <button type="button" className="btn" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button type="submit" form="category-form" className="btn primary" disabled={save.isPending}>
-            Save
+            {t("common.save")}
           </button>
         </>
       }
     >
       <form id="category-form" className="stack" onSubmit={submit}>
-        <Field label="Name">
+        <Field label={t("categories.name")}>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={255} />
         </Field>
-        <Field label="Color">
+        <Field label={t("categories.color")}>
           <div className="row">
             {COLORS.map((swatch) => (
               <button
                 key={swatch}
                 type="button"
                 className="btn icon small"
-                aria-label={`Color ${swatch}`}
+                aria-label={t("categories.colorValue", { color: swatch })}
                 aria-pressed={color === swatch}
                 style={{ background: swatch, borderColor: color === swatch ? "var(--fg)" : swatch }}
                 onClick={() => setColor(swatch)}
               />
             ))}
-            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} aria-label="Other color" />
+            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} aria-label={t("categories.otherColor")} />
           </div>
         </Field>
         <fieldset>
-          <legend>Separation</legend>
+          <legend>{t("categories.separation")}</legend>
           <SeparationEditor value={separation} inherited={rotation.data?.separation} onChange={setSeparation} />
         </fieldset>
       </form>

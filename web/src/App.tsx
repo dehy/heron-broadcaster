@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { api, done, errorMessage, fetchStatus, unwrap } from "./api";
 import { Banner, Icon, type IconName, Loading, Logo } from "./components/ui";
+import { type PlainKey, rich, setLanguage, t, toSetting, useLanguage } from "./i18n";
 import { setTimeZone } from "./lib/format";
 import { startLive, stopLive, useLive } from "./lib/live";
 import { Link, match, navigate, useLocation } from "./lib/router";
@@ -33,10 +34,13 @@ applyTheme(storedTheme());
 export function App() {
   const me = useMeQuery();
   const user = me.data;
+  // Every page re-renders in the new language at once.
+  useLanguage();
 
   useEffect(() => {
     if (user) {
       applyTheme(user.theme);
+      void setLanguage(toSetting(user.language));
       startLive();
     } else if (user === null) {
       stopLive();
@@ -44,12 +48,12 @@ export function App() {
   }, [user]);
 
   if (me.isPending) {
-    return <Loading label="Contacting Heron…" />;
+    return <Loading label={t("app.contacting")} />;
   }
   if (me.isError) {
     return (
       <main className="login">
-        <Banner kind="bad">The API cannot be reached: {errorMessage(me.error)}</Banner>
+        <Banner kind="bad">{t("app.apiUnreachable", { error: errorMessage(me.error) })}</Banner>
       </main>
     );
   }
@@ -65,28 +69,28 @@ export function App() {
 
 interface Page {
   path: string;
-  label: string;
+  label: PlainKey;
   icon: IconName;
-  section?: string;
+  section?: PlainKey;
   admin?: boolean;
 }
 
 const PAGES: Page[] = [
-  { path: "/", label: "On air", icon: "air" },
-  { path: "/queue", label: "Queue", icon: "queue" },
-  { path: "/history", label: "History", icon: "history" },
-  { path: "/library", label: "Tracks", icon: "library", section: "Library" },
-  { path: "/artists", label: "Artists", icon: "mic" },
-  { path: "/review", label: "Review & organize", icon: "review" },
-  { path: "/clocks", label: "Clocks", icon: "clock", section: "Programming" },
-  { path: "/schedule", label: "Schedule", icon: "calendar" },
-  { path: "/categories", label: "Categories", icon: "tag" },
-  { path: "/restrictions", label: "Restrictions", icon: "ban" },
-  { path: "/rotation", label: "Selection log", icon: "log" },
-  { path: "/playout", label: "Crossfade & loudness", icon: "fade", section: "Station" },
-  { path: "/outputs", label: "Outputs", icon: "output" },
-  { path: "/settings", label: "Settings", icon: "settings" },
-  { path: "/users", label: "Users", icon: "users", admin: true },
+  { path: "/", label: "nav.onAir", icon: "air" },
+  { path: "/queue", label: "nav.queue", icon: "queue" },
+  { path: "/history", label: "nav.history", icon: "history" },
+  { path: "/library", label: "nav.tracks", icon: "library", section: "nav.library" },
+  { path: "/artists", label: "nav.artists", icon: "mic" },
+  { path: "/review", label: "nav.review", icon: "review" },
+  { path: "/clocks", label: "nav.clocks", icon: "clock", section: "nav.programming" },
+  { path: "/schedule", label: "nav.schedule", icon: "calendar" },
+  { path: "/categories", label: "nav.categories", icon: "tag" },
+  { path: "/restrictions", label: "nav.restrictions", icon: "ban" },
+  { path: "/rotation", label: "nav.rotation", icon: "log" },
+  { path: "/playout", label: "nav.playout", icon: "fade", section: "nav.station" },
+  { path: "/outputs", label: "nav.outputs", icon: "output" },
+  { path: "/settings", label: "nav.settings", icon: "settings" },
+  { path: "/users", label: "nav.users", icon: "users", admin: true },
 ];
 
 function route(pathname: string): ReactNode {
@@ -134,7 +138,7 @@ function route(pathname: string): ReactNode {
     default:
       return (
         <Banner kind="warn">
-          There is no page here. <Link to="/">Back on air</Link>
+          {rich("app.noPage", { back: <Link to="/">{t("app.backOnAir")}</Link> })}
         </Banner>
       );
   }
@@ -177,13 +181,13 @@ function Shell() {
     navigate("/");
   };
 
-  let section: string | undefined;
+  let section: PlainKey | undefined;
   return (
     <div className={navOpen ? "shell nav-open" : "shell"}>
       {navOpen && (
         <div className="scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />
       )}
-      <aside className="sidebar" aria-label="Navigation">
+      <aside className="sidebar" aria-label={t("nav.label")}>
         <Link to="/" className="brand">
           <Logo /> Heron
         </Link>
@@ -195,14 +199,14 @@ function Shell() {
             }
             return (
               <div key={page.path} style={{ display: "contents" }}>
-                {heading && <div className="nav-section">{page.section}</div>}
+                {heading && page.section && <div className="nav-section">{t(page.section)}</div>}
                 <Link
                   to={page.path}
                   aria-current={isCurrent(page.path, pathname) ? "page" : undefined}
                 >
-                  <Icon name={page.icon} /> {page.label}
+                  <Icon name={page.icon} /> {t(page.label)}
                   {page.path === "/review" && reviewCount > 0 && (
-                    <span className="count" title="Tracks waiting for review">
+                    <span className="count" title={t("nav.reviewCount")}>
                       {reviewCount}
                     </span>
                   )}
@@ -214,7 +218,7 @@ function Shell() {
         <div className="sidebar-footer">
           <nav className="nav">
             <Link to="/account" aria-current={pathname === "/account" ? "page" : undefined}>
-              <Icon name="user" /> <span className="ellipsis">{user?.username ?? "Account"}</span>
+              <Icon name="user" /> <span className="ellipsis">{user?.username ?? t("nav.account")}</span>
             </Link>
             <a
               href="/"
@@ -223,7 +227,7 @@ function Shell() {
                 void signOut();
               }}
             >
-              <Icon name="logout" /> Sign out
+              <Icon name="logout" /> {t("nav.signOut")}
             </a>
           </nav>
         </div>
@@ -233,7 +237,7 @@ function Shell() {
           <button
             type="button"
             className="btn ghost icon"
-            aria-label="Menu"
+            aria-label={t("nav.menu")}
             aria-expanded={navOpen}
             onClick={() => setNavOpen(true)}
           >
@@ -259,7 +263,7 @@ function OnAirBadge() {
   const onAir = player?.decks.some((deck) => deck.on_air) && !player.paused;
   return onAir ? (
     <span className="on-air-pill">
-      <span className="dot" style={{ background: "#fff" }} /> ON AIR
+      <span className="dot" style={{ background: "#fff" }} /> {t("app.onAirBadge")}
     </span>
   ) : null;
 }
@@ -290,30 +294,28 @@ function Warnings() {
 
   const warnings: ReactNode[] = [];
   if (status.isError) {
-    warnings.push(<>The API cannot be reached: {errorMessage(status.error)}</>);
+    warnings.push(t("app.apiUnreachable", { error: errorMessage(status.error) }));
   } else if (!connected && disconnectedSince !== null && Date.now() - disconnectedSince > 2_500) {
-    warnings.push(<>Live updates are disconnected. Reconnecting…</>);
+    warnings.push(t("app.liveDisconnected"));
   }
   if (status.data?.database === "unavailable") {
-    warnings.push(<>The database is unavailable: the station plays on, but nothing can be changed.</>);
+    warnings.push(t("app.databaseUnavailable"));
   }
   if (player === null || status.data?.engine === "unavailable") {
-    warnings.push(<>The engine cannot be reached. Its outputs keep streaming what it has queued.</>);
+    warnings.push(t("app.engineUnreachable"));
   }
   if (engine.data?.config.state === "failed") {
     warnings.push(
-      <>
-        The engine refused the station's configuration: {engine.data.config.error}.{" "}
-        <Link to="/outputs">Check the outputs</Link>
-      </>,
+      rich("app.configRefused", {
+        error: engine.data.config.error,
+        link: <Link to="/outputs">{t("app.checkOutputs")}</Link>,
+      }),
     );
   }
   const clock = status.data?.clock.warning;
   if (clock) {
     warnings.push(
-      <>
-        <strong>Clock:</strong> {clock}. Scheduled programming may start at the wrong time.
-      </>,
+      rich("app.clockWarning", { label: <strong>{t("app.clockLabel")}</strong>, warning: clock }),
     );
   }
   return (

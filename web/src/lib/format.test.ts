@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { locale, setLanguage } from "../i18n";
 import {
   ago,
   bytes,
   clockTime,
-  count,
+  dateTime,
   db,
   duration,
   fullDate,
@@ -46,12 +47,6 @@ describe("levels and sizes", () => {
 });
 
 describe("names and times", () => {
-  it("counts", () => {
-    expect(count(1, "move")).toBe("1 move");
-    expect(count(3, "file")).toBe("3 files");
-    expect(count(2, "entry", "entries")).toBe("2 entries");
-  });
-
   it("names tracks", () => {
     expect(trackName({ artist: "Miles Davis", title: "So What", path: "a/b.flac" })).toBe(
       "Miles Davis – So What",
@@ -67,10 +62,10 @@ describe("names and times", () => {
 });
 
 describe("time zone", () => {
-  // The machine's locale decides how times are written ("00:30:00",
-  // "12:30:00 AM", "00 h 30 min 00 s"): compare with it, not with a pattern.
+  // The language, and the machine's variant of it, decide how times are
+  // written ("00:30:00", "12:30:00 AM"): compare with it, not with a pattern.
   const time = (timeZone: string, unixMs: number) =>
-    new Intl.DateTimeFormat(undefined, { timeStyle: "medium", timeZone }).format(unixMs);
+    new Intl.DateTimeFormat(locale(), { timeStyle: "medium", timeZone }).format(unixMs);
 
   it("writes times in the station's time zone", () => {
     setTimeZone("UTC");
@@ -93,5 +88,41 @@ describe("time zone", () => {
     const utc = clockTime(at);
     setTimeZone("Not/AZone");
     expect(clockTime(at)).toBe(utc);
+  });
+});
+
+describe("in French", () => {
+  afterEach(async () => {
+    await setLanguage("en");
+  });
+
+  it("writes levels, sizes, durations and relative times the French way", async () => {
+    await setLanguage("fr");
+    expect(db(-1.5)).toMatch(/^[-−]1,5 dB$/);
+    expect(db(3)).toBe("+3,0 dB");
+    expect(bytes(4_321_000)).toBe("4,3 Mo");
+    expect(bytes(999)).toBe("999 o");
+    expect(duration(1_250, true)).toBe("0:01,2");
+    const now = 1_700_000_000_000;
+    expect(ago(now - 5 * 60_000, now)).toBe("il y a 5 minutes");
+    expect(ago(now - 86_400_000, now)).toBe("hier");
+    expect(ago(null, now)).toBe("jamais");
+  });
+
+  it("accepts a comma in durations", () => {
+    expect(parseDuration("1:23,5")).toBe(83_500);
+    expect(parseDuration("1:23.5")).toBe(83_500);
+    expect(parseDuration("12,25")).toBe(12_250);
+  });
+
+  it("writes dates and times in French, in the same zone", async () => {
+    setTimeZone("Europe/Paris");
+    const at = Date.UTC(2024, 0, 1, 23, 30);
+    await setLanguage("fr");
+    const format = (options: Intl.DateTimeFormatOptions) =>
+      new Intl.DateTimeFormat(locale(), { ...options, timeZone: "Europe/Paris" }).format(at);
+    expect(clockTime(at)).toBe(format({ timeStyle: "medium" }));
+    expect(fullDate(at)).toBe("mardi 2 janvier 2024");
+    expect(dateTime(at)).toBe(format({ dateStyle: "medium", timeStyle: "short" }));
   });
 });

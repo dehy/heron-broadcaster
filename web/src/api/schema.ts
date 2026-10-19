@@ -229,7 +229,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Saves your preferences: the web UI's theme. */
+        /** Saves your preferences: the web UI's theme and language. */
         put: operations["set_preferences"];
         post?: never;
         delete?: never;
@@ -2115,8 +2115,15 @@ export interface components {
              */
             loudness: components["schemas"]["LoudnessSettings"];
         };
+        /** @description What to change; what is left out stays as it is. */
         Preferences: {
-            theme: components["schemas"]["Theme"];
+            /**
+             * @description A language tag (`en`, `fr`…) or `system`. The API does not know which
+             *     languages the web UI has: it falls back on the browser's for one it
+             *     lacks.
+             */
+            language?: string | null;
+            theme?: components["schemas"]["Theme"] | null;
         };
         PreviewRequest: {
             /** @description Whether the clock loops across hours. */
@@ -2771,6 +2778,11 @@ export interface components {
             enabled: boolean;
             /** Format: int64 */
             id: number;
+            /**
+             * @description The web UI's language: a language tag (`en`, `fr`…), or `system` to
+             *     follow the browser's languages.
+             */
+            language: string;
             /** Format: int64 */
             last_login_at_unix_ms?: number | null;
             role: components["schemas"]["Role"];

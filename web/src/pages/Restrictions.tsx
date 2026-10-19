@@ -20,13 +20,21 @@ import {
   PageHead,
   Segmented,
 } from "../components/ui";
+import { type PlainKey, t } from "../i18n";
 import { trackName } from "../lib/format";
-import { DAYS, describeRule, hourLabel, targetKind } from "../lib/rotation";
+import { DAY_NUMBERS, dayName, describeRule, hourLabel, targetKind } from "../lib/rotation";
 import { Link, setSearch, useLocation } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 import { useCategories } from "./Clocks";
 
 type TargetKind = Target["kind"];
+
+// Partial: the kind comes from the URL, which may name any.
+const FILTERED: Partial<Record<string, PlainKey>> = {
+  track: "restrictions.filteredTrack",
+  artist: "restrictions.filteredArtist",
+  category: "restrictions.filteredCategory",
+};
 
 function targetLink(target: Target): string {
   switch (target.kind) {
@@ -69,45 +77,45 @@ export function Restrictions() {
   );
   const remove = useAction(
     (id: number) => done(api.DELETE("/api/v1/restrictions/{id}", { params: { path: { id } } })),
-    { success: "Restriction deleted", invalidate: [["restrictions"]] },
+    { success: t("restrictions.deleted"), invalidate: [["restrictions"]] },
   );
 
   return (
     <>
       <PageHead
-        title="Restrictions"
-        description="Hard rules: unlike separation, they are never relaxed. When a slot finds nothing they allow, it uses the fallback category; if even that is forbidden, the engine's fallback directory plays."
+        title={t("nav.restrictions")}
+        description={t("restrictions.description")}
         actions={
           canEdit && (
             <button type="button" className="btn primary" onClick={() => setEditing("new")}>
-              <Icon name="plus" /> New restriction
+              <Icon name="plus" /> {t("restrictions.new")}
             </button>
           )
         }
       />
       {(kind || targetId) && (
         <p className="row small">
-          <span className="muted">Showing the restrictions of one {kind ?? "target"}.</span>
+          <span className="muted">{t((kind && FILTERED[kind]) ?? "restrictions.filteredTarget")}</span>
           <button type="button" className="link-button" onClick={() => setSearch({ target: null, target_id: null })}>
-            Show all
+            {t("restrictions.showAll")}
           </button>
         </p>
       )}
       <Card flush>
         {restrictions.isPending && <Loading />}
         {restrictions.isError && <ErrorView error={restrictions.error} />}
-        {restrictions.data?.length === 0 && <Empty>No restriction.</Empty>}
+        {restrictions.data?.length === 0 && <Empty>{t("restrictions.none")}</Empty>}
         {restrictions.data && restrictions.data.length > 0 && (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>On</th>
-                  <th>Rule</th>
-                  <th>Note</th>
-                  <th>Active</th>
+                  <th>{t("restrictions.on")}</th>
+                  <th>{t("restrictions.rule")}</th>
+                  <th>{t("restrictions.note")}</th>
+                  <th>{t("restrictions.active")}</th>
                   <th>
-                    <span className="visually-hidden">Actions</span>
+                    <span className="visually-hidden">{t("library.actions")}</span>
                   </th>
                 </tr>
               </thead>
@@ -125,7 +133,7 @@ export function Restrictions() {
                     <td>
                       <input
                         type="checkbox"
-                        aria-label="Active"
+                        aria-label={t("restrictions.active")}
                         checked={restriction.enabled}
                         disabled={!canEdit || toggle.isPending}
                         onChange={() => toggle.mutate(restriction)}
@@ -137,16 +145,16 @@ export function Restrictions() {
                           <button
                             type="button"
                             className="btn ghost small icon"
-                            aria-label="Edit"
+                            aria-label={t("restrictions.edit")}
                             onClick={() => setEditing(restriction)}
                           >
                             <Icon name="edit" />
                           </button>
                           <ConfirmButton
                             className="btn ghost small icon danger"
-                            title="Delete"
-                            confirm="Delete"
-                            question={<p>Delete this restriction?</p>}
+                            title={t("categories.deleteButton")}
+                            confirm={t("categories.deleteButton")}
+                            question={<p>{t("restrictions.deleteQuestion")}</p>}
                             onConfirm={() => remove.mutate(restriction.id)}
                           >
                             <Icon name="trash" />
@@ -202,14 +210,14 @@ export function RestrictionDialog({
   const save = useAction(
     () => {
       if (!target) {
-        throw new Error("Pick what the restriction applies to");
+        throw new Error(t("restrictions.pickTarget"));
       }
       const body = { target, rule, enabled: restriction?.enabled ?? true, note: note.trim() || null };
       return restriction
         ? unwrap(api.PUT("/api/v1/restrictions/{id}", { params: { path: { id: restriction.id } }, body }))
         : unwrap(api.POST("/api/v1/restrictions", { body }));
     },
-    { success: "Restriction saved", invalidate: [["restrictions"]], onSuccess: onClose },
+    { success: t("restrictions.saved"), invalidate: [["restrictions"]], onSuccess: onClose },
   );
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -222,23 +230,23 @@ export function RestrictionDialog({
 
   return (
     <Modal
-      title={restriction ? "Edit restriction" : "New restriction"}
+      title={restriction ? t("restrictions.editTitle") : t("restrictions.new")}
       open
       wide
       onClose={onClose}
       footer={
         <>
           <button type="button" className="btn" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button type="submit" form="restriction-form" className="btn primary" disabled={!target || save.isPending}>
-            Save
+            {t("common.save")}
           </button>
         </>
       }
     >
       <form id="restriction-form" className="stack" onSubmit={submit}>
-        <Field label="Applies to">
+        <Field label={t("restrictions.appliesTo")}>
           {fixedTarget ? (
             <span>
               <span className="badge">{targetKind(fixedTarget.target)}</span> {fixedTarget.name}
@@ -246,12 +254,12 @@ export function RestrictionDialog({
           ) : (
             <div className="stack">
               <Segmented
-                label="Kind of target"
+                label={t("restrictions.targetKind")}
                 value={kind}
                 options={[
-                  { value: "category", label: "Category" },
-                  { value: "artist", label: "Artist" },
-                  { value: "track", label: "Track" },
+                  { value: "category", label: t("rotation.target.category") },
+                  { value: "artist", label: t("rotation.target.artist") },
+                  { value: "track", label: t("rotation.target.track") },
                 ]}
                 onChange={(next) => {
                   setKind(next);
@@ -262,7 +270,7 @@ export function RestrictionDialog({
               {kind === "category" && (
                 <select
                   className="input"
-                  aria-label="Category"
+                  aria-label={t("rotation.target.category")}
                   value={target?.kind === "category" ? target.id : ""}
                   onChange={(event) => {
                     const id = Number(event.target.value);
@@ -270,7 +278,7 @@ export function RestrictionDialog({
                   }}
                 >
                   <option value="" disabled>
-                    Pick a category
+                    {t("restrictions.pickCategory")}
                   </option>
                   {categories.data?.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -290,7 +298,7 @@ export function RestrictionDialog({
                       setTargetName("");
                     }}
                   >
-                    Change
+                    {t("restrictions.change")}
                   </button>
                 </div>
               )}
@@ -302,7 +310,7 @@ export function RestrictionDialog({
                       className="btn small"
                       onClick={() => pick({ kind: "artist", id: artist.id }, artist.name)}
                     >
-                      Pick
+                      {t("restrictions.pick")}
                     </button>
                   )}
                 />
@@ -316,7 +324,7 @@ export function RestrictionDialog({
                       className="btn small"
                       onClick={() => pick({ kind: "track", id: track.id }, trackName(track))}
                     >
-                      Pick
+                      {t("restrictions.pick")}
                     </button>
                   )}
                 />
@@ -324,14 +332,14 @@ export function RestrictionDialog({
             </div>
           )}
         </Field>
-        <Field label="Rule">
+        <Field label={t("restrictions.rule")}>
           <Segmented
-            label="Kind of rule"
+            label={t("restrictions.ruleKind")}
             value={rule.kind}
             options={[
-              { value: "daypart", label: "Days and hours" },
-              { value: "date_range", label: "Dates" },
-              { value: "not_after", label: "Sequence" },
+              { value: "daypart", label: t("restrictions.daypart") },
+              { value: "date_range", label: t("restrictions.dates") },
+              { value: "not_after", label: t("restrictions.sequence") },
             ]}
             onChange={(next) => setRule(next === rule.kind ? rule : defaultRule(next, firstCategory))}
           />
@@ -340,7 +348,7 @@ export function RestrictionDialog({
         <p className="muted small" style={{ margin: 0 }}>
           {describeRule(rule, (id) => categories.data?.find((c) => c.id === id)?.name)}.
         </p>
-        <Field label="Note" hint="Why the rule is there, for the team">
+        <Field label={t("restrictions.note")} hint={t("restrictions.noteHint")}>
           <input className="input" value={note} maxLength={512} onChange={(event) => setNote(event.target.value)} />
         </Field>
       </form>
@@ -353,11 +361,11 @@ function RuleFields({ rule, onChange }: { rule: Rule; onChange: (rule: Rule) => 
   const mode =
     rule.kind === "not_after" ? null : (
       <Segmented
-        label="Allow or ban"
+        label={t("restrictions.mode")}
         value={rule.mode}
         options={[
-          { value: "ban", label: "Banned then" },
-          { value: "allow", label: "Only then" },
+          { value: "ban", label: t("restrictions.ban") },
+          { value: "allow", label: t("restrictions.allow") },
         ]}
         onChange={(next) => onChange({ ...rule, mode: next })}
       />
@@ -368,10 +376,10 @@ function RuleFields({ rule, onChange }: { rule: Rule; onChange: (rule: Rule) => 
         <div className="stack">
           {mode}
           <fieldset>
-            <legend>Days</legend>
+            <legend>{t("restrictions.days")}</legend>
             <div className="row">
-              {DAYS.map((name, index) => {
-                const day = index + 1;
+              {DAY_NUMBERS.map((day) => {
+                const name = dayName(day);
                 return (
                   <label key={day} className="check">
                     <input
@@ -393,7 +401,7 @@ function RuleFields({ rule, onChange }: { rule: Rule; onChange: (rule: Rule) => 
             </div>
           </fieldset>
           <div className="form-grid">
-            <Field label="From">
+            <Field label={t("review.from")}>
               <select
                 className="input"
                 value={rule.start_hour}
@@ -406,7 +414,7 @@ function RuleFields({ rule, onChange }: { rule: Rule; onChange: (rule: Rule) => 
                 ))}
               </select>
             </Field>
-            <Field label="To" hint={rule.end_hour <= rule.start_hour ? "Past midnight, into the next day" : undefined}>
+            <Field label={t("review.to")} hint={rule.end_hour <= rule.start_hour ? t("restrictions.pastMidnight") : undefined}>
               <select
                 className="input"
                 value={rule.end_hour}
@@ -427,7 +435,7 @@ function RuleFields({ rule, onChange }: { rule: Rule; onChange: (rule: Rule) => 
         <div className="stack">
           {mode}
           <div className="form-grid">
-            <Field label="From">
+            <Field label={t("review.from")}>
               <input
                 className="input"
                 type="date"
@@ -436,7 +444,7 @@ function RuleFields({ rule, onChange }: { rule: Rule; onChange: (rule: Rule) => 
                 onChange={(event) => onChange({ ...rule, start: event.target.value })}
               />
             </Field>
-            <Field label="To" hint="Included">
+            <Field label={t("review.to")} hint={t("restrictions.included")}>
               <input
                 className="input"
                 type="date"
@@ -451,14 +459,14 @@ function RuleFields({ rule, onChange }: { rule: Rule; onChange: (rule: Rule) => 
                 checked={rule.every_year}
                 onChange={(event) => onChange({ ...rule, every_year: event.target.checked })}
               />
-              Every year (the years are ignored)
+              {t("restrictions.everyYear")}
             </label>
           </div>
         </div>
       );
     case "not_after":
       return (
-        <Field label="Never directly after a track of" hint="Pick the target's own category for “no two in a row”">
+        <Field label={t("restrictions.notAfter")} hint={t("restrictions.notAfterHint")}>
           <select
             className="input"
             value={rule.category_id}

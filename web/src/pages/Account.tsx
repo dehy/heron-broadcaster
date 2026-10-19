@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Your account: theme, password and API tokens.
+// Your account: theme, language, password and API tokens.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { type Theme, api, done, unwrap } from "../api";
 import { Banner, Card, ConfirmButton, Empty, Field, Icon, NumberInput, PageHead, Segmented } from "../components/ui";
+import { LANGUAGES, type LanguageSetting, resolve, rich, setLanguage, t, toSetting } from "../i18n";
 import { ago, dateTime } from "../lib/format";
 import { ME_KEY, useAction, useUser } from "../lib/session";
 import { applyTheme } from "../lib/theme";
@@ -14,9 +15,12 @@ export function Account() {
   const user = useUser();
   return (
     <>
-      <PageHead title="Account" description={`Signed in as ${user.username}, ${user.role}.`} />
+      <PageHead
+        title={t("account.title")}
+        description={t("account.signedInAs", { user: user.username, role: t(`role.${user.role}`) })}
+      />
       <div className="grid two">
-        <ThemeCard theme={user.theme} />
+        <DisplayCard theme={user.theme} language={toSetting(user.language)} />
         <PasswordCard />
       </div>
       <TokensCard />
@@ -24,31 +28,52 @@ export function Account() {
   );
 }
 
-function ThemeCard({ theme }: { theme: Theme }) {
+function DisplayCard({ theme, language }: { theme: Theme; language: LanguageSetting }) {
   const client = useQueryClient();
   const save = useAction(
-    (next: Theme) => unwrap(api.PUT("/api/v1/auth/preferences", { body: { theme: next } })),
+    (preferences: { theme?: Theme; language?: LanguageSetting }) =>
+      unwrap(api.PUT("/api/v1/auth/preferences", { body: preferences })),
     { onSuccess: (user) => client.setQueryData(ME_KEY, user) },
   );
+  const system = LANGUAGES.find((entry) => entry.code === resolve("system"))?.name;
   return (
-    <Card title="Theme">
+    <Card title={t("account.display")}>
       <div className="stack">
-        <Segmented
-          label="Theme"
-          value={theme}
-          onChange={(next) => {
-            applyTheme(next);
-            save.mutate(next);
-          }}
-          options={[
-            { value: "system", label: <><Icon name="monitor" size={14} /> System</> },
-            { value: "light", label: <><Icon name="sun" size={14} /> Light</> },
-            { value: "dark", label: <><Icon name="moon" size={14} /> Dark</> },
-          ]}
-        />
+        <Field label={t("account.theme")}>
+          <Segmented
+            label={t("account.theme")}
+            value={theme}
+            onChange={(next) => {
+              applyTheme(next);
+              save.mutate({ theme: next });
+            }}
+            options={[
+              { value: "system", label: <><Icon name="monitor" size={14} /> {t("account.system")}</> },
+              { value: "light", label: <><Icon name="sun" size={14} /> {t("account.light")}</> },
+              { value: "dark", label: <><Icon name="moon" size={14} /> {t("account.dark")}</> },
+            ]}
+          />
+        </Field>
+        <Field label={t("account.language")}>
+          <select
+            className="input"
+            value={language}
+            onChange={(event) => {
+              const next = toSetting(event.target.value);
+              void setLanguage(next);
+              save.mutate({ language: next });
+            }}
+          >
+            <option value="system">{t("account.systemLanguage", { language: system ?? "" })}</option>
+            {LANGUAGES.map((entry) => (
+              <option key={entry.code} value={entry.code} lang={entry.code}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        </Field>
         <p className="muted small" style={{ margin: 0 }}>
-          System follows your device's setting. Your choice follows you on every browser you sign in
-          with.
+          {t("account.displayHelp")}
         </p>
       </div>
     </Card>
@@ -62,7 +87,7 @@ function PasswordCard() {
     () =>
       done(api.PUT("/api/v1/auth/password", { body: { current_password: current, new_password: next } })),
     {
-      success: "Password changed: your other sessions are signed out",
+      success: t("account.passwordChanged"),
       onSuccess: () => {
         setCurrent("");
         setNext("");
@@ -74,9 +99,9 @@ function PasswordCard() {
     change.mutate(undefined);
   };
   return (
-    <Card title="Password">
+    <Card title={t("login.password")}>
       <form className="stack" onSubmit={submit}>
-        <Field label="Current password">
+        <Field label={t("account.currentPassword")}>
           <input
             className="input"
             type="password"
@@ -86,7 +111,7 @@ function PasswordCard() {
             required
           />
         </Field>
-        <Field label="New password" hint="8 characters at least">
+        <Field label={t("account.newPassword")} hint={t("account.passwordHint")}>
           <input
             className="input"
             type="password"
@@ -99,7 +124,7 @@ function PasswordCard() {
         </Field>
         <div className="row end">
           <button type="submit" className="btn primary" disabled={change.isPending}>
-            Change
+            {t("account.change")}
           </button>
         </div>
       </form>
@@ -129,18 +154,17 @@ function TokensCard() {
   );
   const revoke = useAction(
     (id: number) => done(api.DELETE("/api/v1/tokens/{id}", { params: { path: { id } } })),
-    { success: "Token revoked", invalidate: [["tokens"]] },
+    { success: t("account.tokenRevoked"), invalidate: [["tokens"]] },
   );
   return (
-    <Card title="API tokens">
+    <Card title={t("account.tokens")}>
       <div className="stack">
         <p className="muted small" style={{ margin: 0 }}>
-          For scripts: send <code>Authorization: Bearer heron_…</code>. A token acts as you, with your
-          role.
+          {rich("account.tokensHelp", { header: <code>Authorization: Bearer heron_…</code> })}
         </p>
         {created && (
           <Banner kind="warn">
-            Copy this token now, it is not shown again: <code style={{ overflowWrap: "anywhere" }}>{created}</code>
+            {rich("account.copyToken", { token: <code style={{ overflowWrap: "anywhere" }}>{created}</code> })}
           </Banner>
         )}
         <form
@@ -151,27 +175,29 @@ function TokensCard() {
           }}
         >
           <label style={{ flex: "1 1 12rem" }}>
-            <span className="visually-hidden">Token name</span>
+            <span className="visually-hidden">{t("account.tokenName")}</span>
             <input
               className="input"
-              placeholder="What it is for"
+              placeholder={t("account.tokenPurpose")}
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
             />
           </label>
           <label className="row small muted" style={{ flexWrap: "nowrap" }}>
-            Expires after
-            <span style={{ width: "5rem" }}>
-              <NumberInput value={days} min={0} max={3650} step={1} onChange={(d) => setDays(Math.round(d))} />
-            </span>
-            days (0: never)
+            {rich("account.expiresAfter", {
+              days: (
+                <span style={{ width: "5rem" }}>
+                  <NumberInput value={days} min={0} max={3650} step={1} onChange={(d) => setDays(Math.round(d))} />
+                </span>
+              ),
+            })}
           </label>
           <button type="submit" className="btn primary" disabled={create.isPending}>
-            Create
+            {t("account.create")}
           </button>
         </form>
-        {tokens.data?.length === 0 && <Empty>No token.</Empty>}
+        {tokens.data?.length === 0 && <Empty>{t("account.noToken")}</Empty>}
         <ul className="list">
           {tokens.data?.map((token) => (
             <li key={token.id} className="row between" style={{ padding: "0.5rem 0" }}>
@@ -179,17 +205,19 @@ function TokensCard() {
                 <strong>{token.name}</strong>
                 <span className="muted small">
                   {" "}
-                  · created {dateTime(token.created_at_unix_ms)} · used {ago(token.last_used_at_unix_ms)}
-                  {token.expires_at_unix_ms && ` · expires ${dateTime(token.expires_at_unix_ms)}`}
+                  · {t("account.tokenCreated", { date: dateTime(token.created_at_unix_ms) })} ·{" "}
+                  {t("account.tokenUsed", { ago: ago(token.last_used_at_unix_ms) })}
+                  {token.expires_at_unix_ms &&
+                    ` · ${t("account.tokenExpires", { date: dateTime(token.expires_at_unix_ms) })}`}
                 </span>
               </span>
               <ConfirmButton
                 className="btn small danger"
-                confirm="Revoke"
-                question={<p>Revoke {token.name}? Scripts using it stop working.</p>}
+                confirm={t("account.revoke")}
+                question={<p>{t("account.revokeQuestion", { name: token.name })}</p>}
                 onConfirm={() => revoke.mutate(token.id)}
               >
-                Revoke
+                {t("account.revoke")}
               </ConfirmButton>
             </li>
           ))}

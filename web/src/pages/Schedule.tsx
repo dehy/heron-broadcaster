@@ -7,8 +7,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type ScheduledHour, api, unwrap } from "../api";
 import { Card, Empty, ErrorView, Loading, PageHead } from "../components/ui";
-import { count } from "../lib/format";
-import { DAYS, hourLabel } from "../lib/rotation";
+import { rich, t } from "../i18n";
+import { DAY_NUMBERS, dayName, hourLabel } from "../lib/rotation";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 
@@ -64,7 +64,7 @@ export function Schedule() {
   );
   const names = new Map((clocks.data ?? []).map((clock) => [clock.id, clock.name]));
   const save = useAction(() => unwrap(api.PUT("/api/v1/schedule", { body: fromGrid(grid) })), {
-    success: "Schedule saved",
+    success: t("schedule.saved"),
     invalidate: [["schedule"], ["clocks"]],
   });
 
@@ -91,19 +91,17 @@ export function Schedule() {
   return (
     <>
       <PageHead
-        title="Schedule"
-        description={
-          <>
-            Which <Link to="/clocks">clock</Link> runs at each hour, in station time (
-            {station.data?.timezone ?? "…"}). Hours without a clock rotate the whole library.
-          </>
-        }
+        title={t("nav.schedule")}
+        description={rich("schedule.description", {
+          link: <Link to="/clocks">{t("schedule.clock")}</Link>,
+          zone: station.data?.timezone ?? "…",
+        })}
         actions={
           canEdit && (
             <>
               {dirty && (
                 <button type="button" className="btn" onClick={() => setGrid(toGrid(schedule.data))}>
-                  Revert
+                  {t("track.revert")}
                 </button>
               )}
               <button
@@ -112,7 +110,7 @@ export function Schedule() {
                 disabled={!dirty || save.isPending}
                 onClick={() => save.mutate(undefined)}
               >
-                Save
+                {t("common.save")}
               </button>
             </>
           )
@@ -121,15 +119,15 @@ export function Schedule() {
       {clocks.data.length === 0 ? (
         <Card>
           <Empty>
-            No clock yet. <Link to="/clocks/new">Create one</Link>, then schedule it here.
+            {rich("schedule.noClock", { link: <Link to="/clocks/new">{t("schedule.createOne")}</Link> })}
           </Empty>
         </Card>
       ) : (
         <Card>
           <div className="stack">
             {canEdit && (
-              <div className="row" role="radiogroup" aria-label="Clock to schedule">
-                <span className="muted small">Paint with:</span>
+              <div className="row" role="radiogroup" aria-label={t("schedule.clockToSchedule")}>
+                <span className="muted small">{t("schedule.paintWith")}</span>
                 {clocks.data.map((clock) => (
                   <button
                     key={clock.id}
@@ -141,7 +139,7 @@ export function Schedule() {
                   >
                     <span className="swatch" style={{ background: colors.get(clock.id) }} />
                     {clock.name}
-                    <span className="muted">{hoursOf(clock.id)} h</span>
+                    <span className="muted">{t("rotation.hours", { hours: hoursOf(clock.id) })}</span>
                   </button>
                 ))}
                 <button
@@ -151,7 +149,7 @@ export function Schedule() {
                   className={brush === null ? "btn small brush active" : "btn small brush"}
                   onClick={() => setBrush(null)}
                 >
-                  <span className="swatch empty-swatch" /> No clock
+                  <span className="swatch empty-swatch" /> {t("schedule.noClockBrush")}
                 </button>
               </div>
             )}
@@ -173,14 +171,18 @@ export function Schedule() {
                   </tr>
                 </thead>
                 <tbody>
-                  {DAYS.map((name, index) => {
-                    const day = index + 1;
+                  {DAY_NUMBERS.map((day) => {
+                    const name = dayName(day);
                     return (
                       <tr key={day}>
                         <th scope="row">{name}</th>
                         {HOURS.map((hour) => {
                           const clock = grid.get(cell(day, hour));
-                          const label = `${name} ${hourLabel(hour)}: ${clock !== undefined ? (names.get(clock) ?? "?") : "no clock"}`;
+                          const label = t("schedule.cell", {
+                            day: name,
+                            hour: hourLabel(hour),
+                            clock: clock !== undefined ? (names.get(clock) ?? "?") : t("schedule.noClockCell"),
+                          });
                           return (
                             <td key={hour}>
                               <button
@@ -220,10 +222,13 @@ export function Schedule() {
               {clocks.data.map((clock) => (
                 <span key={clock.id} className="row" style={{ gap: "0.3rem" }}>
                   <span className="swatch" style={{ background: colors.get(clock.id) }} />
-                  <Link to={`/clocks/${clock.id}`}>{clock.name}</Link>: {count(hoursOf(clock.id), "hour")}
+                  {rich("schedule.clockHours", {
+                    clock: <Link to={`/clocks/${clock.id}`}>{clock.name}</Link>,
+                    count: hoursOf(clock.id),
+                  })}
                 </span>
               ))}
-              <span>Unscheduled: {count(168 - grid.size, "hour")}</span>
+              <span>{t("schedule.unscheduled", { count: 168 - grid.size })}</span>
             </div>
           </div>
         </Card>

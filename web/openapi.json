@@ -588,7 +588,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "Saves your preferences: the web UI's theme.",
+        "summary": "Saves your preferences: the web UI's theme and language.",
         "operationId": "set_preferences",
         "requestBody": {
           "content": {
@@ -6095,12 +6095,24 @@
       },
       "Preferences": {
         "type": "object",
-        "required": [
-          "theme"
-        ],
+        "description": "What to change; what is left out stays as it is.",
         "properties": {
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A language tag (`en`, `fr`…) or `system`. The API does not know which\nlanguages the web UI has: it falls back on the browser's for one it\nlacks."
+          },
           "theme": {
-            "$ref": "#/components/schemas/Theme"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Theme"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -7903,6 +7915,7 @@
           "role",
           "enabled",
           "theme",
+          "language",
           "created_at_unix_ms"
         ],
         "properties": {
@@ -7917,6 +7930,10 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "language": {
+            "type": "string",
+            "description": "The web UI's language: a language tag (`en`, `fr`…), or `system` to\nfollow the browser's languages."
           },
           "last_login_at_unix_ms": {
             "type": [

@@ -7,7 +7,8 @@ import { api, done, unwrap } from "../api";
 import { QueueList, useWaiting } from "../components/QueueList";
 import { TrackSearch } from "../components/TrackSearch";
 import { Card, ConfirmButton, Icon, PageHead } from "../components/ui";
-import { count, duration } from "../lib/format";
+import { t } from "../i18n";
+import { duration } from "../lib/format";
 import { useAction, useCan } from "../lib/session";
 
 export function QueuePage() {
@@ -25,9 +26,9 @@ export function QueuePage() {
           body: next ? { track_ids: [id], position: 0 } : { track_ids: [id] },
         }),
       ),
-    { success: "Queued" },
+    { success: t("queuePage.queued") },
   );
-  const clear = useAction(() => done(api.DELETE("/api/v1/queue")), { success: "Queue cleared" });
+  const clear = useAction(() => done(api.DELETE("/api/v1/queue")), { success: t("queuePage.cleared") });
   const setAutofill = useAction(
     (autofill: boolean) =>
       unwrap(
@@ -45,38 +46,35 @@ export function QueuePage() {
   return (
     <>
       <PageHead
-        title="Queue"
+        title={t("nav.queue")}
         description={
           waiting
-            ? `${count(waiting.length, "track")} waiting, ${duration(total)} of music. Drag tracks to reorder them.`
+            ? t("queuePage.description", { count: waiting.length, duration: duration(total) })
             : undefined
         }
         actions={
           canEdit && (
             <>
               {settings.data && (
-                <label className="check" title="Queue tracks when fewer than the minimum wait">
+                <label className="check" title={t("queuePage.autofillHelp")}>
                   <input
                     type="checkbox"
                     checked={settings.data.autofill}
                     disabled={setAutofill.isPending}
                     onChange={(event) => setAutofill.mutate(event.target.checked)}
                   />
-                  Autofill (at least {settings.data.min_queued})
+                  {t("queuePage.autofill", { min: settings.data.min_queued })}
                 </label>
               )}
               <ConfirmButton
-                confirm="Clear the queue"
+                confirm={t("queuePage.clearConfirm")}
                 question={
-                  <p>
-                    Every waiting track leaves the queue, the cued one too. The track on air plays
-                    on{settings.data?.autofill ? ", and autofill queues new tracks" : ""}.
-                  </p>
+                  <p>{settings.data?.autofill ? t("queuePage.clearQuestionAutofill") : t("queuePage.clearQuestion")}</p>
                 }
                 onConfirm={() => clear.mutate(undefined)}
                 disabled={!waiting?.length}
               >
-                <Icon name="trash" /> Clear
+                <Icon name="trash" /> {t("queuePage.clear")}
               </ConfirmButton>
             </>
           )
@@ -84,7 +82,7 @@ export function QueuePage() {
       />
       {settings.data && !settings.data.autofill && (
         <div className="banner warn" role="status">
-          <Icon name="warn" /> Autofill is off: the station goes silent once the queue is empty.
+          <Icon name="warn" /> {t("queuePage.autofillOff")}
         </div>
       )}
       <div className="grid sidebar-right">
@@ -92,26 +90,26 @@ export function QueuePage() {
           <QueueList />
         </Card>
         {canEdit && (
-          <Card title="Add tracks">
+          <Card title={t("queuePage.add")}>
             <TrackSearch
               actions={(track) => (
                 <>
                   <button
                     type="button"
                     className="btn small"
-                    title="Play next"
+                    title={t("queue.playNext")}
                     onClick={() => enqueue.mutate({ id: track.id, next: true })}
                   >
-                    <Icon name="next" size={14} /> Next
+                    <Icon name="next" size={14} /> {t("dashboard.next")}
                   </button>
                   <button
                     type="button"
                     className="btn small"
-                    title="Add to the end"
+                    title={t("queuePage.addEnd")}
                     onClick={() => enqueue.mutate({ id: track.id, next: false })}
                   >
                     <Icon name="plus" size={14} />
-                    <span className="visually-hidden">Add to the end</span>
+                    <span className="visually-hidden">{t("queuePage.addEnd")}</span>
                   </button>
                 </>
               )}

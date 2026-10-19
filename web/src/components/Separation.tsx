@@ -4,14 +4,15 @@
 // either inherited or set here.
 
 import type { SeparationOverrides, Windows } from "../api";
+import { type PlainKey, number, t } from "../i18n";
 import { WINDOW_FIELDS } from "../lib/rotation";
 import { NumberInput } from "./ui";
 
-const LABELS: Record<keyof Windows, string> = {
-  album_min: "Same album",
-  artist_min: "Same artist",
-  title_min: "Same title",
-  track_min: "Same track",
+const LABELS: Record<keyof Windows, PlainKey> = {
+  album_min: "separation.album",
+  artist_min: "separation.artist",
+  title_min: "separation.title",
+  track_min: "separation.track",
 };
 
 /** The longest a window can be: a week. */
@@ -52,7 +53,7 @@ export function SeparationEditor({
                   onChange(next);
                 }}
               />
-              {LABELS[key]} within
+              {t(LABELS[key])}
             </label>
             {overridden ? (
               <NumberInput
@@ -61,19 +62,23 @@ export function SeparationEditor({
                 max={MAX_MINUTES}
                 step={1}
                 disabled={disabled ?? false}
-                suffix="min"
+                suffix={t("common.min")}
                 onChange={(minutes) => onChange({ ...value, [key]: Math.round(minutes) })}
               />
             ) : (
               <span className="muted small">
-                {fallback === undefined ? "inherited" : fallback === 0 ? "off (inherited)" : `${fallback} min (inherited)`}
+                {fallback === undefined
+                  ? t("separation.inherited")
+                  : fallback === 0
+                    ? t("separation.offInherited")
+                    : t("separation.minutesInherited", { minutes: number(fallback) })}
               </span>
             )}
           </div>
         );
       })}
       <p className="muted small" style={{ margin: 0 }}>
-        0 turns a rule off. Relaxation halves, then drops, these windows when the library runs short.
+        {t("separation.help")}
       </p>
     </div>
   );

@@ -26,9 +26,7 @@ The web UI in more than one language, starting with **English and French**. Toda
 - Dates, times, numbers, file sizes, levels and relative times (`format.ts`, `rotation.ts`, the history days) use the chosen language instead of the browser's locale or a fixed `"en"`: `-1,5 dB` and *il y a 5 minutes* in French.
 - Duration fields accept the language's decimal separator (`1:23,5` in French) as well as the dot.
 - Day and month names (schedule, history, restrictions) come from `Intl`, not from the catalogs.
-- Only the language changes, never the time zone, so no hour or day boundary moves. Each display keeps the zone it uses today:
-  - Timestamps (`clockTime`, `dateTime`) and the history's days: the browser's time zone.
-  - The schedule and the rotation: the station's time zone. Dates computed by `rotation.ts` are formatted in UTC.
+- Only the language changes, never the time zone, so no hour or day boundary moves: every time and date stays in the station's time zone ([Web UI – Times](../web.md#times)), and dates computed by `rotation.ts` are formatted in UTC.
 
 ### What is not translated
 
@@ -42,11 +40,11 @@ The web UI in more than one language, starting with **English and French**. Toda
 
 ## Acceptance criteria
 
-- [ ] With the pseudo-locale, every page and dialog (signed in as admin, so every control shows) has no untranslated text, and the layout holds at phone width.
-- [ ] A test checks that every catalog has exactly the English keys, with the same parameters.
-- [ ] Choosing French on the Account page switches the interface at once, survives a reload with the first paint already in French, and follows the user to another browser; *System* follows the browser's languages.
-- [ ] In French, dates, times, numbers, levels, relative times and plurals are written the French way (unit tests in `format.test.ts`), and duration fields accept `1:23,5`.
-- [ ] An English-only session downloads no other catalog.
+- [x] With the pseudo-locale, every page and dialog (signed in as admin, so every control shows) has no untranslated text, and the layout holds at phone width.
+- [x] A test checks that every catalog has exactly the English keys, with the same parameters.
+- [x] Choosing French on the Account page switches the interface at once, survives a reload with the first paint already in French, and follows the user to another browser; *System* follows the browser's languages.
+- [x] In French, dates, times, numbers, levels, relative times and plurals are written the French way (unit tests in `format.test.ts`), and duration fields accept `1:23,5`.
+- [x] An English-only session downloads no other catalog.
 
 ## References
 

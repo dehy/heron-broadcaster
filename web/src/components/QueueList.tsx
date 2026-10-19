@@ -22,7 +22,9 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useEffect, useMemo, useState } from "react";
 import { type QueueEntry, api, done } from "../api";
+import { t } from "../i18n";
 import { clockTime, duration, trackName } from "../lib/format";
+import { sourceLabel } from "../lib/labels";
 import { positionNow, useLive } from "../lib/live";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
@@ -82,14 +84,14 @@ export function QueueList({ limit }: { limit?: number }) {
   );
 
   if (player === undefined) {
-    return <Empty>Connecting…</Empty>;
+    return <Empty>{t("queue.connecting")}</Empty>;
   }
   if (player === null) {
-    return <Empty>The engine cannot be reached.</Empty>;
+    return <Empty>{t("queue.engineUnreachable")}</Empty>;
   }
   const entries = order ?? [];
   if (entries.length === 0) {
-    return <Empty>Nothing is queued. Autofill queues tracks when it is on.</Empty>;
+    return <Empty>{t("queue.empty")}</Empty>;
   }
 
   // The on-air deck's remaining time gives the first start.
@@ -122,7 +124,7 @@ export function QueueList({ limit }: { limit?: number }) {
         items={shown.map((entry) => entry.entry_id)}
         strategy={verticalListSortingStrategy}
       >
-        <ol className="list" aria-label="Queue">
+        <ol className="list" aria-label={t("nav.queue")}>
           {shown.map((entry, index) => (
             <Item
               key={entry.entry_id}
@@ -145,8 +147,8 @@ export function QueueList({ limit }: { limit?: number }) {
       </SortableContext>
       {limit && entries.length > limit && (
         <div className="pager">
-          <span className="muted small">{entries.length - limit} more</span>
-          <Link to="/queue">Whole queue</Link>
+          <span className="muted small">{t("queue.more", { count: entries.length - limit })}</span>
+          <Link to="/queue">{t("queue.whole")}</Link>
         </div>
       )}
     </DndContext>
@@ -186,7 +188,7 @@ function Item({
         <button
           type="button"
           className="btn ghost small icon handle"
-          aria-label={`Move ${name}`}
+          aria-label={t("queue.move", { name })}
           {...attributes}
           {...listeners}
         >
@@ -199,14 +201,14 @@ function Item({
           {track.track_id ? <Link to={`/library/${track.track_id}`}>{name}</Link> : name}
         </div>
         <div className="row small muted" style={{ gap: "0.4rem" }}>
-          {cued && <span className="badge accent">Cued</span>}
+          {cued && <span className="badge accent">{t("queue.cued")}</span>}
           <span className="badge">
-            {track.source === "rotation" ? "Autofill" : track.source}
+            {sourceLabel(track.source)}
           </span>
           <span className="num">{duration(track.cue_out_ms - track.cue_in_ms)}</span>
         </div>
       </div>
-      <span className="start" title="Expected start, without crossfades">
+      <span className="start" title={t("queue.expectedStart")}>
         {start !== null ? `≈ ${clockTime(start)}` : ""}
       </span>
       {canEdit && (
@@ -215,8 +217,8 @@ function Item({
             <button
               type="button"
               className="btn ghost small icon"
-              title="Play next"
-              aria-label={`Play ${name} next`}
+              title={t("queue.playNext")}
+              aria-label={t("queue.playNamedNext", { name })}
               onClick={onNext}
             >
               <Icon name="next" />
@@ -225,8 +227,8 @@ function Item({
           <button
             type="button"
             className="btn ghost small icon danger"
-            title="Remove from the queue"
-            aria-label={`Remove ${name} from the queue`}
+            title={t("queue.remove")}
+            aria-label={t("queue.removeNamed", { name })}
             onClick={onRemove}
           >
             <Icon name="trash" />

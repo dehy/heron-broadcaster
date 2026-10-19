@@ -6,13 +6,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { type Role, type User, api, done, unwrap } from "../api";
 import { Banner, Card, ConfirmButton, ErrorView, Field, Icon, Loading, Modal, PageHead } from "../components/ui";
+import { type PlainKey, t } from "../i18n";
 import { ago } from "../lib/format";
 import { useAction, useCan, useUser } from "../lib/session";
 
-const ROLES: { value: Role; label: string; hint: string }[] = [
-  { value: "viewer", label: "Viewer", hint: "Sees everything except users and secrets" },
-  { value: "operator", label: "Operator", hint: "Also runs the station: queue, skip, FX, tracks, categories" },
-  { value: "admin", label: "Admin", hint: "Also settings, outputs and users" },
+const ROLES: { value: Role; label: PlainKey; hint: PlainKey }[] = [
+  { value: "viewer", label: "users.role.viewer", hint: "users.role.viewerHint" },
+  { value: "operator", label: "users.role.operator", hint: "users.role.operatorHint" },
+  { value: "admin", label: "users.role.admin", hint: "users.role.adminHint" },
 ];
 
 export function Users() {
@@ -28,23 +29,23 @@ export function Users() {
   const update = useAction(
     ({ id, ...body }: { id: number; role?: Role; enabled?: boolean }) =>
       unwrap(api.PATCH("/api/v1/users/{id}", { params: { path: { id } }, body })),
-    { success: "Saved", invalidate: [["users"]] },
+    { success: t("categories.saved"), invalidate: [["users"]] },
   );
   const remove = useAction(
     (id: number) => done(api.DELETE("/api/v1/users/{id}", { params: { path: { id } } })),
-    { success: "User deleted", invalidate: [["users"]] },
+    { success: t("users.deleted"), invalidate: [["users"]] },
   );
 
   if (!isAdmin) {
-    return <Banner kind="warn">Only admins manage users.</Banner>;
+    return <Banner kind="warn">{t("users.adminsOnly")}</Banner>;
   }
   return (
     <>
       <PageHead
-        title="Users"
+        title={t("nav.users")}
         actions={
           <button type="button" className="btn primary" onClick={() => setCreating(true)}>
-            <Icon name="plus" /> New user
+            <Icon name="plus" /> {t("users.new")}
           </button>
         }
       />
@@ -56,11 +57,11 @@ export function Users() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>User</th>
-                  <th>Role</th>
-                  <th className="hide-narrow">Last sign-in</th>
+                  <th>{t("users.user")}</th>
+                  <th>{t("users.role")}</th>
+                  <th className="hide-narrow">{t("users.lastSignIn")}</th>
                   <th>
-                    <span className="visually-hidden">Actions</span>
+                    <span className="visually-hidden">{t("library.actions")}</span>
                   </th>
                 </tr>
               </thead>
@@ -68,19 +69,19 @@ export function Users() {
                 {users.data.map((user) => (
                   <tr key={user.id}>
                     <td>
-                      {user.username} {user.id === me.id && <span className="badge accent">You</span>}{" "}
-                      {!user.enabled && <span className="badge">Disabled</span>}
+                      {user.username} {user.id === me.id && <span className="badge accent">{t("users.you")}</span>}{" "}
+                      {!user.enabled && <span className="badge">{t("output.disabled")}</span>}
                     </td>
                     <td>
                       <select
                         className="input"
                         value={user.role}
-                        aria-label={`Role of ${user.username}`}
+                        aria-label={t("users.roleOf", { name: user.username })}
                         onChange={(e) => update.mutate({ id: user.id, role: e.target.value as Role })}
                       >
                         {ROLES.map((role) => (
                           <option key={role.value} value={role.value}>
-                            {role.label}
+                            {t(role.label)}
                           </option>
                         ))}
                       </select>
@@ -88,7 +89,7 @@ export function Users() {
                     <td className="hide-narrow muted">{ago(user.last_login_at_unix_ms)}</td>
                     <td className="actions">
                       <button type="button" className="btn small" onClick={() => setResetting(user)}>
-                        Password
+                        {t("login.password")}
                       </button>
                       {user.id !== me.id && (
                         <>
@@ -97,13 +98,13 @@ export function Users() {
                             className="btn small"
                             onClick={() => update.mutate({ id: user.id, enabled: !user.enabled })}
                           >
-                            {user.enabled ? "Disable" : "Enable"}
+                            {user.enabled ? t("track.disable") : t("track.enable")}
                           </button>
                           <ConfirmButton
                             className="btn ghost small icon danger"
-                            title={`Delete ${user.username}`}
-                            confirm="Delete"
-                            question={<p>Delete {user.username}? Their sessions and API tokens stop working.</p>}
+                            title={t("categories.delete", { name: user.username })}
+                            confirm={t("categories.deleteButton")}
+                            question={<p>{t("users.deleteQuestion", { name: user.username })}</p>}
                             onConfirm={() => remove.mutate(user.id)}
                           >
                             <Icon name="trash" />
@@ -121,8 +122,8 @@ export function Users() {
       <dl className="facts small">
         {ROLES.map((role) => (
           <div key={role.value} style={{ display: "contents" }}>
-            <dt>{role.label}</dt>
-            <dd>{role.hint}</dd>
+            <dt>{t(role.label)}</dt>
+            <dd>{t(role.hint)}</dd>
           </div>
         ))}
       </dl>
@@ -138,20 +139,20 @@ function NewUserDialog({ onClose }: { onClose: () => void }) {
   const [role, setRole] = useState<Role>("operator");
   const create = useAction(
     () => unwrap(api.POST("/api/v1/users", { body: { username, password, role } })),
-    { success: "User created", invalidate: [["users"]], onSuccess: onClose },
+    { success: t("users.created"), invalidate: [["users"]], onSuccess: onClose },
   );
   return (
     <Modal
-      title="New user"
+      title={t("users.new")}
       open
       onClose={onClose}
       footer={
         <>
           <button type="button" className="btn" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button type="submit" form="user-form" className="btn primary" disabled={create.isPending}>
-            Create
+            {t("account.create")}
           </button>
         </>
       }
@@ -164,10 +165,10 @@ function NewUserDialog({ onClose }: { onClose: () => void }) {
           create.mutate(undefined);
         }}
       >
-        <Field label="Username">
+        <Field label={t("login.username")}>
           <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} required autoComplete="off" />
         </Field>
-        <Field label="Password" hint="8 characters at least">
+        <Field label={t("login.password")} hint={t("account.passwordHint")}>
           <input
             className="input"
             type="password"
@@ -178,11 +179,11 @@ function NewUserDialog({ onClose }: { onClose: () => void }) {
             autoComplete="new-password"
           />
         </Field>
-        <Field label="Role" hint={ROLES.find((r) => r.value === role)?.hint}>
+        <Field label={t("users.role")} hint={t(ROLES.find((r) => r.value === role)?.hint ?? "users.role.operatorHint")}>
           <select className="input" value={role} onChange={(e) => setRole(e.target.value as Role)}>
             {ROLES.map((r) => (
               <option key={r.value} value={r.value}>
-                {r.label}
+                {t(r.label)}
               </option>
             ))}
           </select>
@@ -196,20 +197,20 @@ function PasswordDialog({ user, onClose }: { user: User; onClose: () => void }) 
   const [password, setPassword] = useState("");
   const reset = useAction(
     () => unwrap(api.PATCH("/api/v1/users/{id}", { params: { path: { id: user.id } }, body: { password } })),
-    { success: `New password set for ${user.username}`, onSuccess: onClose },
+    { success: t("users.passwordSet", { name: user.username }), onSuccess: onClose },
   );
   return (
     <Modal
-      title={`Password of ${user.username}`}
+      title={t("users.passwordOf", { name: user.username })}
       open
       onClose={onClose}
       footer={
         <>
           <button type="button" className="btn" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button type="submit" form="password-form" className="btn primary" disabled={reset.isPending}>
-            Set
+            {t("users.set")}
           </button>
         </>
       }
@@ -223,9 +224,9 @@ function PasswordDialog({ user, onClose }: { user: User; onClose: () => void }) 
         }}
       >
         <p className="muted small" style={{ margin: 0 }}>
-          They are signed out everywhere.
+          {t("users.signedOut")}
         </p>
-        <Field label="New password" hint="8 characters at least">
+        <Field label={t("account.newPassword")} hint={t("account.passwordHint")}>
           <input
             className="input"
             type="password"

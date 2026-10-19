@@ -17,7 +17,8 @@ import {
   PageHead,
   useToast,
 } from "../components/ui";
-import { ago, count, dateTime, duration, trackName } from "../lib/format";
+import { type PlainKey, number, rich, t } from "../i18n";
+import { ago, dateTime, duration, trackName } from "../lib/format";
 import { Link, setSearch, useLocation } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 
@@ -44,19 +45,19 @@ function TaskState({ task }: { task: LibraryTask | undefined }) {
     case "pending":
       return (
         <span className="row small muted">
-          <span className="spinner" /> Waiting for heron-librarian…
+          <span className="spinner" /> {t("review.waiting")}
         </span>
       );
     case "running":
       return (
         <span className="row small muted">
-          <span className="spinner" /> Working…
+          <span className="spinner" /> {t("review.working")}
         </span>
       );
     case "failed":
-      return <span className="small bad">Failed: {task.error}</span>;
+      return <span className="small bad">{t("review.failed", { error: task.error ?? "" })}</span>;
     case "done":
-      return <span className="small good">Done {ago(task.finished_at_unix_ms)}</span>;
+      return <span className="small good">{t("review.doneAgo", { ago: ago(task.finished_at_unix_ms) })}</span>;
   }
 }
 
@@ -66,16 +67,16 @@ export function Review() {
   return (
     <>
       <PageHead
-        title="Review & organize"
-        description="heron-librarian, the only service that writes to the library, carries these out; every change can be undone."
+        title={t("nav.review")}
+        description={t("review.description")}
       />
-      <nav className="tabs" aria-label="Sections">
+      <nav className="tabs" aria-label={t("review.sections")}>
         {(
           [
-            ["review", "Identifications"],
-            ["organize", "Organize"],
-            ["batches", "Changes"],
-          ] as const
+            ["review", "review.tab.identifications"],
+            ["organize", "review.tab.organize"],
+            ["batches", "review.tab.changes"],
+          ] as const satisfies readonly (readonly [Tab, PlainKey])[]
         ).map(([value, label]) => (
           <button
             key={value}
@@ -83,7 +84,7 @@ export function Review() {
             aria-selected={tab === value}
             onClick={() => setSearch({ tab: value === "review" ? undefined : value })}
           >
-            {label}
+            {t(label)}
           </button>
         ))}
       </nav>
@@ -111,8 +112,7 @@ function Identifications() {
     return (
       <Card>
         <Empty>
-          Nothing to review. Files dropped into the incoming folder are identified with AcoustID and
-          MusicBrainz; the doubtful matches wait here.
+          {t("review.nothing")}
         </Empty>
       </Card>
     );
@@ -120,8 +120,7 @@ function Identifications() {
   return (
     <div className="stack">
       <p className="muted" style={{ margin: 0 }}>
-        {count(review.data.total, "track")} imported with their own tags: their identification was
-        not confident enough. Pick the right release, or keep their tags.
+        {t("review.intro", { count: review.data.total })}
       </p>
       {review.data.items.map((item) => (
         <ReviewItem key={item.track.id} item={item} />
@@ -148,17 +147,17 @@ function ReviewItem({ item }: { item: Schemas["ReviewItem"] }) {
   );
   const keep = useAction(
     () => done(api.POST("/api/v1/tracks/{id}/review/keep", { params: { path: { id: item.track.id } } })),
-    { success: "Kept its own tags", invalidate: [["review"], ["review-count"]] },
+    { success: t("review.kept"), invalidate: [["review"], ["review-count"]] },
   );
 
   useEffect(() => {
     if (task.data?.status === "done") {
-      toast(`${trackName(item.track)}: release applied`);
+      toast(t("review.applied", { track: trackName(item.track) }));
       void client.invalidateQueries({ queryKey: ["review"] });
       void client.invalidateQueries({ queryKey: ["review-count"] });
       void client.invalidateQueries({ queryKey: ["library-batches"] });
     } else if (task.data?.status === "failed") {
-      toast(task.data.error ?? "The release could not be applied", true);
+      toast(task.data.error ?? t("review.applyFailed"), true);
     }
   }, [task.data?.status, task.data?.error, client, toast, item.track]);
 
@@ -178,30 +177,30 @@ function ReviewItem({ item }: { item: Schemas["ReviewItem"] }) {
       actions={
         canEdit && (
           <button type="button" className="btn small" disabled={busy} onClick={() => keep.mutate(undefined)}>
-            <Icon name="check" size={14} /> Keep its tags
+            <Icon name="check" size={14} /> {t("review.keep")}
           </button>
         )
       }
       flush
     >
       <div className="card-body row between">
-        <span className="warn small">{item.reason ?? "Needs review"}</span>
+        <span className="warn small">{item.reason ?? t("library.filter.needsReview")}</span>
         <TaskState task={task.data} />
       </div>
       {item.candidates.length === 0 ? (
-        <Empty>No candidate release: keep its tags, or fix them and drop the file again.</Empty>
+        <Empty>{t("review.noCandidate")}</Empty>
       ) : (
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <th>Release</th>
-                <th className="hide-narrow">Date</th>
-                <th className="hide-narrow">Country</th>
-                <th>Track</th>
-                <th>Score</th>
+                <th>{t("review.release")}</th>
+                <th className="hide-narrow">{t("review.date")}</th>
+                <th className="hide-narrow">{t("review.country")}</th>
+                <th>{t("history.track")}</th>
+                <th>{t("review.score")}</th>
                 <th>
-                  <span className="visually-hidden">Actions</span>
+                  <span className="visually-hidden">{t("library.actions")}</span>
                 </th>
               </tr>
             </thead>
@@ -223,7 +222,7 @@ function ReviewItem({ item }: { item: Schemas["ReviewItem"] }) {
                     {candidate.disc && candidate.disc > 1 ? `${candidate.disc}-` : ""}
                     {candidate.track ?? "–"}
                   </td>
-                  <td className="num">{Math.round(candidate.score * 100)}%</td>
+                  <td className="num">{number(candidate.score, { style: "percent" })}</td>
                   <td className="actions">
                     {canEdit && (
                       <button
@@ -232,7 +231,7 @@ function ReviewItem({ item }: { item: Schemas["ReviewItem"] }) {
                         disabled={busy || apply.isPending}
                         onClick={() => apply.mutate(candidate)}
                       >
-                        Apply
+                        {t("review.apply")}
                       </button>
                     )}
                   </td>
@@ -305,7 +304,7 @@ function Organize() {
   return (
     <div className="stack">
       <Card
-        title="Organize the library"
+        title={t("review.organizeTitle")}
         actions={
           isAdmin && (
             <button
@@ -314,43 +313,39 @@ function Organize() {
               disabled={dryRun.isPending || plan.data?.status === "pending" || plan.data?.status === "running"}
               onClick={() => dryRun.mutate(undefined)}
             >
-              {plan.data ? "New dry run" : "Dry run"}
+              {plan.data ? t("review.newDryRun") : t("review.dryRun")}
             </button>
           )
         }
       >
         <div className="stack">
           <p style={{ margin: 0 }}>
-            Moves every track where the layout puts it, using the files' current tags:{" "}
-            <code>{settings.data?.layout ?? "…"}</code> (<Link to="/settings">change it</Link>).
+            {rich("review.organizeHelp", {
+              layout: <code>{settings.data?.layout ?? "…"}</code>,
+              link: <Link to="/settings">{t("review.changeIt")}</Link>,
+            })}
           </p>
           <p className="muted small" style={{ margin: 0 }}>
-            The dry run lists every move and changes nothing. Applying it moves the files as one batch,
-            which can be undone. Files are never overwritten: a name already taken gets “ (2)”.
+            {t("review.dryRunHelp")}
           </p>
-          {!isAdmin && <p className="muted small">Only admins can organize the library.</p>}
+          {!isAdmin && <p className="muted small">{t("review.adminsOnly")}</p>}
         </div>
       </Card>
 
       {plan.data && (
         <Card
-          title={`Dry run ${dateTime(plan.data.created_at_unix_ms)}`}
+          title={t("review.dryRunAt", { date: dateTime(plan.data.created_at_unix_ms) })}
           actions={
             <>
               <TaskState task={plan.data} />
               {isAdmin && plan.data.status === "done" && moves.length > 0 && !applyId && (
                 <ConfirmButton
                   className="btn primary"
-                  confirm={`Move ${count(moves.length, "file")}`}
-                  question={
-                    <p>
-                      Move {count(moves.length, "file")} as listed? Tracks moved since the dry run are skipped.
-                      The batch can be undone from Changes.
-                    </p>
-                  }
+                  confirm={t("review.moveFiles", { count: moves.length })}
+                  question={<p>{t("review.moveQuestion", { count: moves.length })}</p>}
                   onConfirm={() => apply.mutate(plan.data?.id ?? 0)}
                 >
-                  Apply {count(moves.length, "move")}
+                  {t("review.applyMoves", { count: moves.length })}
                 </ConfirmButton>
               )}
             </>
@@ -360,7 +355,7 @@ function Organize() {
           {applied.data && (
             <div className="card-body stack">
               <div className="row between">
-                <strong>Applying</strong>
+                <strong>{t("review.applying")}</strong>
                 <TaskState task={applied.data} />
               </div>
               {applied.data.report && (
@@ -371,18 +366,18 @@ function Organize() {
           {plan.data.plan && (
             <>
               <div className="card-body">
-                {count(moves.length, "move")}, {count(plan.data.plan.unchanged, "track")} already in place
+                {t("review.moves", { count: moves.length })}, {t("review.inPlace", { count: plan.data.plan.unchanged })}
                 {plan.data.plan.unreadable.length > 0 &&
-                  `, ${plan.data.plan.unreadable.length} unreadable (left where they are)`}
-                .
+                  `, ${t("review.unreadable", { count: plan.data.plan.unreadable.length })}`}
+                {t("library.end")}
               </div>
               {moves.length > 0 && (
                 <div className="table-wrap">
                   <table className="table">
                     <thead>
                       <tr>
-                        <th>From</th>
-                        <th>To</th>
+                        <th>{t("review.from")}</th>
+                        <th>{t("review.to")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -402,9 +397,9 @@ function Organize() {
               )}
               {moves.length > shown && (
                 <div className="pager">
-                  <span className="muted small">{moves.length - shown} more</span>
+                  <span className="muted small">{t("queue.more", { count: moves.length - shown })}</span>
                   <button type="button" className="btn small" onClick={() => setShown((n) => n + 500)}>
-                    Show more
+                    {t("review.showMore")}
                   </button>
                 </div>
               )}
@@ -420,8 +415,9 @@ function BatchReport({ report }: { report: Schemas["BatchReport"] }) {
   return (
     <div className="stack">
       <span>
-        Batch {report.batch_id}: {count(report.done, "file")} done
-        {report.skipped.length > 0 && `, ${report.skipped.length} skipped`}.
+        {t("review.batchReport", { batch: String(report.batch_id), count: report.done })}
+        {report.skipped.length > 0 && `, ${t("review.skipped", { count: report.skipped.length })}`}
+        {t("library.end")}
       </span>
       {report.skipped.length > 0 && (
         <ul className="small" style={{ margin: 0 }}>
@@ -438,12 +434,17 @@ function BatchReport({ report }: { report: Schemas["BatchReport"] }) {
 
 // Batches -------------------------------------------------------------------
 
-const KINDS: Record<string, string> = {
-  import: "Import",
-  organize: "Organization",
-  undo: "Undo",
-  review: "Review",
+const KINDS: Record<string, PlainKey> = {
+  import: "review.kind.import",
+  organize: "review.kind.organize",
+  undo: "review.kind.undo",
+  review: "review.kind.review",
 };
+
+function kindLabel(kind: string): string {
+  const key = KINDS[kind];
+  return key ? t(key) : kind;
+}
 
 function Batches() {
   const isAdmin = useCan("admin");
@@ -465,13 +466,15 @@ function Batches() {
       const report = undoing.data?.report;
       toast(
         report
-          ? `Undone: ${count(report.done, "file")} back${report.skipped.length ? `, ${report.skipped.length} left in place` : ""}`
-          : "Undone",
+          ? report.skipped.length
+            ? t("review.undoneSkipped", { count: report.done, skipped: report.skipped.length })
+            : t("review.undoneCount", { count: report.done })
+          : t("review.undone"),
       );
       void client.invalidateQueries({ queryKey: ["library-batches"] });
       void client.invalidateQueries({ queryKey: ["review"] });
     } else if (status === "failed") {
-      toast(undoing.data?.error ?? "The undo failed", true);
+      toast(undoing.data?.error ?? t("review.undoFailed"), true);
     }
   }, [undoing.data?.status, undoing.data?.report, undoing.data?.error, client, toast]);
 
@@ -486,22 +489,22 @@ function Batches() {
     <div className="stack">
       {busy && (
         <Banner kind="warn">
-          Undoing… <TaskState task={undoing.data} />
+          {t("review.undoing")} <TaskState task={undoing.data} />
         </Banner>
       )}
       <Card flush>
         {batches.data.length === 0 ? (
-          <Empty>No change yet.</Empty>
+          <Empty>{t("review.noChange")}</Empty>
         ) : (
           <table className="table">
             <thead>
               <tr>
-                <th>Batch</th>
-                <th>When</th>
-                <th>Files</th>
-                <th>State</th>
+                <th>{t("review.batch")}</th>
+                <th>{t("review.when")}</th>
+                <th>{t("review.files")}</th>
+                <th>{t("review.state")}</th>
                 <th>
-                  <span className="visually-hidden">Actions</span>
+                  <span className="visually-hidden">{t("library.actions")}</span>
                 </th>
               </tr>
             </thead>
@@ -509,35 +512,30 @@ function Batches() {
               {batches.data.map((batch) => (
                 <tr key={batch.id}>
                   <td>
-                    #{batch.id} {KINDS[batch.kind]}
-                    {batch.undoes && <span className="muted"> of #{batch.undoes}</span>}
+                    #{batch.id} {kindLabel(batch.kind)}
+                    {batch.undoes && <span className="muted"> {t("review.of", { batch: String(batch.undoes) })}</span>}
                   </td>
                   <td>{dateTime(batch.created_at_unix_ms)}</td>
-                  <td className="num">{batch.files}</td>
+                  <td className="num">{number(batch.files)}</td>
                   <td>
                     {batch.undone_by ? (
-                      <span className="badge">Undone by #{batch.undone_by}</span>
+                      <span className="badge">{t("review.undoneBy", { batch: String(batch.undone_by) })}</span>
                     ) : batch.finished_at_unix_ms ? (
-                      <span className="badge good">Done</span>
+                      <span className="badge good">{t("review.done")}</span>
                     ) : (
-                      <span className="badge warn">Unfinished</span>
+                      <span className="badge warn">{t("review.unfinished")}</span>
                     )}
                   </td>
                   <td className="actions">
                     {isAdmin && batch.kind !== "undo" && !batch.undone_by && batch.files > 0 && (
                       <ConfirmButton
                         className="btn small"
-                        confirm="Undo"
+                        confirm={t("review.kind.undo")}
                         disabled={busy}
-                        question={
-                          <p>
-                            Put the {count(batch.files, "file")} of batch #{batch.id} back where they were, with
-                            their previous tags? Files whose previous path is taken stay where they are.
-                          </p>
-                        }
+                        question={<p>{t("review.undoQuestion", { count: batch.files, batch: String(batch.id) })}</p>}
                         onConfirm={() => undo.mutate(batch.id)}
                       >
-                        <Icon name="undo" size={14} /> Undo
+                        <Icon name="undo" size={14} /> {t("review.kind.undo")}
                       </ConfirmButton>
                     )}
                   </td>

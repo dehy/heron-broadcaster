@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { type Schemas, api, unwrap } from "../api";
 import { Card, ErrorView, Field, Loading, NumberInput, PageHead } from "../components/ui";
+import { type PlainKey, rich, t } from "../i18n";
 import { WINDOW_FIELDS } from "../lib/rotation";
 import { Link } from "../lib/router";
 import { useCategories } from "./Clocks";
@@ -15,7 +16,7 @@ import { useAction, useCan } from "../lib/session";
 export function Settings() {
   return (
     <>
-      <PageHead title="Settings" description="How the station fills its queue, analyzes and files its music." />
+      <PageHead title={t("nav.settings")} description={t("settings.description")} />
       <QueueCard />
       <RotationCard />
       <StationCard />
@@ -54,7 +55,7 @@ function SettingsCard<T>({
           <>
             {dirty && (
               <button type="button" className="btn small" onClick={() => setDraft(value)}>
-                Revert
+                {t("track.revert")}
               </button>
             )}
             <button
@@ -63,7 +64,7 @@ function SettingsCard<T>({
               disabled={!dirty || saving}
               onClick={() => save(draft)}
             >
-              Save
+              {t("common.save")}
             </button>
           </>
         )
@@ -89,7 +90,7 @@ function QueueCard() {
   });
   const save = useAction(
     (body: Schemas["QueueSettings"]) => unwrap(api.PUT("/api/v1/settings/queue", { body })),
-    { success: "Saved", invalidate: [["settings", "queue"]] },
+    { success: t("categories.saved"), invalidate: [["settings", "queue"]] },
   );
   if (settings.isPending) {
     return <Loading />;
@@ -99,13 +100,12 @@ function QueueCard() {
   }
   return (
     <SettingsCard
-      title="Queue"
-      description={
-        <>
-          Autofill queues the tracks rotation picks, following the <Link to="/schedule">schedule</Link> and its{" "}
-          <Link to="/clocks">clocks</Link>. Every pick goes to the <Link to="/rotation">selection log</Link>.
-        </>
-      }
+      title={t("nav.queue")}
+      description={rich("settings.queueHelp", {
+        schedule: <Link to="/schedule">{t("clocks.scheduleLink")}</Link>,
+        clocks: <Link to="/clocks">{t("settings.clocksLink")}</Link>,
+        log: <Link to="/rotation">{t("settings.logLink")}</Link>,
+      })}
       value={settings.data}
       save={(value) => save.mutate(value)}
       saving={save.isPending}
@@ -120,9 +120,9 @@ function QueueCard() {
               disabled={!canEdit}
               onChange={(e) => set({ autofill: e.target.checked })}
             />
-            Autofill
+            {t("source.rotation")}
           </label>
-          <Field label="Tracks kept waiting" hint="The cued one included, 1 to 50">
+          <Field label={t("settings.minQueued")} hint={t("settings.minQueuedHint")}>
             <NumberInput
               value={draft.min_queued}
               min={1}
@@ -138,11 +138,11 @@ function QueueCard() {
   );
 }
 
-const WINDOW_LABELS: Record<string, string> = {
-  album_min: "Same album within",
-  artist_min: "Same artist within",
-  title_min: "Same title within",
-  track_min: "Same track within",
+const WINDOW_LABELS: Record<string, PlainKey> = {
+  album_min: "separation.album",
+  artist_min: "separation.artist",
+  title_min: "separation.title",
+  track_min: "separation.track",
 };
 
 function RotationCard() {
@@ -154,7 +154,7 @@ function RotationCard() {
   });
   const save = useAction(
     (body: Schemas["RotationSettings"]) => unwrap(api.PUT("/api/v1/settings/rotation", { body })),
-    { success: "Saved", invalidate: [["settings", "rotation"]] },
+    { success: t("categories.saved"), invalidate: [["settings", "rotation"]] },
   );
   if (settings.isPending) {
     return <Loading />;
@@ -164,8 +164,8 @@ function RotationCard() {
   }
   return (
     <SettingsCard
-      title="Rotation"
-      description="Separation windows, in minutes (0 turns a rule off); categories and clock slots can override them. When no track fits, rules are relaxed step by step: album, artist, title, then track separation, each halved before being dropped, then the fallback category."
+      title={t("settings.rotation")}
+      description={t("settings.rotationHelp")}
       value={settings.data}
       save={(value) => save.mutate(value)}
       saving={save.isPending}
@@ -175,13 +175,13 @@ function RotationCard() {
         <>
           <div className="form-grid">
             {WINDOW_FIELDS.map(([key]) => (
-              <Field key={key} label={WINDOW_LABELS[key]}>
+              <Field key={key} label={t(WINDOW_LABELS[key] ?? "separation.track")}>
                 <NumberInput
                   value={draft.separation[key]}
                   min={0}
                   max={10_080}
                   step={1}
-                  suffix="min"
+                  suffix={t("common.min")}
                   disabled={!canEdit}
                   onChange={(minutes) => set({ separation: { ...draft.separation, [key]: Math.round(minutes) } })}
                 />
@@ -189,14 +189,14 @@ function RotationCard() {
             ))}
           </div>
           <div className="form-grid">
-            <Field label="Fallback category" hint="Where relaxation ends: a large, safe category">
+            <Field label={t("settings.fallback")} hint={t("settings.fallbackHint")}>
               <select
                 className="input"
                 value={draft.fallback_category_id ?? ""}
                 disabled={!canEdit}
                 onChange={(e) => set({ fallback_category_id: e.target.value ? Number(e.target.value) : null })}
               >
-                <option value="">The whole library</option>
+                <option value="">{t("settings.wholeLibrary")}</option>
                 {categories.data?.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}
@@ -204,7 +204,7 @@ function RotationCard() {
                 ))}
               </select>
             </Field>
-            <Field label="Weight after a play" hint="Multiplies the track's weights, 0.5 to 1 (1: unchanged)">
+            <Field label={t("settings.playFactor")} hint={t("settings.playFactorHint")}>
               <NumberInput
                 value={draft.weights.play_factor}
                 min={0.5}
@@ -214,7 +214,7 @@ function RotationCard() {
                 onChange={(play_factor) => set({ weights: { ...draft.weights, play_factor } })}
               />
             </Field>
-            <Field label="Weight after a request" hint="1 to 2 (1: unchanged)">
+            <Field label={t("settings.requestFactor")} hint={t("settings.requestFactorHint")}>
               <NumberInput
                 value={draft.weights.request_factor}
                 min={1}
@@ -247,7 +247,7 @@ function StationCard() {
   });
   const save = useAction(
     (body: Schemas["StationSettings"]) => unwrap(api.PUT("/api/v1/settings/station", { body })),
-    { success: "Saved", invalidate: [["settings", "station"]] },
+    { success: t("categories.saved"), invalidate: [["settings", "station"]] },
   );
   if (settings.isPending) {
     return <Loading />;
@@ -257,15 +257,15 @@ function StationCard() {
   }
   return (
     <SettingsCard
-      title="Station"
-      description="The schedule, the restrictions and every time shown follow the station's time zone. When the clocks go back, the repeated hour runs its clock again; when they go forward, the skipped hour is skipped."
+      title={t("nav.station")}
+      description={t("settings.stationHelp")}
       value={settings.data}
       save={(value) => save.mutate(value)}
       saving={save.isPending}
       canEdit={isAdmin}
     >
       {(draft, set) => (
-        <Field label="Time zone" hint="An IANA name, such as Europe/Paris">
+        <Field label={t("settings.timeZone")} hint={t("settings.timeZoneHint")}>
           <input
             className="input"
             list="time-zones"
@@ -293,7 +293,7 @@ function LibraryCard() {
   const [key, setKey] = useState("");
   const save = useAction(
     (body: Schemas["LibrarySettingsPatch"]) => unwrap(api.PATCH("/api/v1/settings/library", { body })),
-    { success: "Saved", invalidate: [["settings", "library"]], onSuccess: () => setKey("") },
+    { success: t("categories.saved"), invalidate: [["settings", "library"]], onSuccess: () => setKey("") },
   );
   if (settings.isPending) {
     return <Loading />;
@@ -305,13 +305,10 @@ function LibraryCard() {
   return (
     <>
       <SettingsCard
-        title="Library"
-        description={
-          <>
-            Files dropped into the incoming folder are identified, tagged and filed by heron-librarian.
-            Fields: <code>{"{album_artist} {artist} {album} {title} {year} {track:02} {disc} {disc-} {ext}"}</code>
-          </>
-        }
+        title={t("nav.library")}
+        description={rich("settings.libraryHelp", {
+          fields: <code>{"{album_artist} {artist} {album} {title} {year} {track:02} {disc} {disc-} {ext}"}</code>,
+        })}
         value={{
           layout: current.layout,
           min_score: current.min_score,
@@ -324,7 +321,7 @@ function LibraryCard() {
       >
         {(draft, set) => (
           <>
-            <Field label="Folder layout" hint="Relative to the library root. Used for new files and for organizing.">
+            <Field label={t("settings.layout")} hint={t("settings.layoutHint")}>
               <input
                 className="input mono"
                 value={draft.layout}
@@ -333,7 +330,7 @@ function LibraryCard() {
               />
             </Field>
             <div className="form-grid">
-              <Field label="Lowest AcoustID score" hint="Matches below it wait for review">
+              <Field label={t("settings.minScore")} hint={t("settings.minScoreHint")}>
                 <NumberInput
                   value={draft.min_score}
                   min={0}
@@ -350,7 +347,7 @@ function LibraryCard() {
                   disabled={!isAdmin}
                   onChange={(e) => set({ save_cover: e.target.checked })}
                 />
-                Save the cover as cover.jpg
+                {t("settings.saveCover")}
               </label>
               <label className="check">
                 <input
@@ -359,34 +356,33 @@ function LibraryCard() {
                   disabled={!isAdmin}
                   onChange={(e) => set({ embed_cover: e.target.checked })}
                 />
-                Embed the cover in files
+                {t("settings.embedCover")}
               </label>
             </div>
           </>
         )}
       </SettingsCard>
-      <Card title="Identification">
+      <Card title={t("track.identification")}>
         <div className="stack">
           <p className="muted small" style={{ margin: 0 }}>
-            Identification uses the station's own AcoustID application key (free keys are for
-            non-commercial use). Without one, files are filed using their own tags.
+            {t("settings.acoustidHelp")}
           </p>
           <p style={{ margin: 0 }}>
             {current.acoustid_key_set ? (
-              <span className="good">A key is set: identification is on.</span>
+              <span className="good">{t("settings.keySet")}</span>
             ) : (
-              <span className="warn">No key: identification is off.</span>
+              <span className="warn">{t("settings.noKey")}</span>
             )}
           </p>
           {isAdmin && (
             <div className="row">
               <label style={{ flex: "1 1 16rem" }}>
-                <span className="visually-hidden">AcoustID key</span>
+                <span className="visually-hidden">{t("settings.key")}</span>
                 <input
                   className="input mono"
                   type="password"
                   autoComplete="off"
-                  placeholder={current.acoustid_key_set ? "Replace the key" : "AcoustID application key"}
+                  placeholder={current.acoustid_key_set ? t("settings.replaceKey") : t("settings.keyPlaceholder")}
                   value={key}
                   onChange={(e) => setKey(e.target.value)}
                 />
@@ -397,11 +393,11 @@ function LibraryCard() {
                 disabled={!key.trim() || save.isPending}
                 onClick={() => save.mutate({ acoustid_key: key.trim() })}
               >
-                Save the key
+                {t("settings.saveKey")}
               </button>
               {current.acoustid_key_set && (
                 <button type="button" className="btn danger" onClick={() => save.mutate({ acoustid_key: null })}>
-                  Remove
+                  {t("settings.removeKey")}
                 </button>
               )}
             </div>
@@ -414,22 +410,22 @@ function LibraryCard() {
 
 const ANALYSIS_FIELDS: {
   key: keyof Schemas["AnalysisSettings"];
-  label: string;
-  hint: string;
+  label: PlainKey;
+  hint: PlainKey;
   unit: string;
   min: number;
   max: number;
   step: number;
   ms?: boolean;
 }[] = [
-  { key: "start_threshold_db", label: "Start threshold", hint: "Below the track's loudness, trimmed at the start", unit: "dB", min: -80, max: 0, step: 1 },
-  { key: "end_threshold_db", label: "End threshold", hint: "Below the track's loudness, trimmed at the end", unit: "dB", min: -80, max: 0, step: 1 },
-  { key: "silence_ceiling_dbfs", label: "Silence ceiling", hint: "Never trimmed above this, however loud the track", unit: "dBFS", min: -90, max: 0, step: 1 },
-  { key: "blip_max_ms", label: "Ignored blips", hint: "Clicks this short in silence", unit: "ms", min: 0, max: 1000, step: 1 },
-  { key: "max_internal_silence_ms", label: "Longest silence inside", hint: "Longer ends the track (hidden tracks)", unit: "s", min: 1, max: 600, step: 1, ms: true },
-  { key: "fade_trigger_db", label: "Crossfade trigger", hint: "The crossfade starts after the last moment above this", unit: "dB", min: -60, max: 0, step: 1 },
-  { key: "fade_min_ms", label: "Crossfade at least", hint: "Before the cue-out", unit: "s", min: 0, max: 30, step: 0.1, ms: true },
-  { key: "fade_max_ms", label: "Crossfade at most", hint: "Before the cue-out", unit: "s", min: 0, max: 60, step: 0.1, ms: true },
+  { key: "start_threshold_db", label: "settings.startThreshold", hint: "settings.startThresholdHint", unit: "dB", min: -80, max: 0, step: 1 },
+  { key: "end_threshold_db", label: "settings.endThreshold", hint: "settings.endThresholdHint", unit: "dB", min: -80, max: 0, step: 1 },
+  { key: "silence_ceiling_dbfs", label: "settings.silenceCeiling", hint: "settings.silenceCeilingHint", unit: "dBFS", min: -90, max: 0, step: 1 },
+  { key: "blip_max_ms", label: "settings.blips", hint: "settings.blipsHint", unit: "ms", min: 0, max: 1000, step: 1 },
+  { key: "max_internal_silence_ms", label: "settings.internalSilence", hint: "settings.internalSilenceHint", unit: "s", min: 1, max: 600, step: 1, ms: true },
+  { key: "fade_trigger_db", label: "settings.fadeTrigger", hint: "settings.fadeTriggerHint", unit: "dB", min: -60, max: 0, step: 1 },
+  { key: "fade_min_ms", label: "settings.fadeMin", hint: "settings.fadeMinHint", unit: "s", min: 0, max: 30, step: 0.1, ms: true },
+  { key: "fade_max_ms", label: "settings.fadeMax", hint: "settings.fadeMaxHint", unit: "s", min: 0, max: 60, step: 0.1, ms: true },
 ];
 
 function AnalysisCard() {
@@ -440,7 +436,7 @@ function AnalysisCard() {
   });
   const save = useAction(
     (body: Schemas["AnalysisSettings"]) => unwrap(api.PUT("/api/v1/settings/analysis", { body })),
-    { success: "Saved: every track is analyzed again, in the background", invalidate: [["settings", "analysis"], ["library-status"]] },
+    { success: t("settings.analysisSaved"), invalidate: [["settings", "analysis"], ["library-status"]] },
   );
   if (settings.isPending) {
     return <Loading />;
@@ -450,8 +446,8 @@ function AnalysisCard() {
   }
   return (
     <SettingsCard
-      title="Analysis"
-      description="Cue points and crossfade points are found when tracks are imported. Changing these analyzes the whole library again (in the background, the station plays on)."
+      title={t("settings.analysis")}
+      description={t("settings.analysisHelp")}
       value={settings.data}
       save={(value) => save.mutate(value)}
       saving={save.isPending}
@@ -460,7 +456,7 @@ function AnalysisCard() {
       {(draft, set) => (
         <div className="form-grid">
           {ANALYSIS_FIELDS.map((field) => (
-            <Field key={field.key} label={field.label} hint={field.hint}>
+            <Field key={field.key} label={t(field.label)} hint={t(field.hint)}>
               <NumberInput
                 value={field.ms ? draft[field.key] / 1000 : draft[field.key]}
                 min={field.min}

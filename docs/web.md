@@ -1,6 +1,6 @@
 # Web UI
 
-`heron-web` serves the web app (React, Vite, TypeScript) and proxies `/api` to `heron-api`, WebSocket included: open `http://<host>:8000/` and sign in. Built in [M5](roadmap/m5-web-ui.md); the programming pages came with [M6](roadmap/m6-rotation-clockwheels.md). Everything it does goes through the [API](api.md), so scripts can do the same.
+`heron-web` serves the web app (React, Vite, TypeScript) and proxies `/api` to `heron-api`, WebSocket included: open `http://<host>:8000/` and sign in. Built in [M5](roadmap/m5-web-ui.md); the programming pages came with [M6](roadmap/m6-rotation-clockwheels.md), the translations with [M5d](roadmap/m5d-web-i18n.md). Everything it does goes through the [API](api.md), so scripts can do the same.
 
 ## Pages
 
@@ -22,7 +22,7 @@
 | **Outputs** | Outputs (Icecast for now) and encoder profiles (MP3 for now), with each output's live state: connected, reconnecting and why, bytes sent | admin |
 | **Settings** | Autofill, rotation (separation windows, fallback category, weights), the station's time zone, library layout and identification (AcoustID key), analysis thresholds | operator (queue, rotation), admin (others) |
 | **Users** | Users and roles, passwords, enable or disable | admin |
-| **Account** | Theme, password, API tokens | |
+| **Account** | Theme, language, password, API tokens | |
 
 Viewers see every page (except users) without the controls. Every page shows a banner when something needs attention: the API, the database or the engine unreachable, live updates disconnected, the engine refusing the configuration, or the **server clock** not synchronized or off by more than about a second (from `GET /api/v1/status`, see [API](api.md#authentication)).
 
@@ -44,6 +44,27 @@ Every time and date is shown in the station's time zone (`station` settings, see
 
 Light and dark themes. *System* (the default) follows the device's setting (`prefers-color-scheme`); *Light* or *Dark* is saved per user by the API (`PUT /api/v1/auth/preferences`) and also remembered by the browser, so the first paint uses it.
 
+## Languages
+
+English and French. *System* (the default) follows the browser's languages (`navigator.languages`: the first one the web UI has, English otherwise); a fixed language is saved per user by the API (`PUT /api/v1/auth/preferences`, `{"language": "fr"}`) and remembered by the browser, like the theme, so the sign-in page and the first paint already use it. `<html lang>` follows.
+
+Dates, times, numbers, sizes, levels, relative times and plurals are written the language's way (`-1,5 dB`, *il y a 5 minutes*, *2 pistes*), with the browser's own variant of it when it has one (`en-GB` writes 24-hour times). Duration fields take a comma as well as a dot (`1:23,5`). Only the language changes, never the time zone (see [Times](#times)).
+
+Not translated: what the station's people wrote or the files carry (tags, artist, category, clock and output names), the messages the API writes (the web translates the error codes it knows and shows the others' message as it is), logs, the command-line tools and the documentation.
+
+### Adding a language
+
+1. Copy `web/src/i18n/fr.ts` to `web/src/i18n/<code>.ts` and translate it. Messages are keyed by id; `{name}` is a parameter, which a translation can move but not rename; plurals are objects of [`Intl.PluralRules` forms](https://www.unicode.org/cldr/charts/latest/supplemental/language_plural_rules.html) (`one`, `few`, `many`, `other`…) chosen by `{count}`, `other` being required.
+2. Add a line to `LANGUAGES` in `web/src/i18n/index.ts`, with the language's name in that language.
+3. `npm run typecheck` fails on a missing or misspelled key, and `npm test` (`catalogs.test.ts`) on a parameter that differs from English.
+4. Check the pages with the pseudo-locale (below), then in the language at phone width.
+
+Catalogs other than English are loaded only when chosen. The API takes any language tag, so adding one needs no change there.
+
+### Pseudo-locale
+
+In development, `?lang=pseudo` on any page shows English accented, a third longer and in brackets (`[Šàṽé ··]`): text left out of the catalogs stands out, and so do layouts that break with longer words. It lasts until the page is reloaded without it, and is never saved.
+
 ## Layout
 
 The layout works from phone width up: below 760 px the navigation moves to a menu, tables drop their secondary columns and cards stack.
@@ -54,11 +75,11 @@ The layout works from phone width up: below 760 px the navigation moves to a men
 cd web
 npm ci
 HERON_API_URL=http://localhost:8000 npm run dev   # against a running station's heron-web
-npm test                                          # unit tests (Vitest)
+npm test                                          # unit tests (Vitest), catalogs included
 npm run typecheck && npm run build
 ```
 
-`HERON_API_URL` defaults to `http://localhost:8080`, a `heron-api` run with `cargo run -p heron-api`. The API client is typed from the OpenAPI document ([API – Web client](api.md#web-client)). The app uses TanStack Query for requests and dnd-kit for dragging; routing is a small module on the History API (`src/lib/router.tsx`), since nginx answers every path with `index.html`.
+Open a page with `?lang=pseudo` to check translations ([Pseudo-locale](#pseudo-locale)). `HERON_API_URL` defaults to `http://localhost:8080`, a `heron-api` run with `cargo run -p heron-api`. The API client is typed from the OpenAPI document ([API – Web client](api.md#web-client)). The app uses TanStack Query for requests and dnd-kit for dragging; routing is a small module on the History API (`src/lib/router.tsx`), since nginx answers every path with `index.html`.
 
 ## Limitations
 
