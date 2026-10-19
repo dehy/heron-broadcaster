@@ -5,11 +5,13 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a push: it may be publishing images.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -83,6 +85,9 @@ jobs:
     # Native runners for both architectures: Heron must run on a Raspberry Pi.
     runs-on: ${{ matrix.runner }}
     needs: [rust, web]
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -96,6 +101,8 @@ jobs:
       - run: |
           cp .env.example .env && mkdir -p data/fallback data/incoming
           sed -i "s/^HERON_LIBRARIAN_USER=.*/HERON_LIBRARIAN_USER=$(id -u):$(id -g)/" .env
+          # The tested images are the ones published, per architecture.
+          echo "HERON_VERSION=sha-${GITHUB_SHA::7}-${{ matrix.arch }}" >> "$GITHUB_ENV"
       - name: Generate a test library
         # The generator runs as root in Docker; the librarian runs as us.
         run: |
@@ -122,7 +129,62 @@ jobs:
           scripts/wait-for-analysis.sh http://localhost:8000 63 300
           test -z "$(find data/incoming -type f)"
           ls "data/music/Artist 1/Album 1/" | grep -F "01 Track 1 (2).m4a"
+      - if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the tested images
+        if: github.event_name == 'push'
+        run: docker compose push heron-api heron-analyzer heron-librarian heron-engine heron-web
       - if: failure()
         run: docker compose --profile icecast ps && docker compose --profile icecast logs
       - if: always()
         run: docker compose --profile icecast down -v
+
+  publish:
+    name: Publish ${{ matrix.image }}
+    # Merges the tested amd64 and arm64 images into one multi-arch image.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: [compose]
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        image: [heron-api, heron-analyzer, heron-librarian, heron-engine, heron-web]
+    env:
+      IMAGE: ghcr.io/dehy/${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: The tag matches the version in Cargo.toml and web/package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          grep -qx "version = \"$version\"" Cargo.toml
+          test "$(jq -r .version web/package.json)" = "$version"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # Main publishes edge; a vX.Y.Z tag publishes X.Y.Z, X.Y and latest.
+          tags: |
+            type=edge,branch=main
+            type=sha
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - name: Create the multi-arch image
+        run: |
+          tags=()
+          while read -r tag; do tags+=(--tag "$tag"); done <<< "$DOCKER_METADATA_OUTPUT_TAGS"
+          docker buildx imagetools create "${tags[@]}" \
+            "$IMAGE:sha-${GITHUB_SHA::7}-amd64" "$IMAGE:sha-${GITHUB_SHA::7}-arm64"
+          docker buildx imagetools inspect "$IMAGE:sha-${GITHUB_SHA::7}"

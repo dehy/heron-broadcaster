@@ -22,6 +22,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         target/release/heron-librarian /out/
 
 FROM debian:trixie-slim AS runtime
+LABEL org.opencontainers.image.source="https://github.com/dehy/heron-broadcaster" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
 RUN useradd --system --uid 10001 --user-group --no-create-home heron
 USER heron
 

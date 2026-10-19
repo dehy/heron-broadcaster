@@ -9,6 +9,8 @@ COPY web/ ./
 RUN npm run build
 
 FROM nginx:1.29-alpine AS heron-web
+LABEL org.opencontainers.image.source="https://github.com/dehy/heron-broadcaster" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /web/dist /usr/share/nginx/html
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
