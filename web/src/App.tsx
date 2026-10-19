@@ -16,6 +16,7 @@ import { Categories } from "./pages/Categories";
 import { ClockEditor, Clocks } from "./pages/Clocks";
 import { Dashboard } from "./pages/Dashboard";
 import { History } from "./pages/History";
+import { Labels } from "./pages/Labels";
 import { Library } from "./pages/Library";
 import { Login } from "./pages/Login";
 import { Outputs } from "./pages/Outputs";
@@ -80,6 +81,7 @@ const PAGES: Page[] = [
   { path: "/queue", label: "nav.queue", icon: "queue" },
   { path: "/history", label: "nav.history", icon: "history" },
   { path: "/library", label: "nav.tracks", icon: "library", section: "nav.library" },
+  { path: "/labels", label: "nav.labels", icon: "label" },
   { path: "/artists", label: "nav.artists", icon: "mic" },
   { path: "/review", label: "nav.review", icon: "review" },
   { path: "/clocks", label: "nav.clocks", icon: "clock", section: "nav.programming" },
@@ -113,6 +115,8 @@ function route(pathname: string): ReactNode {
       return <Library />;
     case "/categories":
       return <Categories />;
+    case "/labels":
+      return <Labels />;
     case "/artists":
       return <Artists />;
     case "/clocks":

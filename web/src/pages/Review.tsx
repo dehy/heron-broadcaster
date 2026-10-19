@@ -439,6 +439,7 @@ const KINDS: Record<string, PlainKey> = {
   organize: "review.kind.organize",
   undo: "review.kind.undo",
   review: "review.kind.review",
+  edit: "review.kind.edit",
 };
 
 function kindLabel(kind: string): string {

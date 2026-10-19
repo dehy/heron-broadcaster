@@ -408,6 +408,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every label, with how many tracks have it. */
+        get: operations["list_labels"];
+        put?: never;
+        /** Operators and admins. */
+        post: operations["create_label"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/labels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Renames or recolors a label. Operators and admins. */
+        put: operations["update_label"];
+        post?: never;
+        /** Deletes a label: its tracks lose it. Operators and admins. */
+        delete: operations["delete_label"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/labels/{id}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merges a label into another: its tracks get the other label, and it is
+         *     deleted. Operators and admins.
+         */
+        post: operations["merge_label"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/batches": {
         parameters: {
             query?: never;
@@ -440,6 +496,28 @@ export interface paths {
          *     is taken stays where it is (see the task's report). Admins.
          */
         post: operations["undo_batch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/musicbrainz-details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fetches the programming details of identified tracks from MusicBrainz
+         *     (album, record label, ISRC, first release year, genres), one release a
+         *     second. From then on, new tracks are looked up in the background.
+         *     Operators and admins.
+         */
+        post: operations["fetch_details"];
         delete?: never;
         options?: never;
         head?: never;
@@ -949,6 +1027,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/programming": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What counts as a play, eras, and the mood and sound code scales. */
+        get: operations["get_programming"];
+        /**
+         * Replaces the programming settings (missing fields take the defaults).
+         *     Tracks keep their mood and sound code when a scale changes. Operators
+         *     and admins.
+         */
+        put: operations["put_programming"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/queue": {
         parameters: {
             query?: never;
@@ -1076,6 +1176,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracks/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Puts every selected track in categories, or takes them out. Filling a
+         *     category from a label: select with `filters.labels_any`. Operators and
+         *     admins.
+         */
+        post: operations["apply_categories"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracks/labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adds labels to, and removes labels from, every selected track.
+         *     Operators and admins.
+         */
+        post: operations["apply_labels"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracks/programming": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sets the mood, sound code or tempo of every selected track. Operators
+         *     and admins.
+         */
+        post: operations["apply_programming"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracks/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Writes tags into the files of the selected tracks (at most 10,000), as
+         *     one batch that can be undone: queues a library task for
+         *     heron-librarian. Files are not moved. Operators and admins.
+         */
+        post: operations["edit_tags"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracks/{id}": {
         parameters: {
             query?: never;
@@ -1083,7 +1265,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A track with its analysis, overrides, categories and identification. */
+        /**
+         * A track with its details, analysis, overrides, categories and
+         *     identification.
+         */
         get: operations["get_track"];
         put?: never;
         post?: never;
@@ -1405,7 +1590,7 @@ export interface components {
             undone_by?: number | null;
         };
         /** @enum {string} */
-        BatchKind: "import" | "organize" | "undo" | "review";
+        BatchKind: "import" | "organize" | "undo" | "review" | "edit";
         /** @description What a batch of file operations did. */
         BatchReport: {
             /** Format: int64 */
@@ -1414,6 +1599,11 @@ export interface components {
             done: number;
             /** @description Operations not done, with the reason. */
             skipped: components["schemas"]["SkippedFile"][];
+            /**
+             * Format: int64
+             * @description Files that needed no change (their tags already had the values).
+             */
+            unchanged?: number;
         };
         Blocked: {
             /** Format: int32 */
@@ -1424,6 +1614,16 @@ export interface components {
             title: number;
             /** Format: int32 */
             track: number;
+        };
+        CategoriesChange: {
+            /**
+             * @description Categories every selected track is put in (with this weight, also
+             *     for tracks already in them).
+             */
+            add?: components["schemas"]["CategoryShare"][];
+            /** @description Categories every selected track is taken out of. */
+            remove?: number[];
+            selection: components["schemas"]["TrackSelection"];
         };
         Category: {
             /** @description `#rrggbb`. */
@@ -1454,6 +1654,15 @@ export interface components {
             name: string;
             /** @description None overridden by default. */
             separation?: components["schemas"]["SeparationOverrides"];
+        };
+        CategoryShare: {
+            /** Format: int64 */
+            category_id: number;
+            /**
+             * Format: double
+             * @description Relative chance of being picked within the category, 1 by default.
+             */
+            weight?: number;
         };
         /** @description dBFS, −120 for silence. */
         ChannelLevels: {
@@ -1632,6 +1841,31 @@ export interface components {
              */
             position_ms: number;
         };
+        /** @description What a MusicBrainz details lookup did. */
+        DetailsReport: {
+            /**
+             * Format: int64
+             * @description Lookups that failed (tried again next time).
+             */
+            failed: number;
+            /**
+             * Format: int64
+             * @description Releases looked up (one request each).
+             */
+            releases: number;
+            /**
+             * Format: int64
+             * @description Tracks whose details were saved.
+             */
+            tracks: number;
+        };
+        DetailsRequest: {
+            /**
+             * @description Look up every identified track again, not only those never looked up.
+             * @default false
+             */
+            all: boolean;
+        };
         /** @description How the engine will play the track: analysis and overrides combined. */
         EffectivePlayout: {
             /** Format: int32 */
@@ -1699,6 +1933,19 @@ export interface components {
         };
         EnqueueResponse: {
             entry_ids: number[];
+        };
+        Era: {
+            /**
+             * Format: int32
+             * @description First year, open-ended when missing.
+             */
+            from_year?: number | null;
+            name: string;
+            /**
+             * Format: int32
+             * @description Last year, open-ended when missing.
+             */
+            to_year?: number | null;
         };
         /** @description Body of every error response. */
         ErrorBody: {
@@ -1795,6 +2042,41 @@ export interface components {
          * @enum {string}
          */
         FadeCurve: "linear" | "s_curve" | "logarithmic" | "exponential";
+        Label: {
+            /** @description `#rrggbb`. */
+            color?: string | null;
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** Format: int64 */
+            tracks: number;
+        };
+        LabelInput: {
+            /** @description `#rrggbb`, or none. */
+            color?: string | null;
+            /** @description Unique, ignoring case. */
+            name: string;
+        };
+        LabelMerge: {
+            /**
+             * Format: int64
+             * @description The label that stays.
+             */
+            into_id: number;
+        };
+        LabelRef: {
+            color?: string | null;
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        LabelsChange: {
+            /** @description Labels added to every selected track. */
+            add?: number[];
+            /** @description Labels removed from every selected track. */
+            remove?: number[];
+            selection: components["schemas"]["TrackSelection"];
+        };
         Levels: {
             deck_a: components["schemas"]["ChannelLevels"];
             deck_b: components["schemas"]["ChannelLevels"];
@@ -1850,6 +2132,7 @@ export interface components {
         LibraryTask: {
             /** Format: int64 */
             created_at_unix_ms: number;
+            details?: components["schemas"]["DetailsReport"] | null;
             /** @description Why it failed. */
             error?: string | null;
             /** Format: int64 */
@@ -2131,6 +2414,54 @@ export interface components {
             /** @description The slots as edited, saved or not. */
             slots: components["schemas"]["ClockSlot"][];
         };
+        ProgrammingChange: {
+            /**
+             * Format: double
+             * @description The tempo, replacing the measured one; `null` goes back to it.
+             */
+            bpm?: number | null;
+            /** @description A value of the mood scale, or `null` to clear it. Missing: kept. */
+            mood?: string | null;
+            selection: components["schemas"]["TrackSelection"];
+            /** @description A value of the sound code scale, or `null` to clear it. */
+            sound_code?: string | null;
+        };
+        /** @description What music programmers sort and separate tracks by. */
+        ProgrammingSettings: {
+            /**
+             * @description Eras by year of first release, the first matching one applies.
+             *     Empty: decades (`70s`, `80s`, `2000s`).
+             * @default []
+             */
+            eras: components["schemas"]["Era"][];
+            /**
+             * Format: int32
+             * @description A play counts (play counts, last played) when it lasted at least
+             *     this long, so skipped tracks do not count. 0 counts every start.
+             * @default 30
+             */
+            min_play_s: number;
+            /**
+             * @description The mood scale, in order (an energy from 1 to 5 by default).
+             * @default [
+             *       "1",
+             *       "2",
+             *       "3",
+             *       "4",
+             *       "5"
+             *     ]
+             */
+            moods: string[];
+            /**
+             * @description The sound code scale, in order.
+             * @default [
+             *       "soft",
+             *       "medium",
+             *       "hard"
+             *     ]
+             */
+            sound_codes: string[];
+        };
         QueueEntry: {
             /**
              * Format: int64
@@ -2384,6 +2715,12 @@ export interface components {
             moved: number;
             /**
              * Format: int64
+             * @description Unchanged files read again for details an older scanner did not
+             *     read (bitrate, genre, …), without being analyzed again.
+             */
+            refreshed: number;
+            /**
+             * Format: int64
              * @description Missing tracks whose file is back.
              */
             restored: number;
@@ -2406,6 +2743,19 @@ export interface components {
              * @description 0 to 23, station time.
              */
             hour: number;
+        };
+        /** @description What an action on a selection did. */
+        SelectionResult: {
+            /**
+             * Format: int64
+             * @description Changes made (a label added to a track counts once).
+             */
+            changed: number;
+            /**
+             * Format: int64
+             * @description Tracks selected.
+             */
+            tracks: number;
         };
         /**
          * @description Separation windows overridden by a category or a clock slot; missing
@@ -2569,6 +2919,26 @@ export interface components {
             error?: string | null;
             state: components["schemas"]["SyncState"];
         };
+        TagEdit: {
+            /**
+             * @description Programming details written from each track's own values (ISRC,
+             *     record label, BPM, mood); tracks without the value keep the file's.
+             */
+            from_details?: components["schemas"]["TagField"][];
+            selection: components["schemas"]["TrackSelection"];
+            /**
+             * @description Fields set to the same value on every track; `null` removes the
+             *     field. Fields left out keep each track's value.
+             */
+            set?: {
+                [key: string]: string | null;
+            };
+        };
+        /**
+         * @description A tag Heron edits in the files, besides those identification writes.
+         * @enum {string}
+         */
+        TagField: "title" | "artist" | "album" | "album_artist" | "year" | "genre" | "track" | "disc" | "isrc" | "record_label" | "bpm" | "mood";
         Target: {
             id: components["schemas"]["u64"];
             /** @enum {string} */
@@ -2610,6 +2980,18 @@ export interface components {
         } | {
             /** @enum {string} */
             kind: "artist_relations";
+        } | {
+            from_details?: components["schemas"]["TagField"][];
+            /** @enum {string} */
+            kind: "edit_tags";
+            set?: {
+                [key: string]: string | null;
+            };
+            track_ids: number[];
+        } | {
+            all?: boolean;
+            /** @enum {string} */
+            kind: "musicbrainz_details";
         };
         /** @enum {string} */
         TaskStatus: "pending" | "running" | "done" | "failed";
@@ -2621,6 +3003,11 @@ export interface components {
         TrackAnalysis: {
             /** Format: int64 */
             analyzed_at_unix_ms: number;
+            /**
+             * Format: double
+             * @description The measured tempo.
+             */
+            bpm?: number | null;
             /** Format: int32 */
             cue_in_ms: number;
             /** Format: int32 */
@@ -2645,15 +3032,16 @@ export interface components {
             weight: number;
         };
         TrackDetail: components["schemas"]["TrackSummary"] & {
-            /** Format: int64 */
-            added_at_unix_ms: number;
             analysis?: components["schemas"]["TrackAnalysis"] | null;
+            /**
+             * Format: double
+             * @description The tempo set by hand, replacing the measured one.
+             */
+            bpm_by_hand?: number | null;
             categories: components["schemas"]["TrackCategory"][];
-            /** Format: int64 */
-            file_size?: number | null;
+            file: components["schemas"]["TrackFile"];
             identification?: components["schemas"]["TrackIdentification"] | null;
-            /** Format: int64 */
-            missing_since_unix_ms?: number | null;
+            musicbrainz?: components["schemas"]["TrackMusicBrainz"] | null;
             overrides: components["schemas"]["TrackOverrides"];
             playout: components["schemas"]["EffectivePlayout"];
         };
@@ -2676,6 +3064,30 @@ export interface components {
             played_ms: number;
             reason: components["schemas"]["EndReason"];
         };
+        /** @description The file and its tags, as the scanner read them. */
+        TrackFile: {
+            /** Format: int32 */
+            channels?: number | null;
+            /** Format: int32 */
+            disc_number?: number | null;
+            /** Format: int64 */
+            missing_since_unix_ms?: number | null;
+            musicbrainz_recording_id?: string | null;
+            musicbrainz_release_id?: string | null;
+            /** Format: int32 */
+            sample_rate?: number | null;
+            /** Format: int64 */
+            size?: number | null;
+            /** Format: int32 */
+            track_number?: number | null;
+            /**
+             * Format: int32
+             * @description The year tag.
+             */
+            year_tag?: number | null;
+        };
+        /** @enum {string} */
+        TrackFilter: "playable" | "missing" | "unanalyzed" | "silent" | "disabled" | "needs_review";
         TrackIdentification: {
             /** @description Why the track needs review. */
             reason?: string | null;
@@ -2691,6 +3103,19 @@ export interface components {
             /** Format: int64 */
             id: number;
             title?: string | null;
+        };
+        /** @description What MusicBrainz says about the track. */
+        TrackMusicBrainz: {
+            album?: string | null;
+            catalog_number?: string | null;
+            /** Format: int64 */
+            fetched_at_unix_ms: number;
+            /** Format: int32 */
+            first_release_year?: number | null;
+            /** @description Most voted first: suggestions for the genre tag. */
+            genres: string[];
+            isrc?: string | null;
+            record_label?: string | null;
         };
         /**
          * @description Per-track overrides (`track_overrides`). Missing fields use the analysis
@@ -2731,23 +3156,120 @@ export interface components {
         TrackPatch: {
             enabled?: boolean | null;
         };
+        /**
+         * @description Which tracks: the filters of `GET /tracks`, also used to select tracks
+         *     for the actions on a selection. Lists of IDs are comma-separated.
+         */
+        TrackQuery: {
+            /**
+             * Format: int32
+             * @description Tracks added in the last this many days.
+             */
+            added_days?: number | null;
+            /**
+             * Format: int32
+             * @description Tracks whose bitrate is below this many kbps.
+             */
+            bitrate_below?: number | null;
+            /** Format: double */
+            bpm_max?: number | null;
+            /** Format: double */
+            bpm_min?: number | null;
+            /** Format: int64 */
+            category_id?: number | null;
+            /** @description Reverses the order of `sort`. */
+            desc?: boolean | null;
+            era?: string | null;
+            filter?: components["schemas"]["TrackFilter"] | null;
+            genre?: string | null;
+            /** @description Tracks with every one of these labels (IDs, comma-separated). */
+            labels_all?: string | null;
+            /** @description Tracks with at least one of these labels. */
+            labels_any?: string | null;
+            /** @description Tracks with none of these labels. */
+            labels_none?: string | null;
+            /**
+             * Format: int32
+             * @description 1 to 500, 50 by default.
+             */
+            limit?: number | null;
+            mood?: string | null;
+            /** @description Tracks never played. */
+            never_played?: boolean | null;
+            /**
+             * Format: int32
+             * @description Tracks not played for this many days (including those never played).
+             */
+            not_played_days?: number | null;
+            /** Format: int32 */
+            offset?: number | null;
+            /** @description Words found in the title, artist, album, album artist, genre or path. */
+            q?: string | null;
+            sort?: components["schemas"]["TrackSort"] | null;
+            sound_code?: string | null;
+            /** Format: int32 */
+            year_max?: number | null;
+            /** Format: int32 */
+            year_min?: number | null;
+        };
+        /** @description Some tracks: these IDs, or every track matching the filters. */
+        TrackSelection: {
+            filters?: components["schemas"]["TrackQuery"] | null;
+            track_ids?: number[] | null;
+        };
+        /** @enum {string} */
+        TrackSort: "artist" | "title" | "album" | "added" | "last_played" | "play_count" | "bitrate" | "duration" | "year" | "bpm" | "mood" | "sound_code" | "genre";
         TrackSummary: {
+            /**
+             * Format: int64
+             * @description When the scanner first found the file.
+             */
+            added_at_unix_ms: number;
             album?: string | null;
+            album_artist?: string | null;
             analyzed: boolean;
             artist?: string | null;
+            /** Format: int32 */
+            bitrate_kbps?: number | null;
+            /** @description `cbr`, `vbr` or `lossless`; unknown for some formats (AAC). */
+            bitrate_mode?: string | null;
+            /**
+             * Format: double
+             * @description Set by hand, else measured.
+             */
+            bpm?: number | null;
+            /** @description `MP3`, `AAC`, `FLAC`, … */
+            codec?: string | null;
             /** Format: int32 */
             duration_ms?: number | null;
             /** @description Disabled tracks are never picked by autofill or rotation. */
             enabled: boolean;
+            /** @description From the year, on the station's eras (decades by default). */
+            era?: string | null;
+            genre?: string | null;
             /** Format: int64 */
             id: number;
-            /** Format: int64 */
+            labels: components["schemas"]["LabelRef"][];
+            /**
+             * Format: int64
+             * @description Plays that count (FX player aside, at least the programming
+             *     settings' `min_play_s`).
+             */
             last_played_at_unix_ms?: number | null;
             missing: boolean;
+            mood?: string | null;
             /** @description Relative to the library root. */
             path: string;
+            /** Format: int64 */
+            play_count: number;
             silent: boolean;
+            sound_code?: string | null;
             title?: string | null;
+            /**
+             * Format: int32
+             * @description Of first release: from MusicBrainz, else the year tag.
+             */
+            year?: number | null;
         };
         TransitionPreview: {
             fade_in?: components["schemas"]["RampView"] | null;
@@ -3881,6 +4403,157 @@ export interface operations {
             };
         };
     };
+    list_labels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Label"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_label: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabelInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Label"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_label: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabelInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Label"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_label: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    merge_label: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabelMerge"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Label"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     list_batches: {
         parameters: {
             query?: {
@@ -3921,6 +4594,37 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    fetch_details: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DetailsRequest"];
+            };
+        };
         responses: {
             202: {
                 headers: {
@@ -5165,6 +5869,64 @@ export interface operations {
             };
         };
     };
+    get_programming: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgrammingSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_programming: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProgrammingSettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgrammingSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_queue_settings: {
         parameters: {
             query?: never;
@@ -5446,11 +6208,35 @@ export interface operations {
     list_tracks: {
         parameters: {
             query?: {
-                /** @description Words found in the title, artist, album or path. */
+                /** @description Words found in the title, artist, album, album artist, genre or path. */
                 q?: string;
                 category_id?: number;
                 filter?: "playable" | "missing" | "unanalyzed" | "silent" | "disabled" | "needs_review";
-                sort?: "artist" | "title" | "album" | "added" | "last_played";
+                /** @description Tracks with every one of these labels (IDs, comma-separated). */
+                labels_all?: string;
+                /** @description Tracks with at least one of these labels. */
+                labels_any?: string;
+                /** @description Tracks with none of these labels. */
+                labels_none?: string;
+                /** @description Tracks never played. */
+                never_played?: boolean;
+                /** @description Tracks not played for this many days (including those never played). */
+                not_played_days?: number;
+                /** @description Tracks added in the last this many days. */
+                added_days?: number;
+                /** @description Tracks whose bitrate is below this many kbps. */
+                bitrate_below?: number;
+                era?: string;
+                mood?: string;
+                sound_code?: string;
+                genre?: string;
+                year_min?: number;
+                year_max?: number;
+                bpm_min?: number;
+                bpm_max?: number;
+                sort?: "artist" | "title" | "album" | "added" | "last_played" | "play_count" | "bitrate" | "duration" | "year" | "bpm" | "mood" | "sound_code" | "genre";
+                /** @description Reverses the order of `sort`. */
+                desc?: boolean;
                 /** @description 1 to 500, 50 by default. */
                 limit?: number;
                 offset?: number;
@@ -5467,6 +6253,130 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrackPage"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    apply_categories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoriesChange"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectionResult"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    apply_labels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabelsChange"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectionResult"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    apply_programming: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProgrammingChange"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectionResult"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    edit_tags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagEdit"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
                 };
             };
             "4XX": {

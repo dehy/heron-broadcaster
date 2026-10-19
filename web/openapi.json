@@ -1338,6 +1338,208 @@
         }
       }
     },
+    "/api/v1/labels": {
+      "get": {
+        "tags": [
+          "labels"
+        ],
+        "summary": "Every label, with how many tracks have it.",
+        "operationId": "list_labels",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Label"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "labels"
+        ],
+        "summary": "Operators and admins.",
+        "operationId": "create_label",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Label"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/labels/{id}": {
+      "put": {
+        "tags": [
+          "labels"
+        ],
+        "summary": "Renames or recolors a label. Operators and admins.",
+        "operationId": "update_label",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Label"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "labels"
+        ],
+        "summary": "Deletes a label: its tracks lose it. Operators and admins.",
+        "operationId": "delete_label",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/labels/{id}/merge": {
+      "post": {
+        "tags": [
+          "labels"
+        ],
+        "summary": "Merges a label into another: its tracks get the other label, and it is\ndeleted. Operators and admins.",
+        "operationId": "merge_label",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelMerge"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Label"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/library/batches": {
       "get": {
         "tags": [
@@ -1402,6 +1604,45 @@
             }
           }
         ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library/musicbrainz-details": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Fetches the programming details of identified tracks from MusicBrainz\n(album, record label, ISRC, first release year, genres), one release a\nsecond. From then on, new tracks are looked up in the background.\nOperators and admins.",
+        "operationId": "fetch_details",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DetailsRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "202": {
             "content": {
@@ -2935,6 +3176,72 @@
         }
       }
     },
+    "/api/v1/settings/programming": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "What counts as a play, eras, and the mood and sound code scales.",
+        "operationId": "get_programming",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgrammingSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Replaces the programming settings (missing fields take the defaults).\nTracks keep their mood and sound code when a scale changes. Operators\nand admins.",
+        "operationId": "put_programming",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgrammingSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgrammingSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/settings/queue": {
       "get": {
         "tags": [
@@ -3267,7 +3574,7 @@
           {
             "name": "q",
             "in": "query",
-            "description": "Words found in the title, artist, album or path.",
+            "description": "Words found in the title, artist, album, album artist, genre or path.",
             "required": false,
             "schema": {
               "type": "string"
@@ -3300,6 +3607,145 @@
             }
           },
           {
+            "name": "labels_all",
+            "in": "query",
+            "description": "Tracks with every one of these labels (IDs, comma-separated).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "labels_any",
+            "in": "query",
+            "description": "Tracks with at least one of these labels.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "labels_none",
+            "in": "query",
+            "description": "Tracks with none of these labels.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "never_played",
+            "in": "query",
+            "description": "Tracks never played.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "not_played_days",
+            "in": "query",
+            "description": "Tracks not played for this many days (including those never played).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "added_days",
+            "in": "query",
+            "description": "Tracks added in the last this many days.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "bitrate_below",
+            "in": "query",
+            "description": "Tracks whose bitrate is below this many kbps.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "era",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mood",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sound_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "genre",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "year_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "year_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "bpm_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          {
+            "name": "bpm_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          {
             "name": "sort",
             "in": "query",
             "required": false,
@@ -3310,8 +3756,25 @@
                 "title",
                 "album",
                 "added",
-                "last_played"
+                "last_played",
+                "play_count",
+                "bitrate",
+                "duration",
+                "year",
+                "bpm",
+                "mood",
+                "sound_code",
+                "genre"
               ]
+            }
+          },
+          {
+            "name": "desc",
+            "in": "query",
+            "description": "Reverses the order of `sort`.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           },
           {
@@ -3358,12 +3821,168 @@
         }
       }
     },
+    "/api/v1/tracks/categories": {
+      "post": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Puts every selected track in categories, or takes them out. Filling a\ncategory from a label: select with `filters.labels_any`. Operators and\nadmins.",
+        "operationId": "apply_categories",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoriesChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks/labels": {
+      "post": {
+        "tags": [
+          "labels"
+        ],
+        "summary": "Adds labels to, and removes labels from, every selected track.\nOperators and admins.",
+        "operationId": "apply_labels",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelsChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks/programming": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Sets the mood, sound code or tempo of every selected track. Operators\nand admins.",
+        "operationId": "apply_programming",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgrammingChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks/tags": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Writes tags into the files of the selected tracks (at most 10,000), as\none batch that can be undone: queues a library task for\nheron-librarian. Files are not moved. Operators and admins.",
+        "operationId": "edit_tags",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tracks/{id}": {
       "get": {
         "tags": [
           "library"
         ],
-        "summary": "A track with its analysis, overrides, categories and identification.",
+        "summary": "A track with its details, analysis, overrides, categories and\nidentification.",
         "operationId": "get_track",
         "parameters": [
           {
@@ -4239,7 +4858,8 @@
           "import",
           "organize",
           "undo",
-          "review"
+          "review",
+          "edit"
         ]
       },
       "BatchReport": {
@@ -4267,6 +4887,12 @@
               "$ref": "#/components/schemas/SkippedFile"
             },
             "description": "Operations not done, with the reason."
+          },
+          "unchanged": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Files that needed no change (their tags already had the values).",
+            "minimum": 0
           }
         }
       },
@@ -4300,6 +4926,34 @@
             "minimum": 0
           }
         }
+      },
+      "CategoriesChange": {
+        "type": "object",
+        "required": [
+          "selection"
+        ],
+        "properties": {
+          "add": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryShare"
+            },
+            "description": "Categories every selected track is put in (with this weight, also\nfor tracks already in them)."
+          },
+          "remove": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Categories every selected track is taken out of."
+          },
+          "selection": {
+            "$ref": "#/components/schemas/TrackSelection"
+          }
+        },
+        "additionalProperties": false
       },
       "Category": {
         "type": "object",
@@ -4373,6 +5027,25 @@
           "separation": {
             "$ref": "#/components/schemas/SeparationOverrides",
             "description": "None overridden by default."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CategoryShare": {
+        "type": "object",
+        "required": [
+          "category_id"
+        ],
+        "properties": {
+          "category_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "weight": {
+            "type": "number",
+            "format": "double",
+            "description": "Relative chance of being picked within the category, 1 by default."
           }
         },
         "additionalProperties": false
@@ -4761,6 +5434,46 @@
           }
         }
       },
+      "DetailsReport": {
+        "type": "object",
+        "description": "What a MusicBrainz details lookup did.",
+        "required": [
+          "releases",
+          "tracks",
+          "failed"
+        ],
+        "properties": {
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Lookups that failed (tried again next time).",
+            "minimum": 0
+          },
+          "releases": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Releases looked up (one request each).",
+            "minimum": 0
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tracks whose details were saved.",
+            "minimum": 0
+          }
+        }
+      },
+      "DetailsRequest": {
+        "type": "object",
+        "properties": {
+          "all": {
+            "type": "boolean",
+            "description": "Look up every identified track again, not only those never looked up.",
+            "default": false
+          }
+        },
+        "additionalProperties": false
+      },
       "EffectivePlayout": {
         "type": "object",
         "description": "How the engine will play the track: analysis and overrides combined.",
@@ -4974,6 +5687,36 @@
           }
         }
       },
+      "Era": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "from_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "First year, open-ended when missing.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "to_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Last year, open-ended when missing.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "ErrorBody": {
         "type": "object",
         "description": "Body of every error response.",
@@ -5171,6 +5914,123 @@
           "exponential"
         ]
       },
+      "Label": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "tracks"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "LabelInput": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`, or none."
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique, ignoring case."
+          }
+        },
+        "additionalProperties": false
+      },
+      "LabelMerge": {
+        "type": "object",
+        "required": [
+          "into_id"
+        ],
+        "properties": {
+          "into_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The label that stays.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "LabelRef": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "LabelsChange": {
+        "type": "object",
+        "required": [
+          "selection"
+        ],
+        "properties": {
+          "add": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Labels added to every selected track."
+          },
+          "remove": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Labels removed from every selected track."
+          },
+          "selection": {
+            "$ref": "#/components/schemas/TrackSelection"
+          }
+        },
+        "additionalProperties": false
+      },
       "Levels": {
         "type": "object",
         "required": [
@@ -5326,6 +6186,17 @@
           "created_at_unix_ms": {
             "type": "integer",
             "format": "int64"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DetailsReport",
+                "description": "What a finished MusicBrainz details lookup did."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "error": {
             "type": [
@@ -6137,6 +7008,88 @@
         },
         "additionalProperties": false
       },
+      "ProgrammingChange": {
+        "type": "object",
+        "required": [
+          "selection"
+        ],
+        "properties": {
+          "bpm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The tempo, replacing the measured one; `null` goes back to it."
+          },
+          "mood": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A value of the mood scale, or `null` to clear it. Missing: kept."
+          },
+          "selection": {
+            "$ref": "#/components/schemas/TrackSelection"
+          },
+          "sound_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A value of the sound code scale, or `null` to clear it."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProgrammingSettings": {
+        "type": "object",
+        "description": "What music programmers sort and separate tracks by.",
+        "properties": {
+          "eras": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Era"
+            },
+            "description": "Eras by year of first release, the first matching one applies.\nEmpty: decades (`70s`, `80s`, `2000s`).",
+            "default": []
+          },
+          "min_play_s": {
+            "type": "integer",
+            "format": "int32",
+            "description": "A play counts (play counts, last played) when it lasted at least\nthis long, so skipped tracks do not count. 0 counts every start.",
+            "default": 30,
+            "minimum": 0
+          },
+          "moods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The mood scale, in order (an energy from 1 to 5 by default).",
+            "default": [
+              "1",
+              "2",
+              "3",
+              "4",
+              "5"
+            ]
+          },
+          "sound_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The sound code scale, in order.",
+            "default": [
+              "soft",
+              "medium",
+              "hard"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "QueueEntry": {
         "type": "object",
         "required": [
@@ -6706,6 +7659,7 @@
           "restored",
           "missing",
           "deferred",
+          "refreshed",
           "failed",
           "enqueued"
         ],
@@ -6761,6 +7715,12 @@
             "description": "Files found under a new path (same content as a missing track).",
             "minimum": 0
           },
+          "refreshed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unchanged files read again for details an older scanner did not\nread (bitrate, genre, …), without being analyzed again.",
+            "minimum": 0
+          },
           "restored": {
             "type": "integer",
             "format": "int64",
@@ -6807,6 +7767,28 @@
           }
         },
         "additionalProperties": false
+      },
+      "SelectionResult": {
+        "type": "object",
+        "description": "What an action on a selection did.",
+        "required": [
+          "tracks",
+          "changed"
+        ],
+        "properties": {
+          "changed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Changes made (a label added to a track counts once).",
+            "minimum": 0
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tracks selected.",
+            "minimum": 0
+          }
+        }
       },
       "SeparationOverrides": {
         "type": "object",
@@ -7204,6 +8186,56 @@
           }
         }
       },
+      "TagEdit": {
+        "type": "object",
+        "required": [
+          "selection"
+        ],
+        "properties": {
+          "from_details": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TagField"
+            },
+            "description": "Programming details written from each track's own values (ISRC,\nrecord label, BPM, mood); tracks without the value keep the file's."
+          },
+          "selection": {
+            "$ref": "#/components/schemas/TrackSelection"
+          },
+          "set": {
+            "type": "object",
+            "description": "Fields set to the same value on every track; `null` removes the\nfield. Fields left out keep each track's value.",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "TagField": {
+        "type": "string",
+        "description": "A tag Heron edits in the files, besides those identification writes.",
+        "enum": [
+          "title",
+          "artist",
+          "album",
+          "album_artist",
+          "year",
+          "genre",
+          "track",
+          "disc",
+          "isrc",
+          "record_label",
+          "bpm",
+          "mood"
+        ]
+      },
       "Target": {
         "oneOf": [
           {
@@ -7380,6 +8412,66 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "Writes tags into the files of `track_ids`, as one batch: the fields\nof `set` take the same value on every track (`null` removes the\nfield), the fields of `from_details` each track's programming\ndetails (ISRC, record label, BPM, mood). Other fields are kept.",
+            "required": [
+              "track_ids",
+              "kind"
+            ],
+            "properties": {
+              "from_details": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TagField"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "edit_tags"
+                ]
+              },
+              "set": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
+              },
+              "track_ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Fetches the programming details of identified tracks from\nMusicBrainz (album, record label, ISRC, first release year, genres):\nevery one, or only those never fetched.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "all": {
+                "type": "boolean"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "musicbrainz_details"
+                ]
+              }
+            }
           }
         ],
         "description": "A task, as stored in `library_tasks.params`. The tag is also its `kind`."
@@ -7414,6 +8506,14 @@
           "analyzed_at_unix_ms": {
             "type": "integer",
             "format": "int64"
+          },
+          "bpm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The measured tempo."
           },
           "cue_in_ms": {
             "type": "integer",
@@ -7489,16 +8589,12 @@
           {
             "type": "object",
             "required": [
-              "added_at_unix_ms",
+              "file",
               "overrides",
               "playout",
               "categories"
             ],
             "properties": {
-              "added_at_unix_ms": {
-                "type": "integer",
-                "format": "int64"
-              },
               "analysis": {
                 "oneOf": [
                   {
@@ -7509,19 +8605,22 @@
                   }
                 ]
               },
+              "bpm_by_hand": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "double",
+                "description": "The tempo set by hand, replacing the measured one."
+              },
               "categories": {
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/TrackCategory"
                 }
               },
-              "file_size": {
-                "type": [
-                  "integer",
-                  "null"
-                ],
-                "format": "int64",
-                "minimum": 0
+              "file": {
+                "$ref": "#/components/schemas/TrackFile"
               },
               "identification": {
                 "oneOf": [
@@ -7533,12 +8632,15 @@
                   }
                 ]
               },
-              "missing_since_unix_ms": {
-                "type": [
-                  "integer",
-                  "null"
-                ],
-                "format": "int64"
+              "musicbrainz": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/TrackMusicBrainz"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "overrides": {
                 "$ref": "#/components/schemas/TrackOverrides"
@@ -7621,6 +8723,91 @@
         ],
         "description": "A track change reported by the engine."
       },
+      "TrackFile": {
+        "type": "object",
+        "description": "The file and its tags, as the scanner read them.",
+        "properties": {
+          "channels": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "disc_number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "missing_since_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "musicbrainz_recording_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "musicbrainz_release_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sample_rate": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "track_number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "year_tag": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The year tag.",
+            "minimum": 0
+          }
+        }
+      },
+      "TrackFilter": {
+        "type": "string",
+        "enum": [
+          "playable",
+          "missing",
+          "unanalyzed",
+          "silent",
+          "disabled",
+          "needs_review"
+        ]
+      },
       "TrackIdentification": {
         "type": "object",
         "required": [
@@ -7677,6 +8864,59 @@
             "minimum": 0
           },
           "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "TrackMusicBrainz": {
+        "type": "object",
+        "description": "What MusicBrainz says about the track.",
+        "required": [
+          "genres",
+          "fetched_at_unix_ms"
+        ],
+        "properties": {
+          "album": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "catalog_number": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fetched_at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "first_release_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "genres": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Most voted first: suggestions for the genre tag."
+          },
+          "isrc": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "record_label": {
             "type": [
               "string",
               "null"
@@ -7759,6 +8999,228 @@
         },
         "additionalProperties": false
       },
+      "TrackQuery": {
+        "type": "object",
+        "description": "Which tracks: the filters of `GET /tracks`, also used to select tracks\nfor the actions on a selection. Lists of IDs are comma-separated.",
+        "properties": {
+          "added_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Tracks added in the last this many days.",
+            "minimum": 0
+          },
+          "bitrate_below": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Tracks whose bitrate is below this many kbps.",
+            "minimum": 0
+          },
+          "bpm_max": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "bpm_min": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "category_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "desc": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Reverses the order of `sort`."
+          },
+          "era": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "filter": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TrackFilter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "genre": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "labels_all": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tracks with every one of these labels (IDs, comma-separated)."
+          },
+          "labels_any": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tracks with at least one of these labels."
+          },
+          "labels_none": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tracks with none of these labels."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "1 to 500, 50 by default.",
+            "minimum": 0
+          },
+          "mood": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "never_played": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Tracks never played."
+          },
+          "not_played_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Tracks not played for this many days (including those never played).",
+            "minimum": 0
+          },
+          "offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "q": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Words found in the title, artist, album, album artist, genre or path."
+          },
+          "sort": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TrackSort"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sound_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "year_max": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "year_min": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "TrackSelection": {
+        "type": "object",
+        "description": "Some tracks: these IDs, or every track matching the filters.",
+        "properties": {
+          "filters": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TrackQuery",
+                "description": "The filters of `GET /tracks` (sorting and pages aside)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "track_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "TrackSort": {
+        "type": "string",
+        "enum": [
+          "artist",
+          "title",
+          "album",
+          "added",
+          "last_played",
+          "play_count",
+          "bitrate",
+          "duration",
+          "year",
+          "bpm",
+          "mood",
+          "sound_code",
+          "genre"
+        ]
+      },
       "TrackSummary": {
         "type": "object",
         "required": [
@@ -7767,10 +9229,24 @@
           "enabled",
           "missing",
           "analyzed",
-          "silent"
+          "silent",
+          "added_at_unix_ms",
+          "play_count",
+          "labels"
         ],
         "properties": {
+          "added_at_unix_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the scanner first found the file."
+          },
           "album": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "album_artist": {
             "type": [
               "string",
               "null"
@@ -7785,6 +9261,36 @@
               "null"
             ]
           },
+          "bitrate_kbps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "bitrate_mode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`cbr`, `vbr` or `lossless`; unknown for some formats (AAC)."
+          },
+          "bpm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Set by hand, else measured."
+          },
+          "codec": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`MP3`, `AAC`, `FLAC`, …"
+          },
           "duration_ms": {
             "type": [
               "integer",
@@ -7797,33 +9303,79 @@
             "type": "boolean",
             "description": "Disabled tracks are never picked by autofill or rotation."
           },
+          "era": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "From the year, on the station's eras (decades by default)."
+          },
+          "genre": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LabelRef"
+            }
           },
           "last_played_at_unix_ms": {
             "type": [
               "integer",
               "null"
             ],
-            "format": "int64"
+            "format": "int64",
+            "description": "Plays that count (FX player aside, at least the programming\nsettings' `min_play_s`)."
           },
           "missing": {
             "type": "boolean"
+          },
+          "mood": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "path": {
             "type": "string",
             "description": "Relative to the library root."
           },
+          "play_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
           "silent": {
             "type": "boolean"
+          },
+          "sound_code": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "title": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Of first release: from MusicBrainz, else the year tag.",
+            "minimum": 0
           }
         }
       },
@@ -8215,6 +9767,10 @@
     {
       "name": "categories",
       "description": "Groups of tracks"
+    },
+    {
+      "name": "labels",
+      "description": "Keywords on tracks, to sort the library"
     },
     {
       "name": "artists",
