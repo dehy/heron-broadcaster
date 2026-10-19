@@ -700,10 +700,16 @@ impl MbReleaseDetails {
                         .iter()
                         .find(|isrc| isrc.len() == 12 && isrc.is_ascii())
                         .cloned(),
-                    // A recording's first release is earlier than or the
-                    // same as the album's (hits on compilations).
-                    first_release_year: year(recording.first_release_date.as_deref())
-                        .or(release_year),
+                    // The earlier: a hit on a compilation came out before
+                    // the album, a recording on a reissue can be a later
+                    // master of an album track.
+                    first_release_year: match (
+                        year(recording.first_release_date.as_deref()),
+                        release_year,
+                    ) {
+                        (Some(recording), Some(release)) => Some(recording.min(release)),
+                        (recording, release) => recording.or(release),
+                    },
                     genres: genre_names([
                         recording.genres.as_slice(),
                         self.genres.as_slice(),
@@ -825,5 +831,26 @@ mod tests {
         let second = &recordings["rec2"];
         assert_eq!(second.isrc, None);
         assert_eq!(second.first_release_year, Some(2005));
+    }
+
+    /// A real answer (MusicBrainz data is CC0): the 2004 US edition of Kind
+    /// of Blue, whose recordings MusicBrainz dates 1959 to 1988.
+    #[test]
+    fn release_details_of_a_real_release() {
+        let release: MbReleaseDetails = serde_json::from_str(include_str!(
+            "../../tests/fixtures/musicbrainz-release-kind-of-blue.json"
+        ))
+        .unwrap();
+        let recordings = release.recordings();
+        assert_eq!(recordings.len(), 13, "two discs");
+        let so_what = &recordings["272dbf93-1501-4650-bbde-627ff0588a73"];
+        assert_eq!(so_what.album.as_deref(), Some("Kind of Blue"));
+        assert_eq!(so_what.record_label.as_deref(), Some("Columbia"));
+        assert_eq!(so_what.catalog_number.as_deref(), Some("CN 90887"));
+        assert_eq!(so_what.isrc.as_deref(), Some("USBJN0920070"));
+        // The album's 1959, not the 1969 MusicBrainz gives the recording.
+        assert_eq!(so_what.first_release_year, Some(1959));
+        let alternate = &recordings["bc80349a-c5d6-4d35-8d29-87d5b10e5d5d"];
+        assert_eq!(alternate.first_release_year, Some(1959));
     }
 }
