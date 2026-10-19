@@ -14,7 +14,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | M4 | [API & control plane](m4-api-control-plane.md) | M2 | Done |
 | M5 | [Web UI](m5-web-ui.md) | M4 | Done |
 | M5b | [Track details, labels & tags](m5b-track-details-tags.md) | M5 | Done |
-| M5c | [Track management](m5c-track-management.md) | M5 | Not started |
+| M5c | [Track management](m5c-track-management.md) | M5 | Done ([#18](https://github.com/dehy/heron-broadcaster/pull/18)) |
 | M5d | [Web UI translations](m5d-web-i18n.md) | M5 | Done ([#17](https://github.com/dehy/heron-broadcaster/pull/17)) |
 | M6 | [Rotation & clockwheels](m6-rotation-clockwheels.md) | M4 | Done ([#11](https://github.com/dehy/heron-broadcaster/pull/11)) |
 | M7 | [Webhooks & output API](m7-webhooks-output-api.md) | M4 | Not started |

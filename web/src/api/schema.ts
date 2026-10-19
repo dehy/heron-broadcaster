@@ -636,6 +636,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tracks in the trash, most recently deleted first. */
+        get: operations["list_trash"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/trash/empty": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purges the whole trash now: the tracks and their files are removed for
+         *     good; their plays keep their artist and title. Admins.
+         */
+        post: operations["empty_trash"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/trash/{batch_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restores the tracks of a deletion (undoes its batch): their files go
+         *     back where they were, with their analysis, categories and history. A
+         *     path taken since is reported, and that track stays in the trash.
+         *     Operators and admins.
+         */
+        post: operations["restore_batch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/live": {
         parameters: {
             query?: never;
@@ -1104,6 +1163,173 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/staging": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The buffer zone: groups with files to import or discard, with their
+         *     identification, flags and planned paths.
+         */
+        get: operations["get_buffer"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staging/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Removes files from the buffer zone (uploads in progress too). They never
+         *     reached the library. Files being imported are left alone. Operators and
+         *     admins.
+         */
+        post: operations["discard_files"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staging/files/{id}/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A file of the buffer zone, to listen to it. Supports range requests. */
+        get: operations["get_staged_audio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staging/files/{id}/choice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Imports a file as one of its candidate releases, or with its own tags:
+         *     heron-librarian works out its tags and path again. Operators and admins.
+         */
+        post: operations["choose"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staging/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Starts an upload: its files are identified together, so the files of an
+         *     album agree on their release. Operators and admins.
+         */
+        post: operations["create_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staging/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Imports files ready in the buffer zone: heron-librarian tags them and
+         *     files them in the library as one batch, which can be undone. Files that
+         *     are not ready are skipped (see the task's report). Operators and admins.
+         */
+        post: operations["import_files"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staging/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Announces a file of an upload: it is created empty, and its content is
+         *     sent in chunks. Refused when it is not audio, when it is larger than
+         *     `max_upload_mb`, or when it would leave less than `min_free_mb` on the
+         *     disk. Operators and admins.
+         */
+        post: operations["create_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staging/uploads/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A file of an upload, with the bytes received so far: send the rest from
+         *     there.
+         */
+        get: operations["get_upload"];
+        /**
+         * Appends a chunk (at most 16 MiB) to a file being uploaded, at `offset`,
+         *     which must be the bytes received so far (409 otherwise: ask for the
+         *     file and carry on from its `received`). With its last byte, the file is
+         *     complete and heron-librarian identifies it. Operators and admins.
+         */
+        put: operations["send_chunk"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/status": {
         parameters: {
             query?: never;
@@ -1191,6 +1417,30 @@ export interface paths {
          *     admins.
          */
         post: operations["apply_categories"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracks/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Moves tracks to the trash: heron-librarian moves their files to
+         *     `.heron-trash/` in the library, as one batch. They leave the library,
+         *     rotation, their categories and the queue (a track on air plays to its
+         *     end), and are purged after `trash_days`; until then they can be
+         *     restored whole. Tracks whose file is missing can be deleted too.
+         *     Operators and admins.
+         */
+        post: operations["delete_tracks"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1590,7 +1840,7 @@ export interface components {
             undone_by?: number | null;
         };
         /** @enum {string} */
-        BatchKind: "import" | "organize" | "undo" | "review" | "edit";
+        BatchKind: "import" | "organize" | "undo" | "review" | "edit" | "delete" | "purge";
         /** @description What a batch of file operations did. */
         BatchReport: {
             /** Format: int64 */
@@ -1614,6 +1864,22 @@ export interface components {
             title: number;
             /** Format: int32 */
             track: number;
+        };
+        Buffer: {
+            /**
+             * Format: int64
+             * @description Free space on the buffer folder's disk.
+             */
+            free_bytes?: number | null;
+            /** @description Groups with files still to import or discard, newest first. */
+            groups: components["schemas"]["StagedGroup"][];
+            /** Format: int64 */
+            max_upload_bytes: number;
+            /**
+             * Format: int64
+             * @description Uploads are refused below this much free space.
+             */
+            min_free_bytes: number;
         };
         CategoriesChange: {
             /**
@@ -1674,6 +1940,15 @@ export interface components {
             rms_left: number;
             /** Format: float */
             rms_right: number;
+        };
+        ChoiceRequest: {
+            /** @enum {string} */
+            kind: "release";
+            recording_id: string;
+            release_id: string;
+        } | {
+            /** @enum {string} */
+            kind: "own";
         };
         ClockInput: {
             /** @description Off by default: the clock starts over at each hour. */
@@ -1866,6 +2141,13 @@ export interface components {
              */
             all: boolean;
         };
+        Discarded: {
+            /**
+             * Format: int64
+             * @description Files removed from the buffer zone.
+             */
+            discarded: number;
+        };
         /** @description How the engine will play the track: analysis and overrides combined. */
         EffectivePlayout: {
             /** Format: int32 */
@@ -2042,6 +2324,11 @@ export interface components {
          * @enum {string}
          */
         FadeCurve: "linear" | "s_curve" | "logarithmic" | "exponential";
+        FileSelection: {
+            file_ids: number[];
+        };
+        /** @enum {string} */
+        GroupSource: "upload" | "incoming";
         Label: {
             /** @description `#rrggbb`. */
             color?: string | null;
@@ -2091,11 +2378,23 @@ export interface components {
             /** @description See `docs/library.md#layout`. */
             layout?: string | null;
             /**
+             * Format: int64
+             * @description 1 or more.
+             */
+            max_upload_mb?: number | null;
+            /** Format: int64 */
+            min_free_mb?: number | null;
+            /**
              * Format: double
              * @description Lowest AcoustID score (0 to 1) accepted as a match.
              */
             min_score?: number | null;
             save_cover?: boolean | null;
+            /**
+             * Format: int32
+             * @description 1 to 3650.
+             */
+            trash_days?: number | null;
         };
         /** @description Library settings as shown: the AcoustID key is never sent back. */
         LibrarySettingsView: {
@@ -2103,9 +2402,25 @@ export interface components {
             acoustid_key_set: boolean;
             embed_cover: boolean;
             layout: string;
+            /**
+             * Format: int64
+             * @description Largest file accepted by upload, in MiB.
+             */
+            max_upload_mb: number;
+            /**
+             * Format: int64
+             * @description Uploads are refused when they would leave less free space on the
+             *     buffer zone's disk, in MiB.
+             */
+            min_free_mb: number;
             /** Format: double */
             min_score: number;
             save_cover: boolean;
+            /**
+             * Format: int32
+             * @description Days deleted tracks stay in the trash.
+             */
+            trash_days: number;
         };
         /** @description Library and analysis progress, served by `/api/v1/library/status`. */
         LibraryStatus: {
@@ -2140,6 +2455,7 @@ export interface components {
             /** Format: int64 */
             id: number;
             plan?: components["schemas"]["OrganizePlan"] | null;
+            purge?: components["schemas"]["PurgeReport"] | null;
             relations?: components["schemas"]["RelationsReport"] | null;
             report?: components["schemas"]["BatchReport"] | null;
             request: components["schemas"]["TaskRequest"];
@@ -2224,6 +2540,10 @@ export interface components {
              */
             position: number;
         };
+        NewGroup: {
+            /** @description What the files are, for people (`Album 2024`, the dropped folder). */
+            name: string;
+        };
         NewToken: {
             /**
              * Format: int32
@@ -2232,6 +2552,17 @@ export interface components {
             expires_in_days?: number | null;
             /** @description What the token is for. */
             name: string;
+        };
+        NewUpload: {
+            /** Format: int64 */
+            group_id: number;
+            /** @description The file's path in what was dropped (`Album/01 Song.flac`). */
+            name: string;
+            /**
+             * Format: int64
+             * @description Size in bytes.
+             */
+            size: number;
         };
         NewUser: {
             /** @description At least 8 characters. */
@@ -2461,6 +2792,25 @@ export interface components {
              *     ]
              */
             sound_codes: string[];
+        };
+        /** @description What a purge of the trash did. */
+        PurgeReport: {
+            /**
+             * Format: int64
+             * @description `None` when there was nothing to purge.
+             */
+            batch_id?: number | null;
+            /**
+             * Format: int64
+             * @description Files removed from the trash (tracks' files and the files that
+             *     went with them).
+             */
+            files: number;
+            /**
+             * Format: int64
+             * @description Tracks removed for good.
+             */
+            tracks: number;
         };
         QueueEntry: {
             /**
@@ -2883,6 +3233,114 @@ export interface components {
             /** @description Windows the slot applies (rotation settings, category, slot). */
             windows: components["schemas"]["Windows"];
         };
+        /**
+         * @description What a file of the buffer zone is imported as, when not its
+         *     identification (as stored in `staged_files.choice`).
+         */
+        StagedChoice: {
+            /** Format: int32 */
+            disc?: number | null;
+            /** @enum {string} */
+            kind: "release";
+            recording_id: string;
+            release_id: string;
+            /** Format: int32 */
+            track?: number | null;
+        } | {
+            /** @enum {string} */
+            kind: "own";
+        };
+        StagedFile: {
+            /** @description Releases it may be on, best first. */
+            candidates: components["schemas"]["ReviewCandidate"][];
+            choice?: components["schemas"]["StagedChoice"] | null;
+            /** Format: int64 */
+            created_at_unix_ms: number;
+            /** Format: int64 */
+            duplicate_of_file_id?: number | null;
+            /** Format: int64 */
+            duplicate_of_track_id?: number | null;
+            /** Format: int32 */
+            duration_ms?: number | null;
+            error?: string | null;
+            /** @description Why it should be looked at before it is imported. */
+            flags: components["schemas"]["StagedFlag"][];
+            /** Format: int64 */
+            group_id: number;
+            /** Format: int64 */
+            id: number;
+            identification?: components["schemas"]["StagedIdentificationView"] | null;
+            /** @description Its path in the upload, or in the incoming folder. */
+            name: string;
+            own_tags?: components["schemas"]["StagedTags"] | null;
+            /** @description Where the layout would file it in the library today. */
+            planned_path?: string | null;
+            /**
+             * Format: int64
+             * @description Bytes received so far, while it is uploaded.
+             */
+            received?: number | null;
+            /** @description The release it is imported as (its cover is on the Cover Art Archive). */
+            release_id?: string | null;
+            /** Format: int64 */
+            size: number;
+            status: components["schemas"]["StagedStatus"];
+            tags?: components["schemas"]["StagedTags"] | null;
+            /**
+             * Format: int64
+             * @description The track it became.
+             */
+            track_id?: number | null;
+            uploaded_by?: string | null;
+        };
+        /**
+         * @description Why a file of the buffer zone should be looked at before it is imported.
+         * @enum {string}
+         */
+        StagedFlag: "duplicate_in_library" | "duplicate_in_buffer" | "same_recording_in_library" | "undecodable" | "too_short" | "unsupported_format";
+        StagedGroup: {
+            /** Format: int64 */
+            created_at_unix_ms: number;
+            created_by?: string | null;
+            files: components["schemas"]["StagedFile"][];
+            /** Format: int64 */
+            id: number;
+            name: string;
+            source: components["schemas"]["GroupSource"];
+        };
+        /**
+         * @description The outcome of identifying a file of the buffer zone.
+         * @enum {string}
+         */
+        StagedIdentificationStatus: "identified" | "needs_review" | "off";
+        StagedIdentificationView: {
+            /** @description Why it needs review. */
+            reason?: string | null;
+            recording_id?: string | null;
+            release_id?: string | null;
+            /** Format: double */
+            score?: number | null;
+            status: components["schemas"]["StagedIdentificationStatus"];
+        };
+        /** @enum {string} */
+        StagedStatus: "receiving" | "identifying" | "ready" | "importing" | "imported" | "discarded" | "failed";
+        /** @description The tags of a file, as read or as they would be written. */
+        StagedTags: {
+            album?: string | null;
+            album_artist?: string | null;
+            artist?: string | null;
+            compilation: boolean;
+            date?: string | null;
+            /** Format: int32 */
+            disc?: number | null;
+            /** Format: int32 */
+            disc_total?: number | null;
+            title?: string | null;
+            /** Format: int32 */
+            track?: number | null;
+            /** Format: int32 */
+            track_total?: number | null;
+        };
         /** @description The station itself. */
         StationSettings: {
             /**
@@ -2992,6 +3450,17 @@ export interface components {
             all?: boolean;
             /** @enum {string} */
             kind: "musicbrainz_details";
+        } | {
+            file_ids: number[];
+            /** @enum {string} */
+            kind: "staging_import";
+        } | {
+            /** @enum {string} */
+            kind: "delete";
+            track_ids: number[];
+        } | {
+            /** @enum {string} */
+            kind: "empty_trash";
         };
         /** @enum {string} */
         TaskStatus: "pending" | "running" | "done" | "failed";
@@ -3039,6 +3508,11 @@ export interface components {
              */
             bpm_by_hand?: number | null;
             categories: components["schemas"]["TrackCategory"][];
+            /**
+             * Format: int64
+             * @description In the trash since then (purged after `trash_days`).
+             */
+            deleted_at_unix_ms?: number | null;
             file: components["schemas"]["TrackFile"];
             identification?: components["schemas"]["TrackIdentification"] | null;
             musicbrainz?: components["schemas"]["TrackMusicBrainz"] | null;
@@ -3293,6 +3767,33 @@ export interface components {
             settings?: components["schemas"]["PlayoutSettings"] | null;
             /** Format: int64 */
             to_track_id: number;
+        };
+        TrashItem: {
+            /**
+             * Format: int64
+             * @description The `delete` batch: restoring undoes it.
+             */
+            batch_id?: number | null;
+            /** Format: int64 */
+            deleted_at_unix_ms: number;
+            /** @description Where it was in the library, and goes back to when restored. */
+            original_path: string;
+            /**
+             * Format: int64
+             * @description When it is purged for good.
+             */
+            purge_at_unix_ms: number;
+            track: components["schemas"]["TrackSummary"];
+        };
+        TrashPage: {
+            items: components["schemas"]["TrashItem"][];
+            /** Format: int64 */
+            total: number;
+            /**
+             * Format: int32
+             * @description Days deleted tracks are kept.
+             */
+            trash_days: number;
         };
         User: {
             /** Format: int64 */
@@ -4817,6 +5318,93 @@ export interface operations {
             };
         };
     };
+    list_trash: {
+        parameters: {
+            query?: {
+                /** @description 1 to 200, 50 by default. */
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrashPage"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    empty_trash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    restore_batch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     live: {
         parameters: {
             query?: {
@@ -6101,6 +6689,292 @@ export interface operations {
             };
         };
     };
+    get_buffer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Buffer"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    discard_files: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FileSelection"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Discarded"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_staged_audio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Part of the file */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    choose: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChoiceRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StagedFile"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewGroup"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StagedGroup"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    import_files: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FileSelection"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_upload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewUpload"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StagedFile"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_upload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StagedFile"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    send_chunk: {
+        parameters: {
+            query: {
+                /** @description Where the chunk goes in the file: the bytes received so far. */
+                offset: number;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": number[];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StagedFile"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     status: {
         parameters: {
             query?: never;
@@ -6284,6 +7158,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SelectionResult"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_tracks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrackSelection"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
                 };
             };
             "4XX": {

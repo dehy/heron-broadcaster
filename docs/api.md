@@ -45,7 +45,8 @@ Then:
 | Engine and decks | `GET /engine` (reachable, configuration in sync), `GET /player` (decks, cued track, queue, outputs), `GET /player/levels`, `POST /player/skip`, `/player/pause`, `/player/resume`, `POST /player/fx` (`{"track_id"}`), `DELETE /player/fx` |
 | Queue | `GET /queue` (the cued track first), `POST /queue` (`{"track_ids", "position"}`), `DELETE /queue`, `DELETE /queue/{entry_id}`, `PUT /queue/{entry_id}/position` |
 | Library | `GET /library/status`; `GET /tracks` (`q`, `category_id`, `filter`: playable, missing, unanalyzed, silent, disabled, needs_review; `labels_all`, `labels_any`, `labels_none` (comma-separated IDs); `never_played`, `not_played_days`, `added_days`, `bitrate_below`, `era`, `mood`, `sound_code`, `genre`, `year_min`, `year_max`, `bpm_min`, `bpm_max`; `sort`: artist, title, album, genre, added, last_played, play_count, bitrate, duration, year, bpm, mood, sound_code, and `desc`; `limit`, `offset`); `GET`, `PATCH /tracks/{id}` (`enabled`); `PUT`, `DELETE /tracks/{id}/overrides`; `PUT /tracks/{id}/categories`; `GET /tracks/{id}/waveform`; `GET /tracks/{id}/audio` (the file, with range requests, for previews); `POST /playout/transition` (preview a transition between two tracks, optionally with unsaved settings) |
-| Library management | `POST /library/musicbrainz-details` (`{"all"}`); `GET /library/review`; `POST /tracks/{id}/review/apply` (`{"release_id", "recording_id"}`, one of its candidates), `POST /tracks/{id}/review/keep`; `POST /library/organize` (dry run), `POST /library/organize/{plan_task_id}/apply`; `GET /library/batches`, `POST /library/batches/{id}/undo`; `GET /library/tasks`, `GET /library/tasks/{id}` — see [below](#library-management) |
+| Library management | `POST /library/musicbrainz-details` (`{"all"}`); `GET /library/review`; `POST /tracks/{id}/review/apply` (`{"release_id", "recording_id"}`, one of its candidates), `POST /tracks/{id}/review/keep`; `POST /library/organize` (dry run), `POST /library/organize/{plan_task_id}/apply`; `GET /library/batches`, `POST /library/batches/{id}/undo`; `GET /library/tasks`, `GET /library/tasks/{id}`; `POST /tracks/delete` (`{"track_ids"}`); `GET /library/trash`, `POST /library/trash/{batch_id}/restore`, `POST /library/trash/empty` — see [below](#library-management) |
+| Buffer zone | `GET /staging`; `POST /staging/groups` (`{"name"}`); `POST /staging/uploads` (`{"group_id", "name", "size"}`), `GET /staging/uploads/{id}`, `PUT /staging/uploads/{id}?offset=` (a chunk, `application/octet-stream`); `POST /staging/files/{id}/choice` (`{"kind": "release", "release_id", "recording_id"}` or `{"kind": "own"}`); `GET /staging/files/{id}/audio`; `POST /staging/import`, `POST /staging/discard` (`{"file_ids"}`) — see [below](#buffer-zone) |
 | Categories | `GET`, `POST /categories`; `GET`, `PUT`, `DELETE /categories/{id}` (with the separation windows a category overrides) |
 | Labels | `GET`, `POST /labels`; `PUT`, `DELETE /labels/{id}`; `POST /labels/{id}/merge` (`{"into_id"}`) |
 | Selections | `POST /tracks/labels` (`add`, `remove`), `POST /tracks/categories` (`add` with weights, `remove`), `POST /tracks/programming` (`mood`, `sound_code`, `bpm`; `null` clears), `POST /tracks/tags` (a library task) — see [below](#actions-on-a-selection) |
@@ -99,11 +100,22 @@ The API cannot write files (its library mount is read-only), so what changes fil
 
 - **Review:** `GET /library/review` lists the tracks whose identification was not confident enough, with the releases AcoustID found (`candidates`). Applying one queues a `review_apply` task: the librarian looks the release up on MusicBrainz, writes its tags into the file, files it where the layout says and saves the cover, as a `review` batch. Keeping the file's own tags only changes the database (status `kept`).
 - **Organize:** `POST /library/organize` queues a dry run; its `plan` lists every move. `POST /library/organize/{plan_task_id}/apply` carries it out as one batch (once per dry run; tracks moved since are skipped).
-- **Undo:** `POST /library/batches/{id}/undo` reverts any batch (import, organization, review, tag edit). Undoing a review puts the track back in review.
+- **Undo:** `POST /library/batches/{id}/undo` reverts any batch (import, organization, review, tag edit, deletion; admins). Undoing a review puts the track back in review.
 - **Tag edits:** `POST /tracks/tags` queues an `edit_tags` task, see [below](#actions-on-a-selection).
 - **MusicBrainz details:** `POST /library/musicbrainz-details` queues a `musicbrainz_details` task: the librarian looks up the release of every identified track never looked up (`"all": true`: every one again), one release a second, and saves album, record label, catalog number, ISRC, first release year and genres. Once one has finished, new tracks are looked up in the background.
 
+- **Deletion:** `POST /tracks/delete` queues a `delete` task (operators): the tracks' files go to the trash, as a `delete` batch. `GET /library/trash` lists the deleted tracks with their deletion batch and when they are purged; `POST /library/trash/{batch_id}/restore` undoes a deletion (operators); `POST /library/trash/empty` purges everything now (`empty_trash`, admins; the task's `purge` tells what went). Deleted tracks leave `GET /tracks`; `GET /tracks/{id}` still answers, with `deleted_at_unix_ms`, until they are purged.
 Tasks running when the librarian stops are marked failed; ask again (an interrupted undo resumes). See [Library management](library.md).
+
+## Buffer zone
+
+Uploads go into the buffer zone (`HERON_STAGING_DIR`, read-write for the API), never into the library. Operators and admins:
+
+1. `POST /staging/groups` starts an upload: its files are identified together.
+2. `POST /staging/uploads` announces a file; it is refused (`422`) when its extension is not an audio one, when it is larger than `max_upload_mb`, or when it would leave less than `min_free_mb` on the disk (counting the uploads in progress).
+3. `PUT /staging/uploads/{id}?offset=n` appends a chunk of at most 16 MiB at byte `n`, which must be what the server has, or the answer is `409`. After a dropped connection, `GET /staging/uploads/{id}` tells `received`: carry on from there. With the last byte, the file takes its name and `heron-librarian` identifies it.
+4. `GET /staging` lists the groups and their files: status (receiving, identifying, ready, importing, failed), own tags and the tags they get, planned path, identification and candidates, flags, choice.
+5. `POST /staging/files/{id}/choice` picks a candidate release, or keeps the file's own tags (the file is `identifying` again while the librarian works its tags and path out). `POST /staging/import` queues a `staging_import` task (files that are not ready are skipped, see its `report`); `POST /staging/discard` removes files from the buffer zone at once.
 
 ## Actions on a selection
 
@@ -145,7 +157,7 @@ CI fails when either file is out of date. The generator (`openapi-typescript`) l
 
 ## Metrics
 
-On top of the scanner's: `heron_api_engine_connected` (0 or 1), `heron_api_engine_disconnections_total`, `heron_api_autofill_tracks_total`, `heron_api_rotation_relaxed_total`, `heron_api_logins_total{result}` and `heron_api_live_clients`.
+On top of the scanner's: `heron_api_uploads_total`, `heron_api_engine_connected` (0 or 1), `heron_api_engine_disconnections_total`, `heron_api_autofill_tracks_total`, `heron_api_rotation_relaxed_total`, `heron_api_logins_total{result}` and `heron_api_live_clients`.
 
 ## Limitations
 

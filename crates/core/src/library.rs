@@ -49,6 +49,12 @@ pub enum TaskRequest {
         #[serde(default)]
         all: bool,
     },
+    /// Imports files of the buffer zone into the library, as one batch.
+    StagingImport { file_ids: Vec<u64> },
+    /// Moves tracks to the trash, as one batch (undone to restore them).
+    Delete { track_ids: Vec<u64> },
+    /// Purges the whole trash now.
+    EmptyTrash,
 }
 
 impl TaskRequest {
@@ -62,6 +68,9 @@ impl TaskRequest {
             Self::ArtistRelations => "artist_relations",
             Self::EditTags { .. } => "edit_tags",
             Self::MusicbrainzDetails { .. } => "musicbrainz_details",
+            Self::StagingImport { .. } => "staging_import",
+            Self::Delete { .. } => "delete",
+            Self::EmptyTrash => "empty_trash",
         }
     }
 }
@@ -217,6 +226,98 @@ pub struct BatchReport {
     pub skipped: Vec<SkippedFile>,
 }
 
+/// Why a file of the buffer zone should be looked at before it is imported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum StagedFlag {
+    /// The same file, or the same audio, is in the library.
+    DuplicateInLibrary,
+    /// The same file, or the same audio, is in the buffer zone.
+    DuplicateInBuffer,
+    /// The library has a track of the same MusicBrainz recording.
+    SameRecordingInLibrary,
+    /// The file cannot be decoded: broken, or not audio.
+    Undecodable,
+    /// Too short to be fingerprinted (and identified).
+    TooShort,
+    /// An audio format Heron cannot play.
+    UnsupportedFormat,
+}
+
+/// The outcome of identifying a file of the buffer zone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum StagedIdentificationStatus {
+    /// A confident match on one release.
+    Identified,
+    /// Not confident: pick a candidate, or keep the file's own tags.
+    NeedsReview,
+    /// Identification is off (no AcoustID key): the file's own tags.
+    Off,
+}
+
+/// As stored in `staged_files.identification`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StagedIdentification {
+    pub status: StagedIdentificationStatus,
+    /// Why it needs review.
+    pub reason: Option<String>,
+    pub score: Option<f64>,
+    pub recording_mbid: Option<String>,
+    pub release_mbid: Option<String>,
+    /// Releases that matched, best first (the review screen's candidates).
+    #[serde(default)]
+    pub candidates: Vec<serde_json::Value>,
+}
+
+/// What a file of the buffer zone is imported as, when not its
+/// identification (as stored in `staged_files.choice`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum StagedChoice {
+    /// One of its candidate releases.
+    Release {
+        release_id: String,
+        recording_id: String,
+        disc: Option<u32>,
+        track: Option<u32>,
+    },
+    /// The file's own tags.
+    Own,
+}
+
+/// Where uploads are written in a group's folder of the buffer zone until
+/// they are complete. Hidden, so they never show as files.
+pub fn upload_part_name(file_id: u64) -> String {
+    format!(".upload-{file_id}.part")
+}
+
+/// What a purge of the trash did.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PurgeReport {
+    /// `None` when there was nothing to purge.
+    pub batch_id: Option<u64>,
+    /// Tracks removed for good.
+    pub tracks: u64,
+    /// Files removed from the trash (tracks' files and the files that
+    /// went with them).
+    pub files: u64,
+}
+
+/// Where deleted files wait, at the root of the library. Hidden, so the
+/// scanner skips it.
+pub const TRASH_DIR: &str = ".heron-trash";
+
+/// Whether a library path is in the trash.
+pub fn in_trash(path: &str) -> bool {
+    path.strip_prefix(TRASH_DIR)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
 /// What a MusicBrainz relationships lookup found.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -268,5 +369,12 @@ mod tests {
         assert!(TagField::Isrc.normalize("USRC1760783").is_err());
         assert!(TagField::Title.normalize("  ").is_err());
         assert_eq!(TagField::Genre.normalize(" Jazz ").unwrap(), "Jazz");
+    }
+
+    #[test]
+    fn trash_paths() {
+        assert!(in_trash(".heron-trash/4/a/b.mp3"));
+        assert!(!in_trash(".heron-trashy/b.mp3"));
+        assert!(!in_trash("a/.heron-trash/b.mp3"));
     }
 }

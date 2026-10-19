@@ -61,8 +61,8 @@ impl Default for AnalysisSettings {
     }
 }
 
-/// Library management: identification and folder layout. Stored under the
-/// `library` settings name. See `docs/library.md`.
+/// Library management: identification, folder layout, uploads and the
+/// trash. Stored under the `library` settings name. See `docs/library.md`.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LibrarySettings {
@@ -77,6 +77,13 @@ pub struct LibrarySettings {
     pub save_cover: bool,
     /// Also embed the front cover in the files.
     pub embed_cover: bool,
+    /// Largest file accepted by upload, in MiB.
+    pub max_upload_mb: u64,
+    /// Uploads are refused when they would leave less free space than
+    /// this on the buffer zone's disk, in MiB.
+    pub min_free_mb: u64,
+    /// Days deleted tracks stay in the trash before it is purged.
+    pub trash_days: u32,
 }
 
 impl LibrarySettings {
@@ -94,6 +101,9 @@ impl Default for LibrarySettings {
             min_score: 0.9,
             save_cover: true,
             embed_cover: false,
+            max_upload_mb: 2048,
+            min_free_mb: 5120,
+            trash_days: 30,
         }
     }
 }
@@ -107,6 +117,9 @@ impl std::fmt::Debug for LibrarySettings {
             .field("min_score", &self.min_score)
             .field("save_cover", &self.save_cover)
             .field("embed_cover", &self.embed_cover)
+            .field("max_upload_mb", &self.max_upload_mb)
+            .field("min_free_mb", &self.min_free_mb)
+            .field("trash_days", &self.trash_days)
             .finish()
     }
 }

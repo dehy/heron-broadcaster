@@ -3,8 +3,8 @@
 // The library: search, filters, sorting, pages, the columns shown, and
 // actions on a selection (queue, labels, categories, programming, tags).
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   type Schemas,
   type TrackFilter,
@@ -26,9 +26,10 @@ import {
   useProgrammingSettings,
 } from "../components/SelectionActions";
 import { useDebounced } from "../components/TrackSearch";
-import { Card, Empty, ErrorView, Icon, Loading, PageHead } from "../components/ui";
-import { type PlainKey, number, t } from "../i18n";
-import { ago, duration } from "../lib/format";
+import { TaskState, useTask } from "../components/Task";
+import { Card, ConfirmButton, Empty, ErrorView, Icon, Loading, PageHead, useToast } from "../components/ui";
+import { type PlainKey, number, rich, t } from "../i18n";
+import { ago, duration, trackName } from "../lib/format";
 import { Link, setSearch, useLocation } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 
@@ -176,6 +177,12 @@ export function Library() {
   const [text, setText] = useState(search.get("q") ?? "");
   const q = useDebounced(text.trim(), 300);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Selected tracks seen on any page, to list what a deletion takes.
+  const known = useRef(new Map<number, TrackSummary>());
+  const client = useQueryClient();
+  const toast = useToast();
+  const [deleteTask, setDeleteTask] = useState<number | null>(null);
+  const deleting = useTask(deleteTask);
   // Every track matching the filters, on every page.
   const [allMatching, setAllMatching] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -233,7 +240,43 @@ export function Library() {
     },
   );
 
+  const remove = useAction(
+    (ids: number[]) => unwrap(api.POST("/api/v1/tracks/delete", { body: { track_ids: ids } })),
+    {
+      onSuccess: (task) => {
+        setDeleteTask(task.id);
+        setSelected(new Set());
+      },
+    },
+  );
+  useEffect(() => {
+    const task = deleting.data;
+    if (task?.status === "done") {
+      const report = task.report;
+      toast(
+        report?.skipped.length
+          ? t("library.deletedSkipped", { count: report.done, skipped: report.skipped.length })
+          : t("library.deleted", { count: report?.done ?? 0 }),
+      );
+      void client.invalidateQueries({ queryKey: ["tracks"] });
+      void client.invalidateQueries({ queryKey: ["library-status"] });
+      void client.invalidateQueries({ queryKey: ["trash"] });
+    } else if (task?.status === "failed") {
+      toast(task.error ?? t("library.deleteFailed"), true);
+    }
+  }, [deleting.data, client, toast]);
+
   const items = tracks.data?.items ?? [];
+  for (const track of items) {
+    known.current.set(track.id, track);
+  }
+  const selectedTracks = [...selected].flatMap((id) => {
+    const track = known.current.get(id);
+    return track ? [track] : [];
+  });
+  const playableIds = selectedTracks.filter((track) => !track.missing && !track.silent).map((track) => track.id);
+  const deletingNow =
+    deleteTask !== null && deleting.data?.status !== "done" && deleting.data?.status !== "failed";
   const total = tracks.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE));
   const toggle = (id: number) => {
@@ -340,6 +383,12 @@ export function Library() {
           </div>
         </div>
         {moreOpen && <MoreFilters search={search} labels={labels.data ?? []} programming={programming.data} />}
+        {deletingNow && (
+          <div className="card-head">
+            <span>{t("library.deleting")}</span>
+            <TaskState task={deleting.data} />
+          </div>
+        )}
         {selectedCount > 0 && (
           <div className="card-head" style={{ background: "var(--accent-soft)" }}>
             <span>
@@ -361,17 +410,28 @@ export function Library() {
                   <button
                     type="button"
                     className="btn small"
-                    onClick={() => enqueue.mutate({ ids: [...selected], next: true })}
+                    disabled={playableIds.length === 0}
+                    onClick={() => enqueue.mutate({ ids: playableIds, next: true })}
                   >
                     <Icon name="next" size={14} /> {t("queue.playNext")}
                   </button>
                   <button
                     type="button"
                     className="btn small"
-                    onClick={() => enqueue.mutate({ ids: [...selected], next: false })}
+                    disabled={playableIds.length === 0}
+                    onClick={() => enqueue.mutate({ ids: playableIds, next: false })}
                   >
                     <Icon name="plus" size={14} /> {t("library.addToQueue")}
                   </button>
+                  <ConfirmButton
+                    className="btn small danger"
+                    confirm={t("library.deleteConfirm", { count: selected.size })}
+                    disabled={deletingNow}
+                    question={<DeleteQuestion tracks={selectedTracks} />}
+                    onConfirm={() => remove.mutate([...selected])}
+                  >
+                    <Icon name="trash" size={14} /> {t("library.delete")}
+                  </ConfirmButton>
                 </>
               )}
               {canEdit && (
@@ -800,5 +860,31 @@ function Row({
         )}
       </td>
     </tr>
+  );
+}
+
+/** What a deletion takes, before it is confirmed. */
+export function DeleteQuestion({ tracks }: { tracks: TrackSummary[] }) {
+  const shown = tracks.slice(0, 15);
+  return (
+    <>
+      <p>
+        {rich("library.deleteQuestion", {
+          count: tracks.length,
+          trash: <Link to="/trash">{t("nav.trash")}</Link>,
+        })}
+      </p>
+      <ul className="small" style={{ margin: 0 }}>
+        {shown.map((track) => (
+          <li key={track.id}>
+            {trackName(track)}
+            {track.missing && <span className="muted"> {t("library.fileMissing")}</span>}
+          </li>
+        ))}
+        {tracks.length > shown.length && (
+          <li className="muted">{t("library.andMore", { count: tracks.length - shown.length })}</li>
+        )}
+      </ul>
+    </>
   );
 }

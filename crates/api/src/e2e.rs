@@ -32,6 +32,7 @@ struct Station {
     db: ScratchDatabase,
     library: TempDir,
     _state_dir: TempDir,
+    staging: TempDir,
     _engine: Arc<Engine>,
     state: AppState,
     api: SocketAddr,
@@ -103,6 +104,7 @@ impl Station {
         }
 
         let state_dir = tempfile::tempdir().unwrap();
+        let staging = tempfile::tempdir().unwrap();
         if let Some(config) = engine_config {
             config.save(state_dir.path()).unwrap();
         }
@@ -144,6 +146,7 @@ impl Station {
             queue,
             sync,
             passwords: Arc::new(Passwords::default()),
+            staging: Arc::new(staging.path().to_path_buf()),
         };
         let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = http.local_addr().unwrap();
@@ -161,6 +164,7 @@ impl Station {
             db,
             library,
             _state_dir: state_dir,
+            staging,
             _engine: engine,
             state,
             api,
@@ -246,6 +250,24 @@ impl Client {
 
     async fn send(&self, method: Method, path: &str, body: Value) -> (StatusCode, Value) {
         self.request(method, path, Some(body)).await
+    }
+
+    /// Sends a chunk of an upload.
+    async fn put_bytes(&self, path: &str, bytes: Vec<u8>) -> (StatusCode, Value) {
+        let mut request = self
+            .http
+            .put(format!("{}{path}", self.base))
+            .header("content-type", "application/octet-stream")
+            .body(bytes);
+        if let Some(cookie) = &self.cookie {
+            request = request
+                .header("cookie", cookie)
+                .header("x-requested-with", "test");
+        }
+        let response = request.send().await.unwrap();
+        let status = response.status();
+        let value = response.json().await.unwrap_or(Value::Null);
+        (status, value)
     }
 }
 
@@ -921,6 +943,7 @@ async fn web_ui_routes() {
     let roots = heron_librarian::journal::Roots {
         library: station.library.path().to_path_buf(),
         incoming: station.library.path().join(".incoming"),
+        staging: station.staging.path().to_path_buf(),
     };
     let librarian = heron_librarian::tasks::TaskRunner::new(
         pool.clone(),
@@ -1758,6 +1781,7 @@ async fn track_details_labels_programming_and_tags() {
     let roots = heron_librarian::journal::Roots {
         library: station.library.path().to_path_buf(),
         incoming: station.library.path().join(".incoming"),
+        staging: station.staging.path().to_path_buf(),
     };
     let librarian = heron_librarian::tasks::TaskRunner::new(
         pool.clone(),
@@ -1807,5 +1831,378 @@ async fn track_details_labels_programming_and_tags() {
         admin.get(&format!("/tracks/{track}")).await["genre"],
         Value::Null
     );
+    station.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn uploads_wait_in_the_buffer_zone_until_imported() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let pool = &station.db.pool;
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+    let roots = heron_librarian::journal::Roots {
+        library: station.library.path().to_path_buf(),
+        incoming: station.library.path().join(".incoming"),
+        staging: station.staging.path().to_path_buf(),
+    };
+    let endpoints = heron_librarian::identify::Endpoints::default();
+    let librarian =
+        heron_librarian::tasks::TaskRunner::new(pool.clone(), roots.clone(), endpoints.clone());
+    let mut stager = heron_librarian::staging::Stager::new(pool.clone(), roots, endpoints);
+
+    let (status, _) = viewer
+        .send(Method::POST, "/staging/groups", json!({"name": "Drop"}))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, group) = admin
+        .send(Method::POST, "/staging/groups", json!({"name": "Drop"}))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{group}");
+    let group_id = group["id"].as_u64().unwrap();
+
+    // Refused: not audio, larger than the limit.
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/staging/uploads",
+            json!({"group_id": group_id, "name": "Drop/notes.txt", "size": 10}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = admin
+        .send(
+            Method::PATCH,
+            "/settings/library",
+            json!({"max_upload_mb": 1}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, refused) = admin
+        .send(
+            Method::POST,
+            "/staging/uploads",
+            json!({"group_id": group_id, "name": "Drop/big.flac", "size": 2 * 1024 * 1024}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    let (status, _) = admin
+        .send(
+            Method::PATCH,
+            "/settings/library",
+            json!({"max_upload_mb": 2048}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // A file sent in chunks; the connection drops after the first.
+    let source = station.staging.path().join("source.wav");
+    write_wav(&source, 10.0, 330.0);
+    let content = std::fs::read(&source).unwrap();
+    std::fs::remove_file(&source).unwrap();
+    let (status, file) = admin
+        .send(
+            Method::POST,
+            "/staging/uploads",
+            json!({"group_id": group_id, "name": "Drop/../Song.wav", "size": content.len()}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{file}");
+    let id = file["id"].as_u64().unwrap();
+    assert_eq!(
+        (file["status"].as_str(), file["received"].as_u64()),
+        (Some("receiving"), Some(0))
+    );
+    let chunk = format!("/staging/uploads/{id}?offset=0");
+    let (status, file) = admin.put_bytes(&chunk, content[..100_000].to_vec()).await;
+    assert_eq!(status, StatusCode::OK, "{file}");
+    assert_eq!(file["received"], 100_000);
+    // Sent again after the drop: refused, the client asks and carries on.
+    let (status, _) = admin.put_bytes(&chunk, content[..100_000].to_vec()).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let file = admin.get(&format!("/staging/uploads/{id}")).await;
+    assert_eq!(file["received"], 100_000);
+    // An incomplete upload never shows as ready.
+    assert!(stager.identify_once().await.unwrap().ready == 0);
+    let buffer = admin.get("/staging").await;
+    assert_eq!(buffer["groups"][0]["files"][0]["status"], "receiving");
+    let (status, file) = admin
+        .put_bytes(
+            &format!("/staging/uploads/{id}?offset=100000"),
+            content[100_000..].to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{file}");
+    assert_eq!(file["status"], "identifying");
+    let staged = station
+        .staging
+        .path()
+        .join(format!("{group_id}/Drop/Song.wav"));
+    assert_eq!(
+        std::fs::read(&staged).unwrap(),
+        content,
+        "complete, byte for byte"
+    );
+
+    // A broken file.
+    let (_, broken) = admin
+        .send(
+            Method::POST,
+            "/staging/uploads",
+            json!({"group_id": group_id, "name": "Drop/broken.mp3", "size": 4096}),
+        )
+        .await;
+    let broken_id = broken["id"].as_u64().unwrap();
+    let (status, _) = admin
+        .put_bytes(
+            &format!("/staging/uploads/{broken_id}?offset=0"),
+            vec![0x5a; 4096],
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Identified (no AcoustID key: its own tags) and checked.
+    assert_eq!(stager.identify_once().await.unwrap().ready, 2);
+    let buffer = viewer.get("/staging").await;
+    let files = buffer["groups"][0]["files"].as_array().unwrap().clone();
+    let song = files.iter().find(|f| f["id"] == id).unwrap();
+    assert_eq!(song["status"], "ready", "{song}");
+    assert_eq!(
+        song["planned_path"],
+        "Unknown Artist/Unknown Album/Song.wav"
+    );
+    assert_eq!(song["identification"]["status"], "off");
+    assert_eq!(song["flags"], json!([]));
+    let broken = files.iter().find(|f| f["id"] == broken_id).unwrap();
+    assert_eq!(broken["flags"].as_array().unwrap().len(), 1, "{broken}");
+    let response = reqwest::Client::new()
+        .get(format!("{}/staging/files/{id}/audio", admin.base))
+        .header("cookie", admin.cookie.clone().unwrap())
+        .header("range", "bytes=0-3")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(&response.bytes().await.unwrap()[..], b"RIFF");
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            &format!("/staging/files/{broken_id}/choice"),
+            json!({"kind": "release", "release_id": "x", "recording_id": "y"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "not a candidate");
+
+    // Discarded: it never reaches the library.
+    let (status, discarded) = admin
+        .send(
+            Method::POST,
+            "/staging/discard",
+            json!({"file_ids": [broken_id]}),
+        )
+        .await;
+    assert_eq!(
+        (status, discarded["discarded"].as_u64()),
+        (StatusCode::OK, Some(1))
+    );
+    assert!(
+        !station
+            .staging
+            .path()
+            .join(format!("{group_id}/Drop/broken.mp3"))
+            .exists()
+    );
+
+    // Imported, as a batch.
+    let (status, task) = admin
+        .send(
+            Method::POST,
+            "/staging/import",
+            json!({"file_ids": [id, broken_id]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{task}");
+    assert!(librarian.run_next().await.unwrap());
+    let task = admin.get(&format!("/library/tasks/{}", task["id"])).await;
+    assert_eq!(task["report"]["done"], 1, "{task}");
+    assert_eq!(
+        task["report"]["skipped"].as_array().unwrap().len(),
+        1,
+        "the discarded one"
+    );
+    assert_eq!(
+        std::fs::read(
+            station
+                .library
+                .path()
+                .join("Unknown Artist/Unknown Album/Song.wav")
+        )
+        .unwrap(),
+        content
+    );
+    assert!(
+        admin.get("/staging").await["groups"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let batches = admin.get("/library/batches").await;
+    assert_eq!(batches[0]["kind"], "import");
+    station.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleted_tracks_leave_the_queue_and_go_to_the_trash() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let pool = &station.db.pool;
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+    let roots = heron_librarian::journal::Roots {
+        library: station.library.path().to_path_buf(),
+        incoming: station.library.path().join(".incoming"),
+        staging: station.staging.path().to_path_buf(),
+    };
+    let librarian = heron_librarian::tasks::TaskRunner::new(
+        pool.clone(),
+        roots,
+        heron_librarian::identify::Endpoints::default(),
+    );
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/queue",
+            json!({"autofill": true, "min_queued": 3}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let on_air = eventually("a track on air", Duration::from_secs(10), || async {
+        let player = admin.get("/player").await;
+        player["decks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|deck| deck["on_air"] == true)
+            .and_then(|deck| deck["entry"]["track"]["track_id"].as_u64())
+    })
+    .await;
+    let queue = eventually("three waiting tracks", Duration::from_secs(10), || async {
+        let queue = admin.get("/queue").await;
+        (queue.as_array().unwrap().len() >= 3).then_some(queue)
+    })
+    .await;
+    let queued = waiting_tracks(&queue)[2];
+    let missing = *station
+        .tracks
+        .iter()
+        .find(|&&id| id != on_air && !waiting_tracks(&queue).contains(&id))
+        .unwrap();
+    sqlx::query("UPDATE tracks SET missing_since = NOW(6) WHERE id = ?")
+        .bind(missing)
+        .execute(pool)
+        .await
+        .unwrap();
+    let playing: u64 = eventually("the play on air", Duration::from_secs(5), || async {
+        let history = admin.get("/history").await;
+        history.as_array().unwrap().iter().find_map(|play| {
+            (play["track_id"] == on_air && play["ended_at_unix_ms"].is_null())
+                .then(|| play["id"].as_u64())
+                .flatten()
+        })
+    })
+    .await;
+
+    let deleting = json!({"track_ids": [on_air, queued, missing]});
+    let (status, _) = viewer
+        .send(Method::POST, "/tracks/delete", deleting.clone())
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, task) = admin.send(Method::POST, "/tracks/delete", deleting).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{task}");
+    assert!(librarian.run_next().await.unwrap());
+    let task = admin.get(&format!("/library/tasks/{}", task["id"])).await;
+    assert_eq!(task["report"]["done"], 3, "{task}");
+
+    // Out of the library and the queue; the track on air plays to its end.
+    let tracks = admin.get("/tracks").await;
+    assert_eq!(tracks["total"], 2);
+    eventually(
+        "the deleted track out of the queue",
+        Duration::from_secs(8),
+        || async { (!waiting_tracks(&admin.get("/queue").await).contains(&queued)).then_some(()) },
+    )
+    .await;
+    eventually(
+        "the play on air to finish",
+        Duration::from_secs(10),
+        || async {
+            let history = admin.get("/history").await;
+            history
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|play| play["id"] == playing && !play["end_reason"].is_null())
+                .map(|play| assert_eq!(play["end_reason"], "finished", "{play}"))
+        },
+    )
+    .await;
+
+    // In the trash, until restored.
+    let trash = viewer.get("/library/trash").await;
+    assert_eq!(trash["total"], 3);
+    assert_eq!(trash["trash_days"], 30);
+    let item = &trash["items"].as_array().unwrap()[0];
+    let batch = item["batch_id"].as_u64().unwrap();
+    assert!(item["purge_at_unix_ms"].as_i64() > item["deleted_at_unix_ms"].as_i64());
+    let detail = admin.get(&format!("/tracks/{queued}")).await;
+    assert!(detail["deleted_at_unix_ms"].is_i64(), "{detail}");
+    let (status, task) = admin
+        .request(
+            Method::POST,
+            &format!("/library/trash/{batch}/restore"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{task}");
+    assert!(librarian.run_next().await.unwrap());
+    assert_eq!(viewer.get("/library/trash").await["total"], 0);
+    assert_eq!(admin.get("/tracks").await["total"], 5);
+    let path: String = sqlx::query_scalar("SELECT path FROM tracks WHERE id = ?")
+        .bind(queued)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(station.library.path().join(path).is_file());
+
+    // Emptying the trash is for admins: here, deleted again and purged.
+    let (_, task) = admin
+        .send(
+            Method::POST,
+            "/tracks/delete",
+            json!({"track_ids": [queued]}),
+        )
+        .await;
+    assert!(librarian.run_next().await.unwrap());
+    assert_eq!(
+        admin.get(&format!("/library/tasks/{}", task["id"])).await["report"]["done"],
+        1
+    );
+    let (status, _) = viewer
+        .request(Method::POST, "/library/trash/empty", None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, task) = admin
+        .request(Method::POST, "/library/trash/empty", None)
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(librarian.run_next().await.unwrap());
+    let task = admin.get(&format!("/library/tasks/{}", task["id"])).await;
+    assert_eq!(task["purge"]["tracks"], 1, "{task}");
+    let (status, _) = admin
+        .request(Method::GET, &format!("/tracks/{queued}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     station.stop().await;
 }

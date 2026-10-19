@@ -35,22 +35,23 @@ See [Library management](library.md).
 
 | Table | Columns |
 |---|---|
-| `library_batches` | id, kind (import, organize, undo, review: a release picked on the review screen, edit: tags edited from the browser), undoes (the batch an undo reverts), created_at, finished_at |
-| `library_moves` | id, batch_id, track_id, from_root (incoming, library), from_path, to_path, method (rename, copy), temp_path, content_hash (copies), status (pending, moved, done, abandoned, undone), error — the journal, written before a file is touched |
+| `library_batches` | id, kind (import, organize, undo, review: a release picked on the review screen, edit: tags edited from the browser, delete, purge), undoes (the batch an undo reverts), created_at, finished_at |
+| `library_moves` | id, batch_id, track_id, from_root (incoming, library, staging), from_path, to_path, method (rename, copy), temp_path, content_hash (copies), status (pending, moved, done, abandoned, undone), error — the journal, written before a file is touched |
 | `track_tag_changes` | id, track_id, move_id, kind (tags: identification's, fields: edited from the browser), previous and applied tags (JSON), cover_embedded, restore (rebuilds the previous file byte for byte from the one written), created_at, undone_at |
-| `library_tasks` | id, kind (organize_plan, organize_apply, undo, review_apply, artist_relations, edit_tags, musicbrainz_details), params (JSON, the request), status (pending, running, done, failed), result (JSON: the dry run's moves or the batch report), error, requested_by, created_at, started_at, finished_at — work the API asks of `heron-librarian` |
+| `library_tasks` | id, kind (organize_plan, organize_apply, undo, review_apply, artist_relations, edit_tags, musicbrainz_details, staging_import, delete, empty_trash), params (JSON, the request), status (pending, running, done, failed), result (JSON: the dry run's moves or the batch report), error, requested_by, created_at, started_at, finished_at — work the API asks of `heron-librarian` |
 
 ## Buffer zone and trash
 
-Sketch, defined in [M5c](roadmap/m5c-track-management.md).
+See [Library management](library.md#the-buffer-zone).
 
 | Table | Columns |
 |---|---|
-| `staged_files` | id, group_id (the files of one upload or one incoming folder), source (upload, incoming), staged_path, original_name, size, content_hash, uploaded_by, status (receiving, identifying, ready, importing, imported, discarded, failed), tags (JSON: the file's own), duration_ms, identification (status, reason, score, candidates, chosen release), planned_path, duplicate_of_track_id, error, created_at |
-| `tracks` (added) | deleted_at (in the trash until purged) |
-| `library_batches` (added) | kind `delete`, `purge` |
-| `library_moves` (added) | from_root `staging`, `trash` |
-| `library_tasks` (added) | kind `staging_import`, `delete`, `empty_trash` (restoring is an `undo`) |
+| `staged_groups` | id, source (upload, incoming), name, created_by, created_at — the files of one upload or one incoming folder, identified together |
+| `staged_files` | id, group_id, staged_path (relative to the buffer folder), original_name, size, content_hash, status (receiving, identifying, ready, importing, imported, discarded, failed), tags (the file's own), duration_ms, has_cover, chromaprint, identification (JSON: status identified, needs_review or off, reason, score, MBIDs, candidates), choice (JSON: a release picked by hand, or own tags), applied_tags, planned_path, flags (JSON), duplicate_of_track_id, duplicate_of_staged_id, track_id (once imported), error, uploaded_by, created_at, updated_at |
+| `tracks` (added) | deleted_at (in the trash until purged; also marked missing) |
+| `track_fingerprints` (added) | chromaprint_hash (to find the same audio) |
+
+Library batches gain the kinds `delete` and `purge`, moves the origin `staging` (the trash is in the library, `.heron-trash/`), and library tasks the kinds `staging_import`, `delete` and `empty_trash` (restoring is an `undo`).
 
 ## Categories
 
@@ -144,6 +145,7 @@ tracks 1──* analysis_jobs
 tracks 1──0..1 track_fingerprints, track_identifications, track_waveforms, track_musicbrainz, track_programming
 tracks *──* labels            (through track_labels)
 library_batches 1──* library_moves 1──0..1 track_tag_changes *──1 tracks
+staged_groups 1──* staged_files *──0..1 tracks
 tracks *──* categories        (through track_categories, with weight)
 tracks *──* artists           (through track_artists)
 artists 1──* artist_names

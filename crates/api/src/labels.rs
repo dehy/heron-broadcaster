@@ -58,7 +58,8 @@ impl LabelInput {
 }
 
 const SELECT: &str = "SELECT l.id, l.name, l.color,
-           (SELECT COUNT(*) FROM track_labels tl WHERE tl.label_id = l.id) AS tracks
+           (SELECT COUNT(*) FROM track_labels tl JOIN tracks t ON t.id = tl.track_id
+            WHERE tl.label_id = l.id AND t.deleted_at IS NULL) AS tracks
     FROM labels l";
 
 fn conflict(error: sqlx::Error) -> ApiError {

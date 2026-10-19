@@ -35,6 +35,8 @@ services:
   # Applies the database migrations on startup, and feeds the engine.
   # Create the first admin with
   # `docker compose exec heron-api heron-api user add admin --role admin`.
+  # It writes uploads into the buffer zone, shared with heron-librarian:
+  # both run as HERON_LIBRARIAN_USER, the owner of that folder.
   heron-api:
     build:
       context: .
@@ -42,16 +44,20 @@ services:
       target: heron-api
     image: ghcr.io/dehy/heron-api:${HERON_VERSION:-latest}
     restart: unless-stopped
+    user: ${HERON_LIBRARIAN_USER:-10001:10001}
     environment:
       <<: *rust-env
       HERON_DATABASE_URL: *database-url
       HERON_ENGINE_URL: http://heron-engine:50051
       HERON_LIBRARY_DIR: /music
+      HERON_STAGING_DIR: /staging
       HERON_SCAN_INTERVAL: ${HERON_SCAN_INTERVAL:-3600}
       HERON_LIBRARY_WATCH: ${HERON_LIBRARY_WATCH:-true}
     volumes:
       # Read-only: only heron-librarian writes to the library.
       - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
+      # Uploads wait there until they are imported.
+      - ${HERON_STAGING_FOLDER:-./data/staging}:/staging
     depends_on:
       mariadb:
         condition: service_healthy
@@ -74,8 +80,10 @@ services:
       heron-api:
         condition: service_healthy
 
-  # Files dropped into the incoming folder are identified, tagged and filed
-  # into the library. The only service with write access to the library.
+  # New files (uploads, and files dropped into the incoming folder) wait in
+  # the buffer zone, identified, until someone imports them; they are then
+  # tagged and filed into the library. Deleted tracks go to its trash. The
+  # only service with write access to the library.
   # It runs as the owner of your music folder: set HERON_LIBRARIAN_USER to
   # `$(id -u):$(id -g)` of that owner. Reorganize and undo with
   # `docker compose exec heron-librarian heron-librarian --help`.
@@ -92,10 +100,12 @@ services:
       HERON_DATABASE_URL: *database-url
       HERON_LIBRARY_DIR: /music
       HERON_INCOMING_DIR: /incoming
+      HERON_STAGING_DIR: /staging
       HERON_INCOMING_WATCH: ${HERON_LIBRARY_WATCH:-true}
     volumes:
       - ${HERON_MUSIC_DIR:-./data/music}:/music
       - ${HERON_INCOMING_FOLDER:-./data/incoming}:/incoming
+      - ${HERON_STAGING_FOLDER:-./data/staging}:/staging
     depends_on:
       # Waits for the API so the schema is migrated first.
       heron-api:

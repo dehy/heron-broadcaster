@@ -1439,3 +1439,28 @@ ul.steps .bar {
   gap: 0.75rem;
   align-items: end;
 }
+
+/* Buffer zone ------------------------------------------------------------ */
+
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 1.25rem 1rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.dropzone.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+.cover-thumb {
+  width: 96px;
+  height: 96px;
+  flex: none;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--surface-2);
+}

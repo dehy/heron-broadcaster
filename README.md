@@ -6,17 +6,17 @@ The name comes from "air on" sounding like *héron*: keeping the air on, 24/7.
 
 ![The On air page: decks A and B, the next tracks, levels, the FX player, outputs and the engine's state](docs/images/on-air.png)
 
-> **Status:** early development, but it plays. Heron imports and analyzes a music library, files new music into it, plays a queue with crossfades to Icecast servers, picks the music with categories, clocks and a weekly schedule, and is operated from a web interface in English or French. Next: 24/7 reliability (M3), track details and management in the browser (M5b, M5c), webhooks (M7) and audio processing (M8, M9). See the [roadmap](docs/roadmap/README.md).
+> **Status:** early development, but it plays. Heron imports and analyzes a music library, takes new music by upload or through an incoming folder and files it once you import it, plays a queue with crossfades to Icecast servers, picks the music with categories, clocks and a weekly schedule, and is operated from a web interface in English or French. Next: 24/7 reliability (M3), webhooks (M7) and audio processing (M8, M9). See the [roadmap](docs/roadmap/README.md).
 
 Heron runs on Linux, amd64 and arm64, down to a Raspberry Pi.
 
 ## What it does today
 
 - **Library:** watches your music folder (MP3, AAC and ALAC in M4A, FLAC, Ogg Vorbis, WAV, AIFF) and analyzes every track: loudness, true peak, silences at both ends, where the next track can start, a waveform. See [Import and analysis](docs/analysis.md).
-- **Incoming folder:** new files are identified (AcoustID, MusicBrainz), tagged and filed as `Artist/Album/01 Title.ext`; doubtful matches wait for review. Reorganizing the library is a dry run first, journaled, and can be undone. See [Library management](docs/library.md).
+- **New music and deletion:** files uploaded from the browser (resumable, folders included) or dropped into the incoming folder wait in a buffer zone, identified (AcoustID, MusicBrainz) and checked for duplicates and unplayable files, until you import them; they are then tagged and filed as `Artist/Album/01 Title.ext`. Deleted tracks go to a trash they can be restored from for 30 days. Reorganizing the library is a dry run first, journaled, and can be undone. See [Library management](docs/library.md).
 - **Playout:** two decks with crossfades or fixed overlaps, Gap Killer, loudness normalization, an FX player for jingles over the music, a fallback folder, MP3 to one or more Icecast servers with track metadata. See [Audio engine](docs/audio-engine.md) and [Encoders and outputs](docs/outputs.md).
 - **Rotation:** categories, clocks of slots, a weekly schedule, separation rules (title, artist, album) relaxed step by step when the library runs short, artists with several names, restrictions (dayparting, date ranges, sequences) that are never relaxed, and a selection log that explains every pick. A simulation checks a day or a week ahead. See [Rotation](docs/rotation.md).
-- **Web interface:** on air, queue, history, tracks with their waveform and cue points, artists, clocks, schedule, restrictions, outputs and settings; live updates, light and dark themes, English and French, from phone width up. Viewer, operator and admin roles. See [Web UI](docs/web.md).
+- **Web interface:** on air, queue, history, tracks with their waveform, cue points, details, labels and tags, the buffer and the trash, artists, clocks, schedule, restrictions, outputs and settings; live updates, light and dark themes, English and French, from phone width up. Viewer, operator and admin roles. See [Web UI](docs/web.md).
 - **API:** everything the web interface does goes through a documented HTTP and WebSocket API (OpenAPI), with API tokens for scripts. See [API and control plane](docs/api.md).
 
 ## Screenshots
@@ -36,7 +36,7 @@ Requirements: Docker with Compose v2.
 
 ```sh
 cp .env.example .env              # then change the passwords
-mkdir -p data/music data/fallback data/incoming # or point HERON_MUSIC_DIR, … elsewhere
+mkdir -p data/music data/fallback data/incoming data/staging # or point HERON_MUSIC_DIR, … elsewhere
 docker compose up -d --wait       # pulls the images from ghcr.io/dehy
 docker compose exec heron-api heron-api user add admin --role admin   # asks for a password
 ```
@@ -67,7 +67,7 @@ Then `docker compose pull && docker compose up -d --wait`. Setting `HERON_VERSIO
 
 Point `HERON_MUSIC_DIR` at your music: new and changed files are picked up automatically, and the **Tracks** page shows them as they are analyzed. See [Import and analysis](docs/analysis.md).
 
-Drop new files into `HERON_INCOMING_FOLDER` (`data/incoming`): `heron-librarian` identifies them (with your station's AcoustID key, in **Settings**), tags them and files them into the library. It never overwrites a file, and reorganizes your existing library only when you ask, after a dry run. Set `HERON_LIBRARIAN_USER` to the owner of your music (`id -u`:`id -g`), the only user Heron writes as. See [Library management](docs/library.md).
+Upload new files from the web interface (*Buffer*), or drop them into `HERON_INCOMING_FOLDER` (`data/incoming`): they wait in the buffer zone (`HERON_STAGING_FOLDER`, `data/staging`), identified by `heron-librarian` (with your station's AcoustID key, in **Settings**) and checked for duplicates, until you import them; they are then tagged and filed into the library as `Artist/Album/01 Title.ext`. Deleted tracks go to a trash they can be restored from for 30 days. Heron never overwrites a file, and reorganizes your existing library only when you ask, after a dry run. Set `HERON_LIBRARIAN_USER` to the owner of your music (`id -u`:`id -g`), the only user Heron writes as. See [Library management](docs/library.md).
 
 To try it without your own music, generate a synthetic library (uses ffmpeg in Docker):
 
@@ -101,8 +101,8 @@ curl -b cookies -X POST -H 'X-Requested-With: curl' $api/player/skip
 | Service | Role | Port (inside the network) |
 |---|---|---|
 | `heron-web` | Web interface, proxies `/api` to `heron-api` | 80, published on `HERON_HTTP_PORT` (8000) |
-| `heron-api` | HTTP and WebSocket API, migrations, library scanner, queue manager, rotation | 8080 |
-| `heron-librarian` | Incoming folder, identification, tags, library layout | 8083 |
+| `heron-api` | HTTP and WebSocket API, migrations, library scanner, queue manager, rotation, uploads | 8080 |
+| `heron-librarian` | Incoming folder, buffer zone, identification, tags, library layout, trash | 8083 |
 | `heron-analyzer` | Track analysis workers | 8082 |
 | `heron-engine` | Real-time playout, encoders, outputs | 8081, gRPC control on 50051 |
 | `mariadb` | Database | 3306 |

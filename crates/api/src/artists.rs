@@ -301,7 +301,8 @@ async fn artists(pool: &MySqlPool, ids: &[u64]) -> ApiResult<Vec<Artist>> {
     }
     let mut query = sqlx::QueryBuilder::new(
         "SELECT a.id, a.name, a.musicbrainz_id,
-                (SELECT COUNT(*) FROM track_artists ta WHERE ta.artist_id = a.id)
+                (SELECT COUNT(*) FROM track_artists ta JOIN tracks t ON t.id = ta.track_id
+                 WHERE ta.artist_id = a.id AND t.deleted_at IS NULL)
          FROM artists a WHERE a.id IN ",
     );
     push_ids(&mut query, ids);

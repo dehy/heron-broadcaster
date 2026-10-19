@@ -3,7 +3,9 @@
 //! `heron-librarian`: library management service and its command line.
 //!
 //! Without a subcommand, it finishes operations interrupted by a crash,
-//! then imports files dropped into the incoming folder until stopped. The
+//! then moves files dropped into the incoming folder into the buffer zone,
+//! identifies the files waiting there and runs the library tasks asked
+//! through the API (imports, deletions, …) until stopped. The
 //! subcommands reorganize the library (after a dry run), undo a batch and
 //! show what needs review; the same work asked through the API (the web
 //! UI) runs as library tasks. It never applies migrations: `heron-api` owns
@@ -21,6 +23,7 @@ use heron_librarian::import::{self, Importer};
 use heron_librarian::journal::{self, Roots};
 use heron_librarian::layout::Layout;
 use heron_librarian::organize;
+use heron_librarian::staging::{self, Stager};
 use heron_librarian::tasks::TaskRunner;
 use heron_library::LibraryLock;
 use heron_service::LogArgs;
@@ -71,7 +74,17 @@ struct Cli {
     )]
     incoming_dir: PathBuf,
 
-    /// Seconds a file must stay unmodified before it is imported.
+    /// The buffer zone, where new files wait until they are imported
+    /// (read-write, shared with heron-api).
+    #[arg(
+        long,
+        env = "HERON_STAGING_DIR",
+        default_value = "/staging",
+        global = true
+    )]
+    staging_dir: PathBuf,
+
+    /// Seconds a file must stay unmodified before it moves into the buffer zone.
     #[arg(long, env = "HERON_IMPORT_SETTLE", default_value_t = 5)]
     import_settle: u64,
 
@@ -152,11 +165,18 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let roots = Roots {
         library: cli.library_dir.clone(),
         incoming: cli.incoming_dir.clone(),
+        staging: cli.staging_dir.clone(),
     };
 
     // Finish what a crash interrupted before doing anything else.
     let lock = LibraryLock::acquire(&pool, SERVICE).await?;
-    let recovered = journal::recover(&pool, &roots).await;
+    let recovered = match journal::recover(&pool, &roots).await {
+        Ok(_) => staging::recover(&pool, &roots)
+            .await
+            .map(|_| ())
+            .map_err(anyhow::Error::from),
+        Err(error) => Err(error.into()),
+    };
     lock.release().await?;
     recovered?;
 
@@ -189,24 +209,22 @@ async fn serve(cli: &Cli, pool: MySqlPool, roots: Roots) -> anyhow::Result<()> {
     };
     let settings = import::load_settings(&pool).await?;
     if settings.acoustid_key.is_none() {
-        tracing::info!("no AcoustID key set: incoming files are filed using their own tags");
+        tracing::info!("no AcoustID key set: new files keep their own tags");
     }
     tracing::info!(
         library = %roots.library.display(),
         incoming = %roots.incoming.display(),
-        "watching the incoming folder"
+        staging = %roots.staging.display(),
+        "watching the incoming folder and the buffer zone"
     );
 
     let (stop, stopped) = tokio::sync::watch::channel(false);
     let tasks = TaskRunner::new(pool.clone(), roots.clone(), endpoints.clone());
     let running_tasks = tokio::spawn(tasks.run(stopped.clone()));
-    let importer = Importer::new(
-        pool.clone(),
-        roots,
-        endpoints,
-        Duration::from_secs(cli.import_settle),
-    );
+    let stager = Stager::new(pool.clone(), roots.clone(), endpoints);
+    let importer = Importer::new(pool.clone(), roots, Duration::from_secs(cli.import_settle));
     let importing = tokio::spawn(importer.run(
+        stager,
         Duration::from_secs(cli.incoming_interval),
         cli.incoming_watch,
         stopped,

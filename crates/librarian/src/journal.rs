@@ -18,6 +18,11 @@
 //!    `done` after a rename).
 //! 4. Remove the original of a copy (`done`).
 //!
+//! A move into the trash (`.heron-trash/` at the library root) marks the
+//! track deleted in step 3, and a move out of it restores the track, so a
+//! track is never in the trash without its file, or out of it with its
+//! file still there.
+//!
 //! Callers hold the [`heron_library::LibraryLock`] around each operation.
 //!
 //! A tag write also records how to rebuild the file as it was
@@ -27,7 +32,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use heron_analysis::Chromaprint;
-use heron_core::library::FieldValues;
+use heron_core::library::{FieldValues, in_trash};
 use heron_core::{FileStamp, LibraryPath};
 use heron_library::Tags;
 use heron_library::tags::{self, Cover};
@@ -37,11 +42,13 @@ use sqlx::{MySqlPool, Row};
 use crate::fsops;
 use crate::restore::{self, Delta};
 
-/// The library and the incoming folder, as mounted in this container.
+/// The library, the incoming folder and the buffer zone, as mounted in
+/// this container.
 #[derive(Clone, Debug)]
 pub struct Roots {
     pub library: PathBuf,
     pub incoming: PathBuf,
+    pub staging: PathBuf,
 }
 
 /// Where a file comes from. Paths are relative to their root.
@@ -49,6 +56,8 @@ pub struct Roots {
 pub enum Origin {
     Incoming(LibraryPath),
     Library(LibraryPath),
+    /// The buffer zone.
+    Staging(LibraryPath),
 }
 
 impl Origin {
@@ -56,26 +65,33 @@ impl Origin {
         match self {
             Self::Incoming(_) => "incoming",
             Self::Library(_) => "library",
+            Self::Staging(_) => "staging",
+        }
+    }
+
+    fn from_stored(root: &str, path: LibraryPath) -> Self {
+        match root {
+            "incoming" => Self::Incoming(path),
+            "staging" => Self::Staging(path),
+            _ => Self::Library(path),
         }
     }
 
     fn path(&self) -> &LibraryPath {
         match self {
-            Self::Incoming(path) | Self::Library(path) => path,
+            Self::Incoming(path) | Self::Library(path) | Self::Staging(path) => path,
         }
     }
 
     fn resolve(&self, roots: &Roots) -> PathBuf {
-        match self {
-            Self::Incoming(path) => path.resolve(&roots.incoming),
-            Self::Library(path) => path.resolve(&roots.library),
-        }
+        self.path().resolve(self.root(roots))
     }
 
     fn root<'a>(&self, roots: &'a Roots) -> &'a Path {
         match self {
             Self::Incoming(_) => &roots.incoming,
             Self::Library(_) => &roots.library,
+            Self::Staging(_) => &roots.staging,
         }
     }
 }
@@ -84,7 +100,7 @@ impl Origin {
 #[derive(Clone, Debug)]
 pub enum Subject {
     Existing(u64),
-    /// A file imported from the incoming folder: its track is created.
+    /// A file imported from the buffer zone: its track is created.
     New(Box<NewTrack>),
 }
 
@@ -102,6 +118,8 @@ pub struct NewTrack {
 pub enum IdentificationStatus {
     Identified,
     NeedsReview,
+    /// Reviewed: the file keeps its own tags.
+    Kept,
 }
 
 impl IdentificationStatus {
@@ -109,6 +127,7 @@ impl IdentificationStatus {
         match self {
             Self::Identified => "identified",
             Self::NeedsReview => "needs_review",
+            Self::Kept => "kept",
         }
     }
 }
@@ -225,6 +244,10 @@ pub enum BatchKind {
     Review,
     /// Tags edited from the browser.
     Edit,
+    /// Tracks moved to the trash.
+    Delete,
+    /// Tracks removed from the trash for good.
+    Purge,
 }
 
 impl BatchKind {
@@ -235,6 +258,8 @@ impl BatchKind {
             Self::Undo => "undo",
             Self::Review => "review",
             Self::Edit => "edit",
+            Self::Delete => "delete",
+            Self::Purge => "purge",
         }
     }
 }
@@ -643,18 +668,26 @@ async fn finish(
         None
     };
     let mut tx = pool.begin().await?;
-    sqlx::query(
+    // In the trash, a track is deleted and nothing plays it; out of it, it
+    // is back.
+    let query = if in_trash(to.as_str()) {
         "UPDATE tracks SET path = ?, file_hash = ?, file_size = ?, file_mtime_us = ?,
-             missing_since = NULL
-         WHERE id = ?",
-    )
-    .bind(to.as_str())
-    .bind(&hash[..])
-    .bind(stamp.size)
-    .bind(stamp.mtime_us)
-    .bind(track_id)
-    .execute(&mut *tx)
-    .await?;
+             missing_since = COALESCE(missing_since, NOW(6)),
+             deleted_at = COALESCE(deleted_at, NOW(6))
+         WHERE id = ?"
+    } else {
+        "UPDATE tracks SET path = ?, file_hash = ?, file_size = ?, file_mtime_us = ?,
+             missing_since = NULL, deleted_at = NULL
+         WHERE id = ?"
+    };
+    sqlx::query(query)
+        .bind(to.as_str())
+        .bind(&hash[..])
+        .bind(stamp.size)
+        .bind(stamp.mtime_us)
+        .bind(track_id)
+        .execute(&mut *tx)
+        .await?;
     if let Some(details) = &details {
         heron_library::details::save(&mut *tx, track_id, details).await?;
     }
@@ -717,7 +750,9 @@ async fn abandon(pool: &MySqlPool, move_id: u64, reason: &str) -> Result<(), sql
         let from_root: String = row.try_get("from_root")?;
         let created: Option<bool> = row.try_get("created")?;
         // An import's track never had a file: it never existed.
-        if let (Some(track_id), "incoming", Some(true)) = (track_id, from_root.as_str(), created) {
+        if let (Some(track_id), "incoming" | "staging", Some(true)) =
+            (track_id, from_root.as_str(), created)
+        {
             sqlx::query("DELETE FROM tracks WHERE id = ?")
                 .bind(track_id)
                 .execute(&mut *tx)
@@ -733,10 +768,60 @@ async fn abandon(pool: &MySqlPool, move_id: u64, reason: &str) -> Result<(), sql
     tx.commit().await
 }
 
+/// Moves a file that is not a track (a cover, a playlist) within the
+/// library, journaled like a track's. Never replaces a file. Hold the
+/// library lock.
+pub async fn move_loose_file(
+    pool: &MySqlPool,
+    roots: &Roots,
+    batch_id: u64,
+    from: &LibraryPath,
+    to: &LibraryPath,
+) -> Result<(), OpError> {
+    let (from_abs, to_abs) = (from.resolve(&roots.library), to.resolve(&roots.library));
+    if !is_free(pool, roots, to).await? {
+        return Err(OpError::TargetTaken(to.clone()));
+    }
+    let move_id = sqlx::query(
+        "INSERT INTO library_moves (batch_id, from_root, from_path, to_path, method)
+         VALUES (?, 'library', ?, ?, 'rename')",
+    )
+    .bind(batch_id)
+    .bind(from.as_str())
+    .bind(to.as_str())
+    .execute(pool)
+    .await?
+    .last_insert_id();
+    if let Some(parent) = to_abs.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let renamed = {
+        let (from_abs, to_abs) = (from_abs.clone(), to_abs.clone());
+        blocking(move || fsops::rename_no_replace(&from_abs, &to_abs)).await
+    };
+    match renamed {
+        Ok(()) => {
+            if let Some(parent) = to_abs.parent() {
+                fsops::sync_dir(parent);
+            }
+            set_status(pool, move_id, "done", None).await?;
+            Ok(())
+        }
+        Err(error) => {
+            abandon(pool, move_id, &error.to_string()).await?;
+            Err(match error.kind() {
+                ErrorKind::AlreadyExists => OpError::TargetTaken(to.clone()),
+                ErrorKind::NotFound => OpError::SourceMissing,
+                _ => error.into(),
+            })
+        }
+    }
+}
+
 /// Fault injection for the chaos tests: with `HERON_LIBRARIAN_CRASH_AT` set
 /// to `step:n`, the process aborts the `n`th time it reaches `step`, as a
 /// power cut would stop it. Never set outside tests.
-fn crash_point(step: &str) {
+pub(crate) fn crash_point(step: &str) {
     use std::sync::OnceLock;
     use std::sync::atomic::{AtomicU64, Ordering};
     static PLAN: OnceLock<Option<(String, u64)>> = OnceLock::new();
@@ -780,10 +865,7 @@ pub async fn recover(pool: &MySqlPool, roots: &Roots) -> Result<Recovery, OpErro
         let move_id: u64 = row.try_get("id")?;
         let track_id: Option<u64> = row.try_get("track_id")?;
         let from_path = LibraryPath::from_stored(row.try_get("from_path")?);
-        let origin = match row.try_get::<String, _>("from_root")?.as_str() {
-            "incoming" => Origin::Incoming(from_path),
-            _ => Origin::Library(from_path),
-        };
+        let origin = Origin::from_stored(&row.try_get::<String, _>("from_root")?, from_path);
         let to = LibraryPath::from_stored(row.try_get("to_path")?);
         let method: String = row.try_get("method")?;
         let temp: Option<String> = row.try_get("temp_path")?;
@@ -832,6 +914,11 @@ pub async fn recover(pool: &MySqlPool, roots: &Roots) -> Result<Recovery, OpErro
                     remove_original(&from_abs)?;
                     set_status(pool, move_id, "done", None).await?;
                 }
+                recovery.finished += 1;
+            }
+            // A file that is not a track (a cover moved to the trash).
+            (true, None) => {
+                set_status(pool, move_id, "done", None).await?;
                 recovery.finished += 1;
             }
             _ => {

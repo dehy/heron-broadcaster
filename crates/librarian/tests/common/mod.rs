@@ -107,7 +107,10 @@ pub async fn assert_tracks_match_files(pool: &MySqlPool, library: &Path) {
         );
     }
     let missing: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM tracks WHERE missing_since IS NOT NULL")
+        // Tracks in the trash are marked missing on purpose.
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM tracks WHERE missing_since IS NOT NULL AND deleted_at IS NULL",
+        )
             .fetch_one(pool)
             .await
             .unwrap();
@@ -358,12 +361,61 @@ pub fn temp_roots() -> (tempfile::TempDir, heron_librarian::journal::Roots) {
     let roots = heron_librarian::journal::Roots {
         library: dir.path().join("library"),
         incoming: dir.path().join("incoming"),
+        staging: dir.path().join("staging"),
     };
     std::fs::create_dir_all(&roots.library).unwrap();
     std::fs::create_dir_all(&roots.incoming).unwrap();
+    std::fs::create_dir_all(&roots.staging).unwrap();
     (dir, roots)
 }
 
 pub fn path_buf(root: &Path, relative: &str) -> PathBuf {
     LibraryPath::from_stored(relative.to_owned()).resolve(root)
+}
+
+/// Moves the incoming files into the buffer zone, identifies them, then
+/// imports every file that is ready, as the web UI's "import" would.
+pub async fn stage_and_import(
+    pool: &MySqlPool,
+    roots: &heron_librarian::journal::Roots,
+    endpoints: heron_librarian::identify::Endpoints,
+    settle: std::time::Duration,
+) -> (
+    heron_librarian::import::ImportReport,
+    heron_core::library::BatchReport,
+) {
+    let staged = stage(pool, roots, endpoints.clone(), settle).await;
+    let report = import_ready(pool, roots, endpoints).await;
+    (staged, report)
+}
+
+/// Moves the incoming files into the buffer zone and identifies them.
+pub async fn stage(
+    pool: &MySqlPool,
+    roots: &heron_librarian::journal::Roots,
+    endpoints: heron_librarian::identify::Endpoints,
+    settle: std::time::Duration,
+) -> heron_librarian::import::ImportReport {
+    let importer = heron_librarian::import::Importer::new(pool.clone(), roots.clone(), settle);
+    let staged = importer.import_once().await.unwrap();
+    let mut stager = heron_librarian::staging::Stager::new(pool.clone(), roots.clone(), endpoints);
+    stager.identify_once().await.unwrap();
+    staged
+}
+
+/// Imports every file of the buffer zone that is ready.
+pub async fn import_ready(
+    pool: &MySqlPool,
+    roots: &heron_librarian::journal::Roots,
+    endpoints: heron_librarian::identify::Endpoints,
+) -> heron_core::library::BatchReport {
+    let ready: Vec<u64> =
+        sqlx::query_scalar("SELECT id FROM staged_files WHERE status = 'ready' ORDER BY id")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    let settings = heron_librarian::import::load_settings(pool).await.unwrap();
+    heron_librarian::staging::import(pool, roots, &endpoints, &settings, &ready)
+        .await
+        .unwrap()
 }

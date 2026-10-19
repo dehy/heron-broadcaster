@@ -1905,6 +1905,128 @@
         }
       }
     },
+    "/api/v1/library/trash": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Tracks in the trash, most recently deleted first.",
+        "operationId": "list_trash",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1 to 200, 50 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrashPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library/trash/empty": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Purges the whole trash now: the tracks and their files are removed for\ngood; their plays keep their artist and title. Admins.",
+        "operationId": "empty_trash",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library/trash/{batch_id}/restore": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Restores the tracks of a deletion (undoes its batch): their files go\nback where they were, with their analysis, categories and history. A\npath taken since is reported, and that track stays in the trash.\nOperators and admins.",
+        "operationId": "restore_batch",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/live": {
       "get": {
         "tags": [
@@ -3438,6 +3560,389 @@
         }
       }
     },
+    "/api/v1/staging": {
+      "get": {
+        "tags": [
+          "buffer"
+        ],
+        "summary": "The buffer zone: groups with files to import or discard, with their\nidentification, flags and planned paths.",
+        "operationId": "get_buffer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Buffer"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/staging/discard": {
+      "post": {
+        "tags": [
+          "buffer"
+        ],
+        "summary": "Removes files from the buffer zone (uploads in progress too). They never\nreached the library. Files being imported are left alone. Operators and\nadmins.",
+        "operationId": "discard_files",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileSelection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Discarded"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/staging/files/{id}/audio": {
+      "get": {
+        "tags": [
+          "buffer"
+        ],
+        "summary": "A file of the buffer zone, to listen to it. Supports range requests.",
+        "operationId": "get_staged_audio",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "206": {
+            "description": "Part of the file"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/staging/files/{id}/choice": {
+      "post": {
+        "tags": [
+          "buffer"
+        ],
+        "summary": "Imports a file as one of its candidate releases, or with its own tags:\nheron-librarian works out its tags and path again. Operators and admins.",
+        "operationId": "choose",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedFile"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/staging/groups": {
+      "post": {
+        "tags": [
+          "buffer"
+        ],
+        "summary": "Starts an upload: its files are identified together, so the files of an\nalbum agree on their release. Operators and admins.",
+        "operationId": "create_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewGroup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/staging/import": {
+      "post": {
+        "tags": [
+          "buffer"
+        ],
+        "summary": "Imports files ready in the buffer zone: heron-librarian tags them and\nfiles them in the library as one batch, which can be undone. Files that\nare not ready are skipped (see the task's report). Operators and admins.",
+        "operationId": "import_files",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileSelection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/staging/uploads": {
+      "post": {
+        "tags": [
+          "buffer"
+        ],
+        "summary": "Announces a file of an upload: it is created empty, and its content is\nsent in chunks. Refused when it is not audio, when it is larger than\n`max_upload_mb`, or when it would leave less than `min_free_mb` on the\ndisk. Operators and admins.",
+        "operationId": "create_upload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedFile"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/staging/uploads/{id}": {
+      "get": {
+        "tags": [
+          "buffer"
+        ],
+        "summary": "A file of an upload, with the bytes received so far: send the rest from\nthere.",
+        "operationId": "get_upload",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedFile"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "buffer"
+        ],
+        "summary": "Appends a chunk (at most 16 MiB) to a file being uploaded, at `offset`,\nwhich must be the bytes received so far (409 otherwise: ask for the\nfile and carry on from its `received`). With its last byte, the file is\ncomplete and heron-librarian identifies it. Operators and admins.",
+        "operationId": "send_chunk",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Where the chunk goes in the file: the bytes received so far.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagedFile"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/status": {
       "get": {
         "tags": [
@@ -3844,6 +4349,45 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SelectionResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks/delete": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Moves tracks to the trash: heron-librarian moves their files to\n`.heron-trash/` in the library, as one batch. They leave the library,\nrotation, their categories and the queue (a track on air plays to its\nend), and are purged after `trash_days`; until then they can be\nrestored whole. Tracks whose file is missing can be deleted too.\nOperators and admins.",
+        "operationId": "delete_tracks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackSelection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
                 }
               }
             }
@@ -4859,7 +5403,9 @@
           "organize",
           "undo",
           "review",
-          "edit"
+          "edit",
+          "delete",
+          "purge"
         ]
       },
       "BatchReport": {
@@ -4923,6 +5469,43 @@
           "track": {
             "type": "integer",
             "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "Buffer": {
+        "type": "object",
+        "required": [
+          "groups",
+          "max_upload_bytes",
+          "min_free_bytes"
+        ],
+        "properties": {
+          "free_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Free space on the buffer folder's disk.",
+            "minimum": 0
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StagedGroup"
+            },
+            "description": "Groups with files still to import or discard, newest first."
+          },
+          "max_upload_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "min_free_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Uploads are refused below this much free space.",
             "minimum": 0
           }
         }
@@ -5077,6 +5660,48 @@
             "format": "float"
           }
         }
+      },
+      "ChoiceRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "One of the file's candidate releases.",
+            "required": [
+              "release_id",
+              "recording_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "release"
+                ]
+              },
+              "recording_id": {
+                "type": "string"
+              },
+              "release_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Keep the file's own tags.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "own"
+                ]
+              }
+            }
+          }
+        ]
       },
       "ClockInput": {
         "type": "object",
@@ -5473,6 +6098,20 @@
           }
         },
         "additionalProperties": false
+      },
+      "Discarded": {
+        "type": "object",
+        "required": [
+          "discarded"
+        ],
+        "properties": {
+          "discarded": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Files removed from the buffer zone.",
+            "minimum": 0
+          }
+        }
       },
       "EffectivePlayout": {
         "type": "object",
@@ -5914,6 +6553,30 @@
           "exponential"
         ]
       },
+      "FileSelection": {
+        "type": "object",
+        "required": [
+          "file_ids"
+        ],
+        "properties": {
+          "file_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "GroupSource": {
+        "type": "string",
+        "enum": [
+          "upload",
+          "incoming"
+        ]
+      },
       "Label": {
         "type": "object",
         "required": [
@@ -6078,6 +6741,23 @@
             ],
             "description": "See `docs/library.md#layout`."
           },
+          "max_upload_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "1 or more.",
+            "minimum": 0
+          },
+          "min_free_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
           "min_score": {
             "type": [
               "number",
@@ -6091,6 +6771,15 @@
               "boolean",
               "null"
             ]
+          },
+          "trash_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "1 to 3650.",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -6103,7 +6792,10 @@
           "layout",
           "min_score",
           "save_cover",
-          "embed_cover"
+          "embed_cover",
+          "max_upload_mb",
+          "min_free_mb",
+          "trash_days"
         ],
         "properties": {
           "acoustid_key_set": {
@@ -6116,12 +6808,30 @@
           "layout": {
             "type": "string"
           },
+          "max_upload_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Largest file accepted by upload, in MiB.",
+            "minimum": 0
+          },
+          "min_free_mb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Uploads are refused when they would leave less free space on the\nbuffer zone's disk, in MiB.",
+            "minimum": 0
+          },
           "min_score": {
             "type": "number",
             "format": "double"
           },
           "save_cover": {
             "type": "boolean"
+          },
+          "trash_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days deleted tracks stay in the trash.",
+            "minimum": 0
           }
         }
       },
@@ -6222,6 +6932,17 @@
               {
                 "$ref": "#/components/schemas/OrganizePlan",
                 "description": "The moves of a finished dry run (`organize_plan`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "purge": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PurgeReport",
+                "description": "What emptying the trash removed."
               },
               {
                 "type": "null"
@@ -6469,6 +7190,19 @@
         },
         "additionalProperties": false
       },
+      "NewGroup": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "What the files are, for people (`Album 2024`, the dropped folder)."
+          }
+        },
+        "additionalProperties": false
+      },
       "NewToken": {
         "type": "object",
         "required": [
@@ -6487,6 +7221,32 @@
           "name": {
             "type": "string",
             "description": "What the token is for."
+          }
+        },
+        "additionalProperties": false
+      },
+      "NewUpload": {
+        "type": "object",
+        "required": [
+          "group_id",
+          "name",
+          "size"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "The file's path in what was dropped (`Album/01 Song.flac`)."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size in bytes.",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -7089,6 +7849,37 @@
           }
         },
         "additionalProperties": false
+      },
+      "PurgeReport": {
+        "type": "object",
+        "description": "What a purge of the trash did.",
+        "required": [
+          "tracks",
+          "files"
+        ],
+        "properties": {
+          "batch_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`None` when there was nothing to purge.",
+            "minimum": 0
+          },
+          "files": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Files removed from the trash (tracks' files and the files that\nwent with them).",
+            "minimum": 0
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tracks removed for good.",
+            "minimum": 0
+          }
+        }
       },
       "QueueEntry": {
         "type": "object",
@@ -8088,6 +8879,414 @@
           }
         }
       },
+      "StagedChoice": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "One of its candidate releases.",
+            "required": [
+              "release_id",
+              "recording_id",
+              "kind"
+            ],
+            "properties": {
+              "disc": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "release"
+                ]
+              },
+              "recording_id": {
+                "type": "string"
+              },
+              "release_id": {
+                "type": "string"
+              },
+              "track": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The file's own tags.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "own"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What a file of the buffer zone is imported as, when not its\nidentification (as stored in `staged_files.choice`)."
+      },
+      "StagedFile": {
+        "type": "object",
+        "required": [
+          "id",
+          "group_id",
+          "name",
+          "size",
+          "status",
+          "flags",
+          "candidates",
+          "created_at_unix_ms"
+        ],
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewCandidate"
+            },
+            "description": "Releases it may be on, best first."
+          },
+          "choice": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StagedChoice",
+                "description": "Picked by hand: another release, or its own tags."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "duplicate_of_file_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "duplicate_of_track_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StagedFlag"
+            },
+            "description": "Why it should be looked at before it is imported."
+          },
+          "group_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "identification": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StagedIdentificationView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Its path in the upload, or in the incoming folder."
+          },
+          "own_tags": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StagedTags",
+                "description": "The file's own tags."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "planned_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the layout would file it in the library today."
+          },
+          "received": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes received so far, while it is uploaded.",
+            "minimum": 0
+          },
+          "release_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The release it is imported as (its cover is on the Cover Art Archive)."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/StagedStatus"
+          },
+          "tags": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StagedTags",
+                "description": "The tags it gets when imported."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "track_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The track it became.",
+            "minimum": 0
+          },
+          "uploaded_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "StagedFlag": {
+        "type": "string",
+        "description": "Why a file of the buffer zone should be looked at before it is imported.",
+        "enum": [
+          "duplicate_in_library",
+          "duplicate_in_buffer",
+          "same_recording_in_library",
+          "undecodable",
+          "too_short",
+          "unsupported_format"
+        ]
+      },
+      "StagedGroup": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "name",
+          "created_at_unix_ms",
+          "files"
+        ],
+        "properties": {
+          "created_at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StagedFile"
+            }
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/GroupSource"
+          }
+        }
+      },
+      "StagedIdentificationStatus": {
+        "type": "string",
+        "description": "The outcome of identifying a file of the buffer zone.",
+        "enum": [
+          "identified",
+          "needs_review",
+          "off"
+        ]
+      },
+      "StagedIdentificationView": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it needs review."
+          },
+          "recording_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StagedIdentificationStatus"
+          }
+        }
+      },
+      "StagedStatus": {
+        "type": "string",
+        "enum": [
+          "receiving",
+          "identifying",
+          "ready",
+          "importing",
+          "imported",
+          "discarded",
+          "failed"
+        ]
+      },
+      "StagedTags": {
+        "type": "object",
+        "description": "The tags of a file, as read or as they would be written.",
+        "required": [
+          "compilation"
+        ],
+        "properties": {
+          "album": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "album_artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "compilation": {
+            "type": "boolean"
+          },
+          "date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "disc": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "disc_total": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "track": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "track_total": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "StationSettings": {
         "type": "object",
         "description": "The station itself.",
@@ -8472,6 +9671,69 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "Imports files of the buffer zone into the library, as one batch.",
+            "required": [
+              "file_ids",
+              "kind"
+            ],
+            "properties": {
+              "file_ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "staging_import"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Moves tracks to the trash, as one batch (undone to restore them).",
+            "required": [
+              "track_ids",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "delete"
+                ]
+              },
+              "track_ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Purges the whole trash now.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "empty_trash"
+                ]
+              }
+            }
           }
         ],
         "description": "A task, as stored in `library_tasks.params`. The tag is also its `kind`."
@@ -8618,6 +9880,14 @@
                 "items": {
                   "$ref": "#/components/schemas/TrackCategory"
                 }
+              },
+              "deleted_at_unix_ms": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "description": "In the trash since then (purged after `trash_days`)."
               },
               "file": {
                 "$ref": "#/components/schemas/TrackFile"
@@ -9459,6 +10729,69 @@
         },
         "additionalProperties": false
       },
+      "TrashItem": {
+        "type": "object",
+        "required": [
+          "track",
+          "original_path",
+          "deleted_at_unix_ms",
+          "purge_at_unix_ms"
+        ],
+        "properties": {
+          "batch_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The `delete` batch: restoring undoes it.",
+            "minimum": 0
+          },
+          "deleted_at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "original_path": {
+            "type": "string",
+            "description": "Where it was in the library, and goes back to when restored."
+          },
+          "purge_at_unix_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it is purged for good."
+          },
+          "track": {
+            "$ref": "#/components/schemas/TrackSummary"
+          }
+        }
+      },
+      "TrashPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "trash_days"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrashItem"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "trash_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days deleted tracks are kept.",
+            "minimum": 0
+          }
+        }
+      },
       "User": {
         "type": "object",
         "required": [
@@ -9762,7 +11095,11 @@
     },
     {
       "name": "library",
-      "description": "Tracks, their analysis and overrides; review, organization and undo through heron-librarian"
+      "description": "Tracks, their analysis and overrides; review, organization, undo, deletion and the trash through heron-librarian"
+    },
+    {
+      "name": "buffer",
+      "description": "The buffer zone: uploads, and new files waiting to be imported"
     },
     {
       "name": "categories",

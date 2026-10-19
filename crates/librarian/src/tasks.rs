@@ -2,11 +2,14 @@
 
 //! Work asked through the API (`library_tasks`), which cannot write files:
 //! organize dry runs and applies, undos, releases picked on the review
-//! screen, MusicBrainz relationships between artists, tag edits and
-//! MusicBrainz programming details. Tasks run one at a time, in order;
+//! screen, MusicBrainz relationships between artists, tag edits,
+//! MusicBrainz programming details, imports from the buffer zone,
+//! deletions and emptying the trash. Tasks run one at a time, in order;
 //! their results are stored as JSON for the API to show.
 //!
-//! Between tasks, new identified tracks get their MusicBrainz details.
+//! Between tasks, new identified tracks get their MusicBrainz details, and
+//! once an hour the trash is purged of tracks deleted more than
+//! `trash_days` ago.
 
 use std::time::{Duration, Instant};
 
@@ -18,10 +21,12 @@ use crate::identify::{Endpoints, Identifier};
 use crate::journal::Roots;
 use crate::layout::Layout;
 use crate::review::{self, Choice};
-use crate::{edit, import, musicbrainz, organize, relations};
+use crate::{edit, import, musicbrainz, organize, relations, staging, trash};
 
 /// Wait between looks at the table when there is nothing to do.
 const POLL: Duration = Duration::from_secs(1);
+/// How often the trash is purged of expired tracks.
+const PURGE_INTERVAL: Duration = Duration::from_secs(3600);
 
 /// Wait between background MusicBrainz details passes.
 const DETAILS_INTERVAL: Duration = Duration::from_secs(60);
@@ -58,7 +63,12 @@ impl TaskRunner {
             tracing::warn!(%error, "cannot close interrupted library tasks");
         }
         let mut details_due = Instant::now();
+        let mut last_purge: Option<Instant> = None;
         while !*stopped.borrow() {
+            if last_purge.is_none_or(|at| at.elapsed() >= PURGE_INTERVAL) {
+                last_purge = Some(Instant::now());
+                self.purge_expired().await;
+            }
             match self.run_next().await {
                 Ok(true) => continue,
                 Ok(false) => {}
@@ -74,6 +84,20 @@ impl TaskRunner {
                 () = tokio::time::sleep(POLL) => {}
                 _ = stopped.changed() => {}
             }
+        }
+    }
+
+    /// Purges the tracks in the trash for more than `trash_days`.
+    pub async fn purge_expired(&self) {
+        let days = match import::load_settings(&self.pool).await {
+            Ok(settings) => settings.trash_days,
+            Err(error) => {
+                tracing::warn!(%error, "cannot read the library settings");
+                return;
+            }
+        };
+        if let Err(error) = trash::purge(&self.pool, &self.roots, Some(days)).await {
+            tracing::warn!(%error, "cannot purge the trash");
         }
     }
 
@@ -174,6 +198,20 @@ impl TaskRunner {
             TaskRequest::MusicbrainzDetails { all } => {
                 json(musicbrainz::look_up(&self.pool, &self.musicbrainz()?, *all, None).await)
             }
+            TaskRequest::StagingImport { file_ids } => json(
+                staging::import(
+                    &self.pool,
+                    &self.roots,
+                    &self.endpoints,
+                    &settings,
+                    file_ids,
+                )
+                .await,
+            ),
+            TaskRequest::Delete { track_ids } => {
+                json(trash::delete(&self.pool, &self.roots, track_ids).await)
+            }
+            TaskRequest::EmptyTrash => json(trash::purge(&self.pool, &self.roots, None).await),
         }
     }
 

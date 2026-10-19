@@ -257,7 +257,8 @@ impl ListContext {
         query: &mut QueryBuilder<sqlx::MySql>,
         params: &TrackQuery,
     ) -> ApiResult<()> {
-        query.push(" WHERE TRUE");
+        // Tracks in the trash are listed by `/library/trash`.
+        query.push(" WHERE t.deleted_at IS NULL");
         for word in params.q.iter().flat_map(|q| q.split_whitespace()).take(10) {
             let pattern = like_pattern(word);
             // Paths compare as bytes: search case- and accent-insensitively.
@@ -656,6 +657,8 @@ pub struct TrackDetail {
     /// The tempo set by hand, replacing the measured one.
     pub bpm_by_hand: Option<f64>,
     pub musicbrainz: Option<TrackMusicBrainz>,
+    /// In the trash since then (purged after `trash_days`).
+    pub deleted_at_unix_ms: Option<i64>,
     pub analysis: Option<TrackAnalysis>,
     pub overrides: TrackOverrides,
     pub playout: EffectivePlayout,
@@ -695,6 +698,12 @@ async fn get_track(
             .await?
             .flatten();
     let musicbrainz = load_musicbrainz(&state, id).await?;
+    let deleted_at_unix_ms: Option<i64> = sqlx::query_scalar(
+        "SELECT CAST(UNIX_TIMESTAMP(deleted_at) * 1000 AS SIGNED) FROM tracks WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_one(&state.pool)
+    .await?;
     let analysis: Option<TrackAnalysis> = sqlx::query_as(
         "SELECT integrated_lufs, true_peak_db, cue_in_ms, cue_out_ms, fade_out_start_ms,
                 has_internal_silence, CAST(bpm AS DOUBLE) AS bpm,
@@ -728,6 +737,7 @@ async fn get_track(
         file,
         bpm_by_hand,
         musicbrainz,
+        deleted_at_unix_ms,
         analysis,
         overrides,
         playout: EffectivePlayout {

@@ -98,7 +98,8 @@ pub fn check_color(color: Option<&str>) -> ApiResult<Option<String>> {
 }
 
 const SELECT: &str = "SELECT c.id, c.name, c.color,
-           (SELECT COUNT(*) FROM track_categories tc WHERE tc.category_id = c.id) AS tracks,
+           (SELECT COUNT(*) FROM track_categories tc JOIN tracks t ON t.id = tc.track_id
+            WHERE tc.category_id = c.id AND t.deleted_at IS NULL) AS tracks,
            CAST(c.separation AS CHAR)
     FROM categories c";
 
