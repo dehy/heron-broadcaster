@@ -9,18 +9,19 @@
 | **On air** | Decks A and B (track, progress, remaining time, which is on air), master and deck levels, skip, pause and resume, the FX player (play a jingle over the music), the next tracks, outputs and their state, the engine's state | operator |
 | **Queue** | The waiting tracks, the cued one first, with their expected start times; drag to reorder (or use the keyboard: focus the handle, space, arrows, space), play next, remove, clear; add tracks from the library; autofill on or off | operator |
 | **History** | Every play by day, with how it ended (played, skipped…) and for how long | |
-| **Tracks** | The library: search, filters (playable, not analyzed, silent, missing, disabled, needs review), category, sort, pages; queue one track or a selection | operator |
-| **Track** | Waveform with the cue-in, cue-out, where the next track starts and the fades; listen from anywhere, from the cue-in or the ending; drag the points or type them; Gap Killer and crossfade overrides; categories and weights; analysis, file and identification; recent plays | operator |
+| **Tracks** | The library: search, filters (playable, not analyzed, silent, missing, disabled, needs review), category, labels (any, all, none of), never played, not played for N days, added in the last N days, bitrate below, era, mood, sound code; sort by any column, either way; choose the columns (added, last played, plays, bitrate, year, era, BPM, mood, sound code, genre, labels); select tracks, a page or every matching track, then queue them, label them, put them in a category, set their mood, sound code or BPM, or edit their tags | operator |
+| **Track** | Waveform with the cue-in, cue-out, where the next track starts and the fades; listen from anywhere, from the cue-in or the ending; drag the points or type them; Gap Killer and crossfade overrides; categories and weights; labels, era, BPM, mood, sound code and the MusicBrainz details; analysis, file (codec, bitrate, sample rate, channels) and identification; plays; edit its tags | operator |
 | **Artists** | Artists and their names (search any name); rename, move a name to another artist or split it off, merge artists, mark artists similar, restrict an artist; the suggestions to review, and the MusicBrainz relationships lookup | operator |
 | **Clocks** | Each clock's slots, reordered by dragging (or with the keyboard), with their category, selection method, enforce-rules flag and separation overrides; whether the clock loops across hours; the hour (or the loop) drawn as it will sound, categories running short, an hour simulated | operator |
 | **Schedule** | The week, hour by hour: pick a clock and click or drag over the hours, in station time | operator |
-| **Categories** | Create, rename, recolor and delete categories; the separation windows they override | operator |
+| **Labels** | Create, rename, recolor, merge and delete labels, with their tracks | operator |
+| **Categories** | Create, rename, recolor and delete categories; the separation windows they override; fill a category from a label | operator |
 | **Restrictions** | Dayparting, date ranges and sequences on tracks, artists and categories; turn them on and off | operator |
 | **Selection log** | Each track rotation picked: clock and slot, rules held or relaxed, and the details (windows, tracks held back, candidates); a simulation of the next day or week, checked rule by rule | operator (simulations) |
-| **Review & organize** | Identifications waiting for review (apply a candidate release, or keep the file's tags); organize the library after a dry run; every batch of file changes, with undo | operator (review), admin (organize, undo) |
+| **Review & organize** | Identifications waiting for review (apply a candidate release, or keep the file's tags); organize the library after a dry run; every batch of file changes (tag edits included), with undo | operator (review), admin (organize, undo) |
 | **Crossfade & loudness** | Station crossfade and loudness settings, with a live preview of the transition between two tracks (the one on air and the next by default) as you change them | admin |
 | **Outputs** | Outputs (Icecast for now) and encoder profiles (MP3 for now), with each output's live state: connected, reconnecting and why, bytes sent | admin |
-| **Settings** | Autofill, rotation (separation windows, fallback category, weights), the station's time zone, library layout and identification (AcoustID key), analysis thresholds | operator (queue, rotation), admin (others) |
+| **Settings** | Autofill, rotation (separation windows, fallback category, weights), the station's time zone, programming (what counts as a play, eras, mood and sound code scales) and the MusicBrainz details lookup, library layout and identification (AcoustID key), analysis thresholds | operator (queue, rotation, programming), admin (others) |
 | **Users** | Users and roles, passwords, enable or disable | admin |
 | **Account** | Theme, language, password, API tokens | |
 
@@ -85,6 +86,5 @@ Open a page with `?lang=pseudo` to check translations ([Pseudo-locale](#pseudo-l
 
 - The FX player and transport act at once; there is no undo for a skip.
 - Only Icecast outputs and MP3 profiles have forms: the other kinds arrive with their encoders and sinks in [M10](roadmap/m10-sinks-live-dj.md) (the engine refuses them until then).
-- Tags cannot be edited in the browser yet: identification or the files' own tags decide them. Editing them comes with [M5b](roadmap/m5b-track-details-tags.md), with labels and the track details (date added, last played, plays, bitrate).
 - Files cannot be uploaded or tracks deleted from the browser yet: that comes with [M5c](roadmap/m5c-track-management.md), with a buffer zone to check files before importing them and a trash.
 - The clock editor draws each slot with its category's average length: real tracks vary, so the hour as it sounds drifts from the drawing; simulate it to see real picks.

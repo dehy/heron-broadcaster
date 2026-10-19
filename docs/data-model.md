@@ -16,14 +16,18 @@ The schema lives in `migrations/`; this page summarizes it. Tables not used yet 
 
 ## Track details and labels
 
-Sketch, defined in [M5b](roadmap/m5b-track-details-tags.md).
+See [M5b](roadmap/m5b-track-details-tags.md). The date a track was added is `tracks.created_at` (the scanner creates the track when it first finds the file).
 
 | Table | Columns |
 |---|---|
-| `tracks` (added) | added_at (date added to the station: the first scan), bitrate_kbps, vbr, sample_rate, channels, codec; isrc, record_label, catalog_number, first_release_year, genres (from MusicBrainz) |
-| `track_programming` | track_id, bpm (measured, or set by hand), era, mood, sound_code (the last three on scales the station defines in the settings) |
-| `labels` | id, name (unique), color |
-| `track_labels` | track_id, label_id |
+| `tracks` (added) | album_artist, genre, year, track_number, disc_number (tags); musicbrainz_recording_id, musicbrainz_release_id (tags); codec, bitrate_kbps, bitrate_mode (cbr, vbr, lossless), sample_rate, channels; details_version (what the scanner read: older tracks are read again) |
+| `track_analysis` (added) | bpm (measured) |
+| `track_musicbrainz` | track_id, release_id and recording_id (looked up for), album, record_label, catalog_number, isrc, first_release_year, genres (JSON), fetched_at |
+| `track_programming` | track_id, bpm (set by hand, replaces the measured one), mood, sound_code (values of the scales in the `programming` settings), updated_at |
+| `labels` | id, name (unique ignoring case), color |
+| `track_labels` | track_id, label_id, created_at |
+
+The era is not stored: it comes from the year of first release (`track_musicbrainz.first_release_year`, else `tracks.year`) and the eras of the `programming` settings.
 
 ## Library management
 
@@ -31,10 +35,10 @@ See [Library management](library.md).
 
 | Table | Columns |
 |---|---|
-| `library_batches` | id, kind (import, organize, undo, review: a release picked on the review screen), undoes (the batch an undo reverts), created_at, finished_at |
+| `library_batches` | id, kind (import, organize, undo, review: a release picked on the review screen, edit: tags edited from the browser), undoes (the batch an undo reverts), created_at, finished_at |
 | `library_moves` | id, batch_id, track_id, from_root (incoming, library), from_path, to_path, method (rename, copy), temp_path, content_hash (copies), status (pending, moved, done, abandoned, undone), error — the journal, written before a file is touched |
-| `track_tag_changes` | id, track_id, move_id, previous and applied tags (JSON), cover_embedded, created_at, undone_at |
-| `library_tasks` | id, kind (organize_plan, organize_apply, undo, review_apply, artist_relations), params (JSON, the request), status (pending, running, done, failed), result (JSON: the dry run's moves or the batch report), error, requested_by, created_at, started_at, finished_at — work the API asks of `heron-librarian` |
+| `track_tag_changes` | id, track_id, move_id, kind (tags: identification's, fields: edited from the browser), previous and applied tags (JSON), cover_embedded, restore (rebuilds the previous file byte for byte from the one written), created_at, undone_at |
+| `library_tasks` | id, kind (organize_plan, organize_apply, undo, review_apply, artist_relations, edit_tags, musicbrainz_details), params (JSON, the request), status (pending, running, done, failed), result (JSON: the dry run's moves or the batch report), error, requested_by, created_at, started_at, finished_at — work the API asks of `heron-librarian` |
 
 ## Buffer zone and trash
 
@@ -98,7 +102,7 @@ Targets are not foreign keys: restrictions on a deleted category go with it, mer
 
 | Table | Columns |
 |---|---|
-| `settings` | name, JSON value. `analysis`: Gap Killer and crossfade point detection ([Import and analysis](analysis.md#settings)); `library`: AcoustID key, layout, covers ([Library management](library.md#settings)); `playout`: crossfade and loudness ([Audio engine](audio-engine.md#playout-settings)); `queue`: autofill and how many tracks wait ([API](api.md#queue-manager)); `engine`: whether the API manages the engine's configuration yet ([API](api.md#engine-configuration)); `rotation`: separation windows, fallback category, weight factors; `station`: time zone ([Rotation](rotation.md#scheduling)) |
+| `settings` | name, JSON value. `analysis`: Gap Killer and crossfade point detection ([Import and analysis](analysis.md#settings)); `library`: AcoustID key, layout, covers ([Library management](library.md#settings)); `playout`: crossfade and loudness ([Audio engine](audio-engine.md#playout-settings)); `queue`: autofill and how many tracks wait ([API](api.md#queue-manager)); `engine`: whether the API manages the engine's configuration yet ([API](api.md#engine-configuration)); `rotation`: separation windows, fallback category, weight factors; `station`: time zone ([Rotation](rotation.md#scheduling)); `programming`: what counts as a play, eras, mood and sound code scales ([API](api.md#track-details)) |
 
 ## Encoders and outputs
 
@@ -137,7 +141,8 @@ Authentication is local only for now ([Decisions](decisions.md#decisions-made-af
 tracks 1──1 track_analysis
 tracks 1──0..1 track_overrides
 tracks 1──* analysis_jobs
-tracks 1──0..1 track_fingerprints, track_identifications, track_waveforms
+tracks 1──0..1 track_fingerprints, track_identifications, track_waveforms, track_musicbrainz, track_programming
+tracks *──* labels            (through track_labels)
 library_batches 1──* library_moves 1──0..1 track_tag_changes *──1 tracks
 tracks *──* categories        (through track_categories, with weight)
 tracks *──* artists           (through track_artists)

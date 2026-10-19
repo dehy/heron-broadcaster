@@ -72,6 +72,24 @@ Fields MusicBrainz leaves empty keep the file's value. Other tags (genre, commen
 
 The previous tags are kept in `track_tag_changes`, so a change can be undone. Re-tagging keeps the track's ID, and so its analysis, categories and history: the audio did not change.
 
+### Editing tags from the browser
+
+Title, artist, album, album artist, year, genre, track and disc numbers can be edited from the web UI, on one track or a selection: a field set on a selection takes the same value on every track, fields left alone keep each track's value. The programming details (ISRC, record label, BPM, mood) can be written into the files too, each track's own. Only those fields are written: comments, lyrics, pictures, ReplayGain and the others are kept as they are.
+
+The librarian writes them as an `edit` batch, in place: the file is not moved (organizing files it by its new tags, after its dry run) and is not analyzed again. A file changed since the last scan is skipped until the scanner has read it.
+
+### Undoing byte for byte
+
+Every tag write (imports, reviews, edits, undos) also records how to rebuild the file as it was from the file it wrote, in `track_tag_changes.restore`: the original's bytes as ranges of the new file (the audio, which a tag change does not touch, even shifted) and the bytes that differ (the old tags), found like rsync does. Undoing the change rebuilds the original from it, checked against the original's hash, so the file gets back the same bytes, not just the same tags.
+
+When the file changed again since (another edit not undone), or for changes recorded before M5b, and for files over 256 MiB, undoing writes the previous tags back instead: the same tags, maybe not the same bytes.
+
+## MusicBrainz details
+
+For identified tracks (whose tags carry a MusicBrainz recording and release), the librarian looks up the release on MusicBrainz (`inc=labels recordings isrcs genres release-groups`, one request a second): album, record label and catalog number, ISRC, the year of first release (the earlier of the recording's and the release group's) and genres, most voted first. They are saved in `track_musicbrainz`, not in the files (they can be written there from the tag editor).
+
+The whole library is looked up on request (*Settings*, or `POST /api/v1/library/musicbrainz-details`); once a lookup has finished, tracks without details (new tracks) are looked up in the background, up to 30 releases a minute. A release MusicBrainz does not know is saved empty and not looked up again unless asked for every track.
+
 ## Layout
 
 Files are filed at `layout` under the library root. Default:
@@ -120,7 +138,7 @@ docker compose exec heron-librarian heron-librarian batches            # recent 
 
 Organizing uses the files' current tags (it does not identify them). Files that are not tracks (cover art, playlists) stay where they are; emptied folders are removed.
 
-**Undo** moves files back to their previous paths and writes back their previous tags, byte for byte for moves. Undoing an import restores the files' own tags; the files stay in the library. A file whose previous path has been taken since is left where it is and reported. An undo interrupted by a crash is resumed by running it again. An organization interrupted by a crash leaves a partial batch: run `organize --apply` again for the rest, and undo both batches to go back.
+**Undo** moves files back to their previous paths and gives them back their previous tags, byte for byte (see [Undoing byte for byte](#undoing-byte-for-byte)). Undoing an import restores the files' own tags; the files stay in the library. A file whose previous path has been taken since is left where it is and reported. An undo interrupted by a crash is resumed by running it again. An organization interrupted by a crash leaves a partial batch: run `organize --apply` again for the rest, and undo both batches to go back.
 
 ## Settings
 
@@ -141,7 +159,7 @@ docker compose exec heron-librarian heron-librarian settings --set '{"acoustid_k
 
 ## Work asked through the API
 
-The web UI's review, organize and undo go through the API, which cannot write files: it queues **library tasks** (`library_tasks`) that the librarian runs one at a time, in order, next to its imports (both take the library lock for each group of file operations). Results (the dry run's moves, the batch report) are stored with the task for the web UI to show. A task running when the librarian stops is marked failed: ask again (an undo resumes where it stopped; an organization is applied once more for the rest). See [API – Library management](api.md#library-management).
+The web UI's review, organize, undo, tag edits and MusicBrainz lookups go through the API, which cannot write files: it queues **library tasks** (`library_tasks`) that the librarian runs one at a time, in order, next to its imports (both take the library lock for each group of file operations). Results (the dry run's moves, the batch report) are stored with the task for the web UI to show. A task running when the librarian stops is marked failed: ask again (an undo resumes where it stopped; an organization is applied once more for the rest). See [API – Library management](api.md#library-management).
 
 ## Coordination with the scanner
 

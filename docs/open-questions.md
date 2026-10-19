@@ -10,7 +10,6 @@ Raise these when they become relevant instead of guessing.
 | Opus and HE-AAC decoding, not supported by Symphonia: add libopus (BSD) and an HE-AAC-capable decoder, or report them as unsupported. | [M2](roadmap/m2-engine-core.md) |
 | Track management: the upload size limit and a quota for the buffer zone; how long the trash keeps deleted tracks (30 days proposed); who may delete (operators move to the trash, admins empty it, proposed); whether files left in the buffer expire. | [M5c](roadmap/m5c-track-management.md) |
 | Listener statistics: how long to keep listener sessions (daily totals are kept indefinitely), the minimum session length that counts as a listener (1 min proposed), and whether reports must follow a given audience-measurement standard. | [M7b](roadmap/m7b-listener-statistics.md) |
-| What counts as a play for play counts and last played: every start, or a minimum played time (30 s proposed, so skips do not count)? | [M5b](roadmap/m5b-track-details-tags.md) |
 
 ## Resolved
 
@@ -26,4 +25,5 @@ Raise these when they become relevant instead of guessing.
 | Default encoder profiles on a fresh install. | **MP3 128 kbps** (default for new outputs) and **AAC-LC 96 kbps** (default for HLS). | [Encoders and outputs](outputs.md#default-profiles) |
 | Restrictions: which kinds are needed first? | **Dayparting, date ranges and category sequences**; quotas later if needed. | [Rotation](rotation.md#restrictions) |
 | Artist names: split "featuring" automatically, and how are ambiguous names handled? | **Split on featuring only** (`feat.`, `ft.`, `featuring`, also in titles); `&`, `and` and commas never split (`Simon & Garfunkel` is one artist). **Similar artists** count as one for separation; links are suggested (names, MusicBrainz) and reviewed by hand. | [Rotation](rotation.md#artists-with-several-names) |
+| What counts as a play for play counts and last played. | **A minimum played time, 30 s by default**, a station setting (0 counts every start); the FX player never counts. | [API](api.md#track-details) |
 | Time zone of the schedule. | A **station setting** (IANA name), the server's by default. | [Rotation](rotation.md#scheduling) |
