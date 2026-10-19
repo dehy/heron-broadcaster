@@ -47,14 +47,12 @@ pub async fn delete(
     for chunk in track_ids.chunks(LOCK_CHUNK) {
         let lock = LibraryLock::acquire(pool, "librarian").await?;
         for &track_id in chunk {
-            let row: Option<(String, bool, bool)> = sqlx::query_as(
-                "SELECT path, missing_since IS NOT NULL, deleted_at IS NOT NULL
-                 FROM tracks WHERE id = ?",
-            )
-            .bind(track_id)
-            .fetch_optional(pool)
-            .await?;
-            let Some((path, missing, deleted)) = row else {
+            let row: Option<(String, bool)> =
+                sqlx::query_as("SELECT path, deleted_at IS NOT NULL FROM tracks WHERE id = ?")
+                    .bind(track_id)
+                    .fetch_optional(pool)
+                    .await?;
+            let Some((path, deleted)) = row else {
                 report.skipped.push(SkippedFile {
                     path: format!("track {track_id}"),
                     reason: "no such track".into(),
@@ -70,7 +68,8 @@ pub async fn delete(
             }
             let from = LibraryPath::from_stored(path);
             let to = trash_path(batch_id, &from);
-            let present = !missing && from.resolve(&roots.library).is_file();
+            // A file back at its path (not scanned yet) goes to the trash too.
+            let present = from.resolve(&roots.library).is_file();
             let outcome = if present {
                 let operation = Operation {
                     batch_id,
