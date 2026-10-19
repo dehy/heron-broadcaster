@@ -9,7 +9,8 @@ How to work on Heron Broadcaster, whether you are a person or an AI agent such a
 - At the end of each milestone:
   1. Demonstrate every acceptance criterion.
   2. Tick its acceptance criteria in its file under `docs/roadmap/` and update its status in the [roadmap](roadmap/README.md).
-  3. Summarize what was done, what was deferred and any open questions.
+  3. Update the root [README](../README.md) whenever what it says has changed: the status, what Heron does, the quick start, the services, and the screenshots in `docs/images/` when a page they show has changed.
+  4. Summarize what was done, what was deferred and any open questions.
 - Prefer small, reviewable commits using Conventional Commits (`feat(engine): …`, `fix(analysis): …`). See [Conventions](conventions.md).
 - When a requirement is ambiguous, pick the simplest option that keeps 24/7 airing safe, note the assumption in the PR or summary, and move on.
 - Questions listed in [Open questions](open-questions.md) should be raised when they become relevant instead of guessed.
