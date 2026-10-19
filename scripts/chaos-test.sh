@@ -130,8 +130,10 @@ start_listening() {
 check_listening() {
     max_silence=$1
     wait "$listener" || true
+    # The recording starts anywhere in an MP3 frame: probed, it is now and
+    # then taken for raw video (VVC) and nothing is decoded. Say it is MP3.
     report=$(docker run --rm -i --entrypoint ffmpeg "$ffmpeg_image" -hide_banner -nostdin \
-        -i pipe:0 -af silencedetect=noise=-50dB:duration=1 -f null - <"$capture" 2>&1 || true)
+        -f mp3 -i pipe:0 -af silencedetect=noise=-50dB:duration=1 -f null - <"$capture" 2>&1 || true)
     heard=$(printf '%s\n' "$report" | tr '\r' '\n' | sed -n 's/.*time=\([0-9:.]*\).*/\1/p' | tail -1 |
         awk -F: '{ print $1 * 3600 + $2 * 60 + $3 }')
     longest=$(printf '%s\n' "$report" | sed -n 's/.*silence_duration: \([0-9.]*\).*/\1/p' |
