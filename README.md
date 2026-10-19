@@ -37,11 +37,33 @@ Requirements: Docker with Compose v2.
 ```sh
 cp .env.example .env              # then change the passwords
 mkdir -p data/music data/fallback data/incoming # or point HERON_MUSIC_DIR, … elsewhere
-docker compose up -d --build --wait
+docker compose up -d --wait       # pulls the images from ghcr.io/dehy
 docker compose exec heron-api heron-api user add admin --role admin   # asks for a password
 ```
 
 Open http://localhost:8000 and sign in. Database migrations run automatically when `heron-api` starts.
+
+The images are built for amd64 and arm64 (Raspberry Pi), and published by CI once the whole stack has passed its tests on both. To build them from source instead, add `--build`.
+
+### Choosing a version
+
+The services run the `latest` release by default; `edge` follows `main`. To pin a release, create a `docker-compose.override.yml` next to `docker-compose.yml` (Compose reads it automatically, and git ignores it):
+
+```yaml
+services:
+  heron-api:
+    image: ghcr.io/dehy/heron-api:0.1.0
+  heron-analyzer:
+    image: ghcr.io/dehy/heron-analyzer:0.1.0
+  heron-librarian:
+    image: ghcr.io/dehy/heron-librarian:0.1.0
+  heron-engine:
+    image: ghcr.io/dehy/heron-engine:0.1.0
+  heron-web:
+    image: ghcr.io/dehy/heron-web:0.1.0
+```
+
+Then `docker compose pull && docker compose up -d --wait`. Setting `HERON_VERSION=0.1.0` in `.env` does the same for all five services at once. To upgrade, change the version and run the same two commands; migrations run when `heron-api` starts.
 
 Point `HERON_MUSIC_DIR` at your music: new and changed files are picked up automatically, and the **Tracks** page shows them as they are analyzed. See [Import and analysis](docs/analysis.md).
 
@@ -115,7 +137,7 @@ cd web && npm ci && npm run dev
 npm test && npm run typecheck   # unit tests (translation catalogs included) and types
 ```
 
-Running a binary locally: `cargo run -p heron-api -- --help`. All options can also be set through `HERON_*` environment variables. Adding a language to the web interface takes one catalog file: see [Web UI – Adding a language](docs/web.md#adding-a-language).
+To run your changes in Docker Compose, build the images: `docker compose up -d --build --wait`. Running a binary locally: `cargo run -p heron-api -- --help`. All options can also be set through `HERON_*` environment variables. Adding a language to the web interface takes one catalog file: see [Web UI – Adding a language](docs/web.md#adding-a-language).
 
 ## Documentation
 

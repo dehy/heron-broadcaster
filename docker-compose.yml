@@ -40,7 +40,7 @@ services:
       context: .
       dockerfile: docker/rust.Dockerfile
       target: heron-api
-    image: heron-api:${HERON_VERSION:-dev}
+    image: ghcr.io/dehy/heron-api:${HERON_VERSION:-latest}
     restart: unless-stopped
     environment:
       <<: *rust-env
@@ -61,7 +61,7 @@ services:
       context: .
       dockerfile: docker/rust.Dockerfile
       target: heron-analyzer
-    image: heron-analyzer:${HERON_VERSION:-dev}
+    image: ghcr.io/dehy/heron-analyzer:${HERON_VERSION:-latest}
     restart: unless-stopped
     environment:
       <<: *rust-env
@@ -84,7 +84,7 @@ services:
       context: .
       dockerfile: docker/rust.Dockerfile
       target: heron-librarian
-    image: heron-librarian:${HERON_VERSION:-dev}
+    image: ghcr.io/dehy/heron-librarian:${HERON_VERSION:-latest}
     restart: unless-stopped
     user: ${HERON_LIBRARIAN_USER:-10001:10001}
     environment:
@@ -110,7 +110,7 @@ services:
       context: .
       dockerfile: docker/rust.Dockerfile
       target: heron-engine
-    image: heron-engine:${HERON_VERSION:-dev}
+    image: ghcr.io/dehy/heron-engine:${HERON_VERSION:-latest}
     restart: unless-stopped
     environment:
       <<: *rust-env
@@ -138,7 +138,7 @@ services:
       context: .
       dockerfile: docker/web.Dockerfile
       target: heron-web
-    image: heron-web:${HERON_VERSION:-dev}
+    image: ghcr.io/dehy/heron-web:${HERON_VERSION:-latest}
     restart: unless-stopped
     ports:
       - "${HERON_HTTP_PORT:-8000}:80"
