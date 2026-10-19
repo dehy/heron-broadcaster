@@ -12,6 +12,7 @@ import { ME_KEY, UserContext, useCan, useMeQuery } from "./lib/session";
 import { applyTheme, storedTheme } from "./lib/theme";
 import { Account } from "./pages/Account";
 import { Artists } from "./pages/Artists";
+import { Buffer } from "./pages/Buffer";
 import { Categories } from "./pages/Categories";
 import { ClockEditor, Clocks } from "./pages/Clocks";
 import { Dashboard } from "./pages/Dashboard";
@@ -28,6 +29,7 @@ import { Rotation } from "./pages/Rotation";
 import { Schedule } from "./pages/Schedule";
 import { Settings } from "./pages/Settings";
 import { Track } from "./pages/Track";
+import { Trash } from "./pages/Trash";
 import { Users } from "./pages/Users";
 
 applyTheme(storedTheme());
@@ -81,9 +83,11 @@ const PAGES: Page[] = [
   { path: "/queue", label: "nav.queue", icon: "queue" },
   { path: "/history", label: "nav.history", icon: "history" },
   { path: "/library", label: "nav.tracks", icon: "library", section: "nav.library" },
+  { path: "/buffer", label: "nav.buffer", icon: "upload" },
   { path: "/labels", label: "nav.labels", icon: "label" },
   { path: "/artists", label: "nav.artists", icon: "mic" },
   { path: "/review", label: "nav.review", icon: "review" },
+  { path: "/trash", label: "nav.trash", icon: "trash" },
   { path: "/clocks", label: "nav.clocks", icon: "clock", section: "nav.programming" },
   { path: "/schedule", label: "nav.schedule", icon: "calendar" },
   { path: "/categories", label: "nav.categories", icon: "tag" },
@@ -113,6 +117,10 @@ function route(pathname: string): ReactNode {
       return <History />;
     case "/library":
       return <Library />;
+    case "/buffer":
+      return <Buffer />;
+    case "/trash":
+      return <Trash />;
     case "/categories":
       return <Categories />;
     case "/labels":
@@ -164,6 +172,13 @@ function Shell() {
     refetchInterval: 60_000,
   });
   const reviewCount = review.data?.total ?? 0;
+  const buffer = useQuery({
+    queryKey: ["buffer"],
+    queryFn: () => unwrap(api.GET("/api/v1/staging")),
+    refetchInterval: 60_000,
+  });
+  const readyCount =
+    buffer.data?.groups.reduce((sum, group) => sum + group.files.filter((f) => f.status === "ready").length, 0) ?? 0;
   const station = useQuery({
     queryKey: ["settings", "station"],
     queryFn: () => unwrap(api.GET("/api/v1/settings/station")),
@@ -212,6 +227,11 @@ function Shell() {
                   {page.path === "/review" && reviewCount > 0 && (
                     <span className="count" title={t("nav.reviewCount")}>
                       {reviewCount}
+                    </span>
+                  )}
+                  {page.path === "/buffer" && readyCount > 0 && (
+                    <span className="count" title={t("nav.bufferCount")}>
+                      {readyCount}
                     </span>
                   )}
                 </Link>

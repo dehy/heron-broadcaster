@@ -526,6 +526,9 @@ function LibraryCard() {
           min_score: current.min_score,
           save_cover: current.save_cover,
           embed_cover: current.embed_cover,
+          max_upload_mb: current.max_upload_mb,
+          min_free_mb: current.min_free_mb,
+          trash_days: current.trash_days,
         }}
         save={(value) => save.mutate(value)}
         saving={save.isPending}
@@ -570,6 +573,39 @@ function LibraryCard() {
                 />
                 {t("settings.embedCover")}
               </label>
+            </div>
+            <div className="form-grid">
+              <Field label={t("settings.maxUpload")} hint={t("settings.maxUploadHint")}>
+                <NumberInput
+                  value={draft.max_upload_mb}
+                  min={1}
+                  step={1}
+                  suffix={t("settings.mib")}
+                  disabled={!isAdmin}
+                  onChange={(max_upload_mb) => set({ max_upload_mb })}
+                />
+              </Field>
+              <Field label={t("settings.minFree")} hint={t("settings.minFreeHint")}>
+                <NumberInput
+                  value={draft.min_free_mb}
+                  min={0}
+                  step={1}
+                  suffix={t("settings.mib")}
+                  disabled={!isAdmin}
+                  onChange={(min_free_mb) => set({ min_free_mb })}
+                />
+              </Field>
+              <Field label={t("settings.trashDays")} hint={t("settings.trashDaysHint")}>
+                <NumberInput
+                  value={draft.trash_days}
+                  min={1}
+                  max={3650}
+                  step={1}
+                  suffix={t("settings.days")}
+                  disabled={!isAdmin}
+                  onChange={(trash_days) => set({ trash_days })}
+                />
+              </Field>
             </div>
           </>
         )}

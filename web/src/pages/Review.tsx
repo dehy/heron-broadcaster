@@ -5,7 +5,8 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { type LibraryTask, type Schemas, api, done, unwrap } from "../api";
+import { type Schemas, api, done, unwrap } from "../api";
+import { TaskState, useTask } from "../components/Task";
 import {
   Banner,
   Card,
@@ -18,48 +19,11 @@ import {
   useToast,
 } from "../components/ui";
 import { type PlainKey, number, rich, t } from "../i18n";
-import { ago, dateTime, duration, trackName } from "../lib/format";
+import { dateTime, duration, trackName } from "../lib/format";
 import { Link, setSearch, useLocation } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 
 type Tab = "review" | "organize" | "batches";
-
-/** A library task, polled until heron-librarian finishes it. */
-function useTask(id: number | null) {
-  return useQuery({
-    queryKey: ["library-task", id],
-    enabled: id !== null,
-    queryFn: () => unwrap(api.GET("/api/v1/library/tasks/{id}", { params: { path: { id: id ?? 0 } } })),
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "done" || status === "failed" ? false : 1000;
-    },
-  });
-}
-
-function TaskState({ task }: { task: LibraryTask | undefined }) {
-  if (!task) {
-    return null;
-  }
-  switch (task.status) {
-    case "pending":
-      return (
-        <span className="row small muted">
-          <span className="spinner" /> {t("review.waiting")}
-        </span>
-      );
-    case "running":
-      return (
-        <span className="row small muted">
-          <span className="spinner" /> {t("review.working")}
-        </span>
-      );
-    case "failed":
-      return <span className="small bad">{t("review.failed", { error: task.error ?? "" })}</span>;
-    case "done":
-      return <span className="small good">{t("review.doneAgo", { ago: ago(task.finished_at_unix_ms) })}</span>;
-  }
-}
 
 export function Review() {
   const { search } = useLocation();
@@ -112,7 +76,7 @@ function Identifications() {
     return (
       <Card>
         <Empty>
-          {t("review.nothing")}
+          {rich("review.nothing", { buffer: <Link to="/buffer">{t("review.nothingBuffer")}</Link> })}
         </Empty>
       </Card>
     );
@@ -440,6 +404,8 @@ const KINDS: Record<string, PlainKey> = {
   undo: "review.kind.undo",
   review: "review.kind.review",
   edit: "review.kind.edit",
+  delete: "review.kind.delete",
+  purge: "review.kind.purge",
 };
 
 function kindLabel(kind: string): string {
@@ -528,7 +494,7 @@ function Batches() {
                     )}
                   </td>
                   <td className="actions">
-                    {isAdmin && batch.kind !== "undo" && !batch.undone_by && batch.files > 0 && (
+                    {isAdmin && batch.kind !== "undo" && batch.kind !== "purge" && !batch.undone_by && batch.files > 0 && (
                       <ConfirmButton
                         className="btn small"
                         confirm={t("review.kind.undo")}

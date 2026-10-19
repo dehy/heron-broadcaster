@@ -4,7 +4,7 @@
 // overrides, categories, programming details and labels, analysis, file
 // and plays, and its tags edited.
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import {
   type Fade,
@@ -16,6 +16,7 @@ import {
   unwrap,
 } from "../api";
 import { FadeEditor } from "../components/FadeEditor";
+import { TaskState, useTask } from "../components/Task";
 import {
   LabelChip,
   LabelsDialog,
@@ -27,6 +28,7 @@ import { type Marker, type Region, WaveformView, useWaveform } from "../componen
 import {
   Banner,
   Card,
+  ConfirmButton,
   Empty,
   ErrorView,
   Field,
@@ -35,13 +37,14 @@ import {
   NumberInput,
   PageHead,
   Segmented,
+  useToast,
 } from "../components/ui";
 import { number, rich, t } from "../i18n";
 import { ago, bytes, dateTime, db, duration, parseDuration, trackName } from "../lib/format";
 import { endingLabel } from "../lib/labels";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
-import { bitrate } from "./Library";
+import { DeleteQuestion, bitrate } from "./Library";
 
 /** Whether overrides change anything (every field unset). */
 function isDefault(overrides: TrackOverrides): boolean {
@@ -157,6 +160,27 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
       ),
     { success: t("queuePage.queued") },
   );
+  const client = useQueryClient();
+  const toast = useToast();
+  const [deleteTask, setDeleteTask] = useState<number | null>(null);
+  const deleting = useTask(deleteTask);
+  const remove = useAction(
+    () => unwrap(api.POST("/api/v1/tracks/delete", { body: { track_ids: [track.id] } })),
+    { onSuccess: (task) => setDeleteTask(task.id) },
+  );
+  useEffect(() => {
+    const task = deleting.data;
+    if (task?.status === "done") {
+      const skipped = task.report?.skipped[0];
+      toast(skipped ? t("track.notDeleted", { reason: skipped.reason }) : t("track.deleted"), Boolean(skipped));
+      void client.invalidateQueries({ queryKey: ["track", track.id] });
+      void client.invalidateQueries({ queryKey: ["tracks"] });
+      void client.invalidateQueries({ queryKey: ["trash"] });
+    } else if (task?.status === "failed") {
+      toast(task.error ?? t("track.deleteFailed"), true);
+    }
+  }, [deleting.data, client, toast, track.id]);
+  const deleted = track.deleted_at_unix_ms !== null && track.deleted_at_unix_ms !== undefined;
 
   const { length, cueIn, cueOut } = effectiveCues(track, draft);
   const crossfade = settings?.crossfade;
@@ -268,7 +292,8 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
           </>
         }
         actions={
-          canEdit && (
+          canEdit &&
+          !deleted && (
             <>
               {!track.missing && !track.silent && (
                 <>
@@ -293,11 +318,33 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
               >
                 {track.enabled ? t("track.disable") : t("track.enable")}
               </button>
+              <ConfirmButton
+                className="btn danger"
+                confirm={t("library.delete")}
+                disabled={deleteTask !== null && deleting.data?.status !== "failed"}
+                question={<DeleteQuestion tracks={[track]} />}
+                onConfirm={() => remove.mutate(undefined)}
+              >
+                <Icon name="trash" /> {t("library.delete")}
+              </ConfirmButton>
             </>
           )
         }
       />
-      {track.missing && (
+      {deleteTask !== null && deleting.data?.status !== "done" && deleting.data?.status !== "failed" && (
+        <Banner kind="warn">
+          {t("library.deleting")} <TaskState task={deleting.data} />
+        </Banner>
+      )}
+      {deleted && (
+        <Banner kind="warn">
+          {rich("track.inTrash", {
+            date: dateTime(track.deleted_at_unix_ms),
+            link: <Link to="/trash">{t("track.restoreFromTrash")}</Link>,
+          })}
+        </Banner>
+      )}
+      {track.missing && !deleted && (
         <Banner kind="bad">
           {t("track.missingSince", { date: dateTime(track.file.missing_since_unix_ms) })}
         </Banner>
