@@ -7,6 +7,14 @@ import { defineConfig } from "vitest/config";
 // running locally, or to a station's heron-web with HERON_API_URL.
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rolldownOptions: {
+      output: {
+        // Dependencies change less often than the app: their own chunk stays cached.
+        codeSplitting: { groups: [{ name: "vendor", test: /node_modules/ }] },
+      },
+    },
+  },
   server: {
     proxy: {
       "/api": { target: process.env.HERON_API_URL ?? "http://localhost:8080", ws: true },
