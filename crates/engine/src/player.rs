@@ -865,22 +865,28 @@ impl Player {
     /// waiting tracks. Tracks from the fallback directory are left out.
     pub fn saved(&self) -> SavedQueue {
         let snapshot = self.snapshot();
-        let on_air = snapshot
-            .decks
-            .into_iter()
-            .find(|deck| deck.on_air)
-            .and_then(|deck| {
-                let entry = deck.entry?;
-                (!self.fallback_entries.contains(&entry.entry_id)).then_some(SavedTrack {
-                    entry,
-                    position_ms: deck.position_ms,
-                })
-            });
+        let on_air_deck = snapshot.decks.into_iter().find(|deck| deck.on_air);
+        // The audio thread may have started the cued track since the last
+        // tick: it is then on air and still cued here. Saved once, on air.
+        let on_air_id = on_air_deck
+            .as_ref()
+            .and_then(|deck| deck.entry.as_ref())
+            .map(|entry| entry.entry_id);
+        let on_air = on_air_deck.and_then(|deck| {
+            let entry = deck.entry?;
+            (!self.fallback_entries.contains(&entry.entry_id)).then_some(SavedTrack {
+                entry,
+                position_ms: deck.position_ms,
+            })
+        });
         let waiting = snapshot
             .cued
             .into_iter()
             .chain(snapshot.queue)
-            .filter(|entry| !self.fallback_entries.contains(&entry.entry_id))
+            .filter(|entry| {
+                Some(entry.entry_id) != on_air_id
+                    && !self.fallback_entries.contains(&entry.entry_id)
+            })
             .collect();
         SavedQueue {
             next_entry_id: self.next_entry_id,

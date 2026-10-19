@@ -674,3 +674,24 @@ fn a_track_that_cannot_start_gives_way_to_the_fallback_directory() {
             .all(|entry| entry.track.path != "stalled.wav")
     );
 }
+
+#[test]
+fn a_track_that_just_started_is_saved_once() {
+    let mut station = Station::new();
+    let tracks = vec![
+        station.file("one.wav", 1.0),
+        station.file("two.wav", 2.0),
+        station.file("three.wav", 1.0),
+    ];
+    let ids = station.player.enqueue(tracks, None).unwrap();
+    station.play(0.5);
+    // The audio thread starts "two" before the player hears of it.
+    let mut block = vec![0.0; BLOCK * CHANNELS];
+    for _ in 0..8 {
+        station.mixer.render(&mut block);
+    }
+    let saved = station.player.saved();
+    assert_eq!(saved.on_air.unwrap().entry.entry_id, ids[1]);
+    let waiting: Vec<u64> = saved.waiting.iter().map(|entry| entry.entry_id).collect();
+    assert_eq!(waiting, [ids[2]]);
+}

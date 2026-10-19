@@ -7,10 +7,14 @@
 //! air within seconds. Each file is read whole by a thread of its own, long
 //! before it is cued; the track then decodes from memory, and plays to the
 //! end even if its file is deleted or the library disappears.
+//!
+//! A read stuck on an unreachable share cannot be interrupted: its thread is
+//! left behind. Reads in flight are therefore limited, counted by the
+//! threads themselves, so a long outage does not pile threads up.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::decoder::SourceFile;
@@ -38,6 +42,8 @@ impl Drop for Preload {
 pub struct Preloader {
     max_tracks: usize,
     preloads: HashMap<u64, Preload>,
+    /// Reading threads still running, forgotten ones included.
+    in_flight: Arc<AtomicUsize>,
 }
 
 impl Preloader {
@@ -46,18 +52,41 @@ impl Preloader {
         Self {
             max_tracks,
             preloads: HashMap::new(),
+            in_flight: Arc::new(AtomicUsize::new(0)),
         }
     }
 
+    /// Reading threads at most: twice the tracks kept, so the queue can
+    /// move on while a few reads finish.
+    fn max_in_flight(&self) -> usize {
+        self.max_tracks.max(1) * 2
+    }
+
     /// Reads the files of the first entries of `upcoming` (queue entry ID
-    /// and file), and forgets the others.
+    /// and file), nearest first, and forgets the others. A file not started
+    /// for lack of a free reader is started on a later call.
     pub fn keep(&mut self, upcoming: impl IntoIterator<Item = (u64, PathBuf)>) {
-        let wanted: HashMap<u64, PathBuf> = upcoming.into_iter().take(self.max_tracks).collect();
-        self.preloads
-            .retain(|entry_id, preload| wanted.get(entry_id) == Some(&preload.path));
+        let wanted: Vec<(u64, PathBuf)> = upcoming.into_iter().take(self.max_tracks).collect();
+        self.preloads.retain(|entry_id, preload| {
+            wanted
+                .iter()
+                .any(|(id, path)| id == entry_id && *path == preload.path)
+        });
         for (entry_id, path) in wanted {
-            self.preloads.entry(entry_id).or_insert_with(|| start(path));
+            if self.preloads.contains_key(&entry_id) {
+                continue;
+            }
+            if self.in_flight.load(Ordering::Acquire) >= self.max_in_flight() {
+                return;
+            }
+            let preload = start(path, Arc::clone(&self.in_flight));
+            self.preloads.insert(entry_id, preload);
         }
+    }
+
+    /// Reading threads still running.
+    pub fn in_flight(&self) -> usize {
+        self.in_flight.load(Ordering::Acquire)
     }
 
     /// The file of `entry_id`, with its content when it is in memory.
@@ -93,15 +122,28 @@ impl Preloader {
     }
 }
 
+/// One reading thread, counted until it exits.
+struct Reader(Arc<AtomicUsize>);
+
+impl Drop for Reader {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 /// Reads `path` on a thread of its own: it may block for a long time on an
 /// unreachable network share without holding anything up.
-fn start(path: PathBuf) -> Preload {
+fn start(path: PathBuf, in_flight: Arc<AtomicUsize>) -> Preload {
     let shared = Arc::new(Shared::default());
     let thread_shared = Arc::clone(&shared);
     let thread_path = path.clone();
+    in_flight.fetch_add(1, Ordering::AcqRel);
+    // Released when the thread exits, or here if it never starts.
+    let reader = Reader(in_flight);
     let spawned = std::thread::Builder::new()
         .name("heron-preload".to_owned())
         .spawn(move || {
+            let _reader = reader;
             let contents = match read(&thread_path) {
                 Ok(Some(contents)) => contents,
                 Ok(None) => return,
@@ -175,6 +217,45 @@ mod tests {
         preloader.keep([(3, paths[2].clone())]);
         wait_loaded(&preloader, 1);
         assert_eq!(preloader.take(2, paths[1].clone()).contents, None);
+    }
+
+    /// Named pipes block their readers, like files on an unreachable share.
+    #[cfg(unix)]
+    #[test]
+    fn stuck_reads_are_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let pipes: Vec<PathBuf> = (0..8)
+            .map(|n| {
+                let path = dir.path().join(format!("{n}.mp3"));
+                let made = std::process::Command::new("mkfifo")
+                    .arg(&path)
+                    .status()
+                    .unwrap();
+                assert!(made.success());
+                path
+            })
+            .collect();
+        let mut preloader = Preloader::new(2);
+        // The queue moves on four times while every read is stuck.
+        for start in [0, 2, 4, 6] {
+            preloader.keep((start..start + 2).map(|n| (n as u64, pipes[n].clone())));
+        }
+        assert_eq!(preloader.in_flight(), 4, "at most twice the tracks kept");
+
+        // The share comes back: the stuck readers finish and free their slots.
+        for path in &pipes[..4] {
+            drop(std::fs::OpenOptions::new().write(true).open(path).unwrap());
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while preloader.in_flight() > 0 {
+            assert!(Instant::now() < deadline, "readers never exited");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        preloader.keep([(6, pipes[6].clone()), (7, pipes[7].clone())]);
+        assert_eq!(preloader.in_flight(), 2);
+        for path in &pipes[6..] {
+            drop(std::fs::OpenOptions::new().write(true).open(path).unwrap());
+        }
     }
 
     #[test]

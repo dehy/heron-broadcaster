@@ -10,12 +10,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::config::write_atomically;
 use crate::player::SavedQueue;
 
 const FILE_NAME: &str = "queue.json";
+/// How long dropping the writer waits for a write in progress (a stuck
+/// disk must not hold the engine's exit up until Docker kills it).
+const STOP_WAIT: Duration = Duration::from_secs(2);
 
 /// The saved queue; empty when there is none or it cannot be read.
 pub fn load(dir: &Path) -> SavedQueue {
@@ -79,13 +82,16 @@ impl QueueWriter {
                         }
                     };
                     let (number, queue) = queue;
-                    if let Err(error) = save(&dir, &queue) {
-                        tracing::error!(%error, "cannot save the queue");
+                    match save(&dir, &queue) {
+                        // Only a queue on disk counts as written.
+                        Ok(()) => {
+                            lock.lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .written = number;
+                            wake.notify_all();
+                        }
+                        Err(error) => tracing::error!(%error, "cannot save the queue"),
                     }
-                    lock.lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .written = number;
-                    wake.notify_all();
                 }
             })?;
         Ok(Self {
@@ -109,7 +115,7 @@ impl QueueWriter {
     }
 
     /// Waits up to `timeout` for the queue `number` (or a later one) to be
-    /// on disk. Returns whether it is.
+    /// on disk. Returns whether it is: `false` when the write failed too.
     pub fn wait_written(&self, number: u64, timeout: Duration) -> bool {
         let (lock, wake) = &*self.shared;
         let pending = lock
@@ -123,15 +129,25 @@ impl QueueWriter {
 }
 
 impl Drop for QueueWriter {
-    /// Writes what is pending, then stops.
+    /// Writes what is pending, then stops; waits for it [`STOP_WAIT`] at
+    /// most, then leaves the thread behind.
     fn drop(&mut self) {
         let (lock, wake) = &*self.shared;
         lock.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .stop = true;
         wake.notify_all();
-        if let Some(handle) = self.handle.take() {
+        let Some(handle) = self.handle.take() else {
+            return;
+        };
+        let deadline = Instant::now() + STOP_WAIT;
+        while !handle.is_finished() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if handle.is_finished() {
             let _ = handle.join();
+        } else {
+            tracing::error!("the queue file is still being written: not waiting for it");
         }
     }
 }
@@ -161,6 +177,15 @@ mod tests {
         });
         assert!(writer.wait_written(number, Duration::from_secs(5)));
         assert_eq!(load(dir.path()).next_entry_id, 21);
+    }
+
+    #[test]
+    fn failed_saves_are_not_acknowledged() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("gone");
+        let writer = QueueWriter::start(missing).unwrap();
+        let number = writer.submit(SavedQueue::default());
+        assert!(!writer.wait_written(number, Duration::from_millis(500)));
 
         std::fs::write(dir.path().join(FILE_NAME), b"{broken").unwrap();
         assert_eq!(load(dir.path()), SavedQueue::default());
