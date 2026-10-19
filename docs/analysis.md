@@ -8,7 +8,7 @@ music library ──► scanner (heron-api) ──► tracks ──► analysis_
                                                                         fingerprint
 ```
 
-The scanner and the analyzer only read the library: `heron-librarian` is the only service that writes to it, when files are dropped into the incoming folder or you ask it to reorganize the library. See [Library management](library.md).
+The scanner and the analyzer only read the library: `heron-librarian` is the only service that writes to it, when new files are imported from the buffer zone, tracks are deleted, or you ask it to reorganize the library. See [Library management](library.md).
 
 ## Scanner
 

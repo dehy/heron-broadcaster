@@ -3,12 +3,15 @@
 How Heron files, identifies and reorganizes music. Delivered in [M1b](roadmap/m1b-library-management.md) by `heron-librarian`, the only service with write access to the library.
 
 ```
-incoming folder ──► heron-librarian ──────────────────────────────► music library ──► scanner, analyzer
-  (drop zone)       fingerprint, AcoustID, MusicBrainz,               (read-write here,   (read-only)
-                    tags, cover.jpg, journaled move                    read-only elsewhere)
+uploads (heron-api) ──┐
+                      ├──► buffer zone ──── import ────► music library ──► scanner, analyzer
+incoming folder ──────┘    fingerprint, AcoustID,       (read-write for     (read-only)
+  (drop zone)              MusicBrainz, flags,           heron-librarian
+                           planned path                  only)
+                                                         └─ .heron-trash/  deleted tracks
 ```
 
-Like iTunes' "Keep Music folder organized": drop files into the incoming folder and they end up tagged and filed under Artist / Album / Track. Nothing else in the library is touched unless you ask, and every change is journaled and can be undone.
+Like iTunes' "Keep Music folder organized": new files, uploaded from the browser or dropped into the incoming folder, wait in a **buffer zone** where they are identified and checked; once someone imports them they are tagged and filed under Artist / Album / Track. Tracks are deleted through a **trash** they can be restored from until it is purged. Nothing else in the library is touched unless you ask, and every change is journaled and can be undone.
 
 ## Folders and permissions
 
@@ -16,17 +19,41 @@ Like iTunes' "Keep Music folder organized": drop files into the incoming folder 
 |---|---|---|
 | Music library | `HERON_MUSIC_DIR` | `heron-librarian` read-write; `heron-api`, `heron-analyzer`, `heron-engine` read-only |
 | Incoming folder | `HERON_INCOMING_FOLDER` | `heron-librarian` only |
+| Buffer zone | `HERON_STAGING_FOLDER` | `heron-api` (writes uploads) and `heron-librarian`, read-write |
 
-`heron-librarian` runs as `HERON_LIBRARIAN_USER` (`uid:gid`), which must own both folders: use the output of `id -u` and `id -g` for the owner of your music.
+`heron-librarian` and `heron-api` run as `HERON_LIBRARIAN_USER` (`uid:gid`), which must own the three folders: use the output of `id -u` and `id -g` for the owner of your music. The buffer zone is best on the library's file system, so imports are renames rather than copies.
 
 ## The incoming folder
 
 - **When:** at startup, after file system events (debounced 2 s), and every `HERON_INCOMING_INTERVAL` seconds (default 60). Set `HERON_INCOMING_WATCH=false` where watching does not work (some network shares).
 - **What:** the same audio extensions as the scanner. Hidden files and other files (cover art, playlists, notes) are left in place.
 - **Files still being copied:** files modified less than `HERON_IMPORT_SETTLE` seconds ago (default 5) wait. A file that changes while it is being imported is left for the next pass.
-- **Siblings:** the files of one folder are handled together, so the files of an album agree on their release.
+- **Siblings:** the files of one folder form a **group** in the buffer zone, so the files of an album agree on their release.
+- Settled files **move into the buffer zone** (a rename, or a verified copy across file systems), recorded in `staged_files` before they are touched, and wait there with uploads until someone imports them. Nothing reaches the library before.
 - Emptied folders are removed from the incoming folder.
-- With [M5c](roadmap/m5c-track-management.md), incoming files wait in a buffer zone, with browser uploads, until someone imports them.
+
+## The buffer zone
+
+New files wait in `HERON_STAGING_FOLDER`, one folder per group, until they are imported or discarded. The web UI's **Buffer** page shows them; files never expire.
+
+**Uploads** (web UI, or `POST /api/v1/staging/…`, see [API](api.md#buffer-zone)): the browser creates a group, announces each file (refused when it is not one of the scanner's audio extensions, when it is larger than `max_upload_mb`, or when it would leave less than `min_free_mb` free on the disk), then sends it in chunks of at most 16 MiB at the offset the server has. After a dropped connection it asks how far the server got and carries on from there. A file is written under a hidden temporary name and shows as complete only once its last byte has arrived. Uploads that make no progress for a day are given up.
+
+**Identification and checks:** once a group's files are complete (no upload has made progress for 10 minutes, or none is left), `heron-librarian` reads each file's tags and duration, fingerprints it and identifies the group as described below. Each file then shows the tags it would be written with, its cover (from the Cover Art Archive), the path the [layout](#layout) gives it today, and its candidate releases. Files are **flagged** when:
+
+| Flag | |
+|---|---|
+| In the library | The same file (content hash) or the same audio (fingerprint) is a library track |
+| Twice here | The same file or audio waits in the buffer zone too |
+| Same recording | A library track is identified as the same MusicBrainz recording |
+| Unreadable | The file cannot be decoded |
+| Too short | Too short to be fingerprinted (and identified) |
+| Unsupported | An audio format Heron cannot decode |
+
+**Choices:** for a file, pick another of its candidate releases, or keep its own tags; the librarian works out the tags and the path again. Confident matches and files without anything to look at are selected already, so a clean album is imported in one click.
+
+**Import:** a library task (`staging_import`) files the selected ready files like any import: tags written, filed where the layout says, `cover.jpg` saved, as one `import` batch that can be undone, then analyzed. Files picked by hand are recorded as identified, files that kept their own tags as reviewed (`kept`), and files imported while they needed review wait on the review screen.
+
+**Discard:** the file is removed from the buffer zone. It never reached the library.
 
 ## Identification
 
@@ -41,7 +68,7 @@ Identification needs the station's own **AcoustID application key** (free keys a
 4. **MusicBrainz** gives the release's tags, once per release (not per file).
 5. **Cover Art Archive:** the release's front cover (500 px), saved as `cover.jpg` in the album folder unless one is there already.
 
-A match is **applied automatically** when its AcoustID score is at least `min_score` (0.9) and it points to a single release. Otherwise the track is imported with its own tags and marked **needs review**, with the reason and the candidate releases (`track_identifications`):
+A match is **confident** when its AcoustID score is at least `min_score` (0.9) and it points to a single release: the file is imported with its tags. Otherwise the file keeps its own tags, unless a candidate is picked in the buffer zone, and is marked **needs review**, with the reason and the candidate releases (`track_identifications` once imported):
 
 | Reason | |
 |---|---|
@@ -51,7 +78,7 @@ A match is **applied automatically** when its AcoustID score is at least `min_sc
 | `the audio could not be fingerprinted` | Undecodable, or too short |
 | `identification failed: …` | AcoustID or MusicBrainz unreachable three times (the folder waits 1, then 2 minutes between tries) |
 
-They wait on the **review screen** of the web UI (*Review & organize*; `heron-librarian review` lists them too). For each track, pick one of its candidate releases, or keep the file's own tags (`kept`). A picked release is applied by the librarian like an import: MusicBrainz tags written into the file, filed where the layout says, cover saved, as a `review` batch that can be undone (the track then needs review again).
+Tracks imported while they need review wait on the **review screen** of the web UI (*Review & organize*; `heron-librarian review` lists them too). For each track, pick one of its candidate releases, or keep the file's own tags (`kept`). A picked release is applied by the librarian like an import: MusicBrainz tags written into the file, filed where the layout says, cover saved, as a `review` batch that can be undone (the track then needs review again).
 
 **Rate limits:** one request per second to MusicBrainz and to the Cover Art Archive, three per second to AcoustID, with a User-Agent that identifies Heron (`HeronBroadcaster/<version> ( https://heronbroadcaster.org )`). Each request waits a full interval after the previous response, so requests never arrive closer than the limit, even when one was delayed on the way. A `503` or `429` answer slows down and retries.
 
@@ -140,6 +167,17 @@ Organizing uses the files' current tags (it does not identify them). Files that 
 
 **Undo** moves files back to their previous paths and gives them back their previous tags, byte for byte (see [Undoing byte for byte](#undoing-byte-for-byte)). Undoing an import restores the files' own tags; the files stay in the library. A file whose previous path has been taken since is left where it is and reported. An undo interrupted by a crash is resumed by running it again. An organization interrupted by a crash leaves a partial batch: run `organize --apply` again for the rest, and undo both batches to go back.
 
+## Deleting tracks and the trash
+
+Tracks are deleted from the web UI (*Tracks* and a track's page; operators and admins), as a library task (`delete`):
+
+- `heron-librarian` moves each file to `.heron-trash/<batch>/<its path>` at the library root (a rename: same file system; hidden, so the scanner skips it), journaled as a `delete` batch. The track is marked deleted in the step that records the file in the trash, so a track is never in the trash without its file, nor out of it with its file there.
+- A deleted track leaves the library, rotation and its categories (it is marked missing too). The queue manager takes it out of the queue within seconds, as it does for missing files; a track on air plays to its end, its file is already open.
+- Tracks whose file is missing can be deleted too: only their record goes to the trash.
+- Files that are not tracks (`cover.jpg`, playlists) go to the trash with the last track of their folder; emptied folders are removed.
+- Its analysis, categories, overrides, identification and history are kept, so **restoring** it (undoing the batch, from the *Trash* page) brings it back whole, its file back where it was. A path taken since is reported and that track stays in the trash.
+- After `trash_days` (30 by default), the librarian **purges** the trash (it looks once an hour): each track is deleted, then its file. Their plays keep their artist and title (`play_history.track_id` becomes NULL); restrictions on them go with them. Admins can also **empty the trash** at once (`empty_trash`). An interrupted purge leaves no track without its file: at worst a file waits in the trash for the next purge.
+
 ## Settings
 
 Stored as JSON under the `library` name in the `settings` table; missing fields take the defaults. Change them through the API (`PATCH /api/v1/settings/library` with the fields to change, admins only; the AcoustID key is never sent back, see [API](api.md)), or on the command line:
@@ -156,10 +194,13 @@ docker compose exec heron-librarian heron-librarian settings --set '{"acoustid_k
 | `min_score` | 0.9 |
 | `save_cover` | true |
 | `embed_cover` | false |
+| `max_upload_mb` | 2048: largest file accepted by upload |
+| `min_free_mb` | 5120: uploads that would leave less free space on the buffer zone's disk are refused |
+| `trash_days` | 30: days deleted tracks stay in the trash |
 
 ## Work asked through the API
 
-The web UI's review, organize, undo, tag edits and MusicBrainz lookups go through the API, which cannot write files: it queues **library tasks** (`library_tasks`) that the librarian runs one at a time, in order, next to its imports (both take the library lock for each group of file operations). Results (the dry run's moves, the batch report) are stored with the task for the web UI to show. A task running when the librarian stops is marked failed: ask again (an undo resumes where it stopped; an organization is applied once more for the rest). See [API – Library management](api.md#library-management).
+The web UI's review, organize, undo, tag edits, MusicBrainz lookups, imports from the buffer zone, deletions and emptying the trash go through the API, which cannot write to the library: it queues **library tasks** (`library_tasks`) that the librarian runs one at a time, in order, next to the buffer zone's identification (both take the library lock for each group of file operations). Results (the dry run's moves, the batch report) are stored with the task for the web UI to show. A task running when the librarian stops is marked failed: ask again (an undo resumes where it stopped; an organization is applied once more for the rest; files of an interrupted import are ready again, or imported if they made it). See [API – Library management](api.md#library-management).
 
 ## Coordination with the scanner
 
@@ -168,8 +209,10 @@ The scanner (in `heron-api`, read-only) and the librarian share a MariaDB named 
 ## Limitations
 
 - The engine holds its upcoming tracks by path. The queue manager follows moves within 5 seconds ([API](api.md#queue-manager)), so only a track due to start in those seconds can be skipped.
-- Existing tracks are fingerprinted but not identified yet: identification runs on incoming files only.
-- Identical files dropped twice are imported twice (with a ` (2)` suffix). The buffer zone of [M5c](roadmap/m5c-track-management.md) flags duplicates before they are imported.
-- Tracks cannot be deleted with their files yet: [M5c](roadmap/m5c-track-management.md) adds deletion through a trash.
+- Existing tracks are fingerprinted but not identified yet: identification runs on new files only.
+- Duplicates are flagged, not refused: importing one gives it a ` (2)` suffix.
+- An upload resumes after a dropped connection, not after the page is reloaded: the file starts over (the abandoned one is given up after a day).
+- Tags cannot be edited in the buffer zone: pick a release or keep the file's own tags, then edit them once imported ([Editing tags from the browser](#editing-tags-from-the-browser)).
+- Restoring works on a whole deletion (batch), not on one track of it.
 
-Metrics: `heron_librarian_imports_total{result}` (identified, needs_review, unidentified, failed).
+Metrics: `heron_librarian_staged_total{source}`, `heron_librarian_imports_total{result}`, `heron_api_uploads_total`.

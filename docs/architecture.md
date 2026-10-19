@@ -14,7 +14,7 @@ flowchart TB
 
     heron["<b>Heron Broadcaster</b><br/>[Software system]<br/>Self-hosted radio automation: library, analysis,<br/>queue and rotation, crossfading playout,<br/>encoding and streaming, 24/7"]:::system
 
-    storage["<b>Music storage</b><br/>[External system]<br/>Host folders: music library,<br/>incoming folder, fallback directory"]:::external
+    storage["<b>Music storage</b><br/>[External system]<br/>Host folders: music library,<br/>incoming folder, buffer zone,<br/>fallback directory"]:::external
     musicdb["<b>AcoustID, MusicBrainz,<br/>Cover Art Archive</b><br/>[External systems]<br/>Fingerprints, releases, covers"]:::external
     streamers["<b>Stream servers</b><br/>[External system]<br/>Icecast; Shoutcast and HLS planned.<br/>Several at once"]:::external
     receivers["<b>Webhook receivers</b><br/>[External system, planned M7]<br/>Websites, bots, displays"]:::planned
@@ -45,13 +45,13 @@ flowchart TB
         web["<b>heron-web</b><br/>[Container: nginx, React, TypeScript]<br/>Static web app; proxies /api,<br/>WebSocket included"]:::container
         api["<b>heron-api</b><br/>[Container: Rust, axum]<br/>REST and WebSocket API, auth, library scanner,<br/>queue manager, play history,<br/>engine configuration, OpenAPI"]:::container
         analyzer["<b>heron-analyzer</b><br/>[Container: Rust, worker pool]<br/>Loudness, cue and crossfade points,<br/>Chromaprint fingerprints"]:::container
-        librarian["<b>heron-librarian</b><br/>[Container: Rust]<br/>Identifies, tags and files incoming files;<br/>organizes and undoes; journaled moves"]:::container
+        librarian["<b>heron-librarian</b><br/>[Container: Rust]<br/>Buffer zone: identifies new files;<br/>tags and files them on import;<br/>organizes, deletes to a trash, undoes;<br/>journaled moves"]:::container
         engine["<b>heron-engine</b><br/>[Container: Rust, real time]<br/>Decks, mixer, crossfades, loudness,<br/>encoders, outputs. Plays on when<br/>everything else is down"]:::container
         db[("<b>mariadb</b><br/>[Container: MariaDB 11]<br/>Tracks, analysis, jobs, users,<br/>settings, outputs, history,<br/>move journal")]:::container
         state[("<b>engine-state</b><br/>[Volume: JSON]<br/>The engine's copy of its<br/>outputs and playout settings")]:::container
     end
 
-    storage["<b>Music storage</b><br/>[External system]<br/>Library, incoming folder,<br/>fallback directory"]:::external
+    storage["<b>Music storage</b><br/>[External system]<br/>Library, incoming folder,<br/>buffer zone, fallback directory"]:::external
     musicdb["<b>AcoustID, MusicBrainz,<br/>Cover Art Archive</b><br/>[External systems]"]:::external
     streamers["<b>Stream servers</b><br/>[External system]<br/>Icecast"]:::external
 
@@ -94,7 +94,8 @@ The engine never connects to the database ([Locked decisions](decisions.md)): it
    (volume)  │ ▲                                                  └──┬───────┬───┘
              │ │ files, tags   ┌─────────────────┐                   │       │
              │ └───────────────│ heron-librarian │ ◄──── incoming    │       │
-             │                 │ identify, file  │       folder      │       │
+             │                 │ identify, file, │       folder      │       │
+             │                 │ trash           │ ◄──── buffer zone ◄ uploads
              │                 └─────────────────┘                   │       │
              │                                                       │       │ gRPC (tonic)
              │         ┌────────────────┐   analysis jobs / results  │       ▼
@@ -109,9 +110,9 @@ The engine never connects to the database ([Locked decisions](decisions.md)): it
 | Service | Role |
 |---|---|
 | **heron-engine** | Real-time playout: decks, mixer, crossfades, DSP, encoders and output sinks (several outputs at once, see [Encoders and outputs](outputs.md)). Reads the music library and the fallback directory, both mounted read-only. Exposes a gRPC control interface (`heron-engine ctl` is its command-line client). Holds the upcoming tracks in memory and keeps its outputs and settings on disk. **Must keep playing if every other service is down.** See [Audio engine](audio-engine.md). |
-| **heron-api** | HTTP + WebSocket server: auth (local users), library, categories, artists, clocks and rotation (with `heron-rotation`), queue manager, selection log, play history, webhooks and the library scanner. Feeds the engine over gRPC and pushes it its playout settings and outputs. See [API and control plane](api.md). |
+| **heron-api** | HTTP + WebSocket server: auth (local users), library, categories, artists, clocks and rotation (with `heron-rotation`), queue manager, selection log, play history, webhooks, the library scanner, and uploads, written into the buffer zone (never into the library). Feeds the engine over gRPC and pushes it its playout settings and outputs. See [API and control plane](api.md). |
 | **heron-analyzer** | Analysis worker pool, as its own modular service. Reads files from the music library volume, runs `heron-analysis` and stores results in MariaDB. Can be scaled independently (several replicas) and restarted without affecting the API or the air. Uses CPUs − 1 workers by default. |
-| **heron-librarian** | Library management, as its own service: identifies files dropped into the incoming folder (Chromaprint, AcoustID, MusicBrainz, Cover Art Archive), tags them and files them into the library; reorganizes the library on request and undoes changes; looks up MusicBrainz relationships between artists on request. **The only service with write access to the library**, so `heron-api` (which faces the network) keeps a read-only mount. Every move is journaled in MariaDB and finished or rolled back after a crash. See [Library management](library.md). |
+| **heron-librarian** | Library management, as its own service: moves files dropped into the incoming folder into the buffer zone, identifies the files waiting there (Chromaprint, AcoustID, MusicBrainz, Cover Art Archive) and flags duplicates, then tags them and files them into the library when they are imported; deletes tracks through a trash and purges it; reorganizes the library on request and undoes changes; looks up MusicBrainz relationships between artists on request. **The only service with write access to the library**, so `heron-api` (which faces the network) keeps a read-only mount. Every move is journaled in MariaDB and finished or rolled back after a crash. See [Library management](library.md). |
 | **heron-web** | Static React build. |
 | **mariadb** | Database. Used by `heron-api`, `heron-analyzer` and `heron-librarian`, never by `heron-engine`. |
 
@@ -143,7 +144,7 @@ heron-broadcaster/
 │   ├── engine/     heron-engine     binary: decks, mixer, pacing clock, decoding, player, gRPC server, ctl
 │   ├── api/        heron-api        binary: axum, auth, queue manager, history, OpenAPI, webhooks, scanner
 │   ├── analyzer/   heron-analyzer   binary: analysis worker pool, job queue consumer
-│   └── librarian/  heron-librarian  binary: incoming folder, identification, layout, journaled moves, organize, undo
+│   └── librarian/  heron-librarian  binary: incoming folder, buffer zone, identification, layout, journaled moves, organize, trash, undo
 ├── web/                             React + Vite + TypeScript
 ├── migrations/                      sqlx migrations
 ├── docker/                          Dockerfiles

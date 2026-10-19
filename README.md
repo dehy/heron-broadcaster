@@ -36,7 +36,7 @@ Requirements: Docker with Compose v2.
 
 ```sh
 cp .env.example .env              # then change the passwords
-mkdir -p data/music data/fallback data/incoming # or point HERON_MUSIC_DIR, … elsewhere
+mkdir -p data/music data/fallback data/incoming data/staging # or point HERON_MUSIC_DIR, … elsewhere
 docker compose up -d --wait       # pulls the images from ghcr.io/dehy
 docker compose exec heron-api heron-api user add admin --role admin   # asks for a password
 ```
@@ -67,7 +67,7 @@ Then `docker compose pull && docker compose up -d --wait`. Setting `HERON_VERSIO
 
 Point `HERON_MUSIC_DIR` at your music: new and changed files are picked up automatically, and the **Tracks** page shows them as they are analyzed. See [Import and analysis](docs/analysis.md).
 
-Drop new files into `HERON_INCOMING_FOLDER` (`data/incoming`): `heron-librarian` identifies them (with your station's AcoustID key, in **Settings**), tags them and files them into the library. It never overwrites a file, and reorganizes your existing library only when you ask, after a dry run. Set `HERON_LIBRARIAN_USER` to the owner of your music (`id -u`:`id -g`), the only user Heron writes as. See [Library management](docs/library.md).
+Upload new files from the web interface (*Buffer*), or drop them into `HERON_INCOMING_FOLDER` (`data/incoming`): they wait in the buffer zone (`HERON_STAGING_FOLDER`, `data/staging`), identified by `heron-librarian` (with your station's AcoustID key, in **Settings**) and checked for duplicates, until you import them; they are then tagged and filed into the library as `Artist/Album/01 Title.ext`. Deleted tracks go to a trash they can be restored from for 30 days. Heron never overwrites a file, and reorganizes your existing library only when you ask, after a dry run. Set `HERON_LIBRARIAN_USER` to the owner of your music (`id -u`:`id -g`), the only user Heron writes as. See [Library management](docs/library.md).
 
 To try it without your own music, generate a synthetic library (uses ffmpeg in Docker):
 
@@ -101,8 +101,8 @@ curl -b cookies -X POST -H 'X-Requested-With: curl' $api/player/skip
 | Service | Role | Port (inside the network) |
 |---|---|---|
 | `heron-web` | Web interface, proxies `/api` to `heron-api` | 80, published on `HERON_HTTP_PORT` (8000) |
-| `heron-api` | HTTP and WebSocket API, migrations, library scanner, queue manager, rotation | 8080 |
-| `heron-librarian` | Incoming folder, identification, tags, library layout | 8083 |
+| `heron-api` | HTTP and WebSocket API, migrations, library scanner, queue manager, rotation, uploads | 8080 |
+| `heron-librarian` | Incoming folder, buffer zone, identification, tags, library layout, trash | 8083 |
 | `heron-analyzer` | Track analysis workers | 8082 |
 | `heron-engine` | Real-time playout, encoders, outputs | 8081, gRPC control on 50051 |
 | `mariadb` | Database | 3306 |
