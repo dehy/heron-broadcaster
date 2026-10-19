@@ -109,11 +109,7 @@ impl Station {
             config.save(state_dir.path()).unwrap();
         }
         let engine = Engine::start(
-            EngineOptions {
-                library_dir: library.path().to_path_buf(),
-                state_dir: state_dir.path().to_path_buf(),
-                monitor: false,
-            },
+            EngineOptions::new(library.path().to_path_buf(), state_dir.path().to_path_buf()),
             tokio::runtime::Handle::current(),
         )
         .unwrap();

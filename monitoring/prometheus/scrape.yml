@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# For a Prometheus that scrapes Heron instead of receiving its metrics by
+# remote write: add these jobs to its prometheus.yml. Keep the job names and
+# the `station` label: the dashboard and the alert rules use them.
+# Targets by service name work from a Prometheus on Heron's Docker network
+# (heron_default); otherwise publish the ports (docs/monitoring.md).
+
+scrape_configs:
+  # The playout engine, scraped more often: short outages show.
+  - job_name: heron-engine
+    scrape_interval: 5s
+    static_configs:
+      - targets: ["heron-engine:8081"]
+        labels: { station: heron }
+
+  - job_name: heron-api
+    static_configs:
+      - targets: ["heron-api:8080"]
+        labels: { station: heron }
+
+  - job_name: heron-analyzer
+    static_configs:
+      - targets: ["heron-analyzer:8082"]
+        labels: { station: heron }
+
+  - job_name: heron-librarian
+    static_configs:
+      - targets: ["heron-librarian:8083"]
+        labels: { station: heron }

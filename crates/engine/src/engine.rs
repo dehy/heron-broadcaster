@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The running engine: the audio thread, the player, the outputs, and the
-//! task keeping them in step.
+//! task keeping them in step and saving the queue.
 
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -15,19 +15,46 @@ use tokio::sync::{broadcast, watch};
 
 use crate::clock::{AudioThread, ClockStatus};
 use crate::config::{ConfigFileError, EngineConfig};
+use crate::fallback::Fallback;
 use crate::mixer::{BLOCK_FRAMES, CHANNELS, Mixer, MixerStatus, SAMPLE_RATE};
 use crate::player::{Player, PlayerEvent};
+use crate::queue_file::{self, QueueWriter};
 
 /// Audio waiting between the audio thread and the encoders, at most.
 const MASTER_BUFFER_SECONDS: usize = 2;
 /// How often the player handles the mixer's events.
 const TICK: Duration = Duration::from_millis(10);
+/// The queue is saved when it changes, and this often for the position.
+const SAVE_EVERY: Duration = Duration::from_secs(5);
+/// With the audio thread stuck this long, the process exits so Docker
+/// restarts it, resuming the saved queue.
+const STUCK_EXIT: Duration = Duration::from_secs(10);
 
 pub struct EngineOptions {
     pub library_dir: PathBuf,
     pub state_dir: PathBuf,
+    /// Tracks played when the queue runs dry. `None`: silence.
+    pub fallback_dir: Option<PathBuf>,
+    /// Queue entries whose file is read into memory ahead of time.
+    pub preload_tracks: usize,
+    /// Exit the process when the audio thread is stuck (production).
+    pub exit_when_stuck: bool,
     /// Play the master bus on the local sound card (`monitor` feature).
     pub monitor: bool,
+}
+
+impl EngineOptions {
+    /// Options for an engine without fallback directory.
+    pub fn new(library_dir: PathBuf, state_dir: PathBuf) -> Self {
+        Self {
+            library_dir,
+            state_dir,
+            fallback_dir: None,
+            preload_tracks: crate::player::PRELOAD_TRACKS,
+            exit_when_stuck: false,
+            monitor: false,
+        }
+    }
 }
 
 pub struct Engine {
@@ -37,6 +64,9 @@ pub struct Engine {
     events: broadcast::Sender<PlayerEvent>,
     status: Arc<MixerStatus>,
     clock: Arc<ClockStatus>,
+    queue_writer: QueueWriter,
+    /// Set when shutting down: the last save is made, no other may follow.
+    closing: AtomicBool,
     started: Instant,
     started_at: SystemTime,
     #[cfg(feature = "monitor")]
@@ -61,6 +91,18 @@ impl Engine {
         options: EngineOptions,
         runtime: tokio::runtime::Handle,
     ) -> Result<Arc<Self>, EngineError> {
+        // Present from the start, so dashboards and alerts see them before
+        // the first event.
+        for counter in [
+            "heron_engine_silence_skips_total",
+            "heron_engine_fallback_tracks_total",
+            "heron_engine_preload_failures_total",
+            "heron_engine_underrun_tracks_total",
+            "heron_engine_stalled_tracks_total",
+        ] {
+            metrics::counter!(counter).absolute(0);
+        }
+        metrics::gauge!("heron_engine_dead_air").set(0.0);
         let config = match EngineConfig::load(&options.state_dir) {
             Ok(config) => config,
             Err(error) => {
@@ -93,15 +135,24 @@ impl Engine {
         if options.monitor {
             tracing::warn!("built without the monitor feature: no monitor output");
         }
-        let player = Player::new(
+        let mut player = Player::new(
             options.library_dir,
             config.playout,
             handle,
             events.clone(),
             now_playing_tx,
-        );
+        )
+        .with_preload(options.preload_tracks);
+        if let Some(dir) = options.fallback_dir {
+            player = player.with_fallback(Fallback::start(dir, &options.state_dir));
+        }
+        player.restore(queue_file::load(&options.state_dir));
+        let queue_writer = QueueWriter::start(options.state_dir.clone())?;
         let clock = Arc::new(ClockStatus::default());
         let audio = AudioThread::spawn(mixer, master_tx, Arc::clone(&clock))?;
+        if options.exit_when_stuck {
+            exit_when_stuck(Arc::clone(&status))?;
+        }
         tracing::info!(
             outputs = config.outputs.outputs.len(),
             "audio engine started"
@@ -114,6 +165,8 @@ impl Engine {
             events,
             status,
             clock,
+            queue_writer,
+            closing: AtomicBool::new(false),
             started: Instant::now(),
             started_at: SystemTime::now(),
             #[cfg(feature = "monitor")]
@@ -176,6 +229,43 @@ impl Engine {
         Ok(())
     }
 
+    /// Saves the queue a last time and waits for it to be on disk (when
+    /// shutting down). No periodic save follows it.
+    pub fn save_queue(&self) {
+        // Under the player's lock, like periodic saves: none can slip in
+        // after this one with an older queue.
+        let (number, waiting) = {
+            let player = self.player();
+            self.closing.store(true, Ordering::Relaxed);
+            let queue = player.saved();
+            let waiting = queue.waiting.len();
+            (self.queue_writer.submit(queue), waiting)
+        };
+        if self
+            .queue_writer
+            .wait_written(number, Duration::from_secs(2))
+        {
+            tracing::info!(waiting, "queue saved");
+        } else {
+            tracing::error!("the queue could not be saved in time");
+        }
+    }
+
+    /// Problems listed in `/healthz` without making the engine unhealthy.
+    pub fn warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        if let Some(warning) = heron_service::clock::status().warning {
+            warnings.push(warning);
+        }
+        if self.player().dead_air() {
+            warnings.push(
+                "nothing to play: the queue is empty and the fallback directory has no track"
+                    .to_owned(),
+            );
+        }
+        warnings
+    }
+
     fn record_metrics(&self) {
         let status = &self.status;
         let rendered = status.frame.load(Ordering::Relaxed) as f64 / f64::from(SAMPLE_RATE);
@@ -200,7 +290,36 @@ impl Engine {
         metrics::gauge!("heron_engine_master_peak").set(f64::from(peak[0].max(peak[1])));
         metrics::gauge!("heron_engine_queue_length")
             .set(self.player().snapshot().queue.len() as f64);
+        metrics::gauge!("heron_engine_silent_seconds")
+            .set(status.silent_frames.load(Ordering::Relaxed) as f64 / f64::from(SAMPLE_RATE));
+        heron_service::clock::status().record_metrics();
     }
+}
+
+/// Exits the process when the audio thread stops rendering: Docker's
+/// restart policy brings the engine back, with the saved queue.
+fn exit_when_stuck(status: Arc<MixerStatus>) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("heron-watchdog".to_owned())
+        .spawn(move || {
+            let mut last = status.frame.load(Ordering::Relaxed);
+            let mut since = Instant::now();
+            loop {
+                std::thread::sleep(Duration::from_secs(1));
+                let frame = status.frame.load(Ordering::Relaxed);
+                if frame != last {
+                    last = frame;
+                    since = Instant::now();
+                } else if since.elapsed() >= STUCK_EXIT {
+                    tracing::error!(
+                        seconds = STUCK_EXIT.as_secs(),
+                        "the audio thread is stuck: exiting to be restarted"
+                    );
+                    std::process::exit(1);
+                }
+            }
+        })?;
+    Ok(())
 }
 
 /// Ticks the player until the engine is dropped.
@@ -208,12 +327,22 @@ async fn run_player(engine: std::sync::Weak<Engine>) {
     let mut interval = tokio::time::interval(TICK);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut ticks = 0_u64;
+    let mut saved_at = Instant::now();
     loop {
         interval.tick().await;
         let Some(engine) = engine.upgrade() else {
             return;
         };
-        engine.player().tick();
+        {
+            let mut player = engine.player();
+            player.tick();
+            let due = player.take_changed() || saved_at.elapsed() >= SAVE_EVERY;
+            // Under the player's lock: see `save_queue`.
+            if due && !engine.closing.load(Ordering::Relaxed) {
+                engine.queue_writer.submit(player.saved());
+                saved_at = Instant::now();
+            }
+        }
         ticks += 1;
         if ticks.is_multiple_of(100) {
             engine.record_metrics();
@@ -221,18 +350,24 @@ async fn run_player(engine: std::sync::Weak<Engine>) {
     }
 }
 
-/// `/healthz`: healthy while the audio thread renders.
+/// `/healthz`: healthy while the audio thread renders. Warns when the clock
+/// is not synchronized or there is nothing to play.
 #[derive(Clone)]
-pub struct EngineHealth(pub Arc<MixerStatus>);
+pub struct EngineHealth(pub Arc<Engine>);
 
 impl HealthCheck for EngineHealth {
     async fn check(&self) -> Result<(), String> {
-        let before = self.0.frame.load(Ordering::Relaxed);
+        let status = self.0.status();
+        let before = status.frame.load(Ordering::Relaxed);
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if self.0.frame.load(Ordering::Relaxed) > before {
+        if status.frame.load(Ordering::Relaxed) > before {
             Ok(())
         } else {
             Err("the audio thread is stuck".to_owned())
         }
+    }
+
+    async fn warnings(&self) -> Vec<String> {
+        self.0.warnings()
     }
 }

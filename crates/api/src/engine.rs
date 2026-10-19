@@ -63,7 +63,8 @@ pub struct QueuedTrack {
 
 #[derive(Clone, Debug, PartialEq, Serialize, ToSchema)]
 pub struct QueueEntry {
-    /// Assigned by the engine, unique until it restarts.
+    /// Assigned by the engine. Never reused: a restarted engine resumes its
+    /// saved queue with the same IDs and goes on from there.
     pub entry_id: u64,
     pub track: QueuedTrack,
 }

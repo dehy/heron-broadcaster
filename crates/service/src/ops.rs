@@ -18,6 +18,12 @@ use crate::Error;
 pub trait HealthCheck: Clone + Send + Sync + 'static {
     /// Returns `Err` with a short reason when the service is not healthy.
     fn check(&self) -> impl Future<Output = Result<(), String>> + Send;
+
+    /// Problems worth an operator's attention that do not make the service
+    /// unhealthy (an unsynchronized clock). Listed in `/healthz` as `warnings`.
+    fn warnings(&self) -> impl Future<Output = Vec<String>> + Send {
+        async { Vec::new() }
+    }
 }
 
 /// A service with no dependencies to check: healthy as long as it answers.
@@ -30,9 +36,18 @@ impl HealthCheck for AlwaysHealthy {
     }
 }
 
-/// Installs the Prometheus recorder and records `heron_build_info`.
-pub fn install_metrics(service: &'static str) -> Result<PrometheusHandle, Error> {
+/// Installs the Prometheus recorder, records `heron_build_info` and, when
+/// configured, starts pushing the metrics with remote write (a bad remote
+/// write configuration is logged, not fatal). Call it from the Tokio runtime.
+pub fn install_metrics(
+    service: &'static str,
+    remote_write: &crate::MetricsArgs,
+) -> Result<PrometheusHandle, Error> {
     let handle = PrometheusBuilder::new().install_recorder()?;
+    // Monitoring must never keep a service (the engine above all) from running.
+    if let Err(error) = crate::remote_write::spawn(handle.clone(), service, remote_write) {
+        tracing::error!(%error, "metrics are not pushed");
+    }
     metrics::gauge!(
         "heron_build_info",
         "service" => service,
@@ -73,14 +88,19 @@ async fn healthz<H: HealthCheck>(State(state): State<OpsState<H>>) -> Response {
             "status": status,
         })
     };
-    match state.health.check().await {
-        Ok(()) => (StatusCode::OK, axum::Json(body("ok"))).into_response(),
+    let (status, mut payload) = match state.health.check().await {
+        Ok(()) => (StatusCode::OK, body("ok")),
         Err(reason) => {
             let mut payload = body("unavailable");
             payload["reason"] = reason.into();
-            (StatusCode::SERVICE_UNAVAILABLE, axum::Json(payload)).into_response()
+            (StatusCode::SERVICE_UNAVAILABLE, payload)
         }
+    };
+    let warnings = state.health.warnings().await;
+    if !warnings.is_empty() {
+        payload["warnings"] = warnings.into();
     }
+    (status, axum::Json(payload)).into_response()
 }
 
 async fn render_metrics<H: HealthCheck>(State(state): State<OpsState<H>>) -> impl IntoResponse {

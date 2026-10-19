@@ -71,7 +71,8 @@ message Track {
 }
 
 message QueueEntry {
-  // Assigned by the engine, unique for its lifetime.
+  // Assigned by the engine. Never reused: the engine saves its queue and
+  // resumes it, IDs included, after a restart.
   uint64 entry_id = 1;
   Track track = 2;
 }
@@ -178,7 +179,8 @@ message EngineState {
   // Audio rendered since the engine started.
   uint64 rendered_ms = 6;
   uint64 underruns = 7;
-  // When the engine started: entry IDs start again from 1 after a restart.
+  // When the engine started. A restart resumes the saved queue: entry IDs
+  // go on from where they were (from 1 when the state directory was lost).
   uint64 started_unix_ms = 8;
 }
 

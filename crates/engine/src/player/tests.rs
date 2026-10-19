@@ -25,21 +25,45 @@ struct Station {
 
 impl Station {
     fn new() -> Self {
+        Self::build(tempfile::tempdir().unwrap(), None)
+    }
+
+    /// A station that plays `fallback` (a directory) when its queue runs dry.
+    fn with_fallback(fallback: &Path) -> Self {
         let library = tempfile::tempdir().unwrap();
+        let fallback = Fallback::start(fallback.to_path_buf(), library.path());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while fallback.analyzed() < fallback.len() || fallback.is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "fallback never analyzed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        Self::build(library, Some(fallback))
+    }
+
+    fn build(library: TempDir, fallback: Option<Fallback>) -> Self {
         let (mixer, handle) = Mixer::new(BLOCK);
         let (events_tx, events) = broadcast::channel(64);
         let (now_playing_tx, now_playing) = watch::channel(NowPlaying::default());
-        let player = Player::new(
+        let mut player = Player::new(
             library.path().to_path_buf(),
             PlayoutSettings::default(),
             handle,
             events_tx,
             now_playing_tx,
         )
-        .with_source_loader(|path, cue_in_ms, cue_out_ms| {
-            let audio = decode_to_memory(&path, cue_in_ms, cue_out_ms);
+        .with_source_loader(|file, cue_in_ms, cue_out_ms| {
+            if file.path.ends_with("stalled.wav") {
+                return Ok(Box::new(Stalled));
+            }
+            let audio = decode_to_memory(&file.path, cue_in_ms, cue_out_ms);
             Ok(Box::new(VecSource::new(audio)))
         });
+        if let Some(fallback) = fallback {
+            player = player.with_fallback(fallback);
+        }
         Self {
             library,
             player,
@@ -49,21 +73,22 @@ impl Station {
         }
     }
 
+    /// A new engine over the same library, resuming the queue saved by this one.
+    fn restart(self) -> Self {
+        let saved = self.player.saved();
+        let mut station = Self::build(self.library, None);
+        station.player.restore(saved);
+        station
+    }
+
     /// Writes a 44.1 kHz stereo WAV of `seconds` of a tone into the library.
     fn file(&self, name: &str, seconds: f64) -> TrackRequest {
-        let spec = hound::WavSpec {
-            channels: 2,
-            sample_rate: 44_100,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
-        let mut writer = hound::WavWriter::create(self.library.path().join(name), spec).unwrap();
-        for n in 0..(seconds * 44_100.0) as u64 {
-            let value = (n as f64 * 0.06).sin() * 0.3 * f64::from(i16::MAX);
-            writer.write_sample(value as i16).unwrap();
-            writer.write_sample(value as i16).unwrap();
-        }
-        writer.finalize().unwrap();
+        self.file_at(name, seconds, 0.3)
+    }
+
+    /// Writes a WAV of `seconds` of a tone of `amplitude` (0 for silence).
+    fn file_at(&self, name: &str, seconds: f64, amplitude: f64) -> TrackRequest {
+        write_tone(&self.library.path().join(name), seconds, amplitude);
         let duration_ms = (seconds * 1_000.0) as u32;
         TrackRequest {
             track_id: None,
@@ -75,7 +100,42 @@ impl Station {
             source: PlaySource::Manual,
         }
     }
+}
 
+/// A file on an unreachable share: its decoder never delivers anything.
+struct Stalled;
+
+impl AudioSource for Stalled {
+    fn read(&mut self, _out: &mut [f32]) -> usize {
+        0
+    }
+
+    fn is_finished(&self) -> bool {
+        false
+    }
+
+    fn is_ready(&self) -> bool {
+        false
+    }
+}
+
+fn write_tone(path: &Path, seconds: f64, amplitude: f64) {
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 44_100,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).unwrap();
+    for n in 0..(seconds * 44_100.0) as u64 {
+        let value = (n as f64 * 0.06).sin() * amplitude * f64::from(i16::MAX);
+        writer.write_sample(value as i16).unwrap();
+        writer.write_sample(value as i16).unwrap();
+    }
+    writer.finalize().unwrap();
+}
+
+impl Station {
     /// Renders `seconds` of audio, the player handling events between blocks.
     fn play(&mut self, seconds: f64) -> Vec<f32> {
         let mut output = Vec::new();
@@ -92,6 +152,18 @@ impl Station {
     fn events(&mut self) -> Vec<PlayerEvent> {
         std::iter::from_fn(|| self.events.try_recv().ok()).collect()
     }
+}
+
+fn started_sources(events: &[PlayerEvent]) -> Vec<(String, PlaySource)> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            PlayerEvent::Started { entry, .. } => {
+                Some((entry.track.path.clone(), entry.track.source))
+            }
+            PlayerEvent::Ended { .. } => None,
+        })
+        .collect()
 }
 
 fn started(events: &[PlayerEvent]) -> Vec<(Deck, String)> {
@@ -410,4 +482,216 @@ fn positions_count_the_cued_track() {
             .collect()
     };
     assert_eq!(waiting, ["two.wav", "inserted.wav", "three.wav"]);
+}
+
+#[test]
+fn the_fallback_directory_plays_when_the_queue_runs_dry() {
+    let fallback = tempfile::tempdir().unwrap();
+    write_tone(&fallback.path().join("filler.wav"), 2.0, 0.3);
+    let mut station = Station::with_fallback(fallback.path());
+    let one = station.file("one.wav", 1.0);
+    station.player.enqueue(vec![one], None).unwrap();
+    station.play(1.5);
+    assert!(!station.player.dead_air());
+
+    // Queued while a fallback track is cued: it goes first.
+    let two = station.file("two.wav", 1.0);
+    station.player.enqueue(vec![two], None).unwrap();
+    station.play(3.0);
+    let sources = started_sources(&station.events());
+    assert_eq!(
+        sources,
+        [
+            ("one.wav".to_owned(), PlaySource::Manual),
+            ("filler.wav".to_owned(), PlaySource::Fallback),
+            ("two.wav".to_owned(), PlaySource::Manual),
+            ("filler.wav".to_owned(), PlaySource::Fallback),
+        ]
+    );
+    // Never saved: a restart picks a new one.
+    assert!(
+        station
+            .player
+            .saved()
+            .waiting
+            .iter()
+            .all(|entry| entry.track.source != PlaySource::Fallback)
+    );
+}
+
+#[test]
+fn dead_air_without_anything_to_play() {
+    let mut station = Station::new();
+    station.play(1.0);
+    assert!(!station.player.dead_air(), "not before 5 s");
+    station.play(5.0);
+    assert!(station.player.dead_air());
+    let one = station.file("one.wav", 1.0);
+    station.player.enqueue(vec![one], None).unwrap();
+    station.play(0.2);
+    assert!(!station.player.dead_air());
+}
+
+#[test]
+fn the_silence_watchdog_skips_then_goes_to_the_fallback_directory() {
+    let fallback = tempfile::tempdir().unwrap();
+    write_tone(&fallback.path().join("filler.wav"), 2.0, 0.3);
+    let mut station = Station::with_fallback(fallback.path());
+    let mut settings = PlayoutSettings::default();
+    settings.silence_watchdog.timeout_ms = 2_000;
+    station.player.set_settings(settings);
+    let tracks = vec![
+        station.file_at("silent one.wav", 30.0, 0.0),
+        station.file_at("silent two.wav", 30.0, 0.0),
+        station.file("music.wav", 1.0),
+    ];
+    station.player.enqueue(tracks, None).unwrap();
+    station.play(8.0);
+    let events = station.events();
+    let paths: Vec<String> = started_sources(&events)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(
+        paths[..4],
+        [
+            "silent one.wav",
+            "silent two.wav",
+            "filler.wav",
+            "music.wav"
+        ]
+    );
+    let skipped = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                PlayerEvent::Ended {
+                    reason: EndReason::Skipped,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(skipped, 2);
+}
+
+#[test]
+fn the_silence_watchdog_ignores_pauses() {
+    let mut station = Station::new();
+    let mut settings = PlayoutSettings::default();
+    settings.silence_watchdog.timeout_ms = 1_000;
+    station.player.set_settings(settings);
+    let music = station.file("music.wav", 10.0);
+    station.player.enqueue(vec![music], None).unwrap();
+    station.play(0.5);
+    station.player.pause().unwrap();
+    station.play(3.0);
+    station.player.resume().unwrap();
+    station.play(0.5);
+    assert!(
+        !station
+            .events()
+            .iter()
+            .any(|event| matches!(event, PlayerEvent::Ended { .. }))
+    );
+}
+
+#[test]
+fn a_restart_resumes_the_track_on_air_and_the_queue() {
+    let mut station = Station::new();
+    let tracks = vec![
+        station.file("one.wav", 10.0),
+        station.file("two.wav", 1.0),
+        station.file("three.wav", 1.0),
+    ];
+    let ids = station.player.enqueue(tracks, None).unwrap();
+    station.play(3.0);
+    let saved = station.player.saved();
+    let on_air = saved.on_air.clone().unwrap();
+    assert_eq!(on_air.entry.entry_id, ids[0]);
+    assert_eq!(on_air.position_ms, 3_000);
+    let waiting: Vec<u64> = saved.waiting.iter().map(|entry| entry.entry_id).collect();
+    assert_eq!(waiting, ids[1..]);
+
+    let mut station = station.restart();
+    station.play(1.0);
+    let snapshot = station.player.snapshot();
+    let deck = snapshot.decks.iter().find(|deck| deck.on_air).unwrap();
+    assert_eq!(deck.entry.as_ref().unwrap().entry_id, ids[0]);
+    assert!(
+        deck.position_ms.abs_diff(4_000) <= 100,
+        "{}",
+        deck.position_ms
+    );
+    station.play(8.0);
+    let order: Vec<(u64, String)> = station
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            PlayerEvent::Started { entry, .. } => Some((entry.entry_id, entry.track.path.clone())),
+            PlayerEvent::Ended { .. } => None,
+        })
+        .collect();
+    assert_eq!(
+        order,
+        [
+            (ids[0], "one.wav".to_owned()),
+            (ids[1], "two.wav".to_owned()),
+            (ids[2], "three.wav".to_owned()),
+        ]
+    );
+    // New entries do not reuse the IDs of the saved ones.
+    let four = station.file("four.wav", 1.0);
+    assert!(station.player.enqueue(vec![four], None).unwrap()[0] > ids[2]);
+}
+
+#[test]
+fn a_track_that_cannot_start_gives_way_to_the_fallback_directory() {
+    let fallback = tempfile::tempdir().unwrap();
+    write_tone(&fallback.path().join("filler.wav"), 2.0, 0.3);
+    let mut station = Station::with_fallback(fallback.path());
+    let tracks = vec![
+        station.file("stalled.wav", 30.0),
+        station.file("music.wav", 1.0),
+    ];
+    station.player.enqueue(tracks, None).unwrap();
+    station.play(9.0);
+    assert!(started(&station.events()).is_empty(), "still waiting");
+    station.play(4.0);
+    let paths: Vec<String> = started_sources(&station.events())
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(paths[..2], ["filler.wav", "music.wav"]);
+    // Dropped, not retried.
+    assert!(
+        station
+            .player
+            .snapshot()
+            .queue
+            .iter()
+            .all(|entry| entry.track.path != "stalled.wav")
+    );
+}
+
+#[test]
+fn a_track_that_just_started_is_saved_once() {
+    let mut station = Station::new();
+    let tracks = vec![
+        station.file("one.wav", 1.0),
+        station.file("two.wav", 2.0),
+        station.file("three.wav", 1.0),
+    ];
+    let ids = station.player.enqueue(tracks, None).unwrap();
+    station.play(0.5);
+    // The audio thread starts "two" before the player hears of it.
+    let mut block = vec![0.0; BLOCK * CHANNELS];
+    for _ in 0..8 {
+        station.mixer.render(&mut block);
+    }
+    let saved = station.player.saved();
+    assert_eq!(saved.on_air.unwrap().entry.entry_id, ids[1]);
+    let waiting: Vec<u64> = saved.waiting.iter().map(|entry| entry.entry_id).collect();
+    assert_eq!(waiting, [ids[2]]);
 }

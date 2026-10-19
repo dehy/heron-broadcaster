@@ -56,17 +56,25 @@ impl EngineConfig {
     /// Saves the configuration in `dir`, atomically: a crash never leaves a
     /// half-written file.
     pub fn save(&self, dir: &Path) -> Result<(), ConfigFileError> {
-        let path = dir.join(FILE_NAME);
-        let temporary = dir.join(format!(".{FILE_NAME}.tmp"));
         let write = || -> std::io::Result<()> {
             let json = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
-            let mut file = std::fs::File::create(&temporary)?;
-            file.write_all(&json)?;
-            file.sync_all()?;
-            std::fs::rename(&temporary, &path)
+            write_atomically(dir, FILE_NAME, &json)
         };
-        write().map_err(|source| ConfigFileError::Write { path, source })
+        write().map_err(|source| ConfigFileError::Write {
+            path: dir.join(FILE_NAME),
+            source,
+        })
     }
+}
+
+/// Replaces `dir/name` with `contents`: written to a temporary file, synced,
+/// then renamed over it, so a crash never leaves a half-written file.
+pub fn write_atomically(dir: &Path, name: &str, contents: &[u8]) -> std::io::Result<()> {
+    let temporary = dir.join(format!(".{name}.tmp"));
+    let mut file = std::fs::File::create(&temporary)?;
+    file.write_all(contents)?;
+    file.sync_all()?;
+    std::fs::rename(&temporary, dir.join(name))
 }
 
 #[cfg(test)]

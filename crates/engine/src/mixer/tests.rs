@@ -25,6 +25,7 @@ fn track(entry_id: u64, samples: &[f32]) -> Box<LoadedTrack> {
     Box::new(LoadedTrack {
         entry_id,
         length: (samples.len() / CHANNELS) as u64,
+        start: 0,
         source: Box::new(VecSource::new(samples.to_vec())),
         gain: 1.0,
         fade_in: None,
@@ -385,6 +386,7 @@ fn underruns_play_silence_and_are_reported() {
             entry_id: 7,
             source: Box::new(Starved),
             length: 48_000,
+            start: 0,
             gain: 1.0,
             fade_in: None,
         }),
@@ -460,6 +462,7 @@ fn cued_tracks_wait_for_their_audio() {
             entry_id: 1,
             source: Box::new(NotReady),
             length: 48_000,
+            start: 0,
             gain: 1.0,
             fade_in: None,
         }),

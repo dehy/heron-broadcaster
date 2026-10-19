@@ -59,6 +59,9 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
     setDraft((d) => ({ ...d, crossfade: { ...d.crossfade, ...changes } }));
   const setLoudness = (changes: Partial<PlayoutSettings["loudness"]>) =>
     setDraft((d) => ({ ...d, loudness: { ...d.loudness, ...changes } }));
+  const watchdog = draft.silence_watchdog;
+  const setWatchdog = (changes: Partial<PlayoutSettings["silence_watchdog"]>) =>
+    setDraft((d) => ({ ...d, silence_watchdog: { ...d.silence_watchdog, ...changes } }));
   const disabled = !isAdmin;
 
   return (
@@ -212,6 +215,37 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
             </div>
             <p className="muted small" style={{ margin: 0 }}>
               {t("playout.noLimiter")}
+            </p>
+          </div>
+        </Card>
+        <Card title="Silence watchdog">
+          <div className="stack">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={watchdog.enabled}
+                disabled={disabled}
+                onChange={(event) => setWatchdog({ enabled: event.target.checked })}
+              />
+              Skip tracks that stay silent
+            </label>
+            <div className="form-grid">
+              <Field label="After" hint="Silence is below -50 dBFS">
+                <NumberInput
+                  value={watchdog.timeout_ms / 1000}
+                  min={16}
+                  max={300}
+                  step={1}
+                  suffix="s"
+                  disabled={disabled || !watchdog.enabled}
+                  onChange={(s) => setWatchdog({ timeout_ms: Math.round(s * 1000) })}
+                />
+              </Field>
+            </div>
+            <p className="muted small" style={{ margin: 0 }}>
+              The engine skips to the next track, then to the fallback directory if the
+              next track is silent too. Keep it above 15 s: the analysis keeps silences up
+              to that long inside tracks.
             </p>
           </div>
         </Card>

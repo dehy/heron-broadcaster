@@ -258,7 +258,11 @@ impl QueueManager {
     async fn fill(&self, state: &PlayerState) -> ApiResult<()> {
         let settings: QueueSettings =
             settings::load(&self.pool, QueueSettings::SETTINGS_NAME).await?;
-        let waiting = state.waiting().count();
+        // A cued fallback track gives way to anything queued.
+        let waiting = state
+            .waiting()
+            .filter(|entry| entry.track.source != PlaySource::Fallback)
+            .count();
         let missing = (settings.min_queued as usize).saturating_sub(waiting);
         if !settings.autofill || missing == 0 || self.idle() {
             return Ok(());

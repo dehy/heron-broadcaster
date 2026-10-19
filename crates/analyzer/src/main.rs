@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use heron_service::LogArgs;
 use heron_service::db::{self, DatabaseHealth};
+use heron_service::{LogArgs, MetricsArgs};
 use worker::WorkerConfig;
 
 const SERVICE: &str = "heron-analyzer";
@@ -54,8 +54,16 @@ struct Cli {
     #[arg(long, env = "HERON_ANALYZER_ID")]
     instance: Option<String>,
 
+    /// Niceness, 0 to 19 (0 leaves it as is). The workers yield the CPU and
+    /// the disk to the engine; they also get the lowest best-effort I/O priority.
+    #[arg(long, env = "HERON_NICE", default_value = "10", global = true)]
+    nice: String,
+
     #[command(flatten)]
     log: LogArgs,
+
+    #[command(flatten)]
+    metrics: MetricsArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -71,14 +79,26 @@ fn main() -> anyhow::Result<()> {
             heron_service::probe::probe(cli.http_addr, "/healthz", Duration::from_secs(3))?;
             Ok(())
         }
-        None => run(cli),
+        None => {
+            // Before the runtime starts: its threads inherit the priority.
+            let lowered = heron_service::priority::lower_current_thread_to(&cli.nice);
+            run(cli, lowered)
+        }
     }
 }
 
 #[tokio::main]
-async fn run(cli: Cli) -> anyhow::Result<()> {
-    heron_service::telemetry::init_tracing(&cli.log)?;
-    let metrics = heron_service::ops::install_metrics(SERVICE)?;
+async fn run(cli: Cli, lowered: Result<(), String>) -> anyhow::Result<()> {
+    let _telemetry = heron_service::telemetry::init_tracing(&cli.log, SERVICE)?;
+    match lowered {
+        Ok(()) => {
+            tracing::info!(nice = ?heron_service::priority::current_nice(), "priority lowered")
+        }
+        Err(problem) => {
+            tracing::warn!(nice = ?heron_service::priority::current_nice(), "priority: {problem}")
+        }
+    }
+    let metrics = heron_service::ops::install_metrics(SERVICE, &cli.metrics)?;
     let database_url = cli
         .database_url
         .context("HERON_DATABASE_URL (or --database-url) is required")?;

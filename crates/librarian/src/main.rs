@@ -26,8 +26,8 @@ use heron_librarian::organize;
 use heron_librarian::staging::{self, Stager};
 use heron_librarian::tasks::TaskRunner;
 use heron_library::LibraryLock;
-use heron_service::LogArgs;
 use heron_service::db::{self, DatabaseHealth};
+use heron_service::{LogArgs, MetricsArgs};
 use sqlx::{MySqlPool, Row};
 
 const SERVICE: &str = "heron-librarian";
@@ -109,8 +109,16 @@ struct Cli {
     #[arg(long, env = "HERON_COVER_ART_URL", hide = true)]
     cover_art_url: Option<String>,
 
+    /// Niceness, 0 to 19 (0 leaves it as is). The librarian yield the CPU and
+    /// the disk to the engine; they also get the lowest best-effort I/O priority.
+    #[arg(long, env = "HERON_NICE", default_value = "10", global = true)]
+    nice: String,
+
     #[command(flatten)]
     log: LogArgs,
+
+    #[command(flatten)]
+    metrics: MetricsArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -150,13 +158,25 @@ fn main() -> anyhow::Result<()> {
             heron_service::probe::probe(cli.http_addr, "/healthz", Duration::from_secs(3))?;
             Ok(())
         }
-        _ => run(cli),
+        _ => {
+            // Before the runtime starts: its threads inherit the priority.
+            let lowered = heron_service::priority::lower_current_thread_to(&cli.nice);
+            run(cli, lowered)
+        }
     }
 }
 
 #[tokio::main]
-async fn run(cli: Cli) -> anyhow::Result<()> {
-    heron_service::telemetry::init_tracing(&cli.log)?;
+async fn run(cli: Cli, lowered: Result<(), String>) -> anyhow::Result<()> {
+    let _telemetry = heron_service::telemetry::init_tracing(&cli.log, SERVICE)?;
+    match lowered {
+        Ok(()) => {
+            tracing::info!(nice = ?heron_service::priority::current_nice(), "priority lowered")
+        }
+        Err(problem) => {
+            tracing::warn!(nice = ?heron_service::priority::current_nice(), "priority: {problem}")
+        }
+    }
     let database_url = cli
         .database_url
         .clone()
@@ -200,7 +220,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 }
 
 async fn serve(cli: &Cli, pool: MySqlPool, roots: Roots) -> anyhow::Result<()> {
-    let metrics = heron_service::ops::install_metrics(SERVICE)?;
+    let metrics = heron_service::ops::install_metrics(SERVICE, &cli.metrics)?;
     let defaults = Endpoints::default();
     let endpoints = Endpoints {
         acoustid: cli.acoustid_url.clone().unwrap_or(defaults.acoustid),

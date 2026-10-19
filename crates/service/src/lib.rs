@@ -10,12 +10,15 @@ pub mod clock;
 #[cfg(feature = "mysql")]
 pub mod db;
 pub mod ops;
+pub mod priority;
 pub mod probe;
+pub mod remote_write;
 pub mod telemetry;
 
 use std::net::SocketAddr;
 
 pub use ops::{HealthCheck, ops_router};
+pub use remote_write::MetricsArgs;
 pub use telemetry::{LogArgs, LogFormat};
 
 /// Errors raised while setting up or running a service.
@@ -30,6 +33,8 @@ pub enum Error {
         addr: SocketAddr,
         source: std::io::Error,
     },
+    #[error("metrics remote write: {0}")]
+    RemoteWrite(String),
     #[error("health probe failed: {0}")]
     Probe(String),
     #[cfg(feature = "mysql")]

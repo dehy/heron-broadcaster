@@ -10,7 +10,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | M1 | [Import & analysis](m1-import-analysis.md) | M0 | Done ([#3](https://github.com/dehy/heron-broadcaster/pull/3)) |
 | M1b | [Library management](m1b-library-management.md) | M1 | Done |
 | M2 | [Engine core](m2-engine-core.md) | M1 | In progress: 24 h run pending |
-| M3 | [24/7 reliability](m3-reliability.md) | M2 | Not started |
+| M3 | [24/7 reliability](m3-reliability.md) | M2 | Done |
 | M4 | [API & control plane](m4-api-control-plane.md) | M2 | Done |
 | M5 | [Web UI](m5-web-ui.md) | M4 | Done |
 | M5b | [Track details, labels & tags](m5b-track-details-tags.md) | M5 | Done |

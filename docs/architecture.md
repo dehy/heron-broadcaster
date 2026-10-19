@@ -116,6 +116,23 @@ The engine never connects to the database ([Locked decisions](decisions.md)): it
 | **heron-web** | Static React build. |
 | **mariadb** | Database. Used by `heron-api`, `heron-analyzer` and `heron-librarian`, never by `heron-engine`. |
 
+### Priorities
+
+The air comes first when the machine is short of CPU, disk or memory (a large import on a Raspberry Pi):
+
+| | heron-engine | heron-api, mariadb, heron-web | heron-analyzer | heron-librarian |
+|---|---|---|---|---|
+| CPU weight between containers (`cpu_shares`) | 8192 | 1024 | 256 | 256 |
+| Killed when memory runs out (`oom_score_adj`) | last (−500) | 0 | first (500) | 300 |
+| Niceness inside the container | 0; its fallback analysis thread 19 | 0 | 10 (`HERON_NICE`) | 10 (`HERON_NICE`) |
+| I/O priority | normal | normal | lowest best-effort | lowest best-effort |
+
+- Under cgroup v2, the kernel first shares the CPU between containers by their weight, then between the threads of a container by their niceness: lowering a service's niceness alone does not make it yield to another container, hence `cpu_shares` in `docker-compose.yml`. Weights only matter when the CPU is busy. Every service sets one: some Docker versions map `cpu_shares: 1024` below the weight of a container without it.
+- The analyzer and the librarian lower themselves before their runtime starts, so every thread inherits it (`heron_service::priority`). Lowering needs no privilege; a niceness set higher by the operator is kept. The I/O priority only matters with an I/O scheduler that uses it (BFQ).
+- No service raises its priority: real-time scheduling of the engine's audio thread would need `CAP_SYS_NICE`, and is not needed while `heron_engine_clock_max_late_seconds` stays under the 50 ms lead (see [Monitoring](monitoring.md)).
+
+Change these with a `docker-compose.override.yml`, or `HERON_NICE` (0 leaves the niceness as is).
+
 ### Scanner and analyzer split
 
 Built in [M1](roadmap/m1-import-analysis.md); details in [Import and analysis](analysis.md):
@@ -140,14 +157,16 @@ heron-broadcaster/
 │   ├── dsp/        heron-dsp        resampling; later EQ, compressor, expander, limiter, crossovers, AGC chain
 │   ├── outputs/    heron-outputs    encoders, OutputSink trait + Icecast (later Shoutcast, HLS, file, pipe)
 │   ├── rotation/   heron-rotation   pure rotation: separation, restrictions, relaxation, clocks, selection, simulation
-│   ├── service/    heron-service    process plumbing: logging, /healthz, /metrics, shutdown, DB connect
-│   ├── engine/     heron-engine     binary: decks, mixer, pacing clock, decoding, player, gRPC server, ctl
+│   ├── service/    heron-service    process plumbing: logging, Sentry, /healthz, /metrics, remote write, clock sync, shutdown, DB connect
+│   ├── engine/     heron-engine     binary: decks, mixer, pacing clock, decoding, preloading, player, fallback, gRPC server, ctl
 │   ├── api/        heron-api        binary: axum, auth, queue manager, history, OpenAPI, webhooks, scanner
 │   ├── analyzer/   heron-analyzer   binary: analysis worker pool, job queue consumer
 │   └── librarian/  heron-librarian  binary: incoming folder, buffer zone, identification, layout, journaled moves, organize, trash, undo
 ├── web/                             React + Vite + TypeScript
 ├── migrations/                      sqlx migrations
 ├── docker/                          Dockerfiles
+├── monitoring/                      Grafana dashboard and Prometheus alert rules to import (docs/monitoring.md)
+├── scripts/                         test library, streaming, soak and chaos tests
 ├── docker-compose.yml
 ├── LICENSE                          AGPL-3.0
 └── README.md

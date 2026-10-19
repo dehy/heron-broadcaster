@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { readFileSync } from "node:fs";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
+
+const version: string = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8")).version;
 
 // In development, /api (and its WebSocket) is proxied to a heron-api
 // running locally, or to a station's heron-web with HERON_API_URL.
@@ -14,6 +17,9 @@ export default defineConfig({
         codeSplitting: { groups: [{ name: "vendor", test: /node_modules/ }] },
       },
     },
+  },
+  define: {
+    __APP_VERSION__: JSON.stringify(version),
   },
   server: {
     proxy: {

@@ -108,7 +108,9 @@ curl -b cookies -X POST -H 'X-Requested-With: curl' $api/player/skip
 | `mariadb` | Database | 3306 |
 | `icecast` | Optional local Icecast server (`--profile icecast`) | 8000, published on `HERON_ICECAST_PORT` (8010) |
 
-Every Rust service serves `/healthz` and `/metrics` (Prometheus) on its port.
+Every Rust service serves `/healthz` and `/metrics` (Prometheus) on its port. With `HERON_METRICS_REMOTE_WRITE_URL` set, they also push their metrics to your Prometheus or Grafana Cloud (remote write); import `monitoring/grafana/heron-dashboard.json` into Grafana and load the alert rules of `monitoring/prometheus/alerts.yml`. `HERON_SENTRY_DSN` reports errors to Sentry. See [Monitoring](docs/monitoring.md).
+
+Put a few tracks in the fallback directory (`HERON_FALLBACK_DIR`, `./data/fallback` by default): the engine plays them when the queue runs dry, for example while the API is down.
 
 ## Development
 
@@ -127,6 +129,12 @@ HERON_TEST_DATABASE_URL=mysql://root:root@127.0.0.1:33306 cargo test --workspace
 # Soak test of the engine: two Icecast servers, the library for an hour:
 cargo build --release -p heron-engine
 scripts/soak-test.sh data/music 3600
+
+# Chaos tests (M3) on a running stack with tracks in the library and in
+# the fallback directory: stops the database and the API, restarts Icecast
+# and the engine, deletes queued files, queues a silent file:
+docker compose --profile icecast up -d --wait
+scripts/chaos-test.sh
 
 # Analyze files with given settings, without a database:
 HERON_ANALYSIS_SETTINGS='{"silence_ceiling_dbfs": -60}' \

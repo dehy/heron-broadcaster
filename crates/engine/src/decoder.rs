@@ -4,7 +4,9 @@
 //! that the deck reads on the audio thread.
 //!
 //! Decoding goes through `heron_analysis::Decoder`, the code the analysis
-//! used, so cue points line up with the audio.
+//! used, so cue points line up with the audio. A file read into memory
+//! beforehand ([`crate::preload`]) is decoded from there, so the track plays
+//! to the end even if the library becomes unreachable.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -26,6 +28,27 @@ const MAX_SAMPLE: f32 = 4.0;
 const READY_SAMPLES: usize = SAMPLE_RATE as usize / 10 * CHANNELS;
 /// How long the decoder sleeps when the buffer is full.
 const FULL_WAIT: Duration = Duration::from_millis(5);
+/// Starting further into the file than this (resuming after a restart),
+/// the audio before the start is decoded but not resampled, to get there
+/// quickly. Resampling starts [`SKIP_MARGIN`] before the start.
+const SKIP_FROM: u64 = 30 * SAMPLE_RATE as u64;
+const SKIP_MARGIN: u64 = SAMPLE_RATE as u64;
+
+/// A file to play, with its content when it was read into memory beforehand.
+#[derive(Clone, Debug, Default)]
+pub struct SourceFile {
+    pub path: PathBuf,
+    pub contents: Option<Arc<[u8]>>,
+}
+
+impl SourceFile {
+    pub fn on_disk(path: PathBuf) -> Self {
+        Self {
+            path,
+            contents: None,
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 struct DecodeState {
@@ -44,13 +67,14 @@ pub struct DecodedSource {
 }
 
 impl DecodedSource {
-    /// Starts decoding `path` from `cue_in_ms` to `cue_out_ms` on a new thread.
-    pub fn spawn(path: PathBuf, cue_in_ms: u32, cue_out_ms: u32) -> std::io::Result<Self> {
+    /// Starts decoding `file` from `cue_in_ms` to `cue_out_ms` on a new thread.
+    pub fn spawn(file: SourceFile, cue_in_ms: u32, cue_out_ms: u32) -> std::io::Result<Self> {
         let (producer, consumer) =
             rtrb::RingBuffer::new(BUFFER_SECONDS * SAMPLE_RATE as usize * CHANNELS);
         let state = Arc::new(DecodeState::default());
         let thread_state = Arc::clone(&state);
-        let name = path
+        let name = file
+            .path
             .file_name()
             .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
         std::thread::Builder::new()
@@ -61,7 +85,7 @@ impl DecodedSource {
                     producer,
                     state: &thread_state,
                 };
-                let result = decode(&path, range, &mut writer);
+                let result = decode(&file, range, &mut writer);
                 if let Err(error) = &result {
                     thread_state.failed.store(true, Ordering::Release);
                     tracing::warn!(file = %name, %error, "decoding failed");
@@ -139,7 +163,7 @@ impl Output for Vec<f32> {
 pub fn decode_to_memory(path: &Path, cue_in_ms: u32, cue_out_ms: u32) -> Vec<f32> {
     let mut audio = Vec::new();
     let range = ms_to_frames(cue_in_ms)..ms_to_frames(cue_out_ms);
-    if let Err(error) = decode(path, range, &mut audio) {
+    if let Err(error) = decode(&SourceFile::on_disk(path.to_path_buf()), range, &mut audio) {
         tracing::warn!(path = %path.display(), %error, "decoding failed");
     }
     audio
@@ -180,11 +204,14 @@ impl Output for Writer<'_> {
 
 /// Decodes the frames of `range` (at the internal rate) into `writer`.
 fn decode(
-    path: &Path,
+    file: &SourceFile,
     range: std::ops::Range<u64>,
     writer: &mut impl Output,
 ) -> Result<(), DecodeError> {
-    let mut decoder = Decoder::open(path)?;
+    let mut decoder = match &file.contents {
+        Some(contents) => Decoder::from_memory(&file.path, Arc::clone(contents))?,
+        None => Decoder::open(&file.path)?,
+    };
     let mut resampler: Option<StreamResampler> = None;
     let mut stereo = Vec::new();
     let mut resampled = Vec::new();
@@ -205,8 +232,30 @@ fn decode(
         *position < range.end
     };
 
+    // Input frames skipped without resampling.
+    let mut skipped = 0_u64;
+
     while let Some(block) = decoder.next_block()? {
-        to_stereo(block.samples, block.channels, &mut stereo);
+        let mut samples = block.samples;
+        if resampler.is_none() && range.start > SKIP_FROM {
+            let rate = u64::from(block.rate);
+            let channels = block.channels.max(1);
+            let frames = (samples.len() / channels) as u64;
+            let end = (skipped + frames) * u64::from(SAMPLE_RATE) / rate;
+            if end + SKIP_MARGIN < range.start {
+                skipped += frames;
+                continue;
+            }
+            // Start on an input frame that falls exactly on an output frame
+            // (every 147 frames at 44.1 kHz), so the audio lines up with
+            // what decoding from the start gives.
+            let period = rate / gcd(rate, u64::from(SAMPLE_RATE));
+            let drop = ((period - skipped % period) % period).min(frames);
+            skipped += drop;
+            samples = &samples[drop as usize * channels..];
+            position = skipped * u64::from(SAMPLE_RATE) / rate;
+        }
+        to_stereo(samples, block.channels, &mut stereo);
         let resampler = match &mut resampler {
             Some(resampler) => resampler,
             None => resampler.insert(StreamResampler::new(block.rate, SAMPLE_RATE, CHANNELS)?),
@@ -223,6 +272,10 @@ fn decode(
         emit(&resampled, &mut position);
     }
     Ok(())
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 { a.max(1) } else { gcd(b, a % b) }
 }
 
 /// Converts interleaved audio of any channel count to stereo, and clamps
@@ -288,7 +341,7 @@ mod tests {
         let path = dir.path().join("track.wav");
         write_wav(&path, 44_100, 1, 3.0);
 
-        let source = DecodedSource::spawn(path, 500, 2_250).unwrap();
+        let source = DecodedSource::spawn(SourceFile::on_disk(path), 500, 2_250).unwrap();
         let audio = read_all(source);
         assert_eq!(audio.len(), 1_750 * 48 * CHANNELS);
         // Mono plays on both channels.
@@ -300,13 +353,49 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("track.wav");
         write_wav(&path, 48_000, 2, 1.0);
-        let audio = read_all(DecodedSource::spawn(path, 0, 60_000).unwrap());
+        let audio = read_all(DecodedSource::spawn(SourceFile::on_disk(path), 0, 60_000).unwrap());
         assert_eq!(audio.len(), 48_000 * CHANNELS);
     }
 
     #[test]
+    fn decodes_preloaded_files_without_the_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("track.wav");
+        write_wav(&path, 48_000, 2, 1.0);
+        let file = SourceFile {
+            contents: Some(std::fs::read(&path).unwrap().into()),
+            path: path.clone(),
+        };
+        std::fs::remove_file(&path).unwrap();
+        let source = DecodedSource::spawn(file, 0, 60_000).unwrap();
+        assert_eq!(read_all(source).len(), 48_000 * CHANNELS);
+    }
+
+    #[test]
+    fn far_starts_skip_ahead_to_the_same_audio() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("track.wav");
+        write_wav(&path, 44_100, 2, 40.0);
+        let whole = decode_to_memory(&path, 0, 40_000);
+        let tail =
+            read_all(DecodedSource::spawn(SourceFile::on_disk(path), 35_000, 40_000).unwrap());
+        // The file ends there: the fresh resampler may round its last frame away.
+        assert!(tail.len().abs_diff(5_000 * 48 * CHANNELS) <= CHANNELS);
+        let start = 35_000 * 48 * CHANNELS;
+        // The resampler starts afresh, 1 s before: the same audio, give or
+        // take the resampler's rounding.
+        let error = whole[start..start + tail.len()]
+            .iter()
+            .zip(&tail)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(error < 1e-3, "max difference {error}");
+    }
+
+    #[test]
     fn missing_files_end_at_once_and_report_failure() {
-        let source = DecodedSource::spawn(PathBuf::from("/nonexistent.mp3"), 0, 1_000).unwrap();
+        let source =
+            DecodedSource::spawn(SourceFile::on_disk("/nonexistent.mp3".into()), 0, 1_000).unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         while !source.is_finished() {
             assert!(Instant::now() < deadline);

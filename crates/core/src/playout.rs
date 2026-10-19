@@ -150,6 +150,28 @@ impl Default for LoudnessSettings {
     }
 }
 
+/// The engine's silence watchdog: after this long of silence on the master
+/// bus (below −50 dBFS), it skips to the next track, then to the fallback
+/// directory if the silence goes on.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct SilenceWatchdogSettings {
+    pub enabled: bool,
+    /// Longer than the analysis' longest silence inside a track (15 s), so
+    /// it never cuts a track the analysis kept whole.
+    pub timeout_ms: u32,
+}
+
+impl Default for SilenceWatchdogSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            timeout_ms: 20_000,
+        }
+    }
+}
+
 /// Playout settings, stored under `playout` in the `settings` table and
 /// pushed to the engine.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -158,6 +180,7 @@ impl Default for LoudnessSettings {
 pub struct PlayoutSettings {
     pub crossfade: CrossfadeSettings,
     pub loudness: LoudnessSettings,
+    pub silence_watchdog: SilenceWatchdogSettings,
 }
 
 impl PlayoutSettings {

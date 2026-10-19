@@ -9,16 +9,18 @@
 mod ctl;
 
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use heron_engine::engine::{Engine, EngineHealth, EngineOptions};
 use heron_engine::grpc::EngineService;
-use heron_service::LogArgs;
+use heron_service::{LogArgs, MetricsArgs};
 
 const SERVICE: &str = "heron-engine";
+/// How long a shutdown waits for open connections to close.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Parser)]
 #[command(name = SERVICE, version, about = "Heron Broadcaster playout engine")]
@@ -56,6 +58,11 @@ struct Cli {
     )]
     fallback_dir: PathBuf,
 
+    /// Queue entries whose file is read into memory ahead of time, so a slow
+    /// or unreachable library does not interrupt the air.
+    #[arg(long, env = "HERON_PRELOAD_TRACKS", default_value_t = heron_engine::player::PRELOAD_TRACKS)]
+    preload_tracks: usize,
+
     /// Play the master bus on the local sound card (builds with the `monitor` feature).
     #[arg(long, env = "HERON_MONITOR")]
     monitor: bool,
@@ -66,6 +73,9 @@ struct Cli {
 
     #[command(flatten)]
     log: LogArgs,
+
+    #[command(flatten)]
+    metrics: MetricsArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -90,8 +100,8 @@ fn main() -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn run(cli: Cli) -> anyhow::Result<()> {
-    heron_service::telemetry::init_tracing(&cli.log)?;
-    let metrics = heron_service::ops::install_metrics(SERVICE)?;
+    let _telemetry = heron_service::telemetry::init_tracing(&cli.log, SERVICE)?;
+    let metrics = heron_service::ops::install_metrics(SERVICE, &cli.metrics)?;
 
     std::fs::create_dir_all(&cli.state_dir).with_context(|| {
         format!(
@@ -99,13 +109,13 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             cli.state_dir.display()
         )
     })?;
-    check_fallback_dir(&cli.fallback_dir);
-
     let engine = Engine::start(
         EngineOptions {
-            library_dir: cli.library_dir.clone(),
-            state_dir: cli.state_dir.clone(),
+            fallback_dir: Some(cli.fallback_dir.clone()),
+            preload_tracks: cli.preload_tracks,
+            exit_when_stuck: true,
             monitor: cli.monitor,
+            ..EngineOptions::new(cli.library_dir.clone(), cli.state_dir.clone())
         },
         tokio::runtime::Handle::current(),
     )?;
@@ -120,27 +130,32 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         .serve_with_shutdown(cli.grpc_addr, heron_service::shutdown_signal());
     tracing::info!(addr = %cli.grpc_addr, "grpc server listening");
 
-    let health = EngineHealth(engine.status_handle());
+    let health = EngineHealth(std::sync::Arc::clone(&engine));
     let router = heron_service::ops_router(SERVICE, metrics, health);
-    let (grpc, http) = tokio::join!(grpc, heron_service::serve(cli.http_addr, router));
-    grpc.context("grpc server failed")?;
-    http?;
-    Ok(())
-}
-
-/// A missing fallback directory is not fatal, but it removes a safety net, so say so loudly.
-fn check_fallback_dir(dir: &Path) {
-    match std::fs::read_dir(dir) {
-        Ok(entries) => {
-            let files = entries.filter_map(Result::ok).count();
-            if files == 0 {
-                tracing::warn!(dir = %dir.display(), "fallback directory is empty");
-            } else {
-                tracing::info!(dir = %dir.display(), files, "fallback directory found");
-            }
+    let servers = async {
+        let (grpc, http) = tokio::join!(grpc, heron_service::serve(cli.http_addr, router));
+        grpc.context("grpc server failed")?;
+        http?;
+        anyhow::Ok(())
+    };
+    tokio::pin!(servers);
+    tokio::select! {
+        result = &mut servers => {
+            engine.save_queue();
+            return result;
         }
-        Err(error) => {
-            tracing::warn!(dir = %dir.display(), %error, "fallback directory is not readable");
+        () = heron_service::shutdown_signal() => {}
+    }
+    // Where the track on air is now, for the next start: first, before
+    // anything can delay the exit.
+    engine.save_queue();
+    // Streams (the API's WatchEvents) never end on their own: do not wait
+    // for them, or Docker kills the engine after 10 s.
+    match tokio::time::timeout(SHUTDOWN_GRACE, &mut servers).await {
+        Ok(result) => result,
+        Err(_) => {
+            tracing::info!("closing the connections still open");
+            Ok(())
         }
     }
 }
