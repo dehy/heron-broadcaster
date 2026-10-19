@@ -27,6 +27,7 @@ mod restrictions;
 mod rotation;
 mod selection;
 mod settings;
+mod staging;
 mod sync;
 mod tracks;
 mod users;
@@ -80,6 +81,11 @@ struct Cli {
     /// Root of the music library. Track paths are stored relative to it.
     #[arg(long, env = "HERON_LIBRARY_DIR", default_value = "/music")]
     library_dir: PathBuf,
+
+    /// The buffer zone, where uploads are written (read-write, shared with
+    /// heron-librarian, which imports them).
+    #[arg(long, env = "HERON_STAGING_DIR", default_value = "/staging")]
+    staging_dir: PathBuf,
 
     /// Seconds between full library scans (file system events also trigger scans).
     #[arg(long, env = "HERON_SCAN_INTERVAL", default_value_t = 3600)]
@@ -203,6 +209,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         queue,
         sync,
         passwords: Arc::new(Passwords::default()),
+        staging: Arc::new(cli.staging_dir),
     };
     let router = app::router(state).merge(heron_service::ops_router(SERVICE, metrics, health));
 

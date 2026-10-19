@@ -5,9 +5,11 @@
 //!
 //! The `heron-librarian` binary is crashed at every step of an operation
 //! (`HERON_LIBRARIAN_CRASH_AT`, an abort like a power cut) and killed with
-//! SIGKILL at random moments, while importing (copies, because identified
-//! files are re-tagged; renames for the others), organizing (renames) and
-//! undoing. After each crash it is restarted, recovers, and carries on.
+//! SIGKILL at random moments, while moving incoming files into the buffer
+//! zone, importing from it (copies, because identified files are re-tagged;
+//! renames for the others), organizing (renames), undoing, deleting tracks
+//! to the trash, restoring them and purging the trash. After each crash it
+//! is restarted, recovers, and carries on.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -22,6 +24,7 @@ use common::{
     Album, Mock, MockState, acoustid_result, fingerprint, temp_roots, write_tagged, write_wav,
 };
 use heron_core::LibrarySettings;
+use heron_core::library::TaskRequest;
 use heron_librarian::journal::Roots;
 use heron_library::{Tags, is_audio, is_hidden};
 use heron_service::db::ScratchDatabase;
@@ -44,6 +47,7 @@ impl Setup {
             .env("HERON_DATABASE_URL", &self.db_url)
             .env("HERON_LIBRARY_DIR", &self.roots.library)
             .env("HERON_INCOMING_DIR", &self.roots.incoming)
+            .env("HERON_STAGING_DIR", &self.roots.staging)
             .env("HERON_HTTP_ADDR", "127.0.0.1:0")
             .env("HERON_IMPORT_SETTLE", "0")
             .env("HERON_INCOMING_INTERVAL", "1")
@@ -111,6 +115,17 @@ fn audio(dirs: &[&Path]) -> BTreeMap<String, usize> {
     found
 }
 
+/// Every place audio can be: the incoming folder, the buffer zone, the
+/// library and its trash.
+fn everywhere(roots: &Roots) -> BTreeMap<String, usize> {
+    audio(&[
+        &roots.incoming,
+        &roots.staging,
+        &roots.library,
+        &roots.library.join(".heron-trash"),
+    ])
+}
+
 /// Nothing is lost and nothing is overwritten, whatever the moment.
 fn assert_nothing_lost(
     roots: &Roots,
@@ -118,7 +133,7 @@ fn assert_nothing_lost(
     pre_existing: &[u8],
     when: &str,
 ) {
-    let found = audio(&[&roots.incoming, &roots.library]);
+    let found = everywhere(roots);
     for fingerprint in originals.keys() {
         assert!(found.contains_key(fingerprint), "{when}: a file was lost");
     }
@@ -136,7 +151,7 @@ async fn assert_settled(
     originals: &BTreeMap<String, usize>,
     when: &str,
 ) {
-    let found = audio(&[&roots.incoming, &roots.library]);
+    let found = everywhere(roots);
     assert_eq!(&found, originals, "{when}: every file exactly once");
     let unfinished: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM library_moves WHERE status IN ('pending', 'moved')",
@@ -148,7 +163,10 @@ async fn assert_settled(
     let leftovers: Vec<_> = walkdir::WalkDir::new(&roots.library)
         .into_iter()
         .flatten()
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with(".heron-"))
+        .filter(|entry| {
+            entry.file_type().is_file()
+                && entry.file_name().to_string_lossy().starts_with(".heron-")
+        })
         .map(|entry| entry.path().display().to_string())
         .collect();
     assert!(
@@ -156,10 +174,83 @@ async fn assert_settled(
         "{when}: temporary files left: {leftovers:?}"
     );
     common::assert_tracks_match_files(pool, &roots.library).await;
+    assert_trash_matches_files(pool, &roots.library, when).await;
+}
+
+/// Every track in the trash has its file there.
+async fn assert_trash_matches_files(pool: &MySqlPool, library: &Path, when: &str) {
+    let paths: Vec<String> =
+        sqlx::query_scalar("SELECT path FROM tracks WHERE deleted_at IS NOT NULL")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    for path in paths {
+        assert!(
+            common::path_buf(library, &path).is_file(),
+            "{when}: deleted track {path} has no file in the trash"
+        );
+    }
 }
 
 fn incoming_is_empty(roots: &Roots) -> bool {
     audio(&[&roots.incoming]).is_empty()
+}
+
+/// Asks the librarian for a task, as the API does.
+async fn ask(pool: &MySqlPool, request: &TaskRequest) -> u64 {
+    sqlx::query("INSERT INTO library_tasks (kind, params) VALUES (?, ?)")
+        .bind(request.kind())
+        .bind(serde_json::to_string(request).unwrap())
+        .execute(pool)
+        .await
+        .unwrap()
+        .last_insert_id()
+}
+
+async fn task_status(pool: &MySqlPool, id: u64) -> String {
+    sqlx::query_scalar("SELECT CAST(status AS CHAR) FROM library_tasks WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// Runs the service until the task is over (then stops it as `docker
+/// compose stop` does) or until it crashes at `crash_at`.
+async fn run_task(setup: &Setup, pool: &MySqlPool, task: u64, crash_at: Option<&str>) {
+    let mut child = setup.spawn(&[], crash_at);
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            return;
+        }
+        if matches!(task_status(pool, task).await.as_str(), "done" | "failed") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "task {task} did not finish");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Command::new("kill")
+        .arg("-TERM")
+        .arg(child.id().to_string())
+        .status()
+        .unwrap();
+    wait(&mut child, Duration::from_secs(60));
+}
+
+async fn ids(pool: &MySqlPool, query: &str) -> Vec<u64> {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(query.to_owned()))
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+async fn ready_files(pool: &MySqlPool) -> Vec<u64> {
+    ids(
+        pool,
+        "SELECT id FROM staged_files WHERE status = 'ready' ORDER BY id",
+    )
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -224,14 +315,56 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
         mock_url: mock.url.clone(),
     };
 
-    // Import: crash at every step of the first operations, then at random.
+    // Into the buffer zone: crash at every step, then at random.
+    for crash_at in ["staging-recorded:1", "staging-recorded:7"] {
+        setup.run(&[], Some(crash_at));
+        assert_nothing_lost(
+            &roots,
+            &originals,
+            &pre_existing,
+            &format!("staging, crash at {crash_at}"),
+        );
+    }
+    let mut round = 0;
+    while !incoming_is_empty(&roots) && round < 3 {
+        round += 1;
+        let mut child = setup.spawn(&[], None);
+        std::thread::sleep(Duration::from_millis(200 * round));
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_nothing_lost(
+            &roots,
+            &originals,
+            &pre_existing,
+            &format!("staging, killed in round {round}"),
+        );
+    }
+    // Then let it move and identify everything.
+    let mut child = setup.spawn(&[], None);
+    let deadline = Instant::now() + Duration::from_secs(120);
+    while !incoming_is_empty(&roots) || ready_files(pool).await.len() < 20 {
+        assert!(Instant::now() < deadline, "the files never got ready");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let tracks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tracks")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(tracks, 0, "nothing imported before it is asked");
+
+    // Import from the buffer zone: crash at every step of the first
+    // operations, then at random, asking again for what is left.
     for step in ["recorded", "transferred", "finished", "removed"] {
         for n in [1, 3] {
-            if incoming_is_empty(&roots) {
+            let ready = ready_files(pool).await;
+            if ready.is_empty() {
                 break;
             }
             let crash_at = format!("{step}:{n}");
-            setup.run(&[], Some(&crash_at));
+            let task = ask(pool, &TaskRequest::StagingImport { file_ids: ready }).await;
+            run_task(&setup, pool, task, Some(&crash_at)).await;
             assert_nothing_lost(
                 &roots,
                 &originals,
@@ -241,33 +374,37 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
         }
     }
     let mut round = 0;
-    while !incoming_is_empty(&roots) && round < 6 {
+    loop {
+        // A run recovers interrupted imports first.
+        let ready = ready_files(pool).await;
+        if ready.is_empty() {
+            let importing = ids(
+                pool,
+                "SELECT id FROM staged_files WHERE status = 'importing'",
+            )
+            .await;
+            if importing.is_empty() {
+                break;
+            }
+        }
         round += 1;
-        let mut child = setup.spawn(&[], None);
-        std::thread::sleep(Duration::from_millis(300 + 700 * round));
-        child.kill().unwrap();
-        child.wait().unwrap();
-        assert_nothing_lost(
-            &roots,
-            &originals,
-            &pre_existing,
-            &format!("import, killed in round {round}"),
-        );
+        assert!(round < 20, "the import never finished");
+        let task = ask(pool, &TaskRequest::StagingImport { file_ids: ready }).await;
+        if round <= 3 {
+            let mut child = setup.spawn(&[], None);
+            tokio::time::sleep(Duration::from_millis(300 + 400 * round)).await;
+            child.kill().unwrap();
+            child.wait().unwrap();
+            assert_nothing_lost(
+                &roots,
+                &originals,
+                &pre_existing,
+                &format!("import, killed in round {round}"),
+            );
+        } else {
+            run_task(&setup, pool, task, None).await;
+        }
     }
-    // Then let it finish.
-    let mut child = setup.spawn(&[], None);
-    let deadline = Instant::now() + Duration::from_secs(120);
-    while !incoming_is_empty(&roots) {
-        assert!(Instant::now() < deadline, "the import did not finish");
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    // Stop it between operations, as `docker compose stop` does.
-    Command::new("kill")
-        .arg("-TERM")
-        .arg(child.id().to_string())
-        .status()
-        .unwrap();
-    wait(&mut child, Duration::from_secs(60));
     setup.run(&["batches"], None);
     assert_settled(pool, &roots, &originals, "after the import").await;
     assert_eq!(
@@ -334,5 +471,98 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
         before_organize,
         "undone byte for byte"
     );
+
+    // Delete half the tracks to the trash, crashing as it goes.
+    let deleting = ids(pool, "SELECT id FROM tracks ORDER BY id LIMIT 10").await;
+    for crash_at in ["recorded:2", "transferred:4", "finished:6"] {
+        let task = ask(
+            pool,
+            &TaskRequest::Delete {
+                track_ids: deleting.clone(),
+            },
+        )
+        .await;
+        run_task(&setup, pool, task, Some(crash_at)).await;
+        assert_nothing_lost(
+            &roots,
+            &originals,
+            &pre_existing,
+            &format!("delete, crash at {crash_at}"),
+        );
+    }
+    let task = ask(
+        pool,
+        &TaskRequest::Delete {
+            track_ids: deleting.clone(),
+        },
+    )
+    .await;
+    run_task(&setup, pool, task, None).await;
+    assert_settled(pool, &roots, &originals, "after deleting").await;
+    let deleted: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM tracks WHERE deleted_at IS NOT NULL")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(deleted, 10);
+
+    // Restore every deletion batch, crashing once.
+    let batches = ids(
+        pool,
+        "SELECT b.id FROM library_batches b WHERE b.kind = 'delete'
+           AND EXISTS (SELECT 1 FROM library_moves m WHERE m.batch_id = b.id AND m.status = 'done')
+         ORDER BY b.id",
+    )
+    .await;
+    for (index, batch) in batches.iter().enumerate() {
+        let batch = batch.to_string();
+        if index == 0 {
+            setup.run(&["undo", &batch], Some("transferred:1"));
+            assert_nothing_lost(&roots, &originals, &pre_existing, "restore, crashed");
+        }
+        assert!(setup.run(&["undo", &batch], None), "restore {batch}");
+    }
+    assert_settled(pool, &roots, &originals, "after restoring").await;
+    assert_eq!(
+        common::snapshot(&roots.library),
+        before_organize,
+        "restored byte for byte"
+    );
+
+    // Delete them again and purge the trash, crashing in the middle: what
+    // is purged is gone, the rest stays whole.
+    let task = ask(
+        pool,
+        &TaskRequest::Delete {
+            track_ids: deleting.clone(),
+        },
+    )
+    .await;
+    run_task(&setup, pool, task, None).await;
+    let task = ask(pool, &TaskRequest::EmptyTrash).await;
+    run_task(&setup, pool, task, Some("purged:4")).await;
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tracks WHERE deleted_at IS NOT NULL")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(left < 10, "the purge started");
+    assert_trash_matches_files(pool, &roots.library, "purge, crashed").await;
+    common::assert_tracks_match_files(pool, &roots.library).await;
+    let task = ask(pool, &TaskRequest::EmptyTrash).await;
+    run_task(&setup, pool, task, None).await;
+    let tracks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tracks")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(tracks, 10, "the purged tracks are gone");
+    assert_eq!(everywhere(&roots).len(), 10, "and their files");
+    assert!(
+        !roots
+            .library
+            .join(".heron-trash")
+            .join(batches[0].to_string())
+            .exists()
+    );
+    common::assert_tracks_match_files(pool, &roots.library).await;
     db.drop().await;
 }

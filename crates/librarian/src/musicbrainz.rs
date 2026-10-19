@@ -37,7 +37,7 @@ pub async fn look_up(
     let rows: Vec<(u64, String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT t.id, t.musicbrainz_release_id, t.musicbrainz_recording_id
          FROM tracks t LEFT JOIN track_musicbrainz mb ON mb.track_id = t.id
-         WHERE t.musicbrainz_release_id IS NOT NULL
+         WHERE t.musicbrainz_release_id IS NOT NULL AND t.deleted_at IS NULL
            AND t.musicbrainz_recording_id IS NOT NULL{stale}
          ORDER BY t.musicbrainz_release_id, t.id"
     )))

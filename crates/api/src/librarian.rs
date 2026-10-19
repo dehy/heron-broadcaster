@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Library management through `heron-librarian`: the review of
-//! identifications, organizing the library after a dry run, and undoing
-//! batches.
+//! identifications, organizing the library after a dry run, undoing
+//! batches, and deleting tracks through the trash.
 //!
 //! The API cannot write files, so work on files is queued as library tasks
 //! (`library_tasks`) that the librarian runs in order; clients poll the
@@ -12,7 +12,10 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use heron_core::library::{BatchReport, DetailsReport, OrganizePlan, RelationsReport, TaskRequest};
+use heron_core::LibrarySettings;
+use heron_core::library::{
+    BatchReport, DetailsReport, OrganizePlan, PurgeReport, RelationsReport, TRASH_DIR, TaskRequest,
+};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
@@ -21,6 +24,7 @@ use utoipa_axum::routes;
 use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{ApiError, ApiResult, ErrorBody};
+use crate::settings;
 use crate::tracks::{ListContext, TrackSummary};
 
 pub fn router() -> OpenApiRouter<AppState> {
@@ -35,6 +39,10 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(apply_release))
         .routes(routes!(keep_tags))
         .routes(routes!(fetch_details))
+        .routes(routes!(delete_tracks))
+        .routes(routes!(list_trash))
+        .routes(routes!(restore_batch))
+        .routes(routes!(empty_trash))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ToSchema)]
@@ -62,6 +70,8 @@ pub struct LibraryTask {
     pub relations: Option<RelationsReport>,
     /// What a finished MusicBrainz details lookup did.
     pub details: Option<DetailsReport>,
+    /// What emptying the trash removed.
+    pub purge: Option<PurgeReport>,
     pub requested_by: Option<String>,
     pub created_at_unix_ms: i64,
     pub started_at_unix_ms: Option<i64>,
@@ -99,7 +109,8 @@ fn task(
         _ => TaskStatus::Pending,
     };
     let result = result.as_deref().filter(|_| status == TaskStatus::Done);
-    let (mut plan, mut report, mut relations, mut details) = (None, None, None, None);
+    let (mut plan, mut report, mut relations, mut details, mut purge) =
+        (None, None, None, None, None);
     match (&request, result) {
         (_, None) => {}
         (TaskRequest::OrganizePlan, Some(result)) => plan = serde_json::from_str(result).ok(),
@@ -109,6 +120,7 @@ fn task(
         (TaskRequest::MusicbrainzDetails { .. }, Some(result)) => {
             details = serde_json::from_str(result).ok();
         }
+        (TaskRequest::EmptyTrash, Some(result)) => purge = serde_json::from_str(result).ok(),
         (_, Some(result)) => report = serde_json::from_str(result).ok(),
     }
     Ok(LibraryTask {
@@ -120,6 +132,7 @@ fn task(
         report,
         relations,
         details,
+        purge,
         requested_by,
         created_at_unix_ms: created,
         started_at_unix_ms: started,
@@ -259,6 +272,10 @@ pub enum BatchKind {
     Review,
     /// Tags edited from the browser.
     Edit,
+    /// Tracks moved to the trash (undone to restore them).
+    Delete,
+    /// Tracks removed from the trash for good.
+    Purge,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -308,6 +325,8 @@ async fn list_batches(
                         "undo" => BatchKind::Undo,
                         "review" => BatchKind::Review,
                         "edit" => BatchKind::Edit,
+                        "delete" => BatchKind::Delete,
+                        "purge" => BatchKind::Purge,
                         _ => BatchKind::Import,
                     },
                     undoes,
@@ -346,6 +365,11 @@ async fn undo_batch(
         Some((kind, _)) if kind == "undo" => {
             return Err(ApiError::Conflict(
                 "an undo cannot be undone: organize again instead".to_owned(),
+            ));
+        }
+        Some((kind, _)) if kind == "purge" => {
+            return Err(ApiError::Conflict(
+                "purged tracks are gone for good".to_owned(),
             ));
         }
         Some((_, Some(by))) => {
@@ -583,4 +607,211 @@ async fn fetch_details(
     )
     .await?;
     Ok((StatusCode::ACCEPTED, Json(task)))
+}
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TrackSelection {
+    pub track_ids: Vec<u64>,
+}
+
+/// Tracks deleted in one request.
+const MAX_DELETE: usize = 10_000;
+
+/// Moves tracks to the trash: heron-librarian moves their files to
+/// `.heron-trash/` in the library, as one batch. They leave the library,
+/// rotation, their categories and the queue (a track on air plays to its
+/// end), and are purged after `trash_days`; until then they can be
+/// restored whole. Tracks whose file is missing can be deleted too.
+/// Operators and admins.
+#[utoipa::path(post, path = "/tracks/delete", tag = "library",
+    request_body = TrackSelection,
+    responses((status = 202, body = LibraryTask), (status = "4XX", body = ErrorBody)))]
+async fn delete_tracks(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(selection): Json<TrackSelection>,
+) -> ApiResult<(StatusCode, Json<LibraryTask>)> {
+    user.require(Role::Operator)?;
+    let mut track_ids = selection.track_ids;
+    track_ids.sort_unstable();
+    track_ids.dedup();
+    if track_ids.is_empty() || track_ids.len() > MAX_DELETE {
+        return Err(ApiError::Invalid(format!(
+            "select 1 to {MAX_DELETE} tracks"
+        )));
+    }
+    let task = ask(&state, &user, TaskRequest::Delete { track_ids }).await?;
+    Ok((StatusCode::ACCEPTED, Json(task)))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TrashItem {
+    pub track: TrackSummary,
+    /// Where it was in the library, and goes back to when restored.
+    pub original_path: String,
+    /// The `delete` batch: restoring undoes it.
+    pub batch_id: Option<u64>,
+    pub deleted_at_unix_ms: i64,
+    /// When it is purged for good.
+    pub purge_at_unix_ms: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TrashPage {
+    pub items: Vec<TrashItem>,
+    pub total: u64,
+    /// Days deleted tracks are kept.
+    pub trash_days: u32,
+}
+
+/// Tracks in the trash, most recently deleted first.
+#[utoipa::path(get, path = "/library/trash", tag = "library",
+    params(ReviewQuery),
+    responses((status = 200, body = TrashPage), (status = "4XX", body = ErrorBody)))]
+async fn list_trash(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<ReviewQuery>,
+) -> ApiResult<Json<TrashPage>> {
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=200).contains(&limit) {
+        return Err(ApiError::BadRequest("limit is 1 to 200".to_owned()));
+    }
+    let settings: LibrarySettings =
+        settings::load(&state.pool, LibrarySettings::SETTINGS_NAME).await?;
+    let total: i64 = sqlx::query_scalar(
+        "SELECT CAST(COUNT(*) AS SIGNED) FROM tracks WHERE deleted_at IS NOT NULL",
+    )
+    .fetch_one(&state.pool)
+    .await?;
+    let ids: Vec<u64> = sqlx::query_scalar(
+        "SELECT id FROM tracks WHERE deleted_at IS NOT NULL
+         ORDER BY deleted_at DESC, id LIMIT ? OFFSET ?",
+    )
+    .bind(limit)
+    .bind(query.offset.unwrap_or(0))
+    .fetch_all(&state.pool)
+    .await?;
+    let mut tracks = ListContext::load(&state.pool)
+        .await?
+        .summaries(&state.pool, &ids)
+        .await?;
+    tracks.sort_by_key(|track| ids.iter().position(|id| *id == track.id));
+    let mut items = Vec::with_capacity(tracks.len());
+    for track in tracks {
+        let deleted: i64 = sqlx::query_scalar(
+            "SELECT CAST(UNIX_TIMESTAMP(deleted_at) * 1000 AS SIGNED) FROM tracks WHERE id = ?",
+        )
+        .bind(track.id)
+        .fetch_one(&state.pool)
+        .await?;
+        let (batch_id, original_path) = trash_origin(&track.path);
+        items.push(TrashItem {
+            original_path,
+            batch_id,
+            deleted_at_unix_ms: deleted,
+            purge_at_unix_ms: deleted + i64::from(settings.trash_days) * 86_400_000,
+            track,
+        });
+    }
+    Ok(Json(TrashPage {
+        items,
+        total: u64::try_from(total).unwrap_or(0),
+        trash_days: settings.trash_days,
+    }))
+}
+
+/// The batch and the original path of a path in the trash
+/// (`.heron-trash/<batch>/<path>`).
+fn trash_origin(path: &str) -> (Option<u64>, String) {
+    let Some(rest) = path
+        .strip_prefix(TRASH_DIR)
+        .and_then(|rest| rest.strip_prefix('/'))
+    else {
+        return (None, path.to_owned());
+    };
+    match rest.split_once('/') {
+        Some((batch, original)) => (batch.parse().ok(), original.to_owned()),
+        None => (None, rest.to_owned()),
+    }
+}
+
+/// Restores the tracks of a deletion (undoes its batch): their files go
+/// back where they were, with their analysis, categories and history. A
+/// path taken since is reported, and that track stays in the trash.
+/// Operators and admins.
+#[utoipa::path(post, path = "/library/trash/{batch_id}/restore", tag = "library",
+    params(("batch_id" = u64, Path)),
+    responses((status = 202, body = LibraryTask), (status = "4XX", body = ErrorBody)))]
+async fn restore_batch(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(batch_id): Path<u64>,
+) -> ApiResult<(StatusCode, Json<LibraryTask>)> {
+    user.require(Role::Operator)?;
+    let batch: Option<(String, Option<u64>)> = sqlx::query_as(
+        "SELECT CAST(b.kind AS CHAR),
+                (SELECT u.id FROM library_batches u WHERE u.undoes = b.id AND u.finished_at IS NOT NULL LIMIT 1)
+         FROM library_batches b WHERE b.id = ?",
+    )
+    .bind(batch_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    match batch {
+        None => return Err(ApiError::not_found("batch")),
+        Some((kind, _)) if kind != "delete" => {
+            return Err(ApiError::Conflict(format!(
+                "batch {batch_id} is not a deletion"
+            )));
+        }
+        Some((_, Some(by))) => {
+            return Err(ApiError::Conflict(format!(
+                "batch {batch_id} was restored by batch {by}"
+            )));
+        }
+        Some(_) => {}
+    }
+    let pending: Option<u64> = sqlx::query_scalar(
+        "SELECT id FROM library_tasks
+         WHERE kind = 'undo' AND status IN ('pending', 'running')
+           AND JSON_VALUE(params, '$.batch_id') = ?
+         LIMIT 1",
+    )
+    .bind(batch_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    if let Some(pending) = pending {
+        return Err(ApiError::Conflict(format!(
+            "these tracks are being restored already (task {pending})"
+        )));
+    }
+    let task = ask(&state, &user, TaskRequest::Undo { batch_id }).await?;
+    Ok((StatusCode::ACCEPTED, Json(task)))
+}
+
+/// Purges the whole trash now: the tracks and their files are removed for
+/// good; their plays keep their artist and title. Admins.
+#[utoipa::path(post, path = "/library/trash/empty", tag = "library",
+    responses((status = 202, body = LibraryTask), (status = "4XX", body = ErrorBody)))]
+async fn empty_trash(
+    user: CurrentUser,
+    State(state): State<AppState>,
+) -> ApiResult<(StatusCode, Json<LibraryTask>)> {
+    user.require(Role::Admin)?;
+    let task = ask(&state, &user, TaskRequest::EmptyTrash).await?;
+    Ok((StatusCode::ACCEPTED, Json(task)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trash_paths_tell_their_batch_and_origin() {
+        assert_eq!(
+            trash_origin(".heron-trash/12/Band/Album/01 Song.mp3"),
+            (Some(12), "Band/Album/01 Song.mp3".to_owned())
+        );
+        assert_eq!(trash_origin("Band/x.mp3"), (None, "Band/x.mp3".to_owned()));
+    }
 }

@@ -19,6 +19,7 @@ use crate::journal::{
 };
 use crate::layout::{self, FileFacts, Layout};
 use crate::restore::Delta;
+use crate::trash;
 
 /// Operations run per library lock, so scans can run in between.
 pub(crate) const LOCK_CHUNK: usize = 50;
@@ -35,6 +36,8 @@ pub enum Error {
     AlreadyUndone { batch: u64, by: u64 },
     #[error("task failed: {0}")]
     Task(#[from] tokio::task::JoinError),
+    #[error(transparent)]
+    Analysis(#[from] heron_analysis::Error),
 }
 
 /// The dry run of an organization.
@@ -251,6 +254,12 @@ pub async fn undo(pool: &MySqlPool, roots: &Roots, batch: u64) -> Result<Report,
         Some(id) => id,
         None => journal::create_batch(pool, BatchKind::Undo, Some(batch)).await?,
     };
+    // Undoing a deletion restores the tracks from the trash.
+    if trash::is_delete(pool, batch).await? {
+        let report = trash::restore(pool, roots, batch, undo_batch).await?;
+        journal::finish_batch(pool, undo_batch).await?;
+        return Ok(report);
+    }
     let mut report = Report {
         batch_id: undo_batch,
         ..Report::default()

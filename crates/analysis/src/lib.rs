@@ -65,4 +65,15 @@ impl Error {
             _ => false,
         }
     }
+
+    /// Whether the file is in a format Heron cannot decode, rather than
+    /// broken.
+    pub fn is_unsupported_format(&self) -> bool {
+        matches!(
+            self,
+            Self::Decode(symphonia::core::errors::Error::Unsupported(_))
+                | Self::NoAudioTrack
+                | Self::UnsupportedFormat { .. }
+        )
+    }
 }

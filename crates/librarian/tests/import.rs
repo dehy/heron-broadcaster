@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Acceptance: 100 files (tagged, badly tagged, untagged) dropped into the
-//! incoming folder. Confidently identified files end up tagged and filed,
-//! the others are imported and flagged for review. AcoustID and MusicBrainz
+//! incoming folder wait in the buffer zone, identified, until they are
+//! imported. Confidently identified files end up tagged and filed, the
+//! others are imported and flagged for review. AcoustID and MusicBrainz
 //! rate limits are respected (against a mock server).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -17,7 +18,6 @@ use common::{
     write_wav,
 };
 use heron_core::LibrarySettings;
-use heron_librarian::import::Importer;
 use heron_library::Tags;
 use heron_service::db::ScratchDatabase;
 use sqlx::MySqlPool;
@@ -144,28 +144,57 @@ async fn a_hundred_dropped_files() {
     )
     .await;
 
-    let mut importer = Importer::new(
-        pool.clone(),
-        roots.clone(),
-        mock.endpoints(),
-        Duration::ZERO,
-    );
-    let report = importer.import_once().await.unwrap();
+    let staged = common::stage(pool, &roots, mock.endpoints(), Duration::ZERO).await;
     assert_eq!(
-        (
-            report.imported,
-            report.identified,
-            report.needs_review,
-            report.failed,
-            report.deferred
-        ),
-        (100, 80, 20, 0, 0),
-        "{report:?}"
+        (staged.staged, staged.failed, staged.deferred),
+        (100, 0, 0),
+        "{staged:?}"
     );
-
     // Everything was taken from the incoming folder, folders included.
     assert!(common::snapshot(incoming).is_empty());
     assert_eq!(std::fs::read_dir(incoming).unwrap().count(), 0);
+
+    // Nothing reached the library: the files wait, identified, with the
+    // path they will get.
+    assert!(common::snapshot(&roots.library).is_empty());
+    let tracks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tracks")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(tracks, 0);
+    let statuses: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT JSON_VALUE(identification, '$.status'), COUNT(*) FROM staged_files
+         WHERE status = 'ready' GROUP BY 1 ORDER BY 1",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        statuses,
+        [
+            ("identified".to_owned(), 80),
+            ("needs_review".to_owned(), 20)
+        ]
+    );
+    let planned: String = sqlx::query_scalar(
+        "SELECT planned_path FROM staged_files WHERE original_name = 'Album 1/03.wav'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(planned, "Band 1/Album 1/03 Song 3 of 1.wav");
+    let groups: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM staged_groups")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(groups, 17, "one group per folder");
+
+    let report = common::import_ready(pool, &roots, mock.endpoints()).await;
+    assert_eq!((report.done, report.skipped.len()), (100, 0), "{report:?}");
+    assert!(
+        common::snapshot(&roots.staging).is_empty(),
+        "the buffer zone is empty"
+    );
     common::assert_tracks_match_files(pool, &roots.library).await;
 
     // Well-tagged albums: filed and tagged from MusicBrainz.
@@ -342,18 +371,9 @@ async fn without_a_key_files_are_filed_by_their_own_tags() {
     write_wav(&roots.incoming.join(".hidden.wav"), 4);
 
     let mock = Mock::start(MockState::default()).await;
-    let mut importer = Importer::new(
-        pool.clone(),
-        roots.clone(),
-        mock.endpoints(),
-        Duration::ZERO,
-    );
-    let report = importer.import_once().await.unwrap();
-    assert_eq!(
-        (report.imported, report.identified, report.needs_review),
-        (2, 0, 0),
-        "{report:?}"
-    );
+    let (staged, report) =
+        common::stage_and_import(pool, &roots, mock.endpoints(), Duration::ZERO).await;
+    assert_eq!((staged.staged, report.done), (2, 2), "{report:?}");
     assert!(mock.state.lock().unwrap().requests.is_empty());
 
     let library = &roots.library;
@@ -397,14 +417,8 @@ async fn files_still_being_copied_wait() {
     let (_dir, roots) = temp_roots();
     write_wav(&roots.incoming.join("fresh.wav"), 1);
     let mock = Mock::start(MockState::default()).await;
-    let mut importer = Importer::new(
-        db.pool.clone(),
-        roots.clone(),
-        mock.endpoints(),
-        Duration::from_secs(60),
-    );
-    let report = importer.import_once().await.unwrap();
-    assert_eq!((report.imported, report.deferred), (0, 1));
+    let report = common::stage(&db.pool, &roots, mock.endpoints(), Duration::from_secs(60)).await;
+    assert_eq!((report.staged, report.deferred), (0, 1));
     assert!(roots.incoming.join("fresh.wav").exists());
     db.drop().await;
 }

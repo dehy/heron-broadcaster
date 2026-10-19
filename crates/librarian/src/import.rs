@@ -1,52 +1,45 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The incoming folder: files dropped there are identified, tagged and
-//! filed into the library, then analyzed like any other track.
+//! The incoming folder: files dropped there are moved into the buffer zone
+//! once they have not changed for the settle time, like the scanner does,
+//! and wait there with uploads until someone imports them (see
+//! [`crate::staging`]). The files of one folder form a group, so siblings
+//! are identified together and agree on their release.
 //!
-//! Files are picked up once they have not changed for the settle time, like
-//! the scanner does. Files of one folder are handled together, so siblings
-//! agree on their release. When AcoustID or MusicBrainz cannot be reached,
-//! the folder waits and is tried again later; after a few failures it is
-//! imported with its own tags and flagged for review.
+//! Each move is recorded in `staged_files` (`receiving`) before the file is
+//! touched, and finished or rolled back by [`crate::staging::recover`].
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::io::ErrorKind;
+use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use heron_analysis::Chromaprint;
 use heron_core::{FileStamp, LibraryPath, LibrarySettings};
-use heron_library::tags::{self, FileTags};
-use heron_library::{LibraryLock, Tags, is_audio, is_hidden};
+use heron_library::{Tags, is_audio, is_hidden};
 use serde::Serialize;
 use sqlx::MySqlPool;
 use tokio::sync::{mpsc, watch};
 
+use crate::fsops;
+use crate::identify::Identifier;
 use crate::identify::matching::Candidate;
-use crate::identify::{Endpoints, FileToIdentify, Identified, Identifier};
-use crate::journal::{
-    self, BatchKind, Identification, IdentificationStatus, NewTrack, OpError, Operation, Origin,
-    Retag, RetagCover, Roots, Subject, TagChange,
-};
-use crate::layout::{FileFacts, Layout};
-use crate::{fsops, organize};
+use crate::journal::Roots;
+use crate::staging::Stager;
 
-/// Lookups of a folder are tried this many times before it is imported
-/// unidentified.
-const LOOKUP_ATTEMPTS: u32 = 3;
-/// Wait before trying a folder again, doubled after each failure.
-const RETRY_DELAY: Duration = Duration::from_secs(60);
 /// Candidates kept for the review screen.
-const MAX_CANDIDATES: usize = 20;
+pub(crate) const MAX_CANDIDATES: usize = 20;
 /// Quiet time after the last file system event before looking.
 const EVENT_DEBOUNCE: Duration = Duration::from_secs(2);
 /// Name of the cover saved in album folders.
 const COVER_FILE: &str = "cover.jpg";
+/// How often the buffer zone is looked at for files to identify.
+const STAGING_POLL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
     #[error("the incoming directory {path} is not readable: {source}")]
     Root {
-        path: PathBuf,
+        path: std::path::PathBuf,
         source: std::io::Error,
     },
     #[error("database error: {0}")]
@@ -60,50 +53,34 @@ pub enum ImportError {
 /// Outcome of one pass over the incoming folder.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ImportReport {
-    pub imported: u64,
-    pub identified: u64,
-    pub needs_review: u64,
-    /// Files still changing, or folders waiting to retry a lookup.
+    /// Files moved into the buffer zone.
+    pub staged: u64,
+    /// Files still changing.
     pub deferred: u64,
     pub failed: u64,
-}
-
-struct Retry {
-    attempts: u32,
-    at: Instant,
 }
 
 pub struct Importer {
     pool: MySqlPool,
     roots: Roots,
-    endpoints: Endpoints,
     settle: Duration,
-    retries: HashMap<String, Retry>,
-}
-
-/// An incoming file, read and fingerprinted.
-struct Incoming {
-    path: LibraryPath,
-    stamp: FileStamp,
-    read: FileTags,
-    chromaprint: Option<Chromaprint>,
 }
 
 impl Importer {
-    pub fn new(pool: MySqlPool, roots: Roots, endpoints: Endpoints, settle: Duration) -> Self {
+    pub fn new(pool: MySqlPool, roots: Roots, settle: Duration) -> Self {
         Self {
             pool,
             roots,
-            endpoints,
             settle,
-            retries: HashMap::new(),
         }
     }
 
-    /// Imports, then looks again after file system events and every
-    /// `interval`, until `stopped` turns true.
+    /// Moves incoming files into the buffer zone after file system events
+    /// and every `interval`, and has `stager` identify what waits there,
+    /// until `stopped` turns true.
     pub async fn run(
-        mut self,
+        self,
+        mut stager: Stager,
         interval: Duration,
         watch: bool,
         mut stopped: watch::Receiver<bool>,
@@ -114,42 +91,37 @@ impl Importer {
         } else {
             None
         };
+        let mut next_look = tokio::time::Instant::now();
         while !*stopped.borrow() {
-            let wait = match self.import_once().await {
-                Ok(report) if report.deferred > 0 => self.settle + Duration::from_secs(1),
-                Ok(_) => interval,
-                Err(error) => {
-                    tracing::error!(%error, "import failed");
-                    interval
-                }
-            };
+            if tokio::time::Instant::now() >= next_look {
+                let wait = match self.import_once().await {
+                    Ok(report) if report.deferred > 0 => self.settle + Duration::from_secs(1),
+                    Ok(_) => interval,
+                    Err(error) => {
+                        tracing::error!(%error, "cannot look at the incoming folder");
+                        interval
+                    }
+                };
+                next_look = tokio::time::Instant::now() + wait;
+            }
+            if let Err(error) = stager.identify_once().await {
+                tracing::error!(%error, "cannot identify the files of the buffer zone");
+            }
+            let wake = next_look.min(tokio::time::Instant::now() + STAGING_POLL);
             tokio::select! {
-                () = tokio::time::sleep(wait) => {}
+                () = tokio::time::sleep_until(wake) => {}
                 Some(()) = events.recv() => {
                     while let Ok(Some(())) = tokio::time::timeout(EVENT_DEBOUNCE, events.recv()).await {}
+                    next_look = tokio::time::Instant::now();
                 }
                 _ = stopped.changed() => {}
             }
         }
     }
 
-    /// One pass over the incoming folder.
-    pub async fn import_once(&mut self) -> Result<ImportReport, ImportError> {
-        let settings = load_settings(&self.pool).await?;
-        let layout = Layout::from_settings(&settings);
-        let identifier = match &settings.acoustid_key {
-            Some(key) => {
-                match Identifier::new(self.endpoints.clone(), key.clone(), settings.min_score) {
-                    Ok(identifier) => Some(identifier),
-                    Err(error) => {
-                        tracing::error!(%error, "cannot set up identification");
-                        None
-                    }
-                }
-            }
-            None => None,
-        };
-
+    /// One pass over the incoming folder: settled files move into the
+    /// buffer zone, one group per folder.
+    pub async fn import_once(&self) -> Result<ImportReport, ImportError> {
         let root = self.roots.incoming.clone();
         let files = tokio::task::spawn_blocking(move || walk(&root)).await??;
         let mut report = ImportReport::default();
@@ -169,302 +141,159 @@ impl Importer {
             groups.entry(dir).or_default().push((path, stamp));
         }
 
-        let mut batch = None;
         for (dir, files) in groups {
-            if self
-                .retries
-                .get(&dir)
-                .is_some_and(|retry| retry.at > Instant::now())
-            {
-                report.deferred += files.len() as u64;
-                continue;
+            let name = if dir.is_empty() { "incoming" } else { &dir };
+            let group_id =
+                sqlx::query("INSERT INTO staged_groups (source, name) VALUES ('incoming', ?)")
+                    .bind(truncate(name, 512))
+                    .execute(&self.pool)
+                    .await?
+                    .last_insert_id();
+            for (path, stamp) in files {
+                match self.stage(group_id, &path, stamp).await {
+                    Ok(true) => report.staged += 1,
+                    Ok(false) => report.deferred += 1,
+                    Err(StageError::Database(error)) => return Err(error.into()),
+                    Err(StageError::Io(error)) => {
+                        tracing::warn!(%path, %error, "cannot move into the buffer zone");
+                        report.failed += 1;
+                    }
+                }
             }
-            let incoming = self.read_group(files, identifier.is_some()).await?;
-            let identified = match &identifier {
-                None => vec![None; incoming.len()],
-                Some(identifier) => match identify(identifier, &incoming).await {
-                    Ok(identified) => {
-                        self.retries.remove(&dir);
-                        identified.into_iter().map(Some).collect()
-                    }
-                    Err(error) => {
-                        let retry = self.retries.entry(dir.clone()).or_insert(Retry {
-                            attempts: 0,
-                            at: Instant::now(),
-                        });
-                        retry.attempts += 1;
-                        if retry.attempts < LOOKUP_ATTEMPTS {
-                            retry.at = Instant::now() + RETRY_DELAY * 2_u32.pow(retry.attempts - 1);
-                            tracing::warn!(dir, %error, attempt = retry.attempts, "identification failed, will retry");
-                            report.deferred += incoming.len() as u64;
-                            continue;
-                        }
-                        tracing::warn!(dir, %error, "identification keeps failing, importing as is");
-                        self.retries.remove(&dir);
-                        let reason = format!("identification failed: {error}");
-                        vec![
-                            Some(Identified::Review {
-                                reason,
-                                candidates: Vec::new()
-                            });
-                            incoming.len()
-                        ]
-                    }
-                },
-            };
-            let covers = match &identifier {
-                Some(identifier) if settings.save_cover || settings.embed_cover => {
-                    fetch_covers(identifier, &identified).await
-                }
-                _ => HashMap::new(),
-            };
-
-            let batch_id = match batch {
-                Some(id) => id,
-                None => {
-                    *batch.insert(journal::create_batch(&self.pool, BatchKind::Import, None).await?)
-                }
-            };
-            let lock = LibraryLock::acquire(&self.pool, "librarian").await?;
-            let result = self
-                .file_group(
-                    batch_id,
-                    &layout,
-                    &settings,
-                    incoming,
-                    identified,
-                    &covers,
-                    &mut report,
-                )
-                .await;
-            lock.release().await?;
-            result?;
             fsops::remove_empty_dirs(
                 &LibraryPath::from_stored(dir).resolve(&self.roots.incoming),
                 &self.roots.incoming,
             );
         }
-
-        if let Some(batch_id) = batch {
-            journal::finish_batch(&self.pool, batch_id).await?;
+        // Folders whose files all failed or changed leave an empty group.
+        sqlx::query(
+            "DELETE FROM staged_groups
+             WHERE source = 'incoming'
+               AND NOT EXISTS (SELECT 1 FROM staged_files f WHERE f.group_id = staged_groups.id)",
+        )
+        .execute(&self.pool)
+        .await?;
+        if report.staged > 0 {
+            tracing::info!(?report, "incoming files moved into the buffer zone");
         }
-        if report.imported > 0 {
-            let analysis = heron_analysis::jobs::load_settings(&self.pool).await?;
-            heron_analysis::jobs::enqueue_stale(&self.pool, &analysis).await?;
-            tracing::info!(?report, "incoming files imported");
-        }
-        for (result, count) in [
-            ("identified", report.identified),
-            ("needs_review", report.needs_review),
-            (
-                "unidentified",
-                report.imported - report.identified - report.needs_review,
-            ),
-            ("failed", report.failed),
-        ] {
-            metrics::counter!("heron_librarian_imports_total", "result" => result).increment(count);
-        }
+        metrics::counter!("heron_librarian_staged_total", "source" => "incoming")
+            .increment(report.staged);
         Ok(report)
     }
 
-    async fn read_group(
+    /// Moves one incoming file into its group's folder of the buffer zone.
+    /// Returns `false` when it changed meanwhile (it is tried again later).
+    async fn stage(
         &self,
-        files: Vec<(LibraryPath, FileStamp)>,
-        fingerprint: bool,
-    ) -> Result<Vec<Incoming>, ImportError> {
-        let root = self.roots.incoming.clone();
-        Ok(tokio::task::spawn_blocking(move || {
-            files
-                .into_iter()
-                .map(|(path, stamp)| {
-                    let absolute = path.resolve(&root);
-                    let read = tags::read(&absolute).unwrap_or_else(|error| {
-                        tracing::warn!(%path, %error, "cannot read tags");
-                        FileTags::default()
-                    });
-                    let chromaprint = if fingerprint {
-                        heron_analysis::fingerprint_file(&absolute).unwrap_or_else(|error| {
-                            tracing::warn!(%path, %error, "cannot fingerprint");
-                            None
-                        })
-                    } else {
-                        None
-                    };
-                    Incoming {
-                        path,
-                        stamp,
-                        read,
-                        chromaprint,
-                    }
-                })
-                .collect()
-        })
-        .await?)
-    }
+        group_id: u64,
+        path: &LibraryPath,
+        stamp: FileStamp,
+    ) -> Result<bool, StageError> {
+        let name = path
+            .as_str()
+            .rsplit_once('/')
+            .map_or(path.as_str(), |(_, name)| name);
+        let staged = LibraryPath::from_stored(format!("{group_id}/{name}"));
+        let file_id = sqlx::query(
+            "INSERT INTO staged_files (group_id, staged_path, original_name, size, status)
+             VALUES (?, ?, ?, ?, 'receiving')",
+        )
+        .bind(group_id)
+        .bind(staged.as_str())
+        .bind(path.as_str())
+        .bind(stamp.size)
+        .execute(&self.pool)
+        .await?
+        .last_insert_id();
+        crate::journal::crash_point("staging-recorded");
 
-    /// Files a group into the library. Hold the library lock.
-    #[allow(clippy::too_many_arguments)]
-    async fn file_group(
-        &self,
-        batch_id: u64,
-        layout: &Layout,
-        settings: &LibrarySettings,
-        incoming: Vec<Incoming>,
-        identified: Vec<Option<Identified>>,
-        covers: &HashMap<String, Vec<u8>>,
-        report: &mut ImportReport,
-    ) -> Result<(), ImportError> {
-        let mut planned = HashSet::new();
-        let mut album_dirs: HashMap<String, PathBuf> = HashMap::new();
-        for (file, identified) in incoming.into_iter().zip(identified) {
-            let own = file.read.tags.clone();
-            let (tags, identification, release) = match identified {
-                None => (own.clone(), None, None),
-                Some(Identified::Match {
-                    tags,
-                    score,
-                    recording_mbid,
-                    release_mbid,
-                    candidates,
-                }) => (
-                    merge(*tags, &own),
-                    Some(Identification {
-                        status: IdentificationStatus::Identified,
-                        reason: None,
-                        score: Some(score),
-                        recording_mbid: Some(recording_mbid),
-                        release_mbid: Some(release_mbid.clone()),
-                        candidates: candidates_json(&candidates),
-                    }),
-                    Some(release_mbid),
-                ),
-                Some(Identified::Review { reason, candidates }) => (
-                    own.clone(),
-                    Some(Identification {
-                        status: IdentificationStatus::NeedsReview,
-                        reason: Some(reason),
-                        score: candidates.iter().map(|c| c.score).reduce(f64::max),
-                        recording_mbid: None,
-                        release_mbid: None,
-                        candidates: candidates_json(&candidates),
-                    }),
-                    None,
-                ),
-            };
-
-            let cover = release
-                .as_ref()
-                .and_then(|release| covers.get(release))
-                .filter(|_| settings.embed_cover && !file.read.has_cover);
-            let retag = (tags != own || cover.is_some()).then(|| Retag {
-                change: TagChange::Tags {
-                    previous: own.clone(),
-                    applied: tags.clone(),
-                },
-                restore: None,
-                cover: cover.map_or(RetagCover::Keep, |jpeg| RetagCover::Embed(jpeg.clone())),
-            });
-
-            let absolute = file.path.resolve(&self.roots.incoming);
-            let (stem, extension) = organize::stem_and_extension(&absolute);
-            let desired = layout.render(&FileFacts {
-                tags: &tags,
-                original_stem: &stem,
-                extension: &extension,
-            });
-            let to = loop {
-                let candidate = organize::free_path(&desired, None, &mut planned, |path| {
-                    std::fs::symlink_metadata(self.roots.library.join(path)).is_ok()
-                });
-                let Some(candidate) = candidate.map(LibraryPath::from_stored) else {
-                    continue;
-                };
-                if journal::is_free(&self.pool, &self.roots, &candidate).await? {
-                    break candidate;
-                }
-            };
-
-            let status = identification
-                .as_ref()
-                .map(|identification| identification.status);
-            let operation = Operation {
-                batch_id,
-                subject: Subject::New(Box::new(NewTrack {
-                    tags: tags.clone(),
-                    duration_ms: file.read.duration_ms,
-                    chromaprint: file.chromaprint,
-                    identification,
-                })),
-                from: Origin::Incoming(file.path.clone()),
-                to: to.clone(),
-                retag,
-                expected_stamp: Some(file.stamp),
-            };
-            match journal::execute(&self.pool, &self.roots, operation).await {
-                Ok(_) => {
-                    report.imported += 1;
-                    match status {
-                        Some(IdentificationStatus::Identified) => report.identified += 1,
-                        Some(IdentificationStatus::NeedsReview) => report.needs_review += 1,
-                        None => {}
-                    }
-                    tracing::info!(from = %file.path, %to, ?status, "imported");
-                    if let (Some(release), Some(parent)) =
-                        (release, to.resolve(&self.roots.library).parent())
-                    {
-                        album_dirs
-                            .entry(release)
-                            .or_insert_with(|| parent.to_path_buf());
-                    }
-                }
-                Err(OpError::Database(error)) => return Err(error.into()),
-                Err(OpError::SourceChanged) => report.deferred += 1,
-                Err(error) => {
-                    tracing::warn!(path = %file.path, %error, "cannot import");
-                    report.failed += 1;
-                }
+        let from = path.resolve(&self.roots.incoming);
+        let to = staged.resolve(&self.roots.staging);
+        let temp = LibraryPath::from_stored(format!("{group_id}/.heron-{file_id}"))
+            .resolve(&self.roots.staging);
+        let moved = tokio::task::spawn_blocking(move || move_in(&from, &to, &temp, stamp))
+            .await
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        match moved {
+            Ok(true) => {
+                sqlx::query("UPDATE staged_files SET status = 'identifying' WHERE id = ?")
+                    .bind(file_id)
+                    .execute(&self.pool)
+                    .await?;
+                tracing::info!(from = %path, to = %staged, "moved into the buffer zone");
+                Ok(true)
+            }
+            Ok(false) | Err(_) => {
+                sqlx::query("DELETE FROM staged_files WHERE id = ?")
+                    .bind(file_id)
+                    .execute(&self.pool)
+                    .await?;
+                moved.map_err(StageError::Io)
             }
         }
-
-        if settings.save_cover {
-            for (release, dir) in album_dirs {
-                if let Some(jpeg) = covers.get(&release) {
-                    save_cover(&dir, jpeg);
-                }
-            }
-        }
-        Ok(())
     }
 }
 
-/// Identifies a group.
-async fn identify(
-    identifier: &Identifier,
-    incoming: &[Incoming],
-) -> Result<Vec<Identified>, crate::identify::IdentifyError> {
-    let files: Vec<FileToIdentify> = incoming
-        .iter()
-        .map(|file| FileToIdentify {
-            chromaprint: file.chromaprint.clone(),
-            duration_s: file.read.duration_ms.map(|ms| (ms + 500) / 1000),
-            album_tag: file.read.tags.album.clone(),
-        })
-        .collect();
-    identifier.identify(&files).await
+#[derive(Debug, thiserror::Error)]
+enum StageError {
+    #[error("database error: {0}")]
+    Database(#[from] sqlx::Error),
+    #[error("file error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
-async fn fetch_covers(
+/// Moves `from` to `to` without replacing anything: a rename, or across
+/// file systems a verified copy into `temp`, renamed into place, before
+/// the original is removed. Returns `false` (nothing moved) when the file
+/// changed since it was looked at.
+fn move_in(from: &Path, to: &Path, temp: &Path, stamp: FileStamp) -> std::io::Result<bool> {
+    if FileStamp::from_metadata(&std::fs::metadata(from)?) != stamp {
+        return Ok(false);
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    match fsops::rename_no_replace(from, to) {
+        Ok(()) => {
+            if let Some(parent) = to.parent() {
+                fsops::sync_dir(parent);
+            }
+            return Ok(true);
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::CrossesDevices | ErrorKind::Unsupported
+            ) => {}
+        Err(error) => return Err(error),
+    }
+    fsops::copy_verified(from, temp)?;
+    if FileStamp::from_metadata(&std::fs::metadata(from)?) != stamp {
+        let _ = std::fs::remove_file(temp);
+        return Ok(false);
+    }
+    if let Err(error) = fsops::rename_no_replace(temp, to) {
+        let _ = std::fs::remove_file(temp);
+        return Err(error);
+    }
+    if let Some(parent) = to.parent() {
+        fsops::sync_dir(parent);
+    }
+    crate::journal::crash_point("staging-copied");
+    std::fs::remove_file(from)?;
+    Ok(true)
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
+}
+
+/// Front covers of releases, from the Cover Art Archive.
+pub(crate) async fn fetch_covers(
     identifier: &Identifier,
-    identified: &[Option<Identified>],
+    releases: HashSet<&String>,
 ) -> HashMap<String, Vec<u8>> {
     let mut covers = HashMap::new();
-    let releases: HashSet<&String> = identified
-        .iter()
-        .filter_map(|identified| match identified {
-            Some(Identified::Match { release_mbid, .. }) => Some(release_mbid),
-            _ => None,
-        })
-        .collect();
     for release in releases {
         match identifier.cover(release).await {
             Ok(Some(jpeg)) => {
@@ -511,7 +340,7 @@ pub(crate) fn merge(identified: Tags, own: &Tags) -> Tags {
     }
 }
 
-fn candidates_json(candidates: &[Candidate]) -> Option<serde_json::Value> {
+pub(crate) fn candidates_json(candidates: &[Candidate]) -> Option<serde_json::Value> {
     if candidates.is_empty() {
         return None;
     }
@@ -541,7 +370,7 @@ pub async fn load_settings(pool: &MySqlPool) -> Result<LibrarySettings, sqlx::Er
 }
 
 /// Audio files in the incoming folder, with their stamps.
-fn walk(root: &Path) -> Result<Vec<(LibraryPath, FileStamp)>, ImportError> {
+pub(crate) fn walk(root: &Path) -> Result<Vec<(LibraryPath, FileStamp)>, ImportError> {
     let root_error = |source| ImportError::Root {
         path: root.to_path_buf(),
         source,

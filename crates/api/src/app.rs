@@ -28,7 +28,7 @@ use crate::queue::QueueManager;
 use crate::sync::ConfigSync;
 use crate::{
     artists, categories, clocks, history, labels, librarian, live, outputs, player, restrictions,
-    rotation, selection, settings, tracks, users,
+    rotation, selection, settings, staging, tracks, users,
 };
 
 pub const SERVICE: &str = "heron-api";
@@ -42,6 +42,8 @@ pub struct AppState {
     pub queue: Arc<QueueManager>,
     pub sync: Arc<ConfigSync>,
     pub passwords: Arc<Passwords>,
+    /// The buffer zone, as mounted in this container (read-write).
+    pub staging: Arc<std::path::PathBuf>,
 }
 
 #[derive(OpenApi)]
@@ -62,7 +64,8 @@ pub struct AppState {
         (name = "users", description = "User management (admins)"),
         (name = "player", description = "Decks, transport, FX player and the engine"),
         (name = "queue", description = "The tracks waiting to play"),
-        (name = "library", description = "Tracks, their analysis and overrides; review, organization and undo through heron-librarian"),
+        (name = "library", description = "Tracks, their analysis and overrides; review, organization, undo, deletion and the trash through heron-librarian"),
+        (name = "buffer", description = "The buffer zone: uploads, and new files waiting to be imported"),
         (name = "categories", description = "Groups of tracks"),
         (name = "labels", description = "Keywords on tracks, to sort the library"),
         (name = "artists", description = "Artists, their names and similar artists"),
@@ -101,6 +104,7 @@ fn api() -> OpenApiRouter<AppState> {
         .merge(selection::router())
         .merge(labels::router())
         .merge(librarian::router())
+        .merge(staging::router())
         .merge(categories::router())
         .merge(artists::router())
         .merge(clocks::router())

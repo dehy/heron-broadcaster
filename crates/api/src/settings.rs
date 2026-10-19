@@ -179,6 +179,13 @@ pub struct LibrarySettingsView {
     pub min_score: f64,
     pub save_cover: bool,
     pub embed_cover: bool,
+    /// Largest file accepted by upload, in MiB.
+    pub max_upload_mb: u64,
+    /// Uploads are refused when they would leave less free space on the
+    /// buffer zone's disk, in MiB.
+    pub min_free_mb: u64,
+    /// Days deleted tracks stay in the trash.
+    pub trash_days: u32,
 }
 
 impl From<LibrarySettings> for LibrarySettingsView {
@@ -189,6 +196,9 @@ impl From<LibrarySettings> for LibrarySettingsView {
             min_score: settings.min_score,
             save_cover: settings.save_cover,
             embed_cover: settings.embed_cover,
+            max_upload_mb: settings.max_upload_mb,
+            min_free_mb: settings.min_free_mb,
+            trash_days: settings.trash_days,
         }
     }
 }
@@ -207,6 +217,11 @@ pub struct LibrarySettingsPatch {
     pub min_score: Option<f64>,
     pub save_cover: Option<bool>,
     pub embed_cover: Option<bool>,
+    /// 1 or more.
+    pub max_upload_mb: Option<u64>,
+    pub min_free_mb: Option<u64>,
+    /// 1 to 3650.
+    pub trash_days: Option<u32>,
 }
 
 /// Tells a field set to `null` (`Some(None)`) from a missing one (`None`).
@@ -420,6 +435,19 @@ async fn patch_library(
             return Err(ApiError::Invalid("min_score is between 0 and 1".to_owned()));
         }
         settings.min_score = min_score;
+    }
+    if let Some(max) = patch.max_upload_mb {
+        if max == 0 {
+            return Err(ApiError::Invalid("max_upload_mb is at least 1".to_owned()));
+        }
+        settings.max_upload_mb = max;
+    }
+    settings.min_free_mb = patch.min_free_mb.unwrap_or(settings.min_free_mb);
+    if let Some(days) = patch.trash_days {
+        if !(1..=3650).contains(&days) {
+            return Err(ApiError::Invalid("trash_days is 1 to 3650".to_owned()));
+        }
+        settings.trash_days = days;
     }
     settings.save_cover = patch.save_cover.unwrap_or(settings.save_cover);
     settings.embed_cover = patch.embed_cover.unwrap_or(settings.embed_cover);

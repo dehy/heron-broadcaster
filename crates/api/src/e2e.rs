@@ -32,6 +32,7 @@ struct Station {
     db: ScratchDatabase,
     library: TempDir,
     _state_dir: TempDir,
+    staging: TempDir,
     _engine: Arc<Engine>,
     state: AppState,
     api: SocketAddr,
@@ -103,6 +104,7 @@ impl Station {
         }
 
         let state_dir = tempfile::tempdir().unwrap();
+        let staging = tempfile::tempdir().unwrap();
         if let Some(config) = engine_config {
             config.save(state_dir.path()).unwrap();
         }
@@ -144,6 +146,7 @@ impl Station {
             queue,
             sync,
             passwords: Arc::new(Passwords::default()),
+            staging: Arc::new(staging.path().to_path_buf()),
         };
         let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = http.local_addr().unwrap();
@@ -161,6 +164,7 @@ impl Station {
             db,
             library,
             _state_dir: state_dir,
+            staging,
             _engine: engine,
             state,
             api,
@@ -921,6 +925,7 @@ async fn web_ui_routes() {
     let roots = heron_librarian::journal::Roots {
         library: station.library.path().to_path_buf(),
         incoming: station.library.path().join(".incoming"),
+        staging: station.staging.path().to_path_buf(),
     };
     let librarian = heron_librarian::tasks::TaskRunner::new(
         pool.clone(),
@@ -1758,6 +1763,7 @@ async fn track_details_labels_programming_and_tags() {
     let roots = heron_librarian::journal::Roots {
         library: station.library.path().to_path_buf(),
         incoming: station.library.path().join(".incoming"),
+        staging: station.staging.path().to_path_buf(),
     };
     let librarian = heron_librarian::tasks::TaskRunner::new(
         pool.clone(),

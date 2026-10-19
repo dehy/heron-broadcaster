@@ -144,7 +144,8 @@ impl Library {
                                    AND a.params_hash = ?), 0) AS SIGNED) AS analyzed,
                  CAST(COALESCE(SUM(t.missing_since IS NULL AND a.cue_out_ms <= a.cue_in_ms), 0)
                       AS SIGNED) AS silent
-             FROM tracks t LEFT JOIN track_analysis a ON a.track_id = t.id",
+             FROM tracks t LEFT JOIN track_analysis a ON a.track_id = t.id
+             WHERE t.deleted_at IS NULL",
         )
         .bind(heron_analysis::ALGORITHM_VERSION)
         .bind(settings.fingerprint().as_slice())
@@ -385,7 +386,7 @@ impl Library {
         let rows = sqlx::query(
             "SELECT id, path, file_size, file_mtime_us, file_hash,
                     missing_since IS NOT NULL AS missing, details_version < ? AS stale_details
-             FROM tracks",
+             FROM tracks WHERE deleted_at IS NULL",
         )
         .bind(DETAILS_VERSION)
         .fetch_all(&self.pool)
