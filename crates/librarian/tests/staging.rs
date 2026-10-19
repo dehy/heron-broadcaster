@@ -146,10 +146,10 @@ async fn flags_and_choices() {
     );
     assert!(flags(pool, "twin a.wav").await.is_empty());
     assert_eq!(flags(pool, "twin b.wav").await, ["duplicate_in_buffer"]);
-    assert_eq!(flags(pool, "broken.mp3").await.len(), 1);
-    assert!(
-        ["undecodable", "unsupported_format"]
-            .contains(&flags(pool, "broken.mp3").await[0].as_str())
+    assert_eq!(
+        flags(pool, "broken.mp3").await,
+        ["undecodable"],
+        "not audio"
     );
     assert_eq!(flags(pool, "short.wav").await, ["too_short"]);
     let duplicate_of: Option<u64> = sqlx::query_scalar(

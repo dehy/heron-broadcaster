@@ -66,14 +66,16 @@ impl Error {
         }
     }
 
-    /// Whether the file is in a format Heron cannot decode, rather than
-    /// broken.
+    /// Whether the file is in a format Heron cannot decode (a container or
+    /// codec it does not know), rather than broken. A file no container
+    /// reader recognizes is not audio: broken.
     pub fn is_unsupported_format(&self) -> bool {
-        matches!(
-            self,
-            Self::Decode(symphonia::core::errors::Error::Unsupported(_))
-                | Self::NoAudioTrack
-                | Self::UnsupportedFormat { .. }
-        )
+        match self {
+            Self::Decode(symphonia::core::errors::Error::Unsupported(what)) => {
+                !what.contains("(probe)")
+            }
+            Self::NoAudioTrack | Self::UnsupportedFormat { .. } => true,
+            _ => false,
+        }
     }
 }
