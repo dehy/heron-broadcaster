@@ -29,7 +29,8 @@ import { useCategories } from "./Clocks";
 
 type TargetKind = Target["kind"];
 
-const FILTERED: Record<TargetKind, PlainKey> = {
+// Partial: the kind comes from the URL, which may name any.
+const FILTERED: Partial<Record<string, PlainKey>> = {
   track: "restrictions.filteredTrack",
   artist: "restrictions.filteredArtist",
   category: "restrictions.filteredCategory",
@@ -94,7 +95,7 @@ export function Restrictions() {
       />
       {(kind || targetId) && (
         <p className="row small">
-          <span className="muted">{t(kind ? FILTERED[kind] : "restrictions.filteredTarget")}</span>
+          <span className="muted">{t((kind && FILTERED[kind]) ?? "restrictions.filteredTarget")}</span>
           <button type="button" className="link-button" onClick={() => setSearch({ target: null, target_id: null })}>
             {t("restrictions.showAll")}
           </button>

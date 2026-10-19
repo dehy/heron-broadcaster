@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { afterEach, describe, expect, it } from "vitest";
-import { number, rich, setLanguage, systemLanguage, t, toSetting } from ".";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { locale, number, rich, setLanguage, systemLanguage, t, toSetting } from ".";
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await setLanguage("en");
 });
 
@@ -49,5 +50,14 @@ describe("choosing the language", () => {
     expect(toSetting("system")).toBe("system");
     expect(toSetting("pt-BR")).toBe("system");
     expect(toSetting(null)).toBe("system");
+  });
+
+  it("follows a change of region alone", async () => {
+    vi.stubGlobal("navigator", { languages: ["en-US"] });
+    await setLanguage("system");
+    expect(locale()).toBe("en-US");
+    vi.stubGlobal("navigator", { languages: ["en-GB"] });
+    await setLanguage("system");
+    expect(locale()).toBe("en-GB");
   });
 });

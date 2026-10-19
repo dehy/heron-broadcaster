@@ -111,14 +111,16 @@ async function load(code: Current): Promise<Catalog> {
 }
 
 let switching = 0;
-// The language last asked for, loaded or still loading.
-let wanted: Current | null = null;
+// The language and regional variant last asked for, loaded or still
+// loading: a change of region alone (en-US to en-GB) changes formats too.
+let wanted: string | null = null;
 
 async function show(code: Current) {
-  if (code === wanted) {
+  const nextTag = regional(code === PSEUDO ? "en" : code);
+  if (`${code} ${nextTag}` === wanted) {
     return;
   }
-  wanted = code;
+  wanted = `${code} ${nextTag}`;
   const attempt = ++switching;
   const next = await load(code).catch(() => null);
   // A later choice won, or the catalog could not be loaded: keep the current one.
@@ -126,11 +128,11 @@ async function show(code: Current) {
     return;
   }
   if (next === null) {
-    wanted = current;
+    wanted = `${current} ${tag}`;
     return;
   }
   current = code;
-  tag = regional(code === PSEUDO ? "en" : code);
+  tag = nextTag;
   catalog = next;
   numbers = new Intl.NumberFormat(locale());
   plurals = new Intl.PluralRules(locale());
@@ -167,6 +169,7 @@ export async function startLanguage() {
   } catch {
     // Storage blocked: follow the system.
   }
+  // The browser's languages changed: another language, or another region.
   window.addEventListener("languagechange", () => {
     if (setting === "system" && current !== PSEUDO) {
       void show(systemLanguage());
@@ -182,9 +185,9 @@ function subscribe(listener: () => void) {
   };
 }
 
-/** The current language; re-renders when it changes. */
+/** The current language and regional variant (`fr fr-CA`); re-renders when either changes. */
 export function useLanguage(): string {
-  return useSyncExternalStore(subscribe, () => current);
+  return useSyncExternalStore(subscribe, () => `${current} ${tag}`);
 }
 
 // Messages ----------------------------------------------------------------
