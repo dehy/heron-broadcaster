@@ -99,7 +99,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: |
-          cp .env.example .env && mkdir -p data/fallback data/incoming
+          cp .env.example .env && mkdir -p data/fallback data/incoming data/staging
           sed -i "s/^HERON_LIBRARIAN_USER=.*/HERON_LIBRARIAN_USER=$(id -u):$(id -g)/" .env
           # The tested images are the ones published, per architecture.
           echo "HERON_VERSION=sha-${GITHUB_SHA::7}-${{ matrix.arch }}" >> "$GITHUB_ENV"
@@ -122,11 +122,12 @@ jobs:
         run: scripts/wait-for-analysis.sh http://localhost:8000 60 300
       - name: The API puts the station on air
         run: scripts/check-streaming.sh
-      - name: Files dropped into the incoming folder are filed and analyzed
+      - name: Files dropped or uploaded wait in the buffer zone, then are filed and analyzed
         run: |
           scripts/generate-test-library.sh "$RUNNER_TEMP/drop" 3
           cp -R "$RUNNER_TEMP/drop/." data/incoming/
-          scripts/wait-for-analysis.sh http://localhost:8000 63 300
+          scripts/check-buffer.sh "$(find "$RUNNER_TEMP/drop" -type f -name '*.m4a' | sort | head -n 1)" 4
+          scripts/wait-for-analysis.sh http://localhost:8000 64 300
           test -z "$(find data/incoming -type f)"
           ls "data/music/Artist 1/Album 1/" | grep -F "01 Track 1 (2).m4a"
       - if: github.event_name == 'push'
