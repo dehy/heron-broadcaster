@@ -432,7 +432,7 @@ export function Buffer() {
         {canEdit && <DropZone onFiles={onFiles} buffer={buffer.data} />}
         <Uploads state={uploads} />
         {imported && !importing && (
-          <div className="card row between" role="status">
+          <div className="card card-head" role="status">
             <span>
               {rich("buffer.importedLink", {
                 count: imported.count,
@@ -666,7 +666,12 @@ function GroupPreparation({ files }: { files: StagedFile[] }) {
 
 /** What a file was prepared with. */
 function Preparation({ file }: { file: StagedFile }) {
-  const programming = [file.mood, file.sound_code].filter(Boolean).join(" · ");
+  const programming = [
+    file.mood && t("buffer.moodValue", { value: file.mood }),
+    file.sound_code && t("buffer.soundCodeValue", { value: file.sound_code }),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   if (file.categories.length === 0 && file.labels.length === 0 && !programming) {
     return null;
   }

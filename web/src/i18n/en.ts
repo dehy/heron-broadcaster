@@ -1155,6 +1155,8 @@ const en = {
   "buffer.editedHelp": "Edited by hand, on top of the identification",
   "buffer.undoEdit": "Undo the edit",
   "buffer.tag.year": "Year",
+  "buffer.moodValue": "Mood {value}",
+  "buffer.soundCodeValue": "Sound code {value}",
   "buffer.importFailed": "The import failed",
   "buffer.discarded": { one: "{count} file discarded", other: "{count} files discarded" },
   "buffer.noAudio": "No audio file in what was dropped",

@@ -1164,6 +1164,8 @@ const fr = {
   "buffer.editedHelp": "Modifié à la main, par-dessus l’identification",
   "buffer.undoEdit": "Annuler la modification",
   "buffer.tag.year": "Année",
+  "buffer.moodValue": "Ambiance {value}",
+  "buffer.soundCodeValue": "Code sonore {value}",
   "buffer.importFailed": "L'import a échoué",
   "buffer.discarded": { one: "{count} fichier écarté", other: "{count} fichiers écartés" },
   "buffer.noAudio": "Aucun fichier audio dans ce qui a été déposé",
