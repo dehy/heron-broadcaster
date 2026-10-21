@@ -96,6 +96,66 @@ pub struct SelectionResult {
     pub changed: u64,
 }
 
+/// Refuses labels that do not exist.
+pub async fn check_labels(pool: &sqlx::MySqlPool, add: &[u64], remove: &[u64]) -> ApiResult<()> {
+    for &id in add.iter().chain(remove) {
+        let exists: Option<u64> = sqlx::query_scalar("SELECT id FROM labels WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+        if exists.is_none() {
+            return Err(ApiError::Invalid(format!("no label {id}")));
+        }
+    }
+    Ok(())
+}
+
+/// Refuses categories that do not exist, and weights that are not above 0.
+pub async fn check_categories(
+    pool: &sqlx::MySqlPool,
+    add: &[CategoryShare],
+    remove: &[u64],
+) -> ApiResult<()> {
+    if add
+        .iter()
+        .any(|share| !share.weight.is_finite() || share.weight <= 0.0)
+    {
+        return Err(ApiError::Invalid("weights must be above 0".to_owned()));
+    }
+    for id in add
+        .iter()
+        .map(|share| share.category_id)
+        .chain(remove.iter().copied())
+    {
+        let exists: Option<u64> = sqlx::query_scalar("SELECT id FROM categories WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+        if exists.is_none() {
+            return Err(ApiError::Invalid(format!("no category {id}")));
+        }
+    }
+    Ok(())
+}
+
+/// Refuses a mood or a sound code that is not on the station's scale.
+pub async fn check_scales(
+    pool: &sqlx::MySqlPool,
+    mood: &Option<Option<String>>,
+    sound_code: &Option<Option<String>>,
+) -> ApiResult<()> {
+    let settings: ProgrammingSettings =
+        settings::load(pool, ProgrammingSettings::SETTINGS_NAME).await?;
+    let on_scale = |what: &str, value: &Option<Option<String>>, scale: &[String]| match value {
+        Some(Some(value)) if !scale.contains(value) => Err(ApiError::Invalid(format!(
+            "{value:?} is not on the {what} scale"
+        ))),
+        _ => Ok(()),
+    };
+    on_scale("mood", mood, &settings.moods)?;
+    on_scale("sound code", sound_code, &settings.sound_codes)
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LabelsChange {
@@ -127,15 +187,7 @@ async fn apply_labels(
             "a label cannot be added and removed at once".to_owned(),
         ));
     }
-    for &id in change.add.iter().chain(&change.remove) {
-        let exists: Option<u64> = sqlx::query_scalar("SELECT id FROM labels WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&state.pool)
-            .await?;
-        if exists.is_none() {
-            return Err(ApiError::Invalid(format!("no label {id}")));
-        }
-    }
+    check_labels(&state.pool, &change.add, &change.remove).await?;
     let ids = change.selection.resolve(&state, MAX_SELECTION).await?;
     let mut tx = state.pool.begin().await?;
     let mut changed = 0;
@@ -212,27 +264,7 @@ async fn apply_categories(
     if change.add.is_empty() && change.remove.is_empty() {
         return Err(ApiError::Invalid("no category to add or remove".to_owned()));
     }
-    if change
-        .add
-        .iter()
-        .any(|share| !share.weight.is_finite() || share.weight <= 0.0)
-    {
-        return Err(ApiError::Invalid("weights must be above 0".to_owned()));
-    }
-    for id in change
-        .add
-        .iter()
-        .map(|share| share.category_id)
-        .chain(change.remove.iter().copied())
-    {
-        let exists: Option<u64> = sqlx::query_scalar("SELECT id FROM categories WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&state.pool)
-            .await?;
-        if exists.is_none() {
-            return Err(ApiError::Invalid(format!("no category {id}")));
-        }
-    }
+    check_categories(&state.pool, &change.add, &change.remove).await?;
     let ids = change.selection.resolve(&state, MAX_SELECTION).await?;
     let mut tx = state.pool.begin().await?;
     let mut changed = 0;
@@ -301,16 +333,7 @@ async fn apply_programming(
     Json(change): Json<ProgrammingChange>,
 ) -> ApiResult<Json<SelectionResult>> {
     user.require(Role::Operator)?;
-    let settings: ProgrammingSettings =
-        settings::load(&state.pool, ProgrammingSettings::SETTINGS_NAME).await?;
-    let on_scale = |what: &str, value: &Option<Option<String>>, scale: &[String]| match value {
-        Some(Some(value)) if !scale.contains(value) => Err(ApiError::Invalid(format!(
-            "{value:?} is not on the {what} scale"
-        ))),
-        _ => Ok(()),
-    };
-    on_scale("mood", &change.mood, &settings.moods)?;
-    on_scale("sound code", &change.sound_code, &settings.sound_codes)?;
+    check_scales(&state.pool, &change.mood, &change.sound_code).await?;
     let bpm = match change.bpm {
         Some(Some(bpm)) => {
             let bpm = TagField::Bpm

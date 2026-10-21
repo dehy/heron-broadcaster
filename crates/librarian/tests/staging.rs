@@ -177,14 +177,16 @@ async fn flags_and_choices() {
         "track": 3,
     });
     sqlx::query(
-        "UPDATE staged_files SET choice = ?, status = 'identifying' WHERE original_name = 'hit.wav'",
+        "UPDATE staged_files SET choice = ?, base_tags = NULL, status = 'identifying'
+         WHERE original_name = 'hit.wav'",
     )
     .bind(choice.to_string())
     .execute(pool)
     .await
     .unwrap();
     sqlx::query(
-        "UPDATE staged_files SET choice = '{\"kind\": \"own\"}', status = 'identifying'
+        "UPDATE staged_files SET choice = '{\"kind\": \"own\"}', base_tags = NULL,
+             status = 'identifying'
          WHERE original_name = 'other.wav'",
     )
     .execute(pool)

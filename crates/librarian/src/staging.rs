@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 
 use heron_analysis::Chromaprint;
 use heron_core::library::{
-    BatchReport, SkippedFile, StagedChoice, StagedFlag, StagedIdentification,
-    StagedIdentificationStatus,
+    BatchReport, FieldValues, SkippedFile, StagedChoice, StagedFlag, StagedIdentification,
+    StagedIdentificationStatus, TagField,
 };
 use heron_core::{LibraryPath, LibrarySettings};
 use heron_library::tags::{self, FileTags};
@@ -94,6 +94,40 @@ struct Waiting {
     own: Option<Tags>,
     identification: Option<StagedIdentification>,
     choice: Option<StagedChoice>,
+    /// Its tags before the edits, once worked out.
+    base: Option<Tags>,
+    /// Fields edited by hand, as stored (to tell when they change).
+    edits: Option<String>,
+}
+
+impl Waiting {
+    fn edits(&self) -> FieldValues {
+        self.edits
+            .as_deref()
+            .and_then(|json| serde_json::from_str(json).ok())
+            .unwrap_or_default()
+    }
+}
+
+/// `tags` with the fields edited by hand: a value replaces the field,
+/// `None` removes it. The year replaces the date.
+pub fn apply_edits(tags: &Tags, edits: &FieldValues) -> Tags {
+    let mut tags = tags.clone();
+    let number = |value: &Option<String>| value.as_deref().and_then(|n| n.parse().ok());
+    for (field, value) in edits {
+        match field {
+            TagField::Title => tags.title.clone_from(value),
+            TagField::Artist => tags.artist.clone_from(value),
+            TagField::Album => tags.album.clone_from(value),
+            TagField::AlbumArtist => tags.album_artist.clone_from(value),
+            TagField::Year => tags.date.clone_from(value),
+            TagField::Track => tags.track = number(value),
+            TagField::Disc => tags.disc = number(value),
+            // Not edited in the buffer zone.
+            _ => {}
+        }
+    }
+    tags
 }
 
 /// A file read and fingerprinted.
@@ -179,10 +213,13 @@ impl Stager {
                 }
             }
             for file in chosen {
-                if self
-                    .apply_choice(group, file, &identifier, &layout, &mut planned)
-                    .await?
-                {
+                let ready = if file.base.is_some() {
+                    self.apply_edits(file, &layout, &mut planned).await?
+                } else {
+                    self.apply_choice(group, file, &identifier, &layout, &mut planned)
+                        .await?
+                };
+                if ready {
                     report.ready += 1;
                 } else {
                     report.waiting += 1;
@@ -199,7 +236,8 @@ impl Stager {
         let rows = sqlx::query(
             "SELECT id, staged_path, CAST(tags AS CHAR) AS tags, duration_ms, has_cover,
                     CAST(identification AS CHAR) AS identification,
-                    CAST(choice AS CHAR) AS choice
+                    CAST(choice AS CHAR) AS choice, CAST(base_tags AS CHAR) AS base,
+                    CAST(tag_edits AS CHAR) AS edits
              FROM staged_files WHERE group_id = ? AND status = 'identifying'
              ORDER BY original_name, id",
         )
@@ -211,12 +249,15 @@ impl Stager {
             let tags: Option<String> = row.try_get("tags")?;
             let identification: Option<String> = row.try_get("identification")?;
             let choice: Option<String> = row.try_get("choice")?;
+            let base: Option<String> = row.try_get("base")?;
             files.push(Waiting {
                 id: row.try_get("id")?,
                 staged_path: LibraryPath::from_stored(row.try_get("staged_path")?),
                 own: tags.and_then(|json| serde_json::from_str(&json).ok()),
                 identification: identification.and_then(|json| serde_json::from_str(&json).ok()),
                 choice: choice.and_then(|json| serde_json::from_str(&json).ok()),
+                base: base.and_then(|json| serde_json::from_str(&json).ok()),
+                edits: row.try_get("edits")?,
             });
         }
         Ok(files)
@@ -288,7 +329,8 @@ impl Stager {
         let mut ready = 0;
         for ((file, mut read), identified) in files.into_iter().zip(reads).zip(identified) {
             let own = read.file.tags.clone();
-            let (identification, applied) = match identified {
+            let edits = file.edits();
+            let (identification, base) = match identified {
                 None => (
                     StagedIdentification {
                         status: StagedIdentificationStatus::Off,
@@ -342,6 +384,7 @@ impl Stager {
                 .await?;
             read.flags.extend(duplicates.flags);
             seen.push((file.id, read.content_hash, chromaprint.clone()));
+            let applied = apply_edits(&base, &edits);
             let planned_path = self
                 .plan_path(layout, &applied, &file.staged_path, planned)
                 .await?;
@@ -349,9 +392,9 @@ impl Stager {
             let updated = sqlx::query(
                 "UPDATE staged_files SET status = 'ready', tags = ?, duration_ms = ?,
                      has_cover = ?, chromaprint = ?, content_hash = ?, identification = ?,
-                     applied_tags = ?, planned_path = ?, flags = ?, duplicate_of_track_id = ?,
-                     duplicate_of_staged_id = ?, error = NULL
-                 WHERE id = ? AND status = 'identifying'",
+                     base_tags = ?, applied_tags = ?, planned_path = ?, flags = ?,
+                     duplicate_of_track_id = ?, duplicate_of_staged_id = ?, error = NULL
+                 WHERE id = ? AND status = 'identifying' AND tag_edits <=> ?",
             )
             .bind(json(&own))
             .bind(read.file.duration_ms)
@@ -359,12 +402,15 @@ impl Stager {
             .bind(chromaprint)
             .bind(read.content_hash.map(|hash| hash.to_vec()))
             .bind(json(&identification))
+            .bind(json(&base))
             .bind(json(&applied))
             .bind(&planned_path)
             .bind((!read.flags.is_empty()).then(|| json(&read.flags)))
             .bind(duplicates.track)
             .bind(duplicates.staged)
             .bind(file.id)
+            // Edited meanwhile: worked out again next time.
+            .bind(&file.edits)
             .execute(&self.pool)
             .await?
             .rows_affected();
@@ -383,7 +429,7 @@ impl Stager {
         layout: &Layout,
         planned: &mut HashSet<String>,
     ) -> Result<bool, StagingError> {
-        let own = file.own.unwrap_or_default();
+        let own = file.own.clone().unwrap_or_default();
         let (applied, error) = match &file.choice {
             None | Some(StagedChoice::Own) => (Some(own.clone()), None),
             Some(StagedChoice::Release {
@@ -416,18 +462,21 @@ impl Stager {
             },
         };
         let updated = match applied {
-            Some(applied) => {
+            Some(base) => {
+                let applied = apply_edits(&base, &file.edits());
                 let planned_path = self
                     .plan_path(layout, &applied, &file.staged_path, planned)
                     .await?;
                 sqlx::query(
-                    "UPDATE staged_files SET status = 'ready', applied_tags = ?, planned_path = ?,
-                         error = NULL
-                     WHERE id = ? AND status = 'identifying'",
+                    "UPDATE staged_files SET status = 'ready', base_tags = ?, applied_tags = ?,
+                         planned_path = ?, error = NULL
+                     WHERE id = ? AND status = 'identifying' AND tag_edits <=> ?",
                 )
+                .bind(json(&base))
                 .bind(json(&applied))
                 .bind(planned_path)
                 .bind(file.id)
+                .bind(&file.edits)
                 .execute(&self.pool)
                 .await?
             }
@@ -443,6 +492,33 @@ impl Stager {
                 .await?
             }
         };
+        Ok(updated.rows_affected() > 0)
+    }
+
+    /// Works out the tags and path of a file whose tags were edited, from
+    /// the tags it had before: the release is not looked up again.
+    async fn apply_edits(
+        &self,
+        file: Waiting,
+        layout: &Layout,
+        planned: &mut HashSet<String>,
+    ) -> Result<bool, StagingError> {
+        let base = file.base.clone().unwrap_or_default();
+        let applied = apply_edits(&base, &file.edits());
+        let planned_path = self
+            .plan_path(layout, &applied, &file.staged_path, planned)
+            .await?;
+        let updated = sqlx::query(
+            "UPDATE staged_files SET status = 'ready', applied_tags = ?, planned_path = ?,
+                 error = NULL
+             WHERE id = ? AND status = 'identifying' AND tag_edits <=> ?",
+        )
+        .bind(json(&applied))
+        .bind(planned_path)
+        .bind(file.id)
+        .bind(&file.edits)
+        .execute(&self.pool)
+        .await?;
         Ok(updated.rows_affected() > 0)
     }
 
@@ -787,6 +863,7 @@ pub async fn import(
                     duration_ms: file.duration_ms,
                     chromaprint: file.chromaprint.clone().map(Chromaprint::from_compressed),
                     identification: file.track_identification(),
+                    prepared_from: Some(file.id),
                 })),
                 from: Origin::Staging(file.staged_path.clone()),
                 to: to.clone(),
@@ -1000,6 +1077,23 @@ pub async fn recover(pool: &MySqlPool, roots: &Roots) -> Result<StagingRecovery,
     Ok(recovery)
 }
 
+/// Drops what a discarded file was prepared with.
+async fn forget_preparation(pool: &MySqlPool, id: u64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM staged_file_categories WHERE staged_file_id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM staged_file_labels WHERE staged_file_id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    sqlx::query("UPDATE staged_files SET mood = NULL, sound_code = NULL WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Gives up uploads that made no progress for a day, and removes the
 /// folders of groups with nothing left to import (files discarded or
 /// imported).
@@ -1019,13 +1113,17 @@ pub async fn cleanup(pool: &MySqlPool, roots: &Roots) -> Result<(), sqlx::Error>
             .join(group.to_string())
             .join(heron_core::library::upload_part_name(id));
         let _ = std::fs::remove_file(part);
-        sqlx::query(
+        let given_up = sqlx::query(
             "UPDATE staged_files SET status = 'discarded', error = 'upload abandoned'
              WHERE id = ? AND status = 'receiving'",
         )
         .bind(id)
         .execute(pool)
-        .await?;
+        .await?
+        .rows_affected();
+        if given_up > 0 {
+            forget_preparation(pool, id).await?;
+        }
     }
     let active: HashSet<u64> = sqlx::query_scalar(
         "SELECT DISTINCT group_id FROM staged_files

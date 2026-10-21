@@ -103,6 +103,8 @@ pub struct TrackQuery {
     pub not_played_days: Option<u32>,
     /// Tracks added in the last this many days.
     pub added_days: Option<u32>,
+    /// Tracks created by this import batch (an import from the buffer zone).
+    pub batch_id: Option<u64>,
     /// Tracks whose bitrate is below this many kbps.
     pub bitrate_below: Option<u32>,
     pub era: Option<String>,
@@ -332,6 +334,14 @@ impl ListContext {
         if let Some(days) = params.added_days {
             query.push(" AND t.created_at >= NOW(6) - INTERVAL ");
             query.push_bind(days).push(" DAY");
+        }
+        if let Some(batch_id) = params.batch_id {
+            query.push(
+                " AND EXISTS (SELECT 1 FROM library_moves m
+                              WHERE m.track_id = t.id AND m.from_root <> 'library'
+                                AND m.batch_id = ",
+            );
+            query.push_bind(batch_id).push(")");
         }
         if let Some(kbps) = params.bitrate_below {
             query.push(" AND t.bitrate_kbps < ").push_bind(kbps);
