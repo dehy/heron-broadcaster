@@ -1990,6 +1990,126 @@ async fn uploads_wait_in_the_buffer_zone_until_imported() {
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "not a candidate");
 
+    // Prepared for when they are imported.
+    let (_, gold) = admin
+        .send(Method::POST, "/categories", json!({"name": "Gold"}))
+        .await;
+    let (_, live) = admin
+        .send(Method::POST, "/labels", json!({"name": "live"}))
+        .await;
+    let preparation = json!({
+        "file_ids": [id, broken_id],
+        "add_categories": [{"category_id": gold["id"], "weight": 2.0}],
+        "add_labels": [live["id"]],
+        "mood": "4",
+        "sound_code": "hard",
+    });
+    let (status, _) = viewer
+        .send(
+            Method::POST,
+            "/staging/files/preparation",
+            preparation.clone(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/staging/files/preparation",
+            json!({"file_ids": [id], "mood": "furious"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "not on the scale");
+    let (status, prepared) = admin
+        .send(Method::POST, "/staging/files/preparation", preparation)
+        .await;
+    assert_eq!(
+        (status, &prepared["files"]),
+        (StatusCode::OK, &json!(2)),
+        "{prepared}"
+    );
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/staging/files/preparation",
+            json!({"file_ids": [id], "sound_code": null}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let song = admin.get(&format!("/staging/uploads/{id}")).await;
+    assert_eq!(song["categories"][0]["name"], "Gold", "{song}");
+    assert_eq!(song["categories"][0]["weight"], 2.0);
+    assert_eq!(song["labels"][0]["name"], "live");
+    assert_eq!(
+        (&song["mood"], &song["sound_code"]),
+        (&json!("4"), &json!(null))
+    );
+    // Tags edited: the librarian works the path out again.
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/staging/files/tags",
+            json!({"file_ids": [id], "set": {"genre": "Rock"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "not edited here");
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/staging/files/tags",
+            json!({"file_ids": [id], "set": {"year": "nineteen"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "not a year");
+    let (status, edited) = admin
+        .send(
+            Method::POST,
+            "/staging/files/tags",
+            json!({"file_ids": [id], "set": {"artist": "The Band", "title": "Song", "year": "1999"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/staging/files/tags",
+            json!({"file_ids": [id], "reset": ["year"]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let song = admin.get(&format!("/staging/uploads/{id}")).await;
+    assert_eq!(song["status"], "identifying");
+    assert_eq!(
+        song["tag_edits"],
+        json!({"artist": "The Band", "title": "Song"})
+    );
+    stager.identify_once().await.unwrap();
+    let song = admin.get(&format!("/staging/uploads/{id}")).await;
+    assert_eq!(song["status"], "ready", "{song}");
+    assert_eq!(song["tags"]["artist"], "The Band");
+    assert_eq!(song["own_tags"]["artist"], json!(null));
+    assert_eq!(song["planned_path"], "The Band/Unknown Album/Song.wav");
+
+    // Not while it is imported.
+    sqlx::query("UPDATE staged_files SET status = 'importing' WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/staging/files/preparation",
+            json!({"file_ids": [id], "remove_labels": [live["id"]]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    sqlx::query("UPDATE staged_files SET status = 'ready' WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+
     // Discarded: it never reaches the library.
     let (status, discarded) = admin
         .send(
@@ -2009,6 +2129,18 @@ async fn uploads_wait_in_the_buffer_zone_until_imported() {
             .join(format!("{group_id}/Drop/broken.mp3"))
             .exists()
     );
+    let left: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM staged_file_categories WHERE staged_file_id = ?)
+              + (SELECT COUNT(*) FROM staged_file_labels WHERE staged_file_id = ?)
+              + (SELECT COUNT(*) FROM staged_files WHERE id = ? AND mood IS NOT NULL)",
+    )
+    .bind(broken_id)
+    .bind(broken_id)
+    .bind(broken_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(left, 0, "nothing left of its preparation");
 
     // Imported, as a batch.
     let (status, task) = admin
@@ -2027,15 +2159,18 @@ async fn uploads_wait_in_the_buffer_zone_until_imported() {
         1,
         "the discarded one"
     );
+    let written = heron_library::tags::read(
+        &station
+            .library
+            .path()
+            .join("The Band/Unknown Album/Song.wav"),
+    )
+    .unwrap()
+    .tags;
     assert_eq!(
-        std::fs::read(
-            station
-                .library
-                .path()
-                .join("Unknown Artist/Unknown Album/Song.wav")
-        )
-        .unwrap(),
-        content
+        (written.artist.as_deref(), written.title.as_deref()),
+        (Some("The Band"), Some("Song")),
+        "filed with its edited tags"
     );
     assert!(
         admin.get("/staging").await["groups"]
@@ -2045,6 +2180,29 @@ async fn uploads_wait_in_the_buffer_zone_until_imported() {
     );
     let batches = admin.get("/library/batches").await;
     assert_eq!(batches[0]["kind"], "import");
+
+    // Its track is ready to air, and found by its import.
+    let batch = task["report"]["batch_id"].as_u64().unwrap();
+    let page = admin
+        .get(&format!("/tracks?batch_id={batch}&sort=added"))
+        .await;
+    assert_eq!(page["total"], 1, "{page}");
+    let track = &page["items"][0];
+    assert_eq!(track["path"], "The Band/Unknown Album/Song.wav");
+    assert_eq!(track["artist"], "The Band");
+    assert_eq!(track["labels"][0]["name"], "live");
+    assert_eq!(
+        (&track["mood"], &track["sound_code"]),
+        (&json!("4"), &json!(null))
+    );
+    let detail = admin.get(&format!("/tracks/{}", track["id"])).await;
+    assert_eq!(detail["categories"][0]["name"], "Gold", "{detail}");
+    assert_eq!(detail["categories"][0]["weight"], 2.0);
+    assert_eq!(
+        admin.get("/tracks?sort=added").await["items"][0]["id"],
+        track["id"],
+        "the newest track first"
+    );
     station.stop().await;
 }
 

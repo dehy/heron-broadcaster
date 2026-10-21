@@ -47,7 +47,9 @@ See [Library management](library.md#the-buffer-zone).
 | Table | Columns |
 |---|---|
 | `staged_groups` | id, source (upload, incoming), name, created_by, created_at — the files of one upload or one incoming folder, identified together |
-| `staged_files` | id, group_id, staged_path (relative to the buffer folder), original_name, size, content_hash, status (receiving, identifying, ready, importing, imported, discarded, failed), tags (the file's own), duration_ms, has_cover, chromaprint, identification (JSON: status identified, needs_review or off, reason, score, MBIDs, candidates), choice (JSON: a release picked by hand, or own tags), applied_tags, planned_path, flags (JSON), duplicate_of_track_id, duplicate_of_staged_id, track_id (once imported), error, uploaded_by, created_at, updated_at |
+| `staged_files` | id, group_id, staged_path (relative to the buffer folder), original_name, size, content_hash, status (receiving, identifying, ready, importing, imported, discarded, failed), tags (the file's own), duration_ms, has_cover, chromaprint, identification (JSON: status identified, needs_review or off, reason, score, MBIDs, candidates), choice (JSON: a release picked by hand, or own tags), base_tags (before hand edits), tag_edits (JSON: fields edited by hand), applied_tags (base_tags with tag_edits), planned_path, mood and sound_code (given to its track), flags (JSON), duplicate_of_track_id, duplicate_of_staged_id, track_id (once imported), error, uploaded_by, created_at, updated_at |
+| `staged_file_categories` | staged_file_id, category_id, weight — categories its track is put in when imported |
+| `staged_file_labels` | staged_file_id, label_id — labels its track gets when imported |
 | `tracks` (added) | deleted_at (in the trash until purged; also marked missing) |
 | `track_fingerprints` (added) | chromaprint_hash (to find the same audio) |
 
@@ -146,6 +148,7 @@ tracks 1──0..1 track_fingerprints, track_identifications, track_waveforms, t
 tracks *──* labels            (through track_labels)
 library_batches 1──* library_moves 1──0..1 track_tag_changes *──1 tracks
 staged_groups 1──* staged_files *──0..1 tracks
+staged_files *──* categories, labels   (through staged_file_categories, staged_file_labels: given to its track)
 tracks *──* categories        (through track_categories, with weight)
 tracks *──* artists           (through track_artists)
 artists 1──* artist_names

@@ -141,6 +141,7 @@ function filtersOf(search: URLSearchParams, q: string) {
     never_played: search.get("never_played") === "true" ? true : undefined,
     not_played_days: whole("not_played_days"),
     added_days: whole("added_days"),
+    batch_id: whole("batch"),
     bitrate_below: whole("bitrate_below"),
     era: text("era"),
     mood: text("mood"),
@@ -174,6 +175,7 @@ export function Library() {
   const desc = search.get("desc") === "true";
   const category = search.get("category") ?? "";
   const page = Math.max(0, Number(search.get("page") ?? 0) || 0);
+  const batch = search.get("batch");
   const [text, setText] = useState(search.get("q") ?? "");
   const q = useDebounced(text.trim(), 300);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -304,6 +306,21 @@ export function Library() {
     <>
       <PageHead title={t("nav.tracks")} description={<LibrarySummary status={status.data} />} />
       <Card flush>
+        {batch && (
+          <div className="card-head">
+            <span className="chip">
+              {t("library.importBatch", { batch })}
+              <button
+                type="button"
+                className="btn ghost small"
+                aria-label={t("library.clearImportBatch")}
+                onClick={() => setSearch({ batch: undefined, page: undefined })}
+              >
+                <Icon name="close" size={12} />
+              </button>
+            </span>
+          </div>
+        )}
         <div className="card-head">
           <div className="row" style={{ flex: 1 }}>
             <label className="row" style={{ flex: "1 1 16rem", flexWrap: "nowrap" }}>

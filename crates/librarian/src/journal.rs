@@ -111,6 +111,9 @@ pub struct NewTrack {
     pub duration_ms: Option<u32>,
     pub chromaprint: Option<Chromaprint>,
     pub identification: Option<Identification>,
+    /// The buffer file whose categories, labels, mood and sound code the
+    /// track gets.
+    pub prepared_from: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -433,6 +436,9 @@ async fn record(pool: &MySqlPool, op: &Operation, copy: bool) -> Result<(u64, u6
             }
             if let Some(identification) = &track.identification {
                 save_identification(&mut tx, id, identification).await?;
+            }
+            if let Some(file_id) = track.prepared_from {
+                give_preparation(&mut tx, id, file_id).await?;
             }
             id
         }
@@ -766,6 +772,42 @@ async fn abandon(pool: &MySqlPool, move_id: u64, reason: &str) -> Result<(), sql
         .execute(&mut *tx)
         .await?;
     tx.commit().await
+}
+
+/// Gives a new track what its buffer file was prepared with, in the
+/// transaction that creates it. Categories and labels deleted since are
+/// gone from the file already.
+async fn give_preparation(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    track_id: u64,
+    file_id: u64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO track_categories (track_id, category_id, weight)
+         SELECT ?, category_id, weight FROM staged_file_categories WHERE staged_file_id = ?",
+    )
+    .bind(track_id)
+    .bind(file_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO track_labels (track_id, label_id)
+         SELECT ?, label_id FROM staged_file_labels WHERE staged_file_id = ?",
+    )
+    .bind(track_id)
+    .bind(file_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO track_programming (track_id, mood, sound_code)
+         SELECT ?, mood, sound_code FROM staged_files
+         WHERE id = ? AND (mood IS NOT NULL OR sound_code IS NOT NULL)",
+    )
+    .bind(track_id)
+    .bind(file_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 /// Moves a file that is not a track (a cover, a playlist) within the

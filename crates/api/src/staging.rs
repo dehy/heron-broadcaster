@@ -24,8 +24,8 @@ use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use heron_core::library::{
-    StagedChoice, StagedFlag, StagedIdentification, StagedIdentificationStatus, TaskRequest,
-    upload_part_name,
+    FieldValues, StagedChoice, StagedFlag, StagedIdentification, StagedIdentificationStatus,
+    TagField, TaskRequest, upload_part_name,
 };
 use heron_core::{LibraryPath, LibrarySettings};
 use heron_library::{Tags, is_audio, layout};
@@ -39,7 +39,9 @@ use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::librarian::{LibraryTask, ReviewCandidate, ask};
-use crate::settings;
+use crate::selection::{CategoryShare, check_categories, check_labels, check_scales};
+use crate::settings::{self, some_or_null};
+use crate::tracks::{LabelRef, TrackCategory};
 
 /// Largest chunk of an upload, in bytes. `heron-web` lets bodies this big
 /// through to the API.
@@ -54,6 +56,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(create_upload))
         .routes(routes!(get_upload, send_chunk).layer(DefaultBodyLimit::max(MAX_CHUNK)))
         .routes(routes!(choose))
+        .routes(routes!(prepare_files))
+        .routes(routes!(edit_staged_tags))
         .routes(routes!(get_staged_audio))
         .routes(routes!(import_files))
         .routes(routes!(discard_files))
@@ -162,10 +166,19 @@ pub struct StagedFile {
     pub candidates: Vec<ReviewCandidate>,
     /// Picked by hand: another release, or its own tags.
     pub choice: Option<StagedChoice>,
+    /// Fields edited by hand, on top of the tags it gets otherwise.
+    #[schema(value_type = std::collections::HashMap<String, Option<String>>)]
+    pub tag_edits: FieldValues,
     /// The release it is imported as (its cover is on the Cover Art Archive).
     pub release_id: Option<String>,
     pub duplicate_of_track_id: Option<u64>,
     pub duplicate_of_file_id: Option<u64>,
+    /// Categories the track is put in when imported.
+    pub categories: Vec<TrackCategory>,
+    /// Labels the track gets when imported.
+    pub labels: Vec<LabelRef>,
+    pub mood: Option<String>,
+    pub sound_code: Option<String>,
     /// The track it became.
     pub track_id: Option<u64>,
     pub error: Option<String>,
@@ -198,7 +211,7 @@ const FILE_COLUMNS: &str = "f.id, f.group_id, f.staged_path, f.original_name, f.
     CAST(f.status AS CHAR) AS status, CAST(f.flags AS CHAR) AS flags,
     CAST(f.tags AS CHAR) AS tags, CAST(f.applied_tags AS CHAR) AS applied_tags,
     f.duration_ms, f.planned_path, CAST(f.identification AS CHAR) AS identification,
-    CAST(f.choice AS CHAR) AS choice, f.duplicate_of_track_id, f.duplicate_of_staged_id,
+    CAST(f.choice AS CHAR) AS choice, CAST(f.tag_edits AS CHAR) AS tag_edits, f.mood, f.sound_code, f.duplicate_of_track_id, f.duplicate_of_staged_id,
     f.track_id, f.error, u.username,
     CAST(UNIX_TIMESTAMP(f.created_at) * 1000 AS SIGNED) AS created_ms
     FROM staged_files f LEFT JOIN users u ON u.id = f.uploaded_by";
@@ -261,6 +274,11 @@ fn staged_file(row: &sqlx::mysql::MySqlRow, staging: &std::path::Path) -> ApiRes
         }),
         choice,
         release_id,
+        tag_edits: parse(row.try_get("tag_edits")?).unwrap_or_default(),
+        categories: Vec::new(),
+        labels: Vec::new(),
+        mood: row.try_get("mood")?,
+        sound_code: row.try_get("sound_code")?,
         duplicate_of_track_id: row.try_get("duplicate_of_track_id")?,
         duplicate_of_file_id: row.try_get("duplicate_of_staged_id")?,
         track_id: row.try_get("track_id")?,
@@ -278,7 +296,64 @@ async fn find_file(state: &AppState, id: u64) -> ApiResult<StagedFile> {
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("file"))?;
-    staged_file(&row, &state.staging)
+    let mut file = [staged_file(&row, &state.staging)?];
+    add_preparation(&state.pool, &mut file).await?;
+    let [file] = file;
+    Ok(file)
+}
+
+/// Fills in the categories and labels `files` were prepared with.
+async fn add_preparation(pool: &sqlx::MySqlPool, files: &mut [StagedFile]) -> ApiResult<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let mut categories: HashMap<u64, Vec<TrackCategory>> = HashMap::new();
+    let mut labels: HashMap<u64, Vec<LabelRef>> = HashMap::new();
+    for chunk in files.chunks(1_000) {
+        let mut query = sqlx::QueryBuilder::new(
+            "SELECT fc.staged_file_id, c.id, c.name, c.color, fc.weight
+             FROM staged_file_categories fc JOIN categories c ON c.id = fc.category_id
+             WHERE fc.staged_file_id IN (",
+        );
+        let mut separated = query.separated(", ");
+        for file in chunk {
+            separated.push_bind(file.id);
+        }
+        query.push(") ORDER BY c.name");
+        let rows: Vec<(u64, u64, String, Option<String>, f64)> =
+            query.build_query_as().fetch_all(pool).await?;
+        for (file_id, category_id, name, color, weight) in rows {
+            categories.entry(file_id).or_default().push(TrackCategory {
+                category_id,
+                name,
+                color,
+                weight,
+            });
+        }
+        let mut query = sqlx::QueryBuilder::new(
+            "SELECT fl.staged_file_id, l.id, l.name, l.color
+             FROM staged_file_labels fl JOIN labels l ON l.id = fl.label_id
+             WHERE fl.staged_file_id IN (",
+        );
+        let mut separated = query.separated(", ");
+        for file in chunk {
+            separated.push_bind(file.id);
+        }
+        query.push(") ORDER BY l.name");
+        let rows: Vec<(u64, u64, String, Option<String>)> =
+            query.build_query_as().fetch_all(pool).await?;
+        for (file_id, id, name, color) in rows {
+            labels
+                .entry(file_id)
+                .or_default()
+                .push(LabelRef { id, name, color });
+        }
+    }
+    for file in files {
+        file.categories = categories.remove(&file.id).unwrap_or_default();
+        file.labels = labels.remove(&file.id).unwrap_or_default();
+    }
+    Ok(())
 }
 
 /// Free space on the buffer folder's disk.
@@ -301,9 +376,13 @@ async fn get_buffer(_user: CurrentUser, State(state): State<AppState>) -> ApiRes
     )))
     .fetch_all(&state.pool)
     .await?;
+    let mut all = rows
+        .iter()
+        .map(|row| staged_file(row, &state.staging))
+        .collect::<ApiResult<Vec<_>>>()?;
+    add_preparation(&state.pool, &mut all).await?;
     let mut files: HashMap<u64, Vec<StagedFile>> = HashMap::new();
-    for row in &rows {
-        let file = staged_file(row, &state.staging)?;
+    for file in all {
         files.entry(file.group_id).or_default().push(file);
     }
     let mut groups = Vec::with_capacity(files.len());
@@ -767,7 +846,7 @@ async fn choose(
     let json =
         serde_json::to_string(&choice).map_err(|error| ApiError::Internal(error.to_string()))?;
     let updated = sqlx::query(
-        "UPDATE staged_files SET choice = ?, status = 'identifying', error = NULL
+        "UPDATE staged_files SET choice = ?, base_tags = NULL, status = 'identifying', error = NULL
          WHERE id = ? AND status = 'ready'",
     )
     .bind(json)
@@ -781,6 +860,285 @@ async fn choose(
         ));
     }
     Ok(Json(find_file(&state, id).await?))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Preparation {
+    pub file_ids: Vec<u64>,
+    /// Categories the files are put in (with this weight, also for files
+    /// already in them).
+    #[serde(default)]
+    pub add_categories: Vec<CategoryShare>,
+    /// Categories the files are taken out of.
+    #[serde(default)]
+    pub remove_categories: Vec<u64>,
+    #[serde(default)]
+    pub add_labels: Vec<u64>,
+    #[serde(default)]
+    pub remove_labels: Vec<u64>,
+    /// A value of the mood scale, or `null` to clear it. Missing: kept.
+    #[serde(default, deserialize_with = "some_or_null")]
+    #[schema(value_type = Option<String>)]
+    pub mood: Option<Option<String>>,
+    /// A value of the sound code scale, or `null` to clear it.
+    #[serde(default, deserialize_with = "some_or_null")]
+    #[schema(value_type = Option<String>)]
+    pub sound_code: Option<Option<String>>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Prepared {
+    /// Files prepared.
+    pub files: u64,
+}
+
+/// Prepares files of the buffer zone for when they are imported: the
+/// categories, labels, mood and sound code their tracks get. Files being
+/// imported, or no longer in the buffer, are refused. Operators and admins.
+#[utoipa::path(post, path = "/staging/files/preparation", tag = "buffer",
+    request_body = Preparation,
+    responses((status = 200, body = Prepared), (status = "4XX", body = ErrorBody)))]
+async fn prepare_files(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(change): Json<Preparation>,
+) -> ApiResult<Json<Prepared>> {
+    user.require(Role::Operator)?;
+    let ids = selection(&FileSelection {
+        file_ids: change.file_ids.clone(),
+    })?;
+    if change.add_categories.is_empty()
+        && change.remove_categories.is_empty()
+        && change.add_labels.is_empty()
+        && change.remove_labels.is_empty()
+        && change.mood.is_none()
+        && change.sound_code.is_none()
+    {
+        return Err(ApiError::Invalid("nothing to prepare".to_owned()));
+    }
+    if change
+        .add_categories
+        .iter()
+        .any(|share| change.remove_categories.contains(&share.category_id))
+        || change
+            .add_labels
+            .iter()
+            .any(|id| change.remove_labels.contains(id))
+    {
+        return Err(ApiError::Invalid(
+            "a category or label cannot be added and removed at once".to_owned(),
+        ));
+    }
+    check_categories(
+        &state.pool,
+        &change.add_categories,
+        &change.remove_categories,
+    )
+    .await?;
+    check_labels(&state.pool, &change.add_labels, &change.remove_labels).await?;
+    check_scales(&state.pool, &change.mood, &change.sound_code).await?;
+
+    let mut tx = state.pool.begin().await?;
+    // Locked until the end: the librarian claims files it imports with an
+    // UPDATE, which waits, so a file is prepared either before its import
+    // or not at all.
+    let mut query = sqlx::QueryBuilder::new("SELECT id FROM staged_files WHERE id IN (");
+    let mut separated = query.separated(", ");
+    for id in &ids {
+        separated.push_bind(*id);
+    }
+    query.push(") AND status IN ('receiving', 'identifying', 'ready') FOR UPDATE");
+    let preparable: Vec<u64> = query.build_query_scalar().fetch_all(&mut *tx).await?;
+    if preparable.len() != ids.len() {
+        return Err(ApiError::Conflict(
+            "only files waiting in the buffer zone can be prepared".to_owned(),
+        ));
+    }
+    for share in &change.add_categories {
+        let mut query = sqlx::QueryBuilder::new(
+            "INSERT INTO staged_file_categories (staged_file_id, category_id, weight) ",
+        );
+        query.push_values(&ids, |mut row, id| {
+            row.push_bind(*id)
+                .push_bind(share.category_id)
+                .push_bind(share.weight);
+        });
+        query.push(" ON DUPLICATE KEY UPDATE weight = VALUES(weight)");
+        query.build().execute(&mut *tx).await?;
+    }
+    for &label in &change.add_labels {
+        let mut query = sqlx::QueryBuilder::new(
+            "INSERT IGNORE INTO staged_file_labels (staged_file_id, label_id) ",
+        );
+        query.push_values(&ids, |mut row, id| {
+            row.push_bind(*id).push_bind(label);
+        });
+        query.build().execute(&mut *tx).await?;
+    }
+    for (table, column, removed) in [
+        (
+            "staged_file_categories",
+            "category_id",
+            &change.remove_categories,
+        ),
+        ("staged_file_labels", "label_id", &change.remove_labels),
+    ] {
+        if removed.is_empty() {
+            continue;
+        }
+        let mut query = sqlx::QueryBuilder::new(format!("DELETE FROM {table} WHERE {column} IN ("));
+        let mut separated = query.separated(", ");
+        for id in removed {
+            separated.push_bind(*id);
+        }
+        query.push(") AND staged_file_id IN (");
+        let mut separated = query.separated(", ");
+        for id in &ids {
+            separated.push_bind(*id);
+        }
+        query.push(")");
+        query.build().execute(&mut *tx).await?;
+    }
+    for (column, value) in [("mood", &change.mood), ("sound_code", &change.sound_code)] {
+        let Some(value) = value else {
+            continue;
+        };
+        let mut query = sqlx::QueryBuilder::new(format!("UPDATE staged_files SET {column} = "));
+        query.push_bind(value.clone()).push(" WHERE id IN (");
+        let mut separated = query.separated(", ");
+        for id in &ids {
+            separated.push_bind(*id);
+        }
+        query.push(")");
+        query.build().execute(&mut *tx).await?;
+    }
+    tx.commit().await?;
+    tracing::info!(user = %user.username, files = ids.len(), "buffer files prepared");
+    Ok(Json(Prepared {
+        files: ids.len() as u64,
+    }))
+}
+
+/// Fields edited in the buffer zone: those the layout and the import's
+/// tags use.
+const EDITABLE: [TagField; 7] = [
+    TagField::Title,
+    TagField::Artist,
+    TagField::Album,
+    TagField::AlbumArtist,
+    TagField::Year,
+    TagField::Track,
+    TagField::Disc,
+];
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StagedTagEdit {
+    pub file_ids: Vec<u64>,
+    /// Fields set to the same value on every file; `null` removes the
+    /// field. Fields left out keep each file's value.
+    #[serde(default)]
+    #[schema(value_type = std::collections::HashMap<String, Option<String>>)]
+    pub set: FieldValues,
+    /// Fields given back the value they had before they were edited.
+    #[serde(default)]
+    pub reset: Vec<TagField>,
+}
+
+/// Edits the tags files of the buffer zone are imported with (title,
+/// artist, album, album artist, year, track, disc), on top of those they
+/// get from their identification, a release picked by hand or their own
+/// tags. heron-librarian works their path out again. Files being imported,
+/// or no longer in the buffer, are refused. Operators and admins.
+#[utoipa::path(post, path = "/staging/files/tags", tag = "buffer",
+    request_body = StagedTagEdit,
+    responses((status = 200, body = Prepared), (status = "4XX", body = ErrorBody)))]
+async fn edit_staged_tags(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(edit): Json<StagedTagEdit>,
+) -> ApiResult<Json<Prepared>> {
+    user.require(Role::Operator)?;
+    let ids = selection(&FileSelection {
+        file_ids: edit.file_ids.clone(),
+    })?;
+    if edit.set.is_empty() && edit.reset.is_empty() {
+        return Err(ApiError::Invalid("no field to edit".to_owned()));
+    }
+    let mut set = FieldValues::new();
+    for (field, value) in &edit.set {
+        if !EDITABLE.contains(field) || edit.reset.contains(field) {
+            return Err(ApiError::Invalid(format!(
+                "{field:?} cannot be edited here"
+            )));
+        }
+        let value = match value {
+            Some(value) => Some(field.normalize(value).map_err(ApiError::Invalid)?),
+            None => None,
+        };
+        set.insert(*field, value);
+    }
+
+    let mut tx = state.pool.begin().await?;
+    let mut query = sqlx::QueryBuilder::new(
+        "SELECT id, CAST(tag_edits AS CHAR) FROM staged_files WHERE id IN (",
+    );
+    let mut separated = query.separated(", ");
+    for id in &ids {
+        separated.push_bind(*id);
+    }
+    query.push(") AND status IN ('receiving', 'identifying', 'ready') FOR UPDATE");
+    let rows: Vec<(u64, Option<String>)> = query.build_query_as().fetch_all(&mut *tx).await?;
+    if rows.len() != ids.len() {
+        return Err(ApiError::Conflict(
+            "only files waiting in the buffer zone can be edited".to_owned(),
+        ));
+    }
+    for (id, edits) in rows {
+        let mut edits: FieldValues = parse(edits).unwrap_or_default();
+        edits.extend(set.clone());
+        for field in &edit.reset {
+            edits.remove(field);
+        }
+        let edits = (!edits.is_empty())
+            .then(|| serde_json::to_string(&edits))
+            .transpose()
+            .map_err(|error| ApiError::Internal(error.to_string()))?;
+        // Ready files wait for the librarian to work their tags and path
+        // out again.
+        sqlx::query(
+            "UPDATE staged_files SET tag_edits = ?,
+                 status = IF(status = 'ready', 'identifying', status)
+             WHERE id = ?",
+        )
+        .bind(edits)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    tracing::info!(user = %user.username, files = ids.len(), "buffer tags edited");
+    Ok(Json(Prepared {
+        files: ids.len() as u64,
+    }))
+}
+
+/// Drops what a discarded file was prepared with.
+async fn forget_preparation(pool: &sqlx::MySqlPool, id: u64) -> ApiResult<()> {
+    sqlx::query("DELETE FROM staged_file_categories WHERE staged_file_id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM staged_file_labels WHERE staged_file_id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    sqlx::query("UPDATE staged_files SET mood = NULL, sound_code = NULL WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 /// A file of the buffer zone, to listen to it. Supports range requests.
@@ -896,6 +1254,7 @@ async fn discard_files(
             continue;
         }
         discarded += 1;
+        forget_preparation(&state.pool, id).await?;
         for path in [
             LibraryPath::from_stored(staged_path).resolve(&state.staging),
             state

@@ -53,7 +53,13 @@ New files wait in `HERON_STAGING_FOLDER`, one folder per group, until they are i
 
 **Import:** a library task (`staging_import`) files the selected ready files like any import: tags written, filed where the layout says, `cover.jpg` saved, as one `import` batch that can be undone, then analyzed. Files picked by hand are recorded as identified, files that kept their own tags as reviewed (`kept`), and files imported while they needed review wait on the review screen.
 
-**Discard:** the file is removed from the buffer zone. It never reached the library.
+**Edit tags:** on a file or a selection, set or remove title, artist, album, album artist, year, track and disc. Edits (`tag_edits`) go on top of the tags the file gets otherwise (`base_tags`: from its identification, a release picked by hand or its own tags), so picking another release keeps them; the librarian works the path out again without looking the release up. They are written into the file on import, like an identified file's tags, in the same batch.
+
+**Prepare:** on a file, a selection or a group, set what its track gets once imported: categories (with a weight), labels, mood and sound code. Files can be prepared until their import starts. Preparing changes neither the library nor the file; it is kept with the file in the database (`staged_file_categories`, `staged_file_labels`, `staged_files.mood` and `sound_code`). The import gives the track all of it in the transaction that creates it, so no track is ever in the library without its preparation, even after a crash. Categories or labels deleted in the meantime are left out.
+
+**Discard:** the file is removed from the buffer zone, with what it was prepared with. It never reached the library.
+
+**Finding imported tracks:** when an import ends, the Buffer page links to its tracks in the library (`GET /tracks?batch_id=`). Their date added is the time of the import.
 
 ## Identification
 
@@ -212,7 +218,6 @@ The scanner (in `heron-api`, read-only) and the librarian share a MariaDB named 
 - Existing tracks are fingerprinted but not identified yet: identification runs on new files only.
 - Duplicates are flagged, not refused: importing one gives it a ` (2)` suffix.
 - An upload resumes after a dropped connection, not after the page is reloaded: the file starts over (the abandoned one is given up after a day).
-- Tags cannot be edited in the buffer zone: pick a release or keep the file's own tags, then edit them once imported ([Editing tags from the browser](#editing-tags-from-the-browser)).
 - Restoring works on a whole deletion (batch), not on one track of it.
 
 Metrics: `heron_librarian_staged_total{source}`, `heron_librarian_imports_total{result}`, `heron_api_uploads_total`.

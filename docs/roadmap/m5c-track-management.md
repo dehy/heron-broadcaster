@@ -81,7 +81,7 @@ Managing the library from the browser: uploading new music, checking it before i
 - **Trash** ([Library management](../library.md#deleting-tracks-and-the-trash)): `delete` batches move files to `.heron-trash/<batch>/`, and the journal marks a track deleted (and missing) in the same step that records its file there, so deletion and restore are crash-safe. Files that are not tracks follow the last track of their folder. Restoring is undoing the batch. The librarian purges tracks older than `trash_days` once an hour; admins can empty the trash.
 - **Web UI**: *Buffer* and *Trash* pages, deletion from *Tracks* and *Track*, upload and trash settings.
 - **Answers to the open question**: 2 GiB per file and 5 GiB kept free (no separate quota), 30 days in the trash, operators delete and restore, admins empty the trash, buffer files never expire.
-- Deferred: editing tags in the buffer zone ([M5b](m5b-track-details-tags.md)); restoring one track of a deletion rather than the whole batch; resuming an upload after the page is reloaded.
+- Deferred: editing tags in the buffer zone (done in [M5e](m5e-buffer-preparation.md)); restoring one track of a deletion rather than the whole batch; resuming an upload after the page is reloaded.
 
 ## References
 

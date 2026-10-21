@@ -3628,6 +3628,84 @@
         }
       }
     },
+    "/api/v1/staging/files/preparation": {
+      "post": {
+        "tags": [
+          "buffer"
+        ],
+        "summary": "Prepares files of the buffer zone for when they are imported: the\ncategories, labels, mood and sound code their tracks get. Files being\nimported, or no longer in the buffer, are refused. Operators and admins.",
+        "operationId": "prepare_files",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Preparation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Prepared"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/staging/files/tags": {
+      "post": {
+        "tags": [
+          "buffer"
+        ],
+        "summary": "Edits the tags files of the buffer zone are imported with (title,\nartist, album, album artist, year, track, disc), on top of those they\nget from their identification, a release picked by hand or their own\ntags. heron-librarian works their path out again. Files being imported,\nor no longer in the buffer, are refused. Operators and admins.",
+        "operationId": "edit_staged_tags",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StagedTagEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Prepared"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/staging/files/{id}/audio": {
       "get": {
         "tags": [
@@ -4166,6 +4244,17 @@
             "schema": {
               "type": "integer",
               "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "batch_id",
+            "in": "query",
+            "description": "Tracks created by this import batch (an import from the buffer zone).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
               "minimum": 0
             }
           },
@@ -7755,6 +7844,83 @@
         },
         "additionalProperties": false
       },
+      "Preparation": {
+        "type": "object",
+        "required": [
+          "file_ids"
+        ],
+        "properties": {
+          "add_categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryShare"
+            },
+            "description": "Categories the files are put in (with this weight, also for files\nalready in them)."
+          },
+          "add_labels": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          "file_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          "mood": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A value of the mood scale, or `null` to clear it. Missing: kept."
+          },
+          "remove_categories": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Categories the files are taken out of."
+          },
+          "remove_labels": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          "sound_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A value of the sound code scale, or `null` to clear it."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Prepared": {
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Files prepared.",
+            "minimum": 0
+          }
+        }
+      },
       "PreviewRequest": {
         "type": "object",
         "required": [
@@ -8973,6 +9139,9 @@
           "status",
           "flags",
           "candidates",
+          "tag_edits",
+          "categories",
+          "labels",
           "created_at_unix_ms"
         ],
         "properties": {
@@ -8982,6 +9151,13 @@
               "$ref": "#/components/schemas/ReviewCandidate"
             },
             "description": "Releases it may be on, best first."
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrackCategory"
+            },
+            "description": "Categories the track is put in when imported."
           },
           "choice": {
             "oneOf": [
@@ -9055,6 +9231,19 @@
               }
             ]
           },
+          "labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LabelRef"
+            },
+            "description": "Labels the track gets when imported."
+          },
+          "mood": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "type": "string",
             "description": "Its path in the upload, or in the incoming folder."
@@ -9098,8 +9287,27 @@
             "format": "int64",
             "minimum": 0
           },
+          "sound_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "status": {
             "$ref": "#/components/schemas/StagedStatus"
+          },
+          "tag_edits": {
+            "type": "object",
+            "description": "Fields edited by hand, on top of the tags it gets otherwise.",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           },
           "tags": {
             "oneOf": [
@@ -9237,6 +9445,43 @@
           "discarded",
           "failed"
         ]
+      },
+      "StagedTagEdit": {
+        "type": "object",
+        "required": [
+          "file_ids"
+        ],
+        "properties": {
+          "file_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          "reset": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TagField"
+            },
+            "description": "Fields given back the value they had before they were edited."
+          },
+          "set": {
+            "type": "object",
+            "description": "Fields set to the same value on every file; `null` removes the\nfield. Fields left out keep each file's value.",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "StagedTags": {
         "type": "object",
@@ -10305,6 +10550,15 @@
             ],
             "format": "int32",
             "description": "Tracks added in the last this many days.",
+            "minimum": 0
+          },
+          "batch_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Tracks created by this import batch (an import from the buffer zone).",
             "minimum": 0
           },
           "bitrate_below": {

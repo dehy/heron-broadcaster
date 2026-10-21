@@ -245,6 +245,22 @@ async fn ids(pool: &MySqlPool, query: &str) -> Vec<u64> {
         .unwrap()
 }
 
+/// Every track has what its buffer file was prepared with, from the
+/// moment it exists.
+async fn assert_prepared(pool: &MySqlPool, when: &str) {
+    let unprepared: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM tracks t
+         WHERE NOT EXISTS (SELECT 1 FROM track_categories c WHERE c.track_id = t.id)
+            OR NOT EXISTS (SELECT 1 FROM track_labels l WHERE l.track_id = t.id)
+            OR NOT EXISTS (SELECT 1 FROM track_programming p
+                           WHERE p.track_id = t.id AND p.mood = 'calm')",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(unprepared, 0, "{when}: tracks without their preparation");
+}
+
 async fn ready_files(pool: &MySqlPool) -> Vec<u64> {
     ids(
         pool,
@@ -354,6 +370,38 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
         .unwrap();
     assert_eq!(tracks, 0, "nothing imported before it is asked");
 
+    // Prepare every file, as the API does.
+    let category = sqlx::query("INSERT INTO categories (name) VALUES ('Chaos')")
+        .execute(pool)
+        .await
+        .unwrap()
+        .last_insert_id();
+    let label = sqlx::query("INSERT INTO labels (name) VALUES ('chaos')")
+        .execute(pool)
+        .await
+        .unwrap()
+        .last_insert_id();
+    sqlx::query(
+        "INSERT INTO staged_file_categories (staged_file_id, category_id)
+         SELECT id, ? FROM staged_files WHERE status = 'ready'",
+    )
+    .bind(category)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO staged_file_labels (staged_file_id, label_id)
+         SELECT id, ? FROM staged_files WHERE status = 'ready'",
+    )
+    .bind(label)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE staged_files SET mood = 'calm' WHERE status = 'ready'")
+        .execute(pool)
+        .await
+        .unwrap();
+
     // Import from the buffer zone: crash at every step of the first
     // operations, then at random, asking again for what is left.
     for step in ["recorded", "transferred", "finished", "removed"] {
@@ -371,6 +419,7 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
                 &pre_existing,
                 &format!("import, crash at {crash_at}"),
             );
+            assert_prepared(pool, &format!("import, crash at {crash_at}")).await;
         }
     }
     let mut round = 0;
@@ -401,6 +450,7 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
                 &pre_existing,
                 &format!("import, killed in round {round}"),
             );
+            assert_prepared(pool, &format!("import, killed in round {round}")).await;
         } else {
             run_task(&setup, pool, task, None).await;
         }
@@ -417,6 +467,7 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
         .await
         .unwrap();
     assert_eq!(tracks, 20, "every file imported once");
+    assert_prepared(pool, "after the import").await;
 
     // Organize under another layout, crashing as it goes.
     sqlx::query(
