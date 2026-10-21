@@ -16,6 +16,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | M5b | [Track details, labels & tags](m5b-track-details-tags.md) | M5 | Done |
 | M5c | [Track management](m5c-track-management.md) | M5 | Done ([#18](https://github.com/dehy/heron-broadcaster/pull/18)) |
 | M5d | [Web UI translations](m5d-web-i18n.md) | M5 | Done ([#17](https://github.com/dehy/heron-broadcaster/pull/17)) |
+| M5e | [Preparing tracks in the buffer zone](m5e-buffer-preparation.md) | M5c | In progress |
 | M6 | [Rotation & clockwheels](m6-rotation-clockwheels.md) | M4 | Done ([#11](https://github.com/dehy/heron-broadcaster/pull/11)) |
 | M7 | [Webhooks & output API](m7-webhooks-output-api.md) | M4 | Not started |
 | M7b | [Listener statistics](m7b-listener-statistics.md) | M4 | Not started |
@@ -29,7 +30,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 M0 ─► M1 ─┬─► M1b
           └─► M2 ─┬─► M3 ─► M10
                   ├─► M4 ─┬─► M5 ─┬─► M5b
-                  │       │       ├─► M5c
+                  │       │       ├─► M5c ─► M5e
                   │       │       └─► M5d
                   │       ├─► M6
                   │       ├─► M7
