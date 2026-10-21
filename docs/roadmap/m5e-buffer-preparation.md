@@ -2,7 +2,7 @@
 
 **Depends on:** M5c (the buffer zone) and M5b (labels, mood and sound code).
 
-New music is checked in the buffer zone ([M5c](m5c-track-management.md)), but everything a programmer does next happens after the import: find the new tracks in the library, then put them in categories, label them, set their mood and sound code. Feedback from the first station using the buffer: tracks should be prepared **from the buffer page**, so they are ready to air the moment they are imported; and the tracks just imported are hard to find in the library.
+New music is checked in the buffer zone ([M5c](m5c-track-management.md)), but everything a programmer does next happens after the import: find the new tracks in the library, then put them in categories, label them, set their mood and sound code. Feedback from the first station using the buffer: tracks should be prepared **from the buffer page**, so they are ready to air the moment they are imported, tags included; and the tracks just imported are hard to find in the library.
 
 ## Scope
 
@@ -15,6 +15,12 @@ New music is checked in the buffer zone ([M5c](m5c-track-management.md)), but ev
 - Files can be prepared from the moment they show in the buffer, while they are identified, and until they are imported; not while they are being imported.
 - The buffer shows what each file has been given, and its group sums it up (categories and labels that all, or some, of its files have).
 - Preparing a file changes nothing in the library or in the file: it is kept in the database with the file, and dropped if the file is discarded.
+
+### Editing tags
+
+- Edit title, artist, album, album artist, year, track and disc number of a file, or of a selection (a field set on a selection applies to all of it; fields left alone keep each file's value). This was deferred from M5c.
+- Edits go on top of the tags the file gets from its identification, a release picked by hand or its own tags: picking another release keeps them. The buffer shows the edited fields, and the path the layout gives the file is worked out again.
+- They are written into the file when it is imported, like the tags of an identified file, in the same `import` batch (undone byte for byte).
 
 ### Importing a prepared file
 
@@ -31,6 +37,7 @@ New music is checked in the buffer zone ([M5c](m5c-track-management.md)), but ev
 ## Acceptance criteria
 
 - [ ] A group of files uploaded to the buffer is put in two categories, given a label and a mood, one of its files taken out of a category, and imported: each track is in the library with exactly what its file was given, as soon as it exists.
+- [ ] Tags edited on a selection of identified files, then on one of them, show in the buffer with the new planned path, without looking the release up again; once imported, the files carry them and the import is undone byte for byte.
 - [ ] A file discarded after being prepared leaves nothing behind; a category deleted after a file was put in it is left out at import, the rest applies.
 - [ ] Preparing a file while it is being imported is refused; interrupting the librarian while it imports prepared files (chaos test) leaves no track without its preparation.
 - [ ] The buffer page links to the tracks of the import that just ended; the library filtered by that batch lists exactly them, and sorted by date added lists them first.
