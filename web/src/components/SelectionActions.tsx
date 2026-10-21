@@ -2,7 +2,8 @@
 
 // Actions on a selection of tracks (some IDs, or every track matching the
 // library's filters): labels, categories, mood, sound code and tempo, and
-// the files' tags.
+// the files' tags. Labels, categories, mood and sound code also prepare
+// files of the buffer zone, for the tracks they become.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
@@ -33,6 +34,9 @@ export function useProgrammingSettings() {
 /** Queries every action on tracks can change. */
 const TRACKS: string[][] = [["tracks"], ["track"], ["labels"], ["categories"]];
 
+/** Queries preparing buffer files changes. */
+const BUFFER: string[][] = [["buffer"], ["labels"]];
+
 interface DialogProps {
   open: boolean;
   onClose: () => void;
@@ -41,8 +45,20 @@ interface DialogProps {
   tracks: number;
 }
 
+/** Library tracks, or files of the buffer zone (`files`). */
+type TargetProps = Omit<DialogProps, "selection"> &
+  ({ selection: Selection; files?: never } | { files: number[]; selection?: never });
+
+type Preparation = Omit<Schemas["Preparation"], "file_ids">;
+/** What an action did: on tracks, or on buffer files. */
+type Applied = { tracks: number } | { files: number };
+
+function prepare(files: number[], body: Preparation) {
+  return unwrap(api.POST("/api/v1/staging/files/preparation", { body: { file_ids: files, ...body } }));
+}
+
 /** A label, as a colored chip. */
-export function LabelChip({ label }: { label: { name: string; color?: string | null } }) {
+export function LabelChip({ label }: { label: { name: string; color?: string | null | undefined } }) {
   return (
     <span className="chip" style={label.color ? { borderColor: label.color } : undefined}>
       <span className="swatch" style={{ background: label.color ?? "var(--muted)" }} />
@@ -53,7 +69,7 @@ export function LabelChip({ label }: { label: { name: string; color?: string | n
 
 type LabelChange = "keep" | "add" | "remove";
 
-export function LabelsDialog({ open, onClose, selection, tracks }: DialogProps) {
+export function LabelsDialog({ open, onClose, selection, files, tracks }: TargetProps) {
   const labels = useLabels();
   const [changes, setChanges] = useState<Record<number, LabelChange>>({});
   const [name, setName] = useState("");
@@ -74,11 +90,14 @@ export function LabelsDialog({ open, onClose, selection, tracks }: DialogProps) 
     },
   );
   const apply = useAction(
-    () => {
+    (): Promise<Applied> => {
       const ids = (change: LabelChange) =>
         Object.entries(changes)
           .filter(([, value]) => value === change)
           .map(([id]) => Number(id));
+      if (files) {
+        return prepare(files, { add_labels: ids("add"), remove_labels: ids("remove") });
+      }
       return unwrap(
         api.POST("/api/v1/tracks/labels", {
           body: { selection, add: ids("add"), remove: ids("remove") },
@@ -86,15 +105,18 @@ export function LabelsDialog({ open, onClose, selection, tracks }: DialogProps) 
       );
     },
     {
-      success: (result) => t("selection.labelsChanged", { count: result.tracks }),
-      invalidate: TRACKS,
+      success: (result) =>
+        "files" in result
+          ? t("buffer.prepared", { count: result.files })
+          : t("selection.labelsChanged", { count: result.tracks }),
+      invalidate: files ? BUFFER : TRACKS,
       onSuccess: onClose,
     },
   );
   const changed = Object.values(changes).some((value) => value !== "keep");
   return (
     <Modal
-      title={t("selection.labelsTitle", { count: tracks })}
+      title={files ? t("buffer.labelsTitle", { count: tracks }) : t("selection.labelsTitle", { count: tracks })}
       open={open}
       onClose={onClose}
       footer={
@@ -161,7 +183,7 @@ export function LabelsDialog({ open, onClose, selection, tracks }: DialogProps) 
   );
 }
 
-export function CategoryDialog({ open, onClose, selection, tracks }: DialogProps) {
+export function CategoryDialog({ open, onClose, selection, files, tracks }: TargetProps) {
   const categories = useQuery({
     queryKey: ["categories"],
     queryFn: () => unwrap(api.GET("/api/v1/categories")),
@@ -177,8 +199,16 @@ export function CategoryDialog({ open, onClose, selection, tracks }: DialogProps
     }
   }, [open]);
   const apply = useAction(
-    () => {
+    (): Promise<Applied> => {
       const id = Number(category);
+      if (files) {
+        return prepare(
+          files,
+          mode === "add"
+            ? { add_categories: [{ category_id: id, weight: Number(weight) }] }
+            : { remove_categories: [id] },
+        );
+      }
       return unwrap(
         api.POST("/api/v1/tracks/categories", {
           body:
@@ -190,17 +220,19 @@ export function CategoryDialog({ open, onClose, selection, tracks }: DialogProps
     },
     {
       success: (result) =>
-        mode === "add"
-          ? t("selection.inCategory", { count: result.tracks })
-          : t("selection.outOfCategory", { count: result.tracks }),
-      invalidate: TRACKS,
+        "files" in result
+          ? t("buffer.prepared", { count: result.files })
+          : mode === "add"
+            ? t("selection.inCategory", { count: result.tracks })
+            : t("selection.outOfCategory", { count: result.tracks }),
+      invalidate: files ? BUFFER : TRACKS,
       onSuccess: onClose,
     },
   );
   const validWeight = Number(weight) > 0;
   return (
     <Modal
-      title={t("selection.categoryTitle", { count: tracks })}
+      title={files ? t("buffer.categoryTitle", { count: tracks }) : t("selection.categoryTitle", { count: tracks })}
       open={open}
       onClose={onClose}
       footer={
@@ -257,9 +289,9 @@ export function CategoryDialog({ open, onClose, selection, tracks }: DialogProps
 }
 
 /** Keep the tracks' values, set one, or clear it. */
-type Change<T> = { kind: "keep" } | { kind: "set"; value: T } | { kind: "clear" };
+export type Change<T> = { kind: "keep" } | { kind: "set"; value: T } | { kind: "clear" };
 
-function ChangeField({
+export function ChangeField({
   label,
   change,
   onChange,
@@ -294,7 +326,7 @@ function ChangeField({
   );
 }
 
-function changeValue<T>(change: Change<T>): T | null | undefined {
+export function changeValue<T>(change: Change<T>): T | null | undefined {
   switch (change.kind) {
     case "keep":
       return undefined;
@@ -305,7 +337,7 @@ function changeValue<T>(change: Change<T>): T | null | undefined {
   }
 }
 
-export function ProgrammingDialog({ open, onClose, selection, tracks }: DialogProps) {
+export function ProgrammingDialog({ open, onClose, selection, files, tracks }: TargetProps) {
   const settings = useProgrammingSettings();
   const [mood, setMood] = useState<Change<string>>({ kind: "keep" });
   const [soundCode, setSoundCode] = useState<Change<string>>({ kind: "keep" });
@@ -318,10 +350,21 @@ export function ProgrammingDialog({ open, onClose, selection, tracks }: DialogPr
     }
   }, [open]);
   const apply = useAction(
-    () => {
-      const body: Schemas["ProgrammingChange"] = { selection };
+    (): Promise<Applied> => {
       const moodValue = changeValue(mood);
       const codeValue = changeValue(soundCode);
+      if (files) {
+        // The tempo is measured once the track is analyzed.
+        const preparation: Preparation = {};
+        if (moodValue !== undefined) {
+          preparation.mood = moodValue;
+        }
+        if (codeValue !== undefined) {
+          preparation.sound_code = codeValue;
+        }
+        return prepare(files, preparation);
+      }
+      const body: Schemas["ProgrammingChange"] = { selection };
       const bpmValue = changeValue(bpm);
       if (moodValue !== undefined) {
         body.mood = moodValue;
@@ -335,8 +378,11 @@ export function ProgrammingDialog({ open, onClose, selection, tracks }: DialogPr
       return unwrap(api.POST("/api/v1/tracks/programming", { body }));
     },
     {
-      success: (result) => t("selection.programmingSet", { count: result.tracks }),
-      invalidate: TRACKS,
+      success: (result) =>
+        "files" in result
+          ? t("buffer.prepared", { count: result.files })
+          : t("selection.programmingSet", { count: result.tracks }),
+      invalidate: files ? BUFFER : TRACKS,
       onSuccess: onClose,
     },
   );
@@ -358,7 +404,9 @@ export function ProgrammingDialog({ open, onClose, selection, tracks }: DialogPr
   const nothing = mood.kind === "keep" && soundCode.kind === "keep" && bpm.kind === "keep";
   return (
     <Modal
-      title={t("selection.programmingTitle", { count: tracks })}
+      title={
+        files ? t("buffer.programmingTitle", { count: tracks }) : t("selection.programmingTitle", { count: tracks })
+      }
       open={open}
       onClose={onClose}
       footer={
@@ -390,24 +438,26 @@ export function ProgrammingDialog({ open, onClose, selection, tracks }: DialogPr
           onChange={setSoundCode}
           input={scale(settings.data?.sound_codes)}
         />
-        <ChangeField
-          label={t("library.column.bpm")}
-          change={bpm}
-          onChange={setBpm}
-          clearLabel={t("selection.measured")}
-          input={(value, set) => (
-            <input
-              className="input num"
-              type="number"
-              min={20}
-              max={400}
-              step={0.1}
-              value={value}
-              onChange={(event) => set(event.target.value)}
-              aria-label={t("library.column.bpm")}
-            />
-          )}
-        />
+        {!files && (
+          <ChangeField
+            label={t("library.column.bpm")}
+            change={bpm}
+            onChange={setBpm}
+            clearLabel={t("selection.measured")}
+            input={(value, set) => (
+              <input
+                className="input num"
+                type="number"
+                min={20}
+                max={400}
+                step={0.1}
+                value={value}
+                onChange={(event) => set(event.target.value)}
+                aria-label={t("library.column.bpm")}
+              />
+            )}
+          />
+        )}
         <p className="muted small" style={{ margin: 0 }}>
           {rich("selection.programmingHelp", {
             link: <Link to="/settings">{t("selection.settingsLink")}</Link>,

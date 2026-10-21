@@ -1,11 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // The buffer zone: uploads, and new files waiting to be imported, with
-// their identification, flags and the path the layout gives them.
+// their identification, flags and the path the layout gives them. Files
+// are prepared here (categories, labels, mood, sound code) for the tracks
+// they become.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { type Schemas, api, errorMessage, unwrap } from "../api";
+import {
+  CategoryDialog,
+  type Change,
+  ChangeField,
+  LabelChip,
+  LabelsDialog,
+  ProgrammingDialog,
+  changeValue,
+} from "../components/SelectionActions";
 import { TaskState, useTask } from "../components/Task";
 import {
   Banner,
@@ -15,6 +26,7 @@ import {
   ErrorView,
   Icon,
   Loading,
+  Modal,
   PageHead,
   useToast,
 } from "../components/ui";
@@ -46,6 +58,13 @@ const FLAGS: Record<Schemas["StagedFlag"], { label: PlainKey; help: PlainKey }> 
   too_short: { label: "buffer.flag.tooShort", help: "buffer.flag.tooShortHelp" },
   unsupported_format: { label: "buffer.flag.unsupported", help: "buffer.flag.unsupportedHelp" },
 };
+
+/** Files that can still be prepared: not yet imported, not being imported. */
+function isPreparable(file: StagedFile): boolean {
+  return file.status === "receiving" || file.status === "identifying" || file.status === "ready";
+}
+
+type Dialog = "category" | "labels" | "programming" | "tags" | null;
 
 /** Ready, identified (or identification off) and nothing to look at. */
 function isClean(file: StagedFile): boolean {
@@ -301,6 +320,9 @@ export function Buffer() {
   const seen = useRef(new Set<number>());
   const [taskId, setTaskId] = useState<number | null>(null);
   const task = useTask(taskId);
+  const [dialog, setDialog] = useState<Dialog>(null);
+  // The last import, to find its tracks in the library.
+  const [imported, setImported] = useState<{ batch: number; count: number } | null>(null);
 
   // Files that need no look are selected as they become ready.
   useEffect(() => {
@@ -329,6 +351,9 @@ export function Buffer() {
           ? t("buffer.importedSkipped", { count: report.done, skipped: report.skipped.length })
           : t("buffer.imported", { count: report?.done ?? 0 }),
       );
+      if (report && report.done > 0) {
+        setImported({ batch: report.batch_id, count: report.done });
+      }
       refresh();
       void client.invalidateQueries({ queryKey: ["tracks"] });
       void client.invalidateQueries({ queryKey: ["library-batches"] });
@@ -379,6 +404,10 @@ export function Buffer() {
   const groups = buffer.data?.groups ?? [];
   const files = groups.flatMap((g) => g.files);
   const importable = [...selected].filter((id) => files.find((f) => f.id === id)?.status === "ready");
+  const preparable = [...selected].filter((id) => {
+    const file = files.find((f) => f.id === id);
+    return file !== undefined && isPreparable(file);
+  });
   const importing = taskId !== null && task.data?.status !== "done" && task.data?.status !== "failed";
   const toggle = (ids: number[], on: boolean) =>
     setSelected((current) => {
@@ -402,6 +431,28 @@ export function Buffer() {
       <div className="stack">
         {canEdit && <DropZone onFiles={onFiles} buffer={buffer.data} />}
         <Uploads state={uploads} />
+        {imported && !importing && (
+          <div className="card row between" role="status">
+            <span>
+              {rich("buffer.importedLink", {
+                count: imported.count,
+                link: (
+                  <Link to={`/library?batch=${imported.batch}&sort=added`}>
+                    {t("buffer.seeImported", { count: imported.count })}
+                  </Link>
+                ),
+              })}
+            </span>
+            <button
+              type="button"
+              className="btn small ghost"
+              aria-label={t("ui.close")}
+              onClick={() => setImported(null)}
+            >
+              <Icon name="close" size={14} />
+            </button>
+          </div>
+        )}
         {importing && (
           <Banner kind="warn">
             {t("buffer.importing")} <TaskState task={task.data} />
@@ -418,6 +469,38 @@ export function Buffer() {
                 onClick={() => importFiles.mutate(importable)}
               >
                 <Icon name="check" size={14} /> {t("buffer.import", { count: importable.length })}
+              </button>
+              <button
+                type="button"
+                className="btn small"
+                disabled={preparable.length === 0}
+                onClick={() => setDialog("category")}
+              >
+                {t("library.categoryAction")}
+              </button>
+              <button
+                type="button"
+                className="btn small"
+                disabled={preparable.length === 0}
+                onClick={() => setDialog("labels")}
+              >
+                {t("library.labelsAction")}
+              </button>
+              <button
+                type="button"
+                className="btn small"
+                disabled={preparable.length === 0}
+                onClick={() => setDialog("programming")}
+              >
+                {t("library.programmingAction")}
+              </button>
+              <button
+                type="button"
+                className="btn small"
+                disabled={preparable.length === 0}
+                onClick={() => setDialog("tags")}
+              >
+                <Icon name="edit" size={14} /> {t("library.tagsAction")}
               </button>
               <ConfirmButton
                 className="btn small danger"
@@ -446,6 +529,25 @@ export function Buffer() {
           <Group key={group.id} group={group} selected={selected} onToggle={toggle} canEdit={canEdit} />
         ))}
       </div>
+      <CategoryDialog
+        open={dialog === "category"}
+        onClose={() => setDialog(null)}
+        files={preparable}
+        tracks={preparable.length}
+      />
+      <LabelsDialog
+        open={dialog === "labels"}
+        onClose={() => setDialog(null)}
+        files={preparable}
+        tracks={preparable.length}
+      />
+      <ProgrammingDialog
+        open={dialog === "programming"}
+        onClose={() => setDialog(null)}
+        files={preparable}
+        tracks={preparable.length}
+      />
+      <TagsDialog open={dialog === "tags"} onClose={() => setDialog(null)} files={preparable} />
     </>
   );
 }
@@ -480,6 +582,7 @@ function Group({
             {review > 0 && <span className="warn">, {t("buffer.toLookAt", { count: review })}</span>}
             {flagged > 0 && <span className="bad">, {t("buffer.flagged", { count: flagged })}</span>}
           </div>
+          <GroupPreparation files={group.files} />
         </div>
       }
       flush
@@ -522,6 +625,67 @@ function Group({
         </table>
       </div>
     </Card>
+  );
+}
+
+/** The categories and labels the files of a group were given, with how
+ * many of them have each when not all do. */
+function GroupPreparation({ files }: { files: StagedFile[] }) {
+  const counts = new Map<string, { chip: { name: string; color?: string | null }; count: number }>();
+  for (const file of files) {
+    for (const category of file.categories) {
+      const key = `c${category.category_id}`;
+      const entry = counts.get(key) ?? { chip: category, count: 0 };
+      entry.count += 1;
+      counts.set(key, entry);
+    }
+    for (const label of file.labels) {
+      const key = `l${label.id}`;
+      const entry = counts.get(key) ?? { chip: label, count: 0 };
+      entry.count += 1;
+      counts.set(key, entry);
+    }
+  }
+  if (counts.size === 0) {
+    return null;
+  }
+  return (
+    <div className="chips" style={{ marginTop: "0.25rem" }}>
+      {[...counts.entries()].map(([key, { chip, count }]) => (
+        <LabelChip
+          key={key}
+          label={{
+            name: count === files.length ? chip.name : t("buffer.someFiles", { name: chip.name, count, total: files.length }),
+            color: chip.color,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** What a file was prepared with. */
+function Preparation({ file }: { file: StagedFile }) {
+  const programming = [file.mood, file.sound_code].filter(Boolean).join(" · ");
+  if (file.categories.length === 0 && file.labels.length === 0 && !programming) {
+    return null;
+  }
+  return (
+    <div className="chips small" style={{ marginTop: "0.25rem" }}>
+      {file.categories.map((category) => (
+        <LabelChip
+          key={`c${category.category_id}`}
+          label={{
+            name: category.weight === 1 ? category.name : `${category.name} ×${category.weight}`,
+            color: category.color,
+          }}
+        />
+      ))}
+      {file.labels.map((label) => (
+        <LabelChip key={`l${label.id}`} label={label} />
+      ))}
+      {programming && <span className="muted">{programming}</span>}
+    </div>
   );
 }
 
@@ -634,6 +798,7 @@ function FileRows({
           <div className="muted small ellipsis">
             {tagLine(shown) || file.name} · {duration(file.duration_ms)} · {bytes(file.size)}
           </div>
+          <Preparation file={file} />
         </td>
         <td className="hide-narrow mono small" style={{ overflowWrap: "anywhere", maxWidth: "22rem" }}>
           {file.planned_path ?? <span className="muted">–</span>}
@@ -664,18 +829,138 @@ function FileRows({
   );
 }
 
-const TAG_FIELDS: { key: keyof Schemas["StagedTags"]; label: PlainKey }[] = [
-  { key: "title", label: "buffer.tag.title" },
-  { key: "artist", label: "buffer.tag.artist" },
-  { key: "album", label: "buffer.tag.album" },
-  { key: "album_artist", label: "buffer.tag.albumArtist" },
-  { key: "track", label: "buffer.tag.track" },
-  { key: "disc", label: "buffer.tag.disc" },
-  { key: "date", label: "buffer.tag.date" },
+type TagField = Schemas["TagField"];
+
+/** Tags shown, and the field that edits each. */
+const TAG_FIELDS: { key: keyof Schemas["StagedTags"]; label: PlainKey; field?: TagField }[] = [
+  { key: "title", label: "buffer.tag.title", field: "title" },
+  { key: "artist", label: "buffer.tag.artist", field: "artist" },
+  { key: "album", label: "buffer.tag.album", field: "album" },
+  { key: "album_artist", label: "buffer.tag.albumArtist", field: "album_artist" },
+  { key: "track", label: "buffer.tag.track", field: "track" },
+  { key: "disc", label: "buffer.tag.disc", field: "disc" },
+  { key: "date", label: "buffer.tag.date", field: "year" },
 ];
+
+/** Fields edited in the buffer zone. */
+const EDITABLE: { field: TagField; key: keyof Schemas["StagedTags"]; label: PlainKey; number?: boolean }[] = [
+  { field: "title", key: "title", label: "buffer.tag.title" },
+  { field: "artist", key: "artist", label: "buffer.tag.artist" },
+  { field: "album", key: "album", label: "buffer.tag.album" },
+  { field: "album_artist", key: "album_artist", label: "buffer.tag.albumArtist" },
+  { field: "year", key: "date", label: "buffer.tag.year", number: true },
+  { field: "track", key: "track", label: "buffer.tag.track", number: true },
+  { field: "disc", key: "disc", label: "buffer.tag.disc", number: true },
+];
+
+/** Edits the tags files are imported with, on top of their identification. */
+function TagsDialog({
+  open,
+  onClose,
+  files,
+  current,
+}: {
+  open: boolean;
+  onClose: () => void;
+  files: number[];
+  /** The tags of a single file, to start from. */
+  current?: Schemas["StagedTags"] | null | undefined;
+}) {
+  const [changes, setChanges] = useState<Partial<Record<TagField, Change<string>>>>({});
+  useEffect(() => {
+    if (open) {
+      setChanges({});
+    }
+  }, [open]);
+  const apply = useAction(
+    () => {
+      const set: Record<string, string | null> = {};
+      for (const [field, change] of Object.entries(changes)) {
+        const value = change ? changeValue(change) : undefined;
+        if (value !== undefined) {
+          set[field] = value;
+        }
+      }
+      return unwrap(api.POST("/api/v1/staging/files/tags", { body: { file_ids: files, set } }));
+    },
+    {
+      success: (result) => t("buffer.tagsEdited", { count: result.files }),
+      invalidate: [["buffer"]],
+      onSuccess: onClose,
+    },
+  );
+  const edited = Object.values(changes).some((change) => change && change.kind !== "keep");
+  const invalid = EDITABLE.some(({ field, number }) => {
+    const change = changes[field];
+    return change?.kind === "set" && (!change.value.trim() || (number && !(Number(change.value) >= 1)));
+  });
+  return (
+    <Modal
+      title={t("buffer.tagsTitle", { count: files.length })}
+      open={open}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onClose}>
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!edited || invalid || apply.isPending}
+            onClick={() => apply.mutate(undefined)}
+          >
+            {t("selection.apply")}
+          </button>
+        </>
+      }
+    >
+      <div className="stack">
+        <p className="muted small" style={{ margin: 0 }}>
+          {files.length > 1 ? t("buffer.tagsHelpMany") : t("buffer.tagsHelpOne")}
+        </p>
+        <div className="form-grid">
+          {EDITABLE.map(({ field, key, label, number: numeric }) => {
+            const value = current?.[key];
+            const name = t(label);
+            return (
+              <ChangeField
+                key={field}
+                label={
+                  value !== undefined && value !== null && value !== false
+                    ? t("selection.currentValue", { field: name, value: String(value) })
+                    : name
+                }
+                change={changes[field] ?? { kind: "keep" }}
+                onChange={(change) => setChanges((all) => ({ ...all, [field]: change }))}
+                input={(text, set) => (
+                  <input
+                    className="input"
+                    type={numeric ? "number" : "text"}
+                    min={numeric ? 1 : undefined}
+                    value={text}
+                    aria-label={name}
+                    onChange={(event) => set(event.target.value)}
+                  />
+                )}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 function Details({ file, canEdit }: { file: StagedFile; canEdit: boolean }) {
   const [cover, setCover] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const reset = useAction(
+    (field: TagField) =>
+      unwrap(api.POST("/api/v1/staging/files/tags", { body: { file_ids: [file.id], reset: [field] } })),
+    { invalidate: [["buffer"]] },
+  );
   const choose = useAction(
     (body: Schemas["ChoiceRequest"]) =>
       unwrap(api.POST("/api/v1/staging/files/{id}/choice", { params: { path: { id: file.id } }, body })),
@@ -724,14 +1009,35 @@ function Details({ file, canEdit }: { file: StagedFile; canEdit: boolean }) {
             </tr>
           </thead>
           <tbody>
-            {TAG_FIELDS.map(({ key, label }) => {
+            {TAG_FIELDS.map(({ key, label, field }) => {
               const own = file.own_tags?.[key];
               const applied = file.tags?.[key];
+              const edited = field !== undefined && field in file.tag_edits;
               return (
                 <tr key={key}>
                   <td className="muted small">{t(label)}</td>
                   <td>{own ?? <span className="muted">–</span>}</td>
-                  <td className={applied !== own ? "good" : undefined}>{applied ?? <span className="muted">–</span>}</td>
+                  <td className={applied !== own ? "good" : undefined}>
+                    {applied ?? <span className="muted">–</span>}
+                    {edited && (
+                      <>
+                        {" "}
+                        <span className="badge" title={t("buffer.editedHelp")}>
+                          {t("buffer.edited")}
+                        </span>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            className="btn ghost small"
+                            disabled={reset.isPending || file.status === "importing"}
+                            onClick={() => reset.mutate(field)}
+                          >
+                            {t("buffer.undoEdit")}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -799,13 +1105,24 @@ function Details({ file, canEdit }: { file: StagedFile; canEdit: boolean }) {
           </table>
         </div>
       )}
-      {canEdit && file.identification && file.identification.status !== "off" && file.choice?.kind !== "own" && (
-        <div>
-          <button type="button" className="btn small" disabled={changing} onClick={() => choose.mutate({ kind: "own" })}>
-            {t("buffer.keepOwn")}
+      {canEdit && (
+        <div className="row">
+          <button
+            type="button"
+            className="btn small"
+            disabled={!isPreparable(file)}
+            onClick={() => setEditing(true)}
+          >
+            <Icon name="edit" size={14} /> {t("library.tagsAction")}
           </button>
+          {file.identification && file.identification.status !== "off" && file.choice?.kind !== "own" && (
+            <button type="button" className="btn small" disabled={changing} onClick={() => choose.mutate({ kind: "own" })}>
+              {t("buffer.keepOwn")}
+            </button>
+          )}
         </div>
       )}
+      <TagsDialog open={editing} onClose={() => setEditing(false)} files={[file.id]} current={file.tags ?? file.own_tags} />
     </div>
   );
 }

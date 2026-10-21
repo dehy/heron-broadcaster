@@ -1204,6 +1204,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/staging/files/preparation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prepares files of the buffer zone for when they are imported: the
+         *     categories, labels, mood and sound code their tracks get. Files being
+         *     imported, or no longer in the buffer, are refused. Operators and admins.
+         */
+        post: operations["prepare_files"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staging/files/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edits the tags files of the buffer zone are imported with (title,
+         *     artist, album, album artist, year, track, disc), on top of those they
+         *     get from their identification, a release picked by hand or their own
+         *     tags. heron-librarian works their path out again. Files being imported,
+         *     or no longer in the buffer, are refused. Operators and admins.
+         */
+        post: operations["edit_staged_tags"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/staging/files/{id}/audio": {
         parameters: {
             query?: never;
@@ -2746,6 +2790,29 @@ export interface components {
             language?: string | null;
             theme?: components["schemas"]["Theme"] | null;
         };
+        Preparation: {
+            /**
+             * @description Categories the files are put in (with this weight, also for files
+             *     already in them).
+             */
+            add_categories?: components["schemas"]["CategoryShare"][];
+            add_labels?: number[];
+            file_ids: number[];
+            /** @description A value of the mood scale, or `null` to clear it. Missing: kept. */
+            mood?: string | null;
+            /** @description Categories the files are taken out of. */
+            remove_categories?: number[];
+            remove_labels?: number[];
+            /** @description A value of the sound code scale, or `null` to clear it. */
+            sound_code?: string | null;
+        };
+        Prepared: {
+            /**
+             * Format: int64
+             * @description Files prepared.
+             */
+            files: number;
+        };
         PreviewRequest: {
             /** @description Whether the clock loops across hours. */
             looping?: boolean;
@@ -3277,6 +3344,8 @@ export interface components {
         StagedFile: {
             /** @description Releases it may be on, best first. */
             candidates: components["schemas"]["ReviewCandidate"][];
+            /** @description Categories the track is put in when imported. */
+            categories: components["schemas"]["TrackCategory"][];
             choice?: components["schemas"]["StagedChoice"] | null;
             /** Format: int64 */
             created_at_unix_ms: number;
@@ -3294,6 +3363,9 @@ export interface components {
             /** Format: int64 */
             id: number;
             identification?: components["schemas"]["StagedIdentificationView"] | null;
+            /** @description Labels the track gets when imported. */
+            labels: components["schemas"]["LabelRef"][];
+            mood?: string | null;
             /** @description Its path in the upload, or in the incoming folder. */
             name: string;
             own_tags?: components["schemas"]["StagedTags"] | null;
@@ -3308,7 +3380,12 @@ export interface components {
             release_id?: string | null;
             /** Format: int64 */
             size: number;
+            sound_code?: string | null;
             status: components["schemas"]["StagedStatus"];
+            /** @description Fields edited by hand, on top of the tags it gets otherwise. */
+            tag_edits: {
+                [key: string]: string | null;
+            };
             tags?: components["schemas"]["StagedTags"] | null;
             /**
              * Format: int64
@@ -3348,6 +3425,18 @@ export interface components {
         };
         /** @enum {string} */
         StagedStatus: "receiving" | "identifying" | "ready" | "importing" | "imported" | "discarded" | "failed";
+        StagedTagEdit: {
+            file_ids: number[];
+            /** @description Fields given back the value they had before they were edited. */
+            reset?: components["schemas"]["TagField"][];
+            /**
+             * @description Fields set to the same value on every file; `null` removes the
+             *     field. Fields left out keep each file's value.
+             */
+            set?: {
+                [key: string]: string | null;
+            };
+        };
         /** @description The tags of a file, as read or as they would be written. */
         StagedTags: {
             album?: string | null;
@@ -3664,6 +3753,11 @@ export interface components {
              * @description Tracks added in the last this many days.
              */
             added_days?: number | null;
+            /**
+             * Format: int64
+             * @description Tracks created by this import batch (an import from the buffer zone).
+             */
+            batch_id?: number | null;
             /**
              * Format: int32
              * @description Tracks whose bitrate is below this many kbps.
@@ -6771,6 +6865,68 @@ export interface operations {
             };
         };
     };
+    prepare_files: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Preparation"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Prepared"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    edit_staged_tags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StagedTagEdit"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Prepared"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_staged_audio: {
         parameters: {
             query?: never;
@@ -7122,6 +7278,8 @@ export interface operations {
                 not_played_days?: number;
                 /** @description Tracks added in the last this many days. */
                 added_days?: number;
+                /** @description Tracks created by this import batch (an import from the buffer zone). */
+                batch_id?: number;
                 /** @description Tracks whose bitrate is below this many kbps. */
                 bitrate_below?: number;
                 era?: string;
