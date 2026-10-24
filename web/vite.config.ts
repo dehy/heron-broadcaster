@@ -28,5 +28,12 @@ export default defineConfig({
   },
   test: {
     include: ["src/**/*.test.ts"],
+    // `npm run coverage`: LCOV for SonarQube Cloud, paths from the repository root.
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/api/schema.ts", "src/**/*.test.ts"],
+      reporter: [["lcov", { projectRoot: ".." }], "text-summary"],
+    },
   },
 });

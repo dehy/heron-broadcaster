@@ -10,6 +10,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "coverage": "vitest run --coverage",
     "generate-api": "npm --prefix tools/openapi ci --ignore-scripts --no-audit --no-fund && node tools/openapi/generate.mjs"
   },
   "dependencies": {
@@ -27,6 +28,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
+    "@vitest/coverage-v8": "5.0.5",
     "typescript": "7.0.2",
     "vite": "8.3.4",
     "vitest": "5.0.5"
