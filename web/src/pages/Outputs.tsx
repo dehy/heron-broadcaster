@@ -149,7 +149,7 @@ export function Outputs() {
                         {status?.error && <div className="bad small">{status.error}</div>}
                       </td>
                       <td className="actions">
-                        {output.listen_url && <ListenLink url={output.listen_url} />}
+                        {output.listen_url && <ListenLink url={output.listen_url} />}{" "}
                         {isAdmin && (
                           <>
                             <button type="button" className="btn small" onClick={() => toggle.mutate(output)}>
