@@ -572,6 +572,7 @@ async fn settings_and_outputs_reach_the_engine() {
     assert_eq!(status, StatusCode::CREATED, "{output}");
     assert!(output["config"].get("password").is_none());
     assert_eq!(output["secrets_set"], json!(["password"]));
+    assert_eq!(output["listen_url"], "http://127.0.0.1:9/live");
     let id = output["id"].as_u64().unwrap();
     eventually(
         "the output in the engine",
@@ -589,7 +590,8 @@ async fn settings_and_outputs_reach_the_engine() {
             Method::PUT,
             &format!("/outputs/{id}"),
             json!({"name": "Icecast", "kind": "icecast", "encoder_profile_id": profile,
-                   "config": {"host": "127.0.0.1", "port": 9, "mount": "/other"}}),
+                   "config": {"host": "127.0.0.1", "port": 9, "mount": "/other",
+                              "public_url": "https://stream.example.org/"}}),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
@@ -608,6 +610,7 @@ async fn settings_and_outputs_reach_the_engine() {
         outputs[0]["status"].is_object().then_some(outputs)
     })
     .await;
+    assert_eq!(outputs[0]["listen_url"], "https://stream.example.org/other");
     assert_ne!(outputs[0]["status"]["state"], "connected");
 
     // A profile in use cannot be deleted.

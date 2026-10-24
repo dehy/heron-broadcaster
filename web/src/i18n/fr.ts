@@ -269,6 +269,7 @@ const fr = {
   "output.stopped": "Arrêtée",
   "output.notRunning": "À l'arrêt",
   "output.disabled": "Désactivée",
+  "output.listen": "Écouter",
 
   // Queue page
   "queuePage.queued": "Ajoutée à la file",
@@ -995,6 +996,8 @@ const fr = {
   "outputs.website": "Site web",
   "outputs.descriptionField": "Description",
   "outputs.public": "Lister le flux dans les annuaires publics",
+  "outputs.publicUrl": "URL publique",
+  "outputs.publicUrlHint": "Adresse du serveur pour les auditeurs, ex. https://stream.example.org. Par défaut, l'hôte et le port",
   "outputs.json": "Réglages (JSON)",
   "outputs.jsonHint": "Voir docs/outputs.md pour les réglages de ce type",
   "outputs.newProfileTitle": "Nouveau profil d'encodage",

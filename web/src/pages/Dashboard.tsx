@@ -328,7 +328,19 @@ export function OutputState({ status }: { status: OutputStatus | null | undefine
   );
 }
 
+/** Opens the stream as listeners hear it. */
+export function ListenLink({ url }: { url: string }) {
+  return (
+    <a className="btn small" href={url} target="_blank" rel="noreferrer" title={url}>
+      <Icon name="play" /> {t("output.listen")}
+    </a>
+  );
+}
+
 function OutputsCard({ outputs }: { outputs: OutputStatus[] }) {
+  // The live state has no settings: the listen links come from the outputs.
+  const configured = useQuery({ queryKey: ["outputs"], queryFn: () => unwrap(api.GET("/api/v1/outputs")) });
+  const listenUrl = (id: number) => configured.data?.find((output) => output.id === id)?.listen_url;
   return (
     <Card
       title={t("nav.outputs")}
@@ -346,7 +358,10 @@ function OutputsCard({ outputs }: { outputs: OutputStatus[] }) {
               <div className="meta">
                 <div className="row between" style={{ flexWrap: "nowrap" }}>
                   <span className="ellipsis">{output.name}</span>
-                  <OutputState status={output} />
+                  <span className="row" style={{ flexWrap: "nowrap" }}>
+                    {listenUrl(output.id) && <ListenLink url={listenUrl(output.id)!} />}
+                    <OutputState status={output} />
+                  </span>
                 </div>
                 <div className="muted small">
                   {output.state === "connected" && output.connected_since_unix_ms

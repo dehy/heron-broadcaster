@@ -7530,6 +7530,13 @@
           "kind": {
             "$ref": "#/components/schemas/OutputKind"
           },
+          "listen_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where listeners can play the stream (Icecast)."
+          },
           "metadata_enabled": {
             "type": "boolean"
           },

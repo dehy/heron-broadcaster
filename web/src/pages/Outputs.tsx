@@ -22,7 +22,7 @@ import { number, t } from "../i18n";
 import { bytes, clockTime } from "../lib/format";
 import { useLive } from "../lib/live";
 import { useAction, useCan } from "../lib/session";
-import { OutputState } from "./Dashboard";
+import { ListenLink, OutputState } from "./Dashboard";
 
 type Encoder = Schemas["EncoderKind"];
 type Kind = Schemas["OutputKind"];
@@ -149,6 +149,7 @@ export function Outputs() {
                         {status?.error && <div className="bad small">{status.error}</div>}
                       </td>
                       <td className="actions">
+                        {output.listen_url && <ListenLink url={output.listen_url} />}
                         {isAdmin && (
                           <>
                             <button type="button" className="btn small" onClick={() => toggle.mutate(output)}>
@@ -427,6 +428,15 @@ function OutputDialog({
                   placeholder={passwordSet ? "••••••••" : ""}
                   onChange={(e) => set("password", e.target.value)}
                   required={!passwordSet}
+                />
+              </Field>
+              <Field label={t("outputs.publicUrl")} hint={t("outputs.publicUrlHint")}>
+                <input
+                  className="input"
+                  type="url"
+                  value={text(config.public_url)}
+                  placeholder={`http://${text(config.host) || "host"}:${String(config.port ?? 8000)}`}
+                  onChange={(e) => set("public_url", e.target.value)}
                 />
               </Field>
             </div>
