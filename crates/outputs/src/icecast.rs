@@ -46,6 +46,10 @@ pub struct IcecastConfig {
     /// List the stream in public directories.
     #[serde(default)]
     pub public: bool,
+    /// Server address as listeners reach it, e.g. `https://stream.example.org`;
+    /// defaults to `http://host:port`.
+    #[serde(default)]
+    pub public_url: Option<String>,
 }
 
 fn default_port() -> u16 {
@@ -62,7 +66,7 @@ impl IcecastConfig {
             output: output.to_owned(),
             reason,
         };
-        let config: Self = serde_json::from_value(config.clone())
+        let mut config: Self = serde_json::from_value(config.clone())
             .map_err(|error| invalid(format!("invalid Icecast settings: {error}")))?;
         if !config.mount.starts_with('/') || config.mount.len() < 2 {
             return Err(invalid(format!(
@@ -79,7 +83,24 @@ impl IcecastConfig {
         if config.host.is_empty() {
             return Err(invalid("the host is missing".to_owned()));
         }
+        config.public_url = config.public_url.filter(|url| !url.is_empty());
+        if let Some(url) = &config.public_url
+            && (!(url.starts_with("http://") || url.starts_with("https://"))
+                || url.contains(|c: char| c.is_whitespace() || c.is_control()))
+        {
+            return Err(invalid(format!(
+                "the public URL must start with http:// or https:// (got {url:?})"
+            )));
+        }
         Ok(config)
+    }
+
+    /// Where listeners can play the stream.
+    pub fn listen_url(&self) -> String {
+        match &self.public_url {
+            Some(url) => format!("{}{}", url.trim_end_matches('/'), self.mount),
+            None => format!("http://{}:{}{}", self.host, self.port, self.mount),
+        }
     }
 }
 
@@ -295,9 +316,35 @@ mod tests {
             serde_json::json!({"host": "", "mount": "/live", "password": "p"}),
             serde_json::json!({"host": "h", "mount": "/live"}),
             serde_json::json!({"host": "h", "mount": "/live", "password": "p", "typo": 1}),
+            serde_json::json!({"host": "h", "mount": "/live", "password": "p", "public_url": "ftp://x"}),
+            serde_json::json!({"host": "h", "mount": "/live", "password": "p", "public_url": "http://a b"}),
         ] {
             assert!(IcecastConfig::parse("test", &config).is_err(), "{config}");
         }
+    }
+
+    #[test]
+    fn listen_url_prefers_the_public_url() {
+        assert_eq!(config(8000).listen_url(), "http://127.0.0.1:8000/live");
+        for public_url in ["https://stream.example.org", "https://stream.example.org/"] {
+            let config = IcecastConfig::parse(
+                "test",
+                &serde_json::json!({
+                    "host": "icecast",
+                    "mount": "/live",
+                    "password": "p",
+                    "public_url": public_url,
+                }),
+            )
+            .unwrap();
+            assert_eq!(config.listen_url(), "https://stream.example.org/live");
+        }
+        let empty = IcecastConfig::parse(
+            "test",
+            &serde_json::json!({"host": "h", "mount": "/live", "password": "p", "public_url": ""}),
+        )
+        .unwrap();
+        assert_eq!(empty.listen_url(), "http://h:8000/live");
     }
 
     #[test]

@@ -266,6 +266,7 @@ const en = {
   "output.stopped": "Stopped",
   "output.notRunning": "Not running",
   "output.disabled": "Disabled",
+  "output.listen": "Listen",
 
   // Queue page
   "queuePage.queued": "Queued",
@@ -986,6 +987,8 @@ const en = {
   "outputs.website": "Website",
   "outputs.descriptionField": "Description",
   "outputs.public": "List the stream in public directories",
+  "outputs.publicUrl": "Public URL",
+  "outputs.publicUrlHint": "How listeners reach the server, e.g. https://stream.example.org. Defaults to the host and port",
   "outputs.json": "Settings (JSON)",
   "outputs.jsonHint": "See docs/outputs.md for this kind's settings",
   "outputs.newProfileTitle": "New encoder profile",

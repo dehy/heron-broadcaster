@@ -2664,6 +2664,8 @@ export interface components {
             /** Format: int64 */
             id: number;
             kind: components["schemas"]["OutputKind"];
+            /** @description Where listeners can play the stream (Icecast). */
+            listen_url?: string | null;
             metadata_enabled: boolean;
             name: string;
             /** @description Credentials set in the settings (e.g. `password`), never sent back. */

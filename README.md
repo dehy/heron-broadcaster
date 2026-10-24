@@ -84,7 +84,7 @@ Heron starts playing as soon as tracks are analyzed: with autofill on (the defau
 docker compose --profile icecast up -d --wait
 ```
 
-Then, in the web interface, open **Outputs** and add an Icecast output: host `icecast`, port `8000`, mount `/live`, password `hackme`, with the MP3 profile. Listen on http://localhost:8010/live.
+Then, in the web interface, open **Outputs** and add an Icecast output: host `icecast`, port `8000`, mount `/live`, password `hackme`, public URL `http://localhost:8010`, with the MP3 profile. Click **Listen** or open http://localhost:8010/live.
 
 To shape the programme, create **Categories**, put tracks in them (from the track's page), build **Clocks** from them and paint the week in **Schedule**. Hours without a clock rotate the whole library.
 

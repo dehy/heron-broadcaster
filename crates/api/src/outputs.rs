@@ -12,6 +12,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use heron_core::{EncoderKind, EncoderProfile, OutputConfig, OutputKind, OutputsConfig};
+use heron_outputs::icecast::IcecastConfig;
 use serde::{Deserialize, Serialize};
 use sqlx::{MySql, Transaction};
 use utoipa::ToSchema;
@@ -67,6 +68,8 @@ pub struct OutputView {
     pub secrets_set: Vec<String>,
     pub metadata_enabled: bool,
     pub enabled: bool,
+    /// Where listeners can play the stream (Icecast).
+    pub listen_url: Option<String>,
     /// Live state from the engine; missing while it is unreachable or
     /// before the output reaches it.
     pub status: Option<OutputStatus>,
@@ -211,6 +214,12 @@ fn keep_secrets(new: &mut serde_json::Value, old: &serde_json::Value) {
 }
 
 fn output_view(output: OutputConfig, status: Option<OutputStatus>) -> OutputView {
+    let listen_url = match output.kind {
+        OutputKind::Icecast => IcecastConfig::parse(&output.name, &output.config)
+            .ok()
+            .map(|config| config.listen_url()),
+        _ => None,
+    };
     let (config, secrets_set) = redact(&output.config);
     OutputView {
         id: output.id,
@@ -221,6 +230,7 @@ fn output_view(output: OutputConfig, status: Option<OutputStatus>) -> OutputView
         secrets_set,
         metadata_enabled: output.metadata_enabled,
         enabled: output.enabled,
+        listen_url,
         status,
     }
 }
