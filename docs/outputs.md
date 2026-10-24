@@ -98,6 +98,9 @@ Source client for Icecast 2.4 and later (HTTP `PUT`). Metadata goes through `/ad
 | `password` | required |
 | `name`, `description`, `genre`, `url` | none (shown in stream directories) |
 | `public` | `false` (list in public directories) |
+| `public_url` | none: `http://host:port` (server address as listeners reach it, e.g. `https://stream.example.org`) |
+
+The stream plays at the public URL followed by the mount. The **Outputs** and **On air** pages link to it (**Listen**).
 
 TLS is not supported yet.
 
@@ -118,10 +121,11 @@ Manage them through the API (`/api/v1/encoder-profiles`, `/api/v1/outputs`, admi
 ```json
 POST /api/v1/outputs
 {"name": "Local Icecast", "kind": "icecast", "encoder_profile_id": 1,
- "config": {"host": "icecast", "port": 8000, "mount": "/live", "password": "hackme", "name": "My station"}}
+ "config": {"host": "icecast", "port": 8000, "mount": "/live", "password": "hackme", "name": "My station",
+            "public_url": "http://localhost:8010"}}
 ```
 
-The API never sends passwords back; an update without one keeps the stored password. Each output in `GET /api/v1/outputs` carries its live state from the engine.
+The API never sends passwords back; an update without one keeps the stored password. Each output in `GET /api/v1/outputs` carries its live state from the engine and, for Icecast, its `listen_url`.
 
 ## Delivery
 

@@ -734,6 +734,10 @@ table.table {
   white-space: nowrap;
 }
 
+.table td.actions > * {
+  vertical-align: middle;
+}
+
 .table .title-cell {
   max-width: 28rem;
 }
