@@ -24,6 +24,10 @@ function toGrid(hours: ScheduledHour[]): Grid {
   return new Map(hours.map((h) => [cell(h.day_of_week, h.hour), h.clock_id]));
 }
 
+function sameGrid(a: Grid, b: Grid): boolean {
+  return a.size === b.size && [...a].every(([key, clock]) => b.get(key) === clock);
+}
+
 function fromGrid(grid: Grid): ScheduledHour[] {
   return [...grid.entries()].map(([key, clock_id]) => {
     const [day, hour] = key.split("-").map(Number);
@@ -74,7 +78,7 @@ export function Schedule() {
   if (clocks.isError || schedule.isError) {
     return <ErrorView error={clocks.error ?? schedule.error} />;
   }
-  const dirty = JSON.stringify([...toGrid(schedule.data)].sort()) !== JSON.stringify([...grid].sort());
+  const dirty = !sameGrid(toGrid(schedule.data), grid);
   const paint = (day: number, hour: number) => {
     setGrid((current) => {
       const next = new Map(current);
