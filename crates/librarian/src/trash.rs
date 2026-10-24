@@ -375,17 +375,7 @@ pub async fn purge(
     .into_iter()
     .collect();
     let trash = roots.library.join(TRASH_DIR);
-    let folders: Vec<(u64, std::path::PathBuf)> = std::fs::read_dir(&trash)
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter_map(|entry| {
-                    let batch = entry.file_name().to_str()?.parse::<u64>().ok()?;
-                    Some((batch, entry.path()))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let folders = tokio::task::spawn_blocking(move || fsops::numbered_dirs(&trash)).await?;
     if tracks.is_empty() && folders.is_empty() {
         return Ok(PurgeReport::default());
     }
@@ -450,13 +440,9 @@ pub async fn purge(
         if !expired_batches.contains(&batch) || remaining.iter().any(|p| p.starts_with(&prefix)) {
             continue;
         }
-        let files = walkdir::WalkDir::new(&folder)
-            .into_iter()
-            .flatten()
-            .filter(|entry| entry.file_type().is_file())
-            .count() as u64;
-        match std::fs::remove_dir_all(&folder) {
-            Ok(()) => report.files += files,
+        let removing = folder.clone();
+        match tokio::task::spawn_blocking(move || fsops::remove_tree(&removing)).await? {
+            Ok(files) => report.files += files,
             Err(error) => {
                 tracing::warn!(folder = %folder.display(), %error, "cannot empty the trash");
             }

@@ -11,7 +11,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rustix::fs::{CWD, RenameFlags};
 use rustix::io::Errno;
@@ -128,6 +128,45 @@ pub fn remove_empty_dirs(dir: &Path, root: &Path) {
             None => break,
         }
     }
+}
+
+/// The folders of `dir` named by a number (a batch or a group id). None
+/// when `dir` cannot be read.
+pub fn numbered_dirs(dir: &Path) -> Vec<(u64, PathBuf)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| {
+            let id = entry.file_name().to_str()?.parse::<u64>().ok()?;
+            Some((id, entry.path()))
+        })
+        .collect()
+}
+
+/// Removes `dir` and everything in it. Returns how many files went.
+pub fn remove_tree(dir: &Path) -> std::io::Result<u64> {
+    let files = walkdir::WalkDir::new(dir)
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry.file_type().is_file())
+        .count() as u64;
+    std::fs::remove_dir_all(dir)?;
+    Ok(files)
+}
+
+/// Removes the empty folders of `dir`, then `dir` itself if nothing is left.
+pub fn prune_empty_dirs(dir: &Path) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                remove_empty_dirs(&entry.path(), dir);
+            }
+        }
+    }
+    let _ = std::fs::remove_dir(dir);
 }
 
 #[cfg(test)]
