@@ -918,17 +918,12 @@ pub async fn import(
             }
         }
     }
-    for group in group_dirs {
-        let dir = roots.staging.join(group.to_string());
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-                    fsops::remove_empty_dirs(&entry.path(), &dir);
-                }
-            }
-        }
-        let _ = std::fs::remove_dir(&dir);
-    }
+    let dirs: Vec<_> = group_dirs
+        .into_iter()
+        .map(|group| roots.staging.join(group.to_string()))
+        .collect();
+    tokio::task::spawn_blocking(move || dirs.iter().for_each(|dir| fsops::prune_empty_dirs(dir)))
+        .await?;
     journal::finish_batch(pool, batch_id).await?;
     if report.done > 0 {
         let analysis = heron_analysis::jobs::load_settings(pool).await?;
@@ -1133,18 +1128,12 @@ pub async fn cleanup(pool: &MySqlPool, roots: &Roots) -> Result<(), sqlx::Error>
     .await?
     .into_iter()
     .collect();
-    let Ok(entries) = std::fs::read_dir(&roots.staging) else {
-        return Ok(());
-    };
-    for entry in entries.flatten() {
-        let Some(group) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<u64>().ok())
-        else {
-            continue;
-        };
-        if active.contains(&group) || !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+    let staging = roots.staging.clone();
+    let folders = tokio::task::spawn_blocking(move || fsops::numbered_dirs(&staging))
+        .await
+        .unwrap_or_default();
+    for (group, folder) in folders {
+        if active.contains(&group) {
             continue;
         }
         // A group created a moment ago, whose first upload has no row yet.
@@ -1157,7 +1146,8 @@ pub async fn cleanup(pool: &MySqlPool, roots: &Roots) -> Result<(), sqlx::Error>
         if known.is_some() {
             continue;
         }
-        if let Err(error) = std::fs::remove_dir_all(entry.path()) {
+        let removed = tokio::task::spawn_blocking(move || fsops::remove_tree(&folder)).await;
+        if let Ok(Err(error)) = removed {
             tracing::warn!(group, %error, "cannot remove a folder of the buffer zone");
         }
     }
