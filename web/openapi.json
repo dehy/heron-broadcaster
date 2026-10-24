@@ -733,7 +733,7 @@
         "tags": [
           "categories"
         ],
-        "summary": "Renames, recolors a category or changes its separation. Operators and\nadmins.",
+        "summary": "Renames, recolors a category, changes its separation or whether the FX\nplayer offers it. Operators and admins.",
         "operationId": "update_category",
         "parameters": [
           {
@@ -5632,6 +5632,7 @@
         "required": [
           "id",
           "name",
+          "fx_player",
           "tracks",
           "separation"
         ],
@@ -5642,6 +5643,10 @@
               "null"
             ],
             "description": "`#rrggbb`."
+          },
+          "fx_player": {
+            "type": "boolean",
+            "description": "Liners, power intros, voice tracks: the FX player's picker opens on\nthese categories. Clocks still call them like any other."
           },
           "id": {
             "type": "integer",
@@ -5692,6 +5697,10 @@
               "null"
             ],
             "description": "`#rrggbb`, or none."
+          },
+          "fx_player": {
+            "type": "boolean",
+            "description": "Not for the FX player by default."
           },
           "name": {
             "type": "string"

@@ -6,7 +6,7 @@
 
 | Page | What it does | Changes need |
 |---|---|---|
-| **On air** | Decks A and B (track, progress, remaining time, which is on air), master and deck levels, skip, pause and resume, the FX player (play a jingle over the music), the next tracks, outputs and their state, the engine's state | operator |
+| **On air** | Decks A and B (track, progress, remaining time, which is on air), master and deck levels, skip, pause and resume, the FX player (play a jingle, liner or voice track over the music: it opens on the categories for the FX player, the last one used first, with the whole library as a last tab), the next tracks, outputs and their state, the engine's state | operator |
 | **Queue** | The waiting tracks, the cued one first, with their expected start times; drag to reorder (or use the keyboard: focus the handle, space, arrows, space), play next, remove, clear; add tracks from the library; autofill on or off | operator |
 | **History** | Every play by day, with how it ended (played, skipped…) and for how long | |
 | **Tracks** | The library: search, filters (playable, not analyzed, silent, missing, disabled, needs review), category, labels (any, all, none of), never played, not played for N days, added in the last N days, bitrate below, era, mood, sound code, the tracks of one import (from the Buffer page); sort by any column, either way; choose the columns (added, last played, plays, bitrate, year, era, BPM, mood, sound code, genre, labels); select tracks, a page or every matching track, then queue them, label them, put them in a category, set their mood, sound code or BPM, or edit their tags; delete a selection (to the trash, after a confirmation that lists what goes) | operator |
@@ -17,7 +17,7 @@
 | **Clocks** | Each clock's slots, reordered by dragging (or with the keyboard), with their category, selection method, enforce-rules flag and separation overrides; whether the clock loops across hours; the hour (or the loop) drawn as it will sound, categories running short, an hour simulated | operator |
 | **Schedule** | The week, hour by hour: pick a clock and click or drag over the hours, in station time | operator |
 | **Labels** | Create, rename, recolor, merge and delete labels, with their tracks | operator |
-| **Categories** | Create, rename, recolor and delete categories; the separation windows they override; fill a category from a label | operator |
+| **Categories** | Create, rename, recolor and delete categories; the separation windows they override; whether the FX player offers them (liners, power intros, voice tracks); fill a category from a label | operator |
 | **Restrictions** | Dayparting, date ranges and sequences on tracks, artists and categories; turn them on and off | operator |
 | **Selection log** | Each track rotation picked: clock and slot, rules held or relaxed, and the details (windows, tracks held back, candidates); a simulation of the next day or week, checked rule by rule | operator (simulations) |
 | **Review & organize** | Identifications waiting for review (apply a candidate release, or keep the file's tags); organize the library after a dry run; every batch of file changes (tag edits included), with undo | operator (review), admin (organize, undo) |

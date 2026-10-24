@@ -677,10 +677,20 @@ async fn library_tracks_overrides_and_categories() {
         )
         .await;
     assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(category["fx_player"], false);
     let (status, duplicate) = admin
         .send(Method::POST, "/categories", json!({"name": "Gold"}))
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "{duplicate}");
+    let (status, liners) = admin
+        .send(
+            Method::POST,
+            "/categories",
+            json!({"name": "Liner cap", "fx_player": true}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{liners}");
+    assert_eq!(liners["fx_player"], true);
     let (status, assigned) = admin
         .send(
             Method::PUT,

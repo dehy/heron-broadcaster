@@ -264,8 +264,8 @@ export interface paths {
         };
         get: operations["get_category"];
         /**
-         * Renames, recolors a category or changes its separation. Operators and
-         *     admins.
+         * Renames, recolors a category, changes its separation or whether the FX
+         *     player offers it. Operators and admins.
          */
         put: operations["update_category"];
         post?: never;
@@ -1938,6 +1938,11 @@ export interface components {
         Category: {
             /** @description `#rrggbb`. */
             color?: string | null;
+            /**
+             * @description Liners, power intros, voice tracks: the FX player's picker opens on
+             *     these categories. Clocks still call them like any other.
+             */
+            fx_player: boolean;
             /** Format: int64 */
             id: number;
             name: string;
@@ -1961,6 +1966,8 @@ export interface components {
         CategoryInput: {
             /** @description `#rrggbb`, or none. */
             color?: string | null;
+            /** @description Not for the FX player by default. */
+            fx_player?: boolean;
             name: string;
             /** @description None overridden by default. */
             separation?: components["schemas"]["SeparationOverrides"];

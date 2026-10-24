@@ -59,7 +59,7 @@ Library batches gain the kinds `delete` and `purge`, moves the origin `staging` 
 
 | Table | Columns |
 |---|---|
-| `categories` | id, name, color, separation (JSON: the windows it overrides, `NULL` for none) |
+| `categories` | id, name, color, fx_player (the FX player's picker opens on it), separation (JSON: the windows it overrides, `NULL` for none) |
 | `track_categories` | track_id, category_id, weight |
 
 ## Artists
