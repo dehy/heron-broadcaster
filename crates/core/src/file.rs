@@ -41,10 +41,12 @@ impl LibraryPath {
         &self.0
     }
 
-    /// Absolute path of this file under `root`.
+    /// Absolute path of this file under `root`. Empty, `.` and `..` parts are
+    /// skipped, so a stored path never leads outside `root`.
     pub fn resolve(&self, root: &Path) -> PathBuf {
         self.0
             .split('/')
+            .filter(|part| !part.is_empty() && *part != "." && *part != "..")
             .fold(root.to_path_buf(), |path, part| path.join(part))
     }
 }
@@ -101,5 +103,22 @@ mod tests {
         let root = Path::new("/music");
         assert!(LibraryPath::from_file(root, Path::new("/other/a.mp3")).is_none());
         assert!(LibraryPath::from_file(root, Path::new("/music")).is_none());
+    }
+
+    #[test]
+    fn stored_paths_stay_under_the_root() {
+        let root = Path::new("/srv/library");
+        for stored in ["../../etc/passwd", "/etc/passwd", "Jazz/./../../etc/passwd"] {
+            let path = LibraryPath::from_stored(stored.to_owned()).resolve(root);
+            assert!(
+                path.starts_with(root),
+                "{stored} resolved to {}",
+                path.display()
+            );
+        }
+        assert_eq!(
+            LibraryPath::from_stored("Jazz//Miles/../a.flac".to_owned()).resolve(root),
+            PathBuf::from("/srv/library/Jazz/Miles/a.flac")
+        );
     }
 }
