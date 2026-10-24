@@ -92,6 +92,30 @@ jobs:
       - name: Grafana dashboard is valid JSON
         run: python3 -m json.tool monitoring/grafana/heron-dashboard.json >/dev/null
 
+  sonarqube:
+    name: SonarQube Cloud
+    # A tag would be analyzed as a branch of its own.
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    env:
+      # Empty on pull requests from forks: the analysis is skipped.
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        if: env.SONAR_TOKEN != ''
+        with:
+          # Blame data and new-code detection need the full history.
+          fetch-depth: 0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: env.SONAR_TOKEN != ''
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+      # Settings in sonar-project.properties.
+      - uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        if: env.SONAR_TOKEN != ''
+
   compose:
     name: Docker Compose on ${{ matrix.arch }} (build, start, import, stream)
     # Native runners for both architectures: Heron must run on a Raspberry Pi.
