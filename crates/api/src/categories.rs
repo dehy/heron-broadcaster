@@ -3,6 +3,8 @@
 //! Categories: groups of tracks the clockwheels call. A track can be in
 //! several categories. A category can override the separation windows of
 //! the rotation settings (a power rotation repeats its titles sooner).
+//! Categories for the FX player (liners, power intros, voice tracks) are
+//! what its picker opens on.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -29,19 +31,23 @@ pub struct Category {
     pub name: String,
     /// `#rrggbb`.
     pub color: Option<String>,
+    /// Liners, power intros, voice tracks: the FX player's picker opens on
+    /// these categories. Clocks still call them like any other.
+    pub fx_player: bool,
     pub tracks: i64,
     /// Windows this category overrides; the others follow the rotation
     /// settings (clock slots can override them again).
     pub separation: SeparationOverrides,
 }
 
-type CategoryRow = (u64, String, Option<String>, i64, Option<String>);
+type CategoryRow = (u64, String, Option<String>, bool, i64, Option<String>);
 
-fn category((id, name, color, tracks, separation): CategoryRow) -> Category {
+fn category((id, name, color, fx_player, tracks, separation): CategoryRow) -> Category {
     Category {
         id,
         name,
         color,
+        fx_player,
         tracks,
         separation: crate::rotation::overrides(separation.as_deref()),
     }
@@ -53,6 +59,9 @@ pub struct CategoryInput {
     pub name: String,
     /// `#rrggbb`, or none.
     pub color: Option<String>,
+    /// Not for the FX player by default.
+    #[serde(default)]
+    pub fx_player: bool,
     /// None overridden by default.
     #[serde(default)]
     pub separation: SeparationOverrides,
@@ -97,7 +106,7 @@ pub fn check_color(color: Option<&str>) -> ApiResult<Option<String>> {
     }
 }
 
-const SELECT: &str = "SELECT c.id, c.name, c.color,
+const SELECT: &str = "SELECT c.id, c.name, c.color, c.fx_player,
            (SELECT COUNT(*) FROM track_categories tc JOIN tracks t ON t.id = tc.track_id
             WHERE tc.category_id = c.id AND t.deleted_at IS NULL) AS tracks,
            CAST(c.separation AS CHAR)
@@ -153,20 +162,23 @@ async fn create_category(
     user.require(Role::Operator)?;
     let (name, color) = input.check()?;
     let separation = separation_json(&input.separation)?;
-    let id = sqlx::query("INSERT INTO categories (name, color, separation) VALUES (?, ?, ?)")
-        .bind(name)
-        .bind(color)
-        .bind(separation)
-        .execute(&state.pool)
-        .await
-        .map_err(conflict)?
-        .last_insert_id();
+    let id = sqlx::query(
+        "INSERT INTO categories (name, color, fx_player, separation) VALUES (?, ?, ?, ?)",
+    )
+    .bind(name)
+    .bind(color)
+    .bind(input.fx_player)
+    .bind(separation)
+    .execute(&state.pool)
+    .await
+    .map_err(conflict)?
+    .last_insert_id();
     let Json(category) = get_category(user, State(state), Path(id)).await?;
     Ok((StatusCode::CREATED, Json(category)))
 }
 
-/// Renames, recolors a category or changes its separation. Operators and
-/// admins.
+/// Renames, recolors a category, changes its separation or whether the FX
+/// player offers it. Operators and admins.
 #[utoipa::path(put, path = "/categories/{id}", tag = "categories",
     params(("id" = u64, Path)), request_body = CategoryInput,
     responses((status = 200, body = Category), (status = "4XX", body = ErrorBody)))]
@@ -179,14 +191,17 @@ async fn update_category(
     user.require(Role::Operator)?;
     let (name, color) = input.check()?;
     let separation = separation_json(&input.separation)?;
-    sqlx::query("UPDATE categories SET name = ?, color = ?, separation = ? WHERE id = ?")
-        .bind(name)
-        .bind(color)
-        .bind(separation)
-        .bind(id)
-        .execute(&state.pool)
-        .await
-        .map_err(conflict)?;
+    sqlx::query(
+        "UPDATE categories SET name = ?, color = ?, fx_player = ?, separation = ? WHERE id = ?",
+    )
+    .bind(name)
+    .bind(color)
+    .bind(input.fx_player)
+    .bind(separation)
+    .bind(id)
+    .execute(&state.pool)
+    .await
+    .map_err(conflict)?;
     get_category(user, State(state), Path(id)).await
 }
 
@@ -233,6 +248,7 @@ mod tests {
         let input = |name: &str, color: Option<&str>| CategoryInput {
             name: name.to_owned(),
             color: color.map(str::to_owned),
+            fx_player: false,
             separation: SeparationOverrides::default(),
         };
         assert_eq!(
