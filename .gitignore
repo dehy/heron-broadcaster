@@ -3,5 +3,7 @@
 .env
 node_modules/
 /web/dist
+/web/coverage
+/lcov.info
 .DS_Store
 /docker-compose.override.yml
