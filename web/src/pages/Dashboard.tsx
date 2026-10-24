@@ -182,21 +182,91 @@ export function Dashboard() {
       </div>
 
       <Modal title={t("dashboard.fxTitle")} open={fxOpen} onClose={() => setFxOpen(false)}>
-        <TrackSearch
-          placeholder={t("dashboard.fxSearch")}
-          actions={(track) => (
-            <button
-              type="button"
-              className="btn small primary"
-              disabled={playFx.isPending}
-              onClick={() => playFx.mutate(track.id)}
-            >
-              <Icon name="play" size={14} /> {t("dashboard.play")}
-            </button>
-          )}
-        />
+        <FxPicker play={(trackId) => playFx.mutate(trackId)} playing={playFx.isPending} />
       </Modal>
     </>
+  );
+}
+
+const FX_TAB_KEY = "heron.fx.category";
+
+function storedFxTab(): number | null {
+  try {
+    const stored = Number(localStorage.getItem(FX_TAB_KEY));
+    return stored > 0 ? stored : null;
+  } catch {
+    // Blocked storage: the first category.
+    return null;
+  }
+}
+
+/**
+ * Tracks to play over the title: the categories for the FX player (liners,
+ * power intros, voice tracks) first, the last one used open, then the
+ * whole library.
+ */
+function FxPicker({ play, playing }: { play: (trackId: number) => void; playing: boolean }) {
+  const categories = useQuery({
+    queryKey: ["categories"],
+    queryFn: () => unwrap(api.GET("/api/v1/categories")),
+  });
+  const [chosen, setChosen] = useState<number | "library" | null>(storedFxTab);
+  const fxCategories = categories.data?.filter((category) => category.fx_player) ?? [];
+  const tab =
+    chosen === "library" || fxCategories.some((category) => category.id === chosen)
+      ? chosen
+      : (fxCategories[0]?.id ?? "library");
+  const choose = (value: number | "library") => {
+    setChosen(value);
+    try {
+      localStorage.setItem(FX_TAB_KEY, value === "library" ? "" : String(value));
+    } catch {
+      // Not remembered in this browser.
+    }
+  };
+  const current = fxCategories.find((category) => category.id === tab);
+
+  if (categories.isPending) {
+    return null;
+  }
+  return (
+    <div className="stack">
+      {fxCategories.length > 0 ? (
+        <div className="tabs" role="tablist" aria-label={t("dashboard.fxCategories")}>
+          {fxCategories.map((category) => (
+            <button
+              key={category.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === category.id}
+              onClick={() => choose(category.id)}
+            >
+              <span className="row" style={{ flexWrap: "nowrap" }}>
+                <span className="swatch" style={{ background: category.color ?? undefined }} />
+                {category.name}
+              </span>
+            </button>
+          ))}
+          <button type="button" role="tab" aria-selected={tab === "library"} onClick={() => choose("library")}>
+            {t("dashboard.fxLibrary")}
+          </button>
+        </div>
+      ) : (
+        <p className="muted small" style={{ margin: 0 }}>
+          {rich("dashboard.fxNoCategory", { link: <Link to="/categories">{t("dashboard.fxCategoriesLink")}</Link> })}
+        </p>
+      )}
+      <TrackSearch
+        categoryId={current?.id}
+        limit={current ? 50 : 8}
+        placeholder={current ? t("dashboard.fxSearchIn", { name: current.name }) : t("dashboard.fxSearch")}
+        actions={(track) => (
+          <button type="button" className="btn small primary" disabled={playing} onClick={() => play(track.id)}>
+            <Icon name="play" size={14} /> {t("dashboard.play")}
+          </button>
+        )}
+      />
+    </div>
   );
 }
 

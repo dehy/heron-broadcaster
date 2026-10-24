@@ -24,26 +24,30 @@ export function TrackSearch({
   actions,
   placeholder = t("trackSearch.placeholder"),
   playableOnly = true,
+  categoryId,
   limit = 8,
 }: {
   /** Buttons for each result. */
   actions: (track: TrackSummary) => ReactNode;
   placeholder?: string;
   playableOnly?: boolean;
+  /** Only the tracks of this category, by title until a search. */
+  categoryId?: number | undefined;
   limit?: number;
 }) {
   const [text, setText] = useState("");
   const q = useDebounced(text.trim());
   const results = useQuery({
-    queryKey: ["tracks", "search", q, playableOnly, limit],
+    queryKey: ["tracks", "search", q, playableOnly, categoryId, limit],
     queryFn: ({ signal }) =>
       unwrap(
         api.GET("/api/v1/tracks", {
           params: {
             query: query({
               q,
+              category_id: categoryId,
               filter: playableOnly ? ("playable" as const) : undefined,
-              sort: q ? undefined : ("last_played" as const),
+              sort: q ? undefined : categoryId ? ("title" as const) : ("last_played" as const),
               limit,
             }),
           },
@@ -84,7 +88,7 @@ export function TrackSearch({
           ))}
         </ul>
       )}
-      {!q && results.data && results.data.items.length > 0 && (
+      {!q && categoryId === undefined && results.data && results.data.items.length > 0 && (
         <p className="muted small" style={{ margin: 0 }}>
           {t("trackSearch.hint")}
         </p>

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Categories: groups of tracks the clocks call, with the separation
-// windows they override.
+// windows they override, and those the FX player's picker opens on.
 
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
@@ -65,6 +65,11 @@ export function Categories() {
                     <span className="row">
                       <span className="swatch" style={{ background: category.color ?? undefined }} />
                       {category.name}
+                      {category.fx_player && (
+                        <span className="chip" title={t("categories.fxPlayerHint")}>
+                          {t("categories.fxPlayerChip")}
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td className="num">
@@ -124,6 +129,7 @@ export function Categories() {
 function CategoryDialog({ category, onClose }: { category: Category | null; onClose: () => void }) {
   const [name, setName] = useState(category?.name ?? "");
   const [color, setColor] = useState(category?.color ?? COLORS[0] ?? "#2f6fd6");
+  const [fxPlayer, setFxPlayer] = useState(category?.fx_player ?? false);
   const [separation, setSeparation] = useState<SeparationOverrides>(category?.separation ?? {});
   const rotation = useQuery({
     queryKey: ["settings", "rotation"],
@@ -131,7 +137,7 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
   });
   const save = useAction(
     () => {
-      const body = { name, color, separation };
+      const body = { name, color, fx_player: fxPlayer, separation };
       return category
         ? unwrap(api.PUT("/api/v1/categories/{id}", { params: { path: { id: category.id } }, body }))
         : unwrap(api.POST("/api/v1/categories", { body }));
@@ -177,6 +183,12 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
             ))}
             <input type="color" value={color} onChange={(e) => setColor(e.target.value)} aria-label={t("categories.otherColor")} />
           </div>
+        </Field>
+        <Field label={t("categories.fxPlayer")} hint={t("categories.fxPlayerHint")}>
+          <label className="check">
+            <input type="checkbox" checked={fxPlayer} onChange={(e) => setFxPlayer(e.target.checked)} />
+            {t("categories.fxPlayerCheck")}
+          </label>
         </Field>
         <fieldset>
           <legend>{t("categories.separation")}</legend>
