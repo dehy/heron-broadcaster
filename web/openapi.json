@@ -7819,7 +7819,7 @@
           "peak_ceiling_dbtp": {
             "type": "number",
             "format": "double",
-            "description": "Boosts never push the track's true peak above this. There is no\nlimiter before M9, so a boost that clips would distort.",
+            "description": "Boosts never push the track's true peak above this. There is no\nlimiter before M10, so a boost that clips would distort.",
             "default": -1.0
           },
           "target_lufs": {

@@ -7,7 +7,7 @@ These decisions are fixed. If one looks wrong, stop and ask instead of working a
 | Language | **Rust** for the engine, analysis, rotation and API. |
 | Database | **MariaDB**, accessed with `sqlx` (MySQL driver). Migrations live in the repository and run automatically on startup. |
 | Frontend | **React + Vite + TypeScript** (a web app, not React Native). |
-| Deployment | **Docker Compose**, one service per process. |
+| Deployment | **Docker Compose**, one service per process. *(Docker Swarm on a single node is supported too, see [Upgrading](upgrading.md).)* |
 | Analysis | Loudness, cue points, silence trimming and crossfade points are computed **when a track is imported** and stored in the database. Never during playback. |
 | Clockwheels | Clockwheels are **data**: ordered slots stored in the database and edited in the UI. No scripting language for now. |
 | Audio path | **The engine never touches the database in the audio path.** |
@@ -39,3 +39,4 @@ These decisions are fixed. If one looks wrong, stop and ask instead of working a
 | Restrictions | M6 ships **dayparting, date ranges and category sequences**, on tracks, artists and categories. Quotas ("no two tracks over 8 min in an hour") may come later. |
 | Station time | Clocks and restrictions follow the **station's time zone**, a setting (IANA name) defaulting to the server's. |
 | Monitoring | Heron **does not bundle Prometheus or Grafana**. Services push their metrics with Prometheus remote write (or are scraped); Heron ships a Grafana dashboard (JSON) and Prometheus alert rules to import into the station's own Grafana or Grafana Cloud. Monitoring and error reporting must never stop a service. See [Monitoring](monitoring.md). |
+| Engine upgrades | An engine is upgraded by a **hot handover on the same host**: the new engine starts as a standby, and the old one passes it its state and its open output connections (file descriptors over a unix socket in the state volume) before exiting. The TCP connections to stream servers are held by `heron-relay`, a process that only carries bytes, since a TCP socket does not outlive its container's network. Rejected: a streaming service doing the encoding (its own upgrades would drop the listeners, and it would change often), sharing a network namespace between engines (not in Swarm), and swapping between two Icecast mounts with `fallback-override` (Icecast only, and the listeners move between mounts). An Icecast fallback mount covers the restarts that are not handovers. See [Engine handover](handover.md). |

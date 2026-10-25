@@ -6,7 +6,7 @@ The name comes from "air on" sounding like *héron*: keeping the air on, 24/7.
 
 ![The On air page: decks A and B, the next tracks, levels, the FX player, outputs and the engine's state](docs/images/on-air.png)
 
-> **Status:** early development, but it plays. Heron imports and analyzes a music library, takes new music by upload or through an incoming folder and files it once you import it, plays a queue with crossfades to Icecast servers, picks the music with categories, clocks and a weekly schedule, keeps the air on when the database, the API or the library goes away, tells websites and bots what plays through signed webhooks and public now-playing endpoints, and is operated from a web interface in English or French. Next: listener statistics (M7b) and audio processing (M8, M9). See the [roadmap](docs/roadmap/README.md).
+> **Status:** early development, but it plays. Heron imports and analyzes a music library, takes new music by upload or through an incoming folder and files it once you import it, plays a queue with crossfades to Icecast servers, picks the music with categories, clocks and a weekly schedule, keeps the air on when the database, the API or the library goes away, tells websites and bots what plays through signed webhooks and public now-playing endpoints, and is operated from a web interface in English or French. Next: listener statistics (M7b), upgrades that keep the listeners connected (M8) and audio processing (M9, M10). See the [roadmap](docs/roadmap/README.md).
 
 Heron runs on Linux, amd64 and arm64, down to a Raspberry Pi.
 
@@ -65,7 +65,7 @@ services:
     image: ghcr.io/dehy/heron-web:0.1.0
 ```
 
-Then `docker compose pull && docker compose up -d --wait`. Setting `HERON_VERSION=0.1.0` in `.env` does the same for all five services at once. To upgrade, change the version and run the same two commands; migrations run when `heron-api` starts.
+Then `docker compose pull && docker compose up -d --wait`. Setting `HERON_VERSION=0.1.0` in `.env` does the same for all five services at once. To upgrade, change the version and run the same two commands; migrations run when `heron-api` starts. Upgrading the engine this way takes the station off air for a few seconds, and Icecast disconnects the listeners; [Upgrading](docs/upgrading.md) describes how to keep them, with Compose or Swarm (in progress, [M8](docs/roadmap/m8-hot-engine-upgrade.md)).
 
 Point `HERON_MUSIC_DIR` at your music: new and changed files are picked up automatically, and the **Tracks** page shows them as they are analyzed. See [Import and analysis](docs/analysis.md).
 
@@ -107,6 +107,7 @@ curl -b cookies -X POST -H 'X-Requested-With: curl' $api/player/skip
 | `heron-librarian` | Incoming folder, buffer zone, identification, tags, library layout, trash | 8083 |
 | `heron-analyzer` | Track analysis workers | 8082 |
 | `heron-engine` | Real-time playout, encoders, outputs | 8081, gRPC control on 50051 |
+| `heron-relay` | Holds the engine's connections to stream servers, so an upgrade hands them to the new engine ([Upgrading](docs/upgrading.md)) | Unix socket in the `engine-relay` volume |
 | `mariadb` | Database | 3306 |
 | `icecast` | Optional local Icecast server (`--profile icecast`) | 8000, published on `HERON_ICECAST_PORT` (8010) |
 

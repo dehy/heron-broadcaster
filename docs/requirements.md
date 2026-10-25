@@ -67,7 +67,7 @@ Delivered in [M2 – Engine core](roadmap/m2-engine-core.md). The real-time rule
 - ±12 dB per band.
 - Presets, enable/bypass.
 
-Delivered in [M8 – Deck EQ](roadmap/m8-deck-eq.md).
+Delivered in [M9 – Deck EQ](roadmap/m9-deck-eq.md).
 
 ### Master AGC chain
 
@@ -84,7 +84,7 @@ Also required: presets, "bypass all", in/out meters and per-band meters in the U
 
 Out of scope: pre-emphasis (50/75 µs). It only matters for FM transmitters.
 
-Delivered in [M9 – AGC & multiband processing](roadmap/m9-agc-multiband.md).
+Delivered in [M10 – AGC & multiband processing](roadmap/m10-agc-multiband.md).
 
 ## 4. Outputs and integrations
 
@@ -99,7 +99,7 @@ Delivered in [M9 – AGC & multiband processing](roadmap/m9-agc-multiband.md).
 - REST API, WebSocket for live state, public now-playing and history endpoints.
 - **Listener statistics** from the stream servers (Icecast, Shoutcast): listeners per day, per hour, per output and per track, peak, average and total listening hours, without storing IP addresses. See [M7b](roadmap/m7b-listener-statistics.md).
 
-Delivered across [M2](roadmap/m2-engine-core.md), [M4](roadmap/m4-api-control-plane.md), [M7](roadmap/m7-webhooks-output-api.md), [M7b](roadmap/m7b-listener-statistics.md) and [M10](roadmap/m10-sinks-live-dj.md).
+Delivered across [M2](roadmap/m2-engine-core.md), [M4](roadmap/m4-api-control-plane.md), [M7](roadmap/m7-webhooks-output-api.md), [M7b](roadmap/m7b-listener-statistics.md) and [M11](roadmap/m11-sinks-live-dj.md).
 
 ## 5. Reliability (24/7)
 

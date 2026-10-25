@@ -13,7 +13,8 @@
 //! slowing its encoder or the other outputs.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -21,12 +22,13 @@ use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use heron_core::{EncoderProfile, OutputConfig, OutputKind, OutputsConfig};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::ConfigError;
+use crate::connection::HandedConnection;
 use crate::encoder::{self, Encoder, INPUT_CHANNELS};
 use crate::icecast::{IcecastConfig, IcecastSink};
-use crate::sink::{self, NowPlaying, OutputState, OutputStatus};
+use crate::sink::{self, NowPlaying, OutputState, OutputStatus, ReleaseRequest};
 
 /// Frames handed to the encoders at once, at most.
 const CHUNK_FRAMES: usize = 4_800;
@@ -41,6 +43,8 @@ type Targets = Arc<Mutex<Vec<(u64, SyncSender<Arc<[f32]>>)>>>;
 /// The thread reading the master bus and handing it to every encoder.
 struct Fanout {
     targets: Targets,
+    /// Master bus frames after which nothing is handed on (`u64::MAX`: none).
+    limit: Arc<AtomicU64>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -48,12 +52,16 @@ struct Fanout {
 impl Fanout {
     fn spawn(mut master: rtrb::Consumer<f32>) -> std::io::Result<Self> {
         let targets: Targets = Arc::default();
+        let limit = Arc::new(AtomicU64::new(u64::MAX));
         let stop = Arc::new(AtomicBool::new(false));
         let thread_targets = Arc::clone(&targets);
+        let thread_limit = Arc::clone(&limit);
         let thread_stop = Arc::clone(&stop);
         let thread = std::thread::Builder::new()
             .name("heron-fanout".to_owned())
             .spawn(move || {
+                // Frames read from the master bus since the start.
+                let mut read = 0_u64;
                 while !thread_stop.load(Ordering::Relaxed) {
                     let available = master.slots().min(CHUNK_FRAMES * INPUT_CHANNELS);
                     let available = available - available % INPUT_CHANNELS;
@@ -66,8 +74,18 @@ impl Fanout {
                         continue;
                     }
                     let (first, second) = chunk.as_slices();
-                    let audio: Arc<[f32]> = [first, second].concat().into();
+                    let mut audio = [first, second].concat();
                     chunk.commit_all();
+                    let frames = (audio.len() / INPUT_CHANNELS) as u64;
+                    let wanted = thread_limit.load(Ordering::Relaxed).saturating_sub(read);
+                    read += frames;
+                    if wanted < frames {
+                        audio.truncate(usize::try_from(wanted).unwrap_or(0) * INPUT_CHANNELS);
+                        if audio.is_empty() {
+                            continue;
+                        }
+                    }
+                    let audio: Arc<[f32]> = audio.into();
                     let Ok(targets) = thread_targets.lock() else {
                         break;
                     };
@@ -84,6 +102,7 @@ impl Fanout {
             })?;
         Ok(Self {
             targets,
+            limit,
             stop,
             thread: Some(thread),
         })
@@ -156,6 +175,12 @@ impl EncoderPipeline {
     }
 
     fn stop(mut self, fanout: &Fanout) {
+        self.finish(fanout);
+    }
+
+    /// Stops encoding once what the encoder was given is encoded and
+    /// flushed. Outputs keep receiving what was published.
+    fn finish(&mut self, fanout: &Fanout) {
         fanout.remove(self.profile.id);
         self.stop.store(true, Ordering::Relaxed);
         if let Some(thread) = self.thread.take() {
@@ -164,6 +189,8 @@ impl EncoderPipeline {
     }
 }
 
+/// Encodes until `stop`, then what is left: the audio already handed to
+/// the encoder, and what the encoder holds.
 fn encode(
     name: &str,
     encoder: &mut dyn Encoder,
@@ -173,6 +200,22 @@ fn encode(
 ) {
     let mut encoded = Vec::new();
     let mut failing = false;
+    let mut publish = |result: Result<(), encoder::EncodeError>, encoded: &[u8]| {
+        match result {
+            Ok(()) => failing = false,
+            Err(error) => {
+                if !failing {
+                    tracing::error!(profile = name, %error, "encoding failed");
+                }
+                failing = true;
+                return;
+            }
+        }
+        if !encoded.is_empty() {
+            // No subscriber (every output disconnected) is fine.
+            let _ = audio.send(Bytes::copy_from_slice(encoded));
+        }
+    };
     while !stop.load(Ordering::Relaxed) {
         let pcm = match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(pcm) => pcm,
@@ -180,27 +223,24 @@ fn encode(
             Err(RecvTimeoutError::Disconnected) => break,
         };
         encoded.clear();
-        match encoder.encode(&pcm, &mut encoded) {
-            Ok(()) => failing = false,
-            Err(error) => {
-                if !failing {
-                    tracing::error!(profile = name, %error, "encoding failed");
-                }
-                failing = true;
-                continue;
-            }
-        }
-        if !encoded.is_empty() {
-            // No subscriber (every output disconnected) is fine.
-            let _ = audio.send(Bytes::copy_from_slice(&encoded));
-        }
+        let result = encoder.encode(&pcm, &mut encoded);
+        publish(result, &encoded);
     }
+    while let Ok(pcm) = receiver.try_recv() {
+        encoded.clear();
+        let result = encoder.encode(&pcm, &mut encoded);
+        publish(result, &encoded);
+    }
+    encoded.clear();
+    let result = encoder.flush(&mut encoded);
+    publish(result, &encoded);
 }
 
 struct RunningOutput {
     config: OutputConfig,
     status: Arc<OutputStatus>,
     task: tokio::task::JoinHandle<()>,
+    release: mpsc::Sender<ReleaseRequest>,
 }
 
 /// A snapshot of one output, for the API and the dashboard.
@@ -222,6 +262,8 @@ pub struct Outputs {
     config: OutputsConfig,
     encoders: HashMap<u64, EncoderPipeline>,
     running: HashMap<u64, RunningOutput>,
+    /// The relay network outputs connect through (`heron-engine relay`).
+    relay: Option<PathBuf>,
 }
 
 impl Outputs {
@@ -239,7 +281,14 @@ impl Outputs {
             config: OutputsConfig::default(),
             encoders: HashMap::new(),
             running: HashMap::new(),
+            relay: None,
         })
+    }
+
+    /// Network outputs connect through the relay listening on `relay`
+    /// from now on (when they next connect).
+    pub fn set_relay(&mut self, relay: Option<PathBuf>) {
+        self.relay = relay;
     }
 
     /// Checks a configuration without applying it.
@@ -273,6 +322,18 @@ impl Outputs {
     /// Applies a new configuration. Outputs whose settings and encoder are
     /// unchanged keep streaming without a hiccup.
     pub fn apply(&mut self, config: &OutputsConfig) -> Result<(), ConfigError> {
+        self.apply_adopting(config, HashMap::new())
+    }
+
+    /// Applies a new configuration, going on with the connections in
+    /// `adopted` (by output ID) instead of connecting those outputs: an
+    /// engine taking over from another ([`Self::release`]). A connection
+    /// left unused is closed.
+    pub fn apply_adopting(
+        &mut self,
+        config: &OutputsConfig,
+        mut adopted: HashMap<u64, HandedConnection>,
+    ) -> Result<(), ConfigError> {
         Self::validate(config)?;
         let profiles: HashMap<u64, &EncoderProfile> = config
             .encoder_profiles
@@ -338,14 +399,27 @@ impl Outputs {
                 continue;
             };
             let status = Arc::new(OutputStatus::default());
+            let (release, release_requests) = mpsc::channel(1);
             let task = match sink_config(output)? {
-                SinkConfig::Icecast(icecast) => self.runtime.spawn(sink::run(
-                    IcecastSink::new(icecast, pipeline.info.clone()),
-                    output.name.clone(),
-                    pipeline.audio.clone(),
-                    self.metadata_for(output),
-                    Arc::clone(&status),
-                )),
+                SinkConfig::Icecast(icecast) => {
+                    let info = pipeline.info.clone();
+                    let sink = match adopted.remove(&output.id) {
+                        Some(connection) => {
+                            tracing::info!(output = %output.name, "going on with the connection handed over");
+                            IcecastSink::adopt(icecast, info, connection)
+                        }
+                        None => IcecastSink::new(icecast, info),
+                    }
+                    .with_relay(self.relay.clone());
+                    self.runtime.spawn(sink::run(
+                        sink,
+                        output.name.clone(),
+                        pipeline.audio.clone(),
+                        self.metadata_for(output),
+                        Arc::clone(&status),
+                        release_requests,
+                    ))
+                }
             };
             self.running.insert(
                 output.id,
@@ -353,11 +427,45 @@ impl Outputs {
                     config: output.clone(),
                     status,
                     task,
+                    release,
                 },
             );
         }
         self.config = config.clone();
         Ok(())
+    }
+
+    /// Hands nothing on to the encoders after the master bus' frame
+    /// `frame` (counted from the start): the last audio of an engine
+    /// handing over to another.
+    pub fn stop_after(&self, frame: u64) {
+        self.fanout.limit.store(frame, Ordering::Relaxed);
+    }
+
+    /// Stops every encoder and output, for another engine to take over:
+    /// the encoders encode what they were given and flush, then each output
+    /// sends what was encoded and gives up its connection. Returns, per
+    /// output ID, where its connection will come (`None`: it had none to
+    /// give). The configuration is kept.
+    pub fn release(&mut self) -> Vec<(u64, oneshot::Receiver<Option<HandedConnection>>)> {
+        // The encoders stop, but keep their streams open: an output must not
+        // see its stream end before it is asked for its connection.
+        for pipeline in self.encoders.values_mut() {
+            pipeline.finish(&self.fanout);
+        }
+        self.running
+            .drain()
+            .filter_map(|(id, output)| {
+                let (request, connection) = oneshot::channel();
+                match output.release.try_send(request) {
+                    Ok(()) => Some((id, connection)),
+                    Err(_) => {
+                        output.task.abort();
+                        None
+                    }
+                }
+            })
+            .collect()
     }
 
     /// A copy of the master bus (interleaved stereo at 48 kHz), for a local
@@ -428,7 +536,7 @@ fn sink_config(output: &OutputConfig) -> Result<SinkConfig, ConfigError> {
         )?)),
         kind => Err(ConfigError::Output {
             output: output.name.clone(),
-            reason: format!("{kind:?} outputs arrive in M10; only Icecast is available"),
+            reason: format!("{kind:?} outputs arrive in M11; only Icecast is available"),
         }),
     }
 }

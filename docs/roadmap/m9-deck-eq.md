@@ -1,4 +1,4 @@
-# M8 – Deck EQ
+# M9 – Deck EQ
 
 **Depends on:** M2
 

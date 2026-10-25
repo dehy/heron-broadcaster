@@ -88,6 +88,6 @@ Open a page with `?lang=pseudo` to check translations ([Pseudo-locale](#pseudo-l
 ## Limitations
 
 - The FX player and transport act at once; there is no undo for a skip.
-- Only Icecast outputs and MP3 profiles have forms: the other kinds arrive with their encoders and sinks in [M10](roadmap/m10-sinks-live-dj.md) (the engine refuses them until then).
+- Only Icecast outputs and MP3 profiles have forms: the other kinds arrive with their encoders and sinks in [M11](roadmap/m11-sinks-live-dj.md) (the engine refuses them until then).
 - An upload resumes after a dropped connection, but not after the page is reloaded. Covers in the buffer are loaded by the browser from the Cover Art Archive.
 - The clock editor draws each slot with its category's average length: real tracks vary, so the hour as it sounds drifts from the drawing; simulate it to see real picks.

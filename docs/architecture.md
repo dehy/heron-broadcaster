@@ -49,6 +49,7 @@ flowchart TB
         analyzer["<b>heron-analyzer</b><br/>[Container: Rust, worker pool]<br/>Loudness, cue and crossfade points,<br/>Chromaprint fingerprints"]:::container
         librarian["<b>heron-librarian</b><br/>[Container: Rust]<br/>Buffer zone: identifies new files;<br/>tags and files them on import;<br/>organizes, deletes to a trash, undoes;<br/>journaled moves"]:::container
         engine["<b>heron-engine</b><br/>[Container: Rust, real time]<br/>Decks, mixer, crossfades, loudness,<br/>encoders, outputs. Plays on when<br/>everything else is down"]:::container
+        relay["<b>heron-relay</b><br/>[Container: Rust]<br/>Holds the engine's connections<br/>to stream servers across<br/>engine upgrades"]:::container
         db[("<b>mariadb</b><br/>[Container: MariaDB 11]<br/>Tracks, analysis, jobs, users,<br/>settings, outputs, history,<br/>webhook deliveries, move journal")]:::container
         state[("<b>engine-state</b><br/>[Volume: JSON]<br/>The engine's copy of its<br/>outputs and playout settings")]:::container
     end
@@ -66,7 +67,9 @@ flowchart TB
     analyzer -- "Jobs, results<br/>[SQL, SKIP LOCKED]" --> db
     librarian -- "Move journal, tracks<br/>[SQL, named lock]" --> db
     engine -- "Configuration" --> state
-    engine -- "Streams audio, now playing<br/>[HTTP PUT]" --> streamers
+    engine -- "Streams audio<br/>[Unix socket]" --> relay
+    relay -- "Streams audio<br/>[HTTP PUT]" --> streamers
+    engine -- "Now playing<br/>[HTTP]" --> streamers
     librarian -- "Fingerprints<br/>[HTTPS, rate limited]" --> musicdb
     api -- "Track changes<br/>[HTTPS webhooks, retried]" --> receivers
     api -. "scans<br/>[ro]" .-> storage
@@ -118,13 +121,14 @@ The engine never connects to the database ([Locked decisions](decisions.md)): it
 | **heron-analyzer** | Analysis worker pool, as its own modular service. Reads files from the music library volume, runs `heron-analysis` and stores results in MariaDB. Can be scaled independently (several replicas) and restarted without affecting the API or the air. Uses CPUs − 1 workers by default. |
 | **heron-librarian** | Library management, as its own service: moves files dropped into the incoming folder into the buffer zone, identifies the files waiting there (Chromaprint, AcoustID, MusicBrainz, Cover Art Archive) and flags duplicates, then tags them and files them into the library when they are imported; deletes tracks through a trash and purges it; reorganizes the library on request and undoes changes; looks up MusicBrainz relationships between artists on request. **The only service with write access to the library**, so `heron-api` (which faces the network) keeps a read-only mount. Every move is journaled in MariaDB and finished or rolled back after a crash. See [Library management](library.md). |
 | **heron-web** | Static React build. |
+| **heron-relay** | `heron-engine relay`: holds the TCP connections from the engine to the stream servers. The engine reaches it through a Unix socket in the `engine-relay` volume; the relay only carries bytes. On an upgrade the old engine hands its connections to the relay over to the new engine, so the stream servers never see the source leave ([Engine handover](handover.md)). Left running by upgrades. |
 | **mariadb** | Database. Used by `heron-api`, `heron-analyzer` and `heron-librarian`, never by `heron-engine`. |
 
 ### Priorities
 
 The air comes first when the machine is short of CPU, disk or memory (a large import on a Raspberry Pi):
 
-| | heron-engine | heron-api, mariadb, heron-web | heron-analyzer | heron-librarian |
+| | heron-engine, heron-relay | heron-api, mariadb, heron-web | heron-analyzer | heron-librarian |
 |---|---|---|---|---|
 | CPU weight between containers (`cpu_shares`) | 8192 | 1024 | 256 | 256 |
 | Killed when memory runs out (`oom_score_adj`) | last (−500) | 0 | first (500) | 300 |

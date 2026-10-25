@@ -10,7 +10,9 @@
 #   3. Icecast restarted;
 #   4. the files of queued tracks deleted;
 #   5. a silent file queued: the silence watchdog skips it;
-#   6. heron-engine restarted, cleanly then killed: it resumes the track on air.
+#   6. heron-engine restarted, cleanly then killed: it resumes the track on air;
+#   7. heron-engine upgraded (scripts/upgrade.sh): the new engine takes over
+#      the source connection, listeners hear no gap.
 #
 #   docker compose --profile icecast up -d --wait
 #   scripts/chaos-test.sh
@@ -176,6 +178,11 @@ on_air_between() {
         '{ found = 1; if ($4 + 0 >= played + 0 && $6 - $4 >= left + 0) ok = 1 } END { exit !(found && ok) }'
 }
 
+# When Icecast's source on /live connected: changes with a new connection.
+source_started() {
+    curl -fsS "$icecast/status-json.xsl" | tr ',' '\n' | sed -n 's/.*"stream_start_iso8601":"\([^"]*\)".*/\1/p' | head -1
+}
+
 # All in a function: the shell reads it whole before running, so editing
 # this file during a run cannot break the run.
 main() {
@@ -299,6 +306,39 @@ main() {
         start_listening 15
         check_listening 1 && pass "$how: on air"
     done
+
+    step "7. heron-engine upgraded: hot handover"
+    wait_for 30 on_icecast || true
+    before=$(on_air_line || true)
+    entry=$(printf '%s\n' "$before" | sed -n 's/.*#\([0-9]*\) .*/\1/p')
+    source_before=$(source_started)
+    start_listening 60
+    sleep 5
+    if scripts/upgrade.sh --no-pull >"$work/upgrade.log" 2>&1; then
+        pass "upgraded: $(tail -1 "$work/upgrade.log")"
+    else
+        fail "scripts/upgrade.sh failed:"
+        sed 's/^/    /' "$work/upgrade.log"
+    fi
+    check_listening 1 && pass "the listener heard no gap"
+    source_after=$(source_started)
+    if [ -n "$source_before" ] && [ "$source_before" = "$source_after" ]; then
+        pass "one source connection throughout (since $source_before)"
+    else
+        fail "the source connected again ($source_before -> $source_after)"
+    fi
+    after=$(on_air_line || true)
+    echo "  before: $before"
+    echo "  after:  $after"
+    if [ -n "$entry" ] && printf '%s\n' "$after" | grep -q "#$entry "; then
+        pass "the new engine plays on the track on air"
+    elif [ -n "$after" ]; then
+        pass "the new engine is on air (the track changed during the test)"
+    else
+        fail "nothing on air after the upgrade"
+    fi
+    engines=$(docker compose ps -q heron-engine | wc -l | tr -d ' ')
+    [ "$engines" -eq 1 ] && pass "one engine left" || fail "$engines engines running"
 
     printf '\n'
     if [ "$failures" -gt 0 ]; then

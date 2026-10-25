@@ -149,29 +149,78 @@ services:
       target: heron-engine
     image: ghcr.io/dehy/heron-engine:${HERON_VERSION:-latest}
     restart: unless-stopped
+    # Room for a hot handover to a new engine on upgrade (docs/upgrading.md).
+    stop_grace_period: 30s
     # The air: first for the CPU, last to be killed when memory runs out.
     cpu_shares: 8192
     oom_score_adj: -500
     environment:
       <<: *rust-env
       HERON_LIBRARY_DIR: /music
+      # Connections to stream servers go through heron-relay, so an upgrade
+      # hands them over to the new engine (docs/handover.md).
+      HERON_RELAY_SOCKET: /run/heron/relay/relay.sock
     volumes:
       - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
       - ${HERON_FALLBACK_DIR:-./data/fallback}:/var/lib/heron/fallback:ro
       # Configuration (outputs, playout settings) kept across restarts.
       - engine-state:/var/lib/heron/engine
+      - engine-relay:/run/heron/relay
+
+  # Holds the engine's connections to stream servers, so they outlive the
+  # engine's container on upgrades. Tiny and seldom changed: scripts/upgrade.sh
+  # leaves it running; restarting it is a short break covered by Icecast's
+  # fallback mount. The engine connects directly while it is down.
+  heron-relay:
+    image: ghcr.io/dehy/heron-engine:${HERON_VERSION:-latest}
+    restart: unless-stopped
+    cpu_shares: 8192
+    oom_score_adj: -500
+    command: ["relay"]
+    environment:
+      <<: *rust-env
+      HERON_RELAY_SOCKET: /run/heron/relay/relay.sock
+    volumes:
+      - engine-relay:/run/heron/relay
+    healthcheck:
+      test: ["CMD", "heron-engine", "relay", "--check"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   # A local Icecast server to try outputs: `docker compose --profile icecast up -d`.
   # Source password `hackme`; listen on http://localhost:${HERON_ICECAST_PORT:-8010}/.
+  # /live falls back to /fallback while the engine restarts (docs/upgrading.md).
   icecast:
     profiles: [icecast]
     image: libretime/icecast:2.4.4
     restart: unless-stopped
+    # The image edits its configuration in place: start from a copy of ours.
+    entrypoint: ["sh", "-c", "cp /etc/heron/icecast.xml /etc/icecast.xml && exec docker-entrypoint \"$$@\"", "--"]
+    command: ["icecast", "-c", "/etc/icecast.xml"]
     environment:
       ICECAST_SOURCE_PASSWORD: hackme
+      ICECAST_RELAY_PASSWORD: ${HERON_ICECAST_ADMIN_PASSWORD:-change-me}
       ICECAST_ADMIN_PASSWORD: ${HERON_ICECAST_ADMIN_PASSWORD:-change-me}
+    volumes:
+      - ./docker/icecast/icecast.xml:/etc/heron/icecast.xml:ro
     ports:
       - "${HERON_ICECAST_PORT:-8010}:8000"
+
+  # Loops the MP3 file of HERON_FALLBACK_STREAM_DIR (silence when there is
+  # none) on Icecast's /fallback. It must be in the stream's format: MP3 128k,
+  # 44.1 kHz, stereo.
+  icecast-fallback:
+    profiles: [icecast]
+    image: linuxserver/ffmpeg:7.1.1
+    restart: unless-stopped
+    depends_on:
+      - icecast
+    entrypoint: ["/fallback-source.sh"]
+    command: ["/fallback", "icecast://source:hackme@icecast:8000/fallback"]
+    volumes:
+      - ./docker/icecast/fallback-source.sh:/fallback-source.sh:ro
+      - ${HERON_FALLBACK_STREAM_DIR:-./data/fallback-stream}:/fallback:ro
 
   heron-web:
     build:
@@ -192,3 +241,4 @@ services:
 volumes:
   mariadb-data:
   engine-state:
+  engine-relay:

@@ -3,6 +3,7 @@
 //! The running engine: the audio thread, the player, the outputs, and the
 //! task keeping them in step and saving the queue.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -17,7 +18,7 @@ use crate::clock::{AudioThread, ClockStatus};
 use crate::config::{ConfigFileError, EngineConfig};
 use crate::fallback::Fallback;
 use crate::mixer::{BLOCK_FRAMES, CHANNELS, Mixer, MixerStatus, SAMPLE_RATE};
-use crate::player::{Player, PlayerEvent};
+use crate::player::{Halted, HandoverPoint, Player, PlayerEvent, SavedQueue};
 use crate::queue_file::{self, QueueWriter};
 
 /// Audio waiting between the audio thread and the encoders, at most.
@@ -41,6 +42,13 @@ pub struct EngineOptions {
     pub exit_when_stuck: bool,
     /// Play the master bus on the local sound card (`monitor` feature).
     pub monitor: bool,
+    /// The relay network outputs connect through (`heron-engine relay`), so
+    /// their connections can be handed over to an engine in another container.
+    pub relay_socket: Option<PathBuf>,
+    /// Start as a standby, to take over from a running engine: silent, no
+    /// outputs, the saved state neither read nor written, until
+    /// [`Engine::complete_takeover`] or [`Engine::cold_start`].
+    pub standby: bool,
 }
 
 impl EngineOptions {
@@ -53,6 +61,8 @@ impl EngineOptions {
             preload_tracks: crate::player::PRELOAD_TRACKS,
             exit_when_stuck: false,
             monitor: false,
+            relay_socket: None,
+            standby: false,
         }
     }
 }
@@ -66,7 +76,11 @@ pub struct Engine {
     clock: Arc<ClockStatus>,
     queue_writer: QueueWriter,
     /// Set when shutting down: the last save is made, no other may follow.
+    /// Set too while a standby: the state belongs to the active engine.
     closing: AtomicBool,
+    standby: AtomicBool,
+    /// Outputs to start when taking over ([`Engine::prepare_takeover`]).
+    takeover_outputs: Mutex<Option<OutputsConfig>>,
     started: Instant,
     started_at: SystemTime,
     #[cfg(feature = "monitor")]
@@ -103,13 +117,11 @@ impl Engine {
             metrics::counter!(counter).absolute(0);
         }
         metrics::gauge!("heron_engine_dead_air").set(0.0);
-        let config = match EngineConfig::load(&options.state_dir) {
-            Ok(config) => config,
-            Err(error) => {
-                // Better on air with defaults than off air.
-                tracing::error!(%error, "ignoring the saved configuration");
-                EngineConfig::default()
-            }
+        let config = if options.standby {
+            // Handed over by the active engine.
+            EngineConfig::default()
+        } else {
+            load_config(&options.state_dir)
         };
 
         let (mixer, handle) = Mixer::new(BLOCK_FRAMES);
@@ -120,6 +132,7 @@ impl Engine {
         let (events, _) = broadcast::channel(256);
 
         let mut outputs = Outputs::new(master_rx, now_playing_rx, runtime.clone())?;
+        outputs.set_relay(options.relay_socket.clone());
         if let Err(error) = outputs.apply(&config.outputs) {
             tracing::error!(%error, "cannot start the saved outputs");
         }
@@ -146,7 +159,11 @@ impl Engine {
         if let Some(dir) = options.fallback_dir {
             player = player.with_fallback(Fallback::start(dir, &options.state_dir));
         }
-        player.restore(queue_file::load(&options.state_dir));
+        if options.standby {
+            player.hold().map_err(std::io::Error::other)?;
+        } else {
+            player.restore(queue_file::load(&options.state_dir));
+        }
         let queue_writer = QueueWriter::start(options.state_dir.clone())?;
         let clock = Arc::new(ClockStatus::default());
         let audio = AudioThread::spawn(mixer, master_tx, Arc::clone(&clock))?;
@@ -155,6 +172,7 @@ impl Engine {
         }
         tracing::info!(
             outputs = config.outputs.outputs.len(),
+            standby = options.standby,
             "audio engine started"
         );
 
@@ -166,7 +184,9 @@ impl Engine {
             status,
             clock,
             queue_writer,
-            closing: AtomicBool::new(false),
+            closing: AtomicBool::new(options.standby),
+            standby: AtomicBool::new(options.standby),
+            takeover_outputs: Mutex::new(None),
             started: Instant::now(),
             started_at: SystemTime::now(),
             #[cfg(feature = "monitor")]
@@ -251,6 +271,146 @@ impl Engine {
         }
     }
 
+    /// Waiting to take over from another engine.
+    pub fn is_standby(&self) -> bool {
+        self.standby.load(Ordering::Relaxed)
+    }
+
+    /// Standby: gets ready to go on with `queue` and `config`, handed over
+    /// by the active engine. The track on air is opened where the active
+    /// engine will stop it; nothing plays yet. May be called again, with a
+    /// later stopping point.
+    pub fn prepare_takeover(&self, config: EngineConfig, queue: SavedQueue) {
+        let mut player = self.player();
+        player.set_settings(config.playout);
+        if let Err(error) = player.reset() {
+            tracing::warn!(%error, "cannot forget the queue prepared before");
+        }
+        player.take_over(queue);
+        *self
+            .takeover_outputs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config.outputs);
+    }
+
+    /// Standby: the track to go on with has enough audio decoded.
+    pub fn takeover_ready(&self) -> bool {
+        self.player().cued_ready()
+    }
+
+    /// Standby: goes on air, streaming to the outputs handed over
+    /// (`connections`, by output ID; the others connect), and becomes the
+    /// active engine, saving its state.
+    pub fn complete_takeover(&self, connections: HashMap<u64, heron_outputs::HandedConnection>) {
+        let outputs = self
+            .takeover_outputs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .unwrap_or_default();
+        if let Err(error) = self.outputs().apply_adopting(&outputs, connections) {
+            tracing::error!(%error, "cannot start the outputs handed over");
+        }
+        if let Err(error) = self.player().unhold() {
+            tracing::error!(%error, "cannot start playing");
+        }
+        self.activate();
+    }
+
+    /// Standby: no engine handed over; starts like a restarted engine, from
+    /// the saved configuration and queue.
+    pub fn cold_start(&self) {
+        let config = load_config(&self.state_dir);
+        {
+            let mut player = self.player();
+            player.set_settings(config.playout);
+            if let Err(error) = player.reset() {
+                tracing::warn!(%error, "cannot forget the queue prepared before");
+            }
+            player.restore(queue_file::load(&self.state_dir));
+            if let Err(error) = player.unhold() {
+                tracing::error!(%error, "cannot start playing");
+            }
+        }
+        if let Err(error) = self.outputs().apply(&config.outputs) {
+            tracing::error!(%error, "cannot start the saved outputs");
+        }
+        self.activate();
+    }
+
+    fn activate(&self) {
+        self.standby.store(false, Ordering::Relaxed);
+        {
+            let player = self.player();
+            self.closing.store(false, Ordering::Relaxed);
+            self.queue_writer.submit(player.saved());
+        }
+        if let Err(error) = self.save() {
+            tracing::error!(%error, "cannot save the configuration");
+        }
+    }
+
+    /// Where the track on air can stop to hand over, `lead_ms` from now.
+    pub fn handover_point(&self, lead_ms: u32) -> HandoverPoint {
+        self.player().handover_point(lead_ms)
+    }
+
+    /// Holds the mixer silent at once (nothing on air to stop).
+    pub fn hold(&self) -> Result<(), crate::player::PlayerError> {
+        self.player().hold()
+    }
+
+    /// Stops the track on air at `position` (frames from its cue-in).
+    pub fn halt_at(&self, position: u64) -> Result<(), crate::player::PlayerError> {
+        self.player().halt_at(position)
+    }
+
+    pub fn take_halted(&self) -> Option<Halted> {
+        self.player().take_halted()
+    }
+
+    /// Plays on after a handover given up.
+    pub fn unhold(&self) -> Result<(), crate::player::PlayerError> {
+        self.player().unhold()
+    }
+
+    /// Position of the track on air, in frames from its cue-in.
+    pub fn on_air_position(&self) -> Option<u64> {
+        let status = &self.status;
+        let on_air = status.on_air.load(Ordering::Relaxed);
+        status.decks[..2]
+            .iter()
+            .find(|deck| on_air != 0 && deck.entry_id.load(Ordering::Relaxed) == on_air)
+            .map(|deck| deck.position.load(Ordering::Relaxed))
+    }
+
+    /// The queue to hand over, the track on air stopping at `position_ms`.
+    pub fn handed_over_queue(&self, position_ms: Option<u64>) -> SavedQueue {
+        self.player().handed_over(position_ms)
+    }
+
+    /// Handing over: no more audio for the outputs after master frame
+    /// `frame`, then every output gives up its connection.
+    pub fn release_outputs(
+        &self,
+        after_frame: Option<u64>,
+    ) -> Vec<(
+        u64,
+        tokio::sync::oneshot::Receiver<Option<heron_outputs::HandedConnection>>,
+    )> {
+        let mut outputs = self.outputs();
+        if let Some(frame) = after_frame {
+            outputs.stop_after(frame);
+        }
+        outputs.release()
+    }
+
+    /// Handed over: the state now belongs to the new engine.
+    pub fn stop_saving(&self) {
+        let _player = self.player();
+        self.closing.store(true, Ordering::Relaxed);
+    }
+
     /// Problems listed in `/healthz` without making the engine unhealthy.
     pub fn warnings(&self) -> Vec<String> {
         let mut warnings = Vec::new();
@@ -294,6 +454,14 @@ impl Engine {
             .set(status.silent_frames.load(Ordering::Relaxed) as f64 / f64::from(SAMPLE_RATE));
         heron_service::clock::status().record_metrics();
     }
+}
+
+fn load_config(dir: &std::path::Path) -> EngineConfig {
+    EngineConfig::load(dir).unwrap_or_else(|error| {
+        // Better on air with defaults than off air.
+        tracing::error!(%error, "ignoring the saved configuration");
+        EngineConfig::default()
+    })
 }
 
 /// Exits the process when the audio thread stops rendering: Docker's
@@ -369,5 +537,14 @@ impl HealthCheck for EngineHealth {
 
     async fn warnings(&self) -> Vec<String> {
         self.0.warnings()
+    }
+
+    async fn details(&self) -> serde_json::Map<String, serde_json::Value> {
+        let role = if self.0.is_standby() {
+            "standby"
+        } else {
+            "active"
+        };
+        serde_json::Map::from_iter([("role".to_owned(), role.into())])
     }
 }

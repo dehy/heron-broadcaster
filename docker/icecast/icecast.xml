@@ -1,0 +1,74 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!--
+  Icecast for the `icecast` profile of docker-compose.yml. The passwords
+  are set from ICECAST_*_PASSWORD when the container starts.
+
+  /live falls back to /fallback, a looping source (the `icecast-fallback`
+  service) in the stream's format: when the engine restarts, listeners
+  move there and back instead of being disconnected. See docs/upgrading.md.
+-->
+<icecast>
+    <location>Earth</location>
+    <admin>icemaster@localhost</admin>
+    <hostname>localhost</hostname>
+
+    <limits>
+        <clients>100</clients>
+        <!-- One per output of the engine, plus their fallbacks. -->
+        <sources>8</sources>
+        <queue-size>524288</queue-size>
+        <client-timeout>30</client-timeout>
+        <header-timeout>15</header-timeout>
+        <source-timeout>10</source-timeout>
+        <burst-on-connect>1</burst-on-connect>
+        <burst-size>65535</burst-size>
+    </limits>
+
+    <authentication>
+        <source-password></source-password>
+        <relay-password></relay-password>
+        <admin-user>admin</admin-user>
+        <admin-password></admin-password>
+    </authentication>
+
+    <listen-socket>
+        <port>8000</port>
+    </listen-socket>
+
+    <http-headers>
+        <header name="Access-Control-Allow-Origin" value="*" />
+    </http-headers>
+
+    <mount type="normal">
+        <mount-name>/live</mount-name>
+        <fallback-mount>/fallback</fallback-mount>
+        <!-- Listeners go back to /live as soon as its source returns. -->
+        <fallback-override>1</fallback-override>
+    </mount>
+
+    <mount type="normal">
+        <mount-name>/fallback</mount-name>
+        <hidden>1</hidden>
+        <public>0</public>
+    </mount>
+
+    <fileserve>1</fileserve>
+
+    <paths>
+        <basedir>/usr/share/icecast</basedir>
+        <logdir>/var/log/icecast</logdir>
+        <webroot>/usr/share/icecast/web</webroot>
+        <adminroot>/usr/share/icecast/admin</adminroot>
+        <alias source="/" destination="/status.xsl"/>
+    </paths>
+
+    <logging>
+        <accesslog>-</accesslog>
+        <errorlog>-</errorlog>
+        <loglevel>3</loglevel>
+    </logging>
+
+    <security>
+        <chroot>0</chroot>
+    </security>
+</icecast>

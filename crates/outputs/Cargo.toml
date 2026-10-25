@@ -27,6 +27,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 symphonia.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "sync"] }
 
 [lints]

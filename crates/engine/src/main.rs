@@ -9,13 +9,14 @@
 mod ctl;
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use heron_engine::engine::{Engine, EngineHealth, EngineOptions};
 use heron_engine::grpc::EngineService;
+use heron_engine::handover;
 use heron_service::{LogArgs, MetricsArgs};
 
 const SERVICE: &str = "heron-engine";
@@ -67,6 +68,12 @@ struct Cli {
     #[arg(long, env = "HERON_MONITOR")]
     monitor: bool,
 
+    /// Socket of the relay (`heron-engine relay`) network outputs connect
+    /// through, so an upgrade hands them over without a gap. Direct
+    /// connections when unset or unreachable.
+    #[arg(long, env = "HERON_RELAY_SOCKET", global = true)]
+    relay_socket: Option<PathBuf>,
+
     /// Directory where the engine persists its state (configuration, queue) between restarts.
     #[arg(long, env = "HERON_STATE_DIR", default_value = "/var/lib/heron/engine")]
     state_dir: PathBuf,
@@ -84,6 +91,14 @@ enum Command {
     Healthcheck,
     /// Control a running engine.
     Ctl(ctl::Args),
+    /// Hold the engine's connections to stream servers, so they outlive
+    /// the engine's container (`docs/handover.md`). Listens on
+    /// `--relay-socket`.
+    Relay {
+        /// Exit 0 if a relay listens (used by Docker).
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -94,7 +109,33 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(Command::Ctl(args)) => ctl::run(args, &cli.library_dir),
+        Some(Command::Relay { check }) => {
+            let socket = cli
+                .relay_socket
+                .clone()
+                .context("the relay needs --relay-socket (HERON_RELAY_SOCKET)")?;
+            if check {
+                std::os::unix::net::UnixStream::connect(&socket)
+                    .with_context(|| format!("no relay on {}", socket.display()))?;
+                return Ok(());
+            }
+            relay(&cli, socket)
+        }
         None => run(cli),
+    }
+}
+
+#[tokio::main]
+async fn relay(cli: &Cli, socket: PathBuf) -> anyhow::Result<()> {
+    let _telemetry = heron_service::telemetry::init_tracing(&cli.log, "heron-relay")?;
+    if let Some(dir) = socket.parent().map(Path::to_path_buf) {
+        tokio::task::spawn_blocking(move || std::fs::create_dir_all(&dir))
+            .await?
+            .context("cannot create the relay's directory")?;
+    }
+    tokio::select! {
+        served = heron_outputs::connection::serve_relay(socket) => served.context("relay failed"),
+        () = heron_service::shutdown_signal() => Ok(()),
     }
 }
 
@@ -109,12 +150,18 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             cli.state_dir.display()
         )
     })?;
+    // An engine running already hands over to this one (an upgrade).
+    let state_dir = cli.state_dir.clone();
+    let start = tokio::task::spawn_blocking(move || handover::start(&state_dir)).await?;
+    let standby = start.standby;
     let engine = Engine::start(
         EngineOptions {
             fallback_dir: Some(cli.fallback_dir.clone()),
             preload_tracks: cli.preload_tracks,
             exit_when_stuck: true,
             monitor: cli.monitor,
+            relay_socket: cli.relay_socket.clone(),
+            standby,
             ..EngineOptions::new(cli.library_dir.clone(), cli.state_dir.clone())
         },
         tokio::runtime::Handle::current(),
@@ -125,17 +172,43 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         "engine ready"
     );
 
+    let health = EngineHealth(std::sync::Arc::clone(&engine));
+    let router = heron_service::ops_router(SERVICE, metrics, health);
+    let http = tokio::spawn(heron_service::serve(cli.http_addr, router));
+
+    // A standby goes on air once the active engine hands over, or stops.
+    let takeover = async {
+        if standby {
+            let following = std::sync::Arc::clone(&engine);
+            let state_dir = cli.state_dir.clone();
+            tokio::task::spawn_blocking(move || {
+                handover::go_on_air(&following, start.follow, &state_dir)
+            })
+            .await?;
+        }
+        anyhow::Ok(
+            handover::Listener::bind(&cli.state_dir)
+                .context("cannot listen for a standby engine")?,
+        )
+    };
+    let listener = tokio::select! {
+        listener = takeover => listener?,
+        () = heron_service::shutdown_signal() => {
+            // A standby stops without touching the state: it is not its own.
+            tracing::info!("stopping before taking over");
+            return Ok(());
+        }
+    };
+
     let grpc = tonic::transport::Server::builder()
         .add_service(EngineService::server(std::sync::Arc::clone(&engine)))
         .serve_with_shutdown(cli.grpc_addr, heron_service::shutdown_signal());
     tracing::info!(addr = %cli.grpc_addr, "grpc server listening");
 
-    let health = EngineHealth(std::sync::Arc::clone(&engine));
-    let router = heron_service::ops_router(SERVICE, metrics, health);
     let servers = async {
-        let (grpc, http) = tokio::join!(grpc, heron_service::serve(cli.http_addr, router));
+        let (grpc, http) = tokio::join!(grpc, http);
         grpc.context("grpc server failed")?;
-        http?;
+        http??;
         anyhow::Ok(())
     };
     tokio::pin!(servers);
@@ -146,9 +219,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         () = heron_service::shutdown_signal() => {}
     }
-    // Where the track on air is now, for the next start: first, before
-    // anything can delay the exit.
-    engine.save_queue();
+    let stopping = std::sync::Arc::clone(&engine);
+    let runtime = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || handover::stop(&stopping, &listener, &runtime)).await?;
     // Streams (the API's WatchEvents) never end on their own: do not wait
     // for them, or Docker kills the engine after 10 s.
     match tokio::time::timeout(SHUTDOWN_GRACE, &mut servers).await {

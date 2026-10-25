@@ -71,7 +71,7 @@ Why these:
 - **Opus** is not created by default: it is the most efficient codec, but some hardware players and stream directories still do not support it. Stations can add an Opus profile in one click.
 - No outputs are created by default: they need the station's own server address and credentials.
 
-The default profiles are seeded by a migration in [M2](roadmap/m2-engine-core.md); AAC arrives in [M10](roadmap/m10-sinks-live-dj.md), so `AAC 96k` is seeded with it.
+The default profiles are seeded by a migration in [M2](roadmap/m2-engine-core.md); AAC arrives in [M11](roadmap/m11-sinks-live-dj.md), so `AAC 96k` is seeded with it.
 
 ## Outputs (sinks)
 
@@ -108,6 +108,8 @@ TLS is not supported yet.
 
 - Encoders and outputs run **outside the audio thread**. The mixer writes to a lock-free ring buffer per encoder; a slow or failed encoder or output never blocks the mixer or other outputs.
 - Each network output reconnects on its own with exponential backoff (1 s, doubling up to 60 s). After a reconnection the stream starts with fresh audio, not a backlog.
+- **Network outputs connect through `heron-relay`** when `HERON_RELAY_SOCKET` is set (it is in `docker-compose.yml`): the engine reaches the relay through a Unix socket, and the relay holds the TCP connection to the stream server, so it outlives the engine's container. Metadata updates go through it too: Icecast accepts them (with the source's credentials) only from the source's address. When the relay cannot be reached, outputs connect directly.
+- **On an engine upgrade, connections are handed over, not reopened** ([Audio engine – Upgrades and handover](audio-engine.md#upgrades-and-handover)): the old engine flushes its encoders and passes each connected output's connection to the new engine ([Engine handover](handover.md#handing-over-the-connections)), which goes on writing to it without a new source request. Icecast (and Shoutcast, from [M11](roadmap/m11-sinks-live-dj.md)) keeps the source and its listeners. The new engine's encoders start fresh: MP3 continues frame after frame, Ogg (Opus, Vorbis) as a new chained stream. An output that was reconnecting, and outputs that are not a connection (HLS, file recording, pipes, external FFmpeg encoders), start again in the new engine.
 - An output's state (connected, reconnecting, error, bytes sent) is exposed through gRPC, the API and `/metrics`. Listener counts come from the stream servers' statistics, collected by `heron-api` ([M7b](roadmap/m7b-listener-statistics.md)).
 
 ## Configuration flow
@@ -131,4 +133,4 @@ The API never sends passwords back; an update without one keeps the stored passw
 
 - [M2 – Engine core](roadmap/m2-engine-core.md): encoder/output model, multiple outputs, MP3 encoder, Icecast sink.
 - [M4 – API & control plane](roadmap/m4-api-control-plane.md): profiles and outputs stored in MariaDB, edited through the API and pushed to the engine.
-- [M10 – More encoders, sinks & live DJ](roadmap/m10-sinks-live-dj.md): AAC-LC, Opus, Vorbis, external FFmpeg encoder, HLS, Shoutcast, file recording, pipe.
+- [M11 – More encoders, sinks & live DJ](roadmap/m11-sinks-live-dj.md): AAC-LC, Opus, Vorbis, external FFmpeg encoder, HLS, Shoutcast, file recording, pipe.

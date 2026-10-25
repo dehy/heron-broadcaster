@@ -135,7 +135,7 @@ pub struct LoudnessSettings {
     /// Quiet tracks are boosted by at most this much.
     pub max_gain_db: f64,
     /// Boosts never push the track's true peak above this. There is no
-    /// limiter before M9, so a boost that clips would distort.
+    /// limiter before M10, so a boost that clips would distort.
     pub peak_ceiling_dbtp: f64,
 }
 

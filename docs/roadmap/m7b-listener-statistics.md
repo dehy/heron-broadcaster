@@ -10,7 +10,7 @@ How many people listen, each day, each hour, to each output and to each track. H
 
 - `heron-api` polls the server of every enabled output once a minute. The engine is not involved: it must stay focused on the air.
   - Icecast: listeners per mount from `/status-json.xsl` (public), and the list of connected listeners from `/admin/listclients` (needs the server's admin credentials, an optional setting of the output).
-  - Shoutcast v1 and v2: their statistics pages, once the Shoutcast sinks exist ([M10](m10-sinks-live-dj.md)).
+  - Shoutcast v1 and v2: their statistics pages, once the Shoutcast sinks exist ([M11](m11-sinks-live-dj.md)).
   - HLS has no server to ask: counting its listeners from the web server's access logs is left for later.
 - A server that does not answer leaves a gap in the statistics, never an error on the air.
 
