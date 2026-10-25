@@ -102,6 +102,8 @@ Source client for Icecast 2.4 and later (HTTP `PUT`). Metadata goes through `/ad
 
 The stream plays at the public URL followed by the mount. The **Outputs** and **On air** pages link to it (**Listen**).
 
+Listener statistics read the server's status page, and its listener list with the server's **admin** credentials: an optional setting of the output, kept apart from `outputs.config` and never pushed to the engine ([Listener statistics](statistics.md#settings)).
+
 TLS is not supported yet.
 
 ## Isolation and reliability

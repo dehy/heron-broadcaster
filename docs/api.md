@@ -53,9 +53,10 @@ Then:
 | Artists | `GET /artists` (`q` matches any name, `limit`, `offset`); `GET`, `PATCH /artists/{id}` (`name`, `musicbrainz_id`); `POST /artists/{id}/merge` (`{"artist_id"}`, merged into this one); `PUT /artist-names/{id}` (`{"artist_id"}` moves the name, `{}` splits it off); `PUT`, `DELETE /artists/{id}/similar/{other}`; `GET /artist-suggestions`, `POST /artist-suggestions/{id}` (`{"accept"}`); `POST /artist-suggestions/musicbrainz` (a library task) |
 | Rotation | `GET`, `POST /clocks`; `GET`, `PUT`, `DELETE /clocks/{id}` (name, `looping` and slots, replaced as a whole); `POST /clocks/preview` (`{"slots", "looping"}`, saved or not: expected starts, categories running short); `GET`, `PUT /schedule` (the whole week); `GET /restrictions` (`target`, `target_id`), `POST /restrictions`, `PUT`, `DELETE /restrictions/{id}`; `GET /rotation/picks` (the selection log: `before`, `track_id`, `limit`); `POST /rotation/simulate` (`hours`, `start_unix_ms`, `seed`, `clock_id`) |
 | History | `GET /history` (`before`, `after`, `track_id`, `exclude_fx`, `limit`) |
-| Settings | `GET`, `PUT /settings/playout`, `/settings/analysis`, `/settings/queue`, `/settings/rotation`, `/settings/station`, `/settings/programming`; `GET`, `PATCH /settings/library` |
-| Outputs | `GET`, `POST /encoder-profiles`; `GET`, `PUT`, `DELETE /encoder-profiles/{id}`; `GET`, `POST /outputs`; `GET`, `PUT`, `DELETE /outputs/{id}` (with each output's live state) |
+| Settings | `GET`, `PUT /settings/playout`, `/settings/analysis`, `/settings/queue`, `/settings/rotation`, `/settings/station`, `/settings/programming`, `/settings/statistics`; `GET`, `PATCH /settings/library` |
+| Outputs | `GET`, `POST /encoder-profiles`; `GET`, `PUT`, `DELETE /encoder-profiles/{id}`; `GET`, `POST /outputs`; `GET`, `PUT`, `DELETE /outputs/{id}` (with each output's live state, and its `statistics` settings: the stream server's admin credentials) |
 | Webhooks (admins) | `GET`, `POST /webhooks`; `GET`, `PUT`, `DELETE /webhooks/{id}`; `POST /webhooks/{id}/secret`; `POST /webhooks/{id}/test`; `GET /webhooks/{id}/deliveries` (`before`, `status`, `limit`); `POST /webhook-deliveries/{id}/retry` — see [below](#webhooks) |
+| Listener statistics | `GET /listeners/now`, `/listeners/samples`, `/listeners/days`, `/listeners/hours-of-day`, `/listeners/tracks`, `/listeners/players` (CSV with `format=csv` for days, hours and tracks); `GET`, `PUT /settings/statistics` (admins) — see [Listener statistics](statistics.md#api) |
 | Public | `GET /public/now-playing`, `GET /public/history` (`before`, `limit`) — no sign-in, see [below](#public-endpoints) |
 | Live | `GET /live` (WebSocket) |
 
@@ -179,7 +180,7 @@ While the API is down or cannot reach the engine, the engine plays on and those 
 
 Playout settings, encoder profiles and outputs are stored in MariaDB and edited through the API. The API pushes them to the engine (`SetPlayoutSettings`, `SetOutputs`) when they change, when the engine starts or becomes reachable again, and checks once a minute; `GET /engine` says whether the engine runs the stored configuration (`synced`, `pending` while it is unreachable, `failed` with the engine's error). Encoder profiles and outputs are checked as a whole configuration before they are saved, the way the engine does: an invalid change saves nothing.
 
-Output settings never show their password; an update that leaves it out keeps the stored one.
+Output settings never show their password, nor the stream server's admin password of their statistics settings; an update that leaves one out keeps the stored one. The statistics settings are not pushed to the engine.
 
 **Upgrading from M2:** the first time the API reaches the engine, it adopts the engine's configuration instead of replacing it: playout settings never saved through the API, and outputs when the database has none, are copied from the engine with their IDs, so the station stays on air. From then on the database is the reference, and changes made with `heron-engine ctl set-outputs` or `set-settings` are replaced within a minute: use the API.
 
@@ -196,7 +197,7 @@ CI fails when either file is out of date. The generator (`openapi-typescript`) l
 
 ## Metrics
 
-On top of the scanner's: `heron_api_uploads_total`, `heron_api_engine_connected` (0 or 1), `heron_api_engine_disconnections_total`, `heron_api_autofill_tracks_total`, `heron_api_rotation_relaxed_total`, `heron_api_logins_total{result}`, `heron_api_live_clients` and `heron_api_webhook_deliveries_total{result}` (`delivered`, `retrying`, `failed`).
+On top of the scanner's: `heron_api_uploads_total`, `heron_api_engine_connected` (0 or 1), `heron_api_engine_disconnections_total`, `heron_api_autofill_tracks_total`, `heron_api_rotation_relaxed_total`, `heron_api_logins_total{result}`, `heron_api_live_clients` `heron_api_webhook_deliveries_total{result}` (`delivered`, `retrying`, `failed`), `heron_listeners{output}` and `heron_api_listener_polls_total{result}` ([Listener statistics](statistics.md#metrics)).
 
 ## Limitations
 
