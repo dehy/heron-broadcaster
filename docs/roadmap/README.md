@@ -20,7 +20,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | M6 | [Rotation & clockwheels](m6-rotation-clockwheels.md) | M4 | Done ([#11](https://github.com/dehy/heron-broadcaster/pull/11)) |
 | M7 | [Webhooks & output API](m7-webhooks-output-api.md) | M4 | Done |
 | M7b | [Listener statistics](m7b-listener-statistics.md) | M4 | Not started |
-| M8 | [Hot engine upgrades](m8-hot-engine-upgrade.md) | M3 | Not started |
+| M8 | [Hot engine upgrades](m8-hot-engine-upgrade.md) | M3 | In progress |
 | M9 | [Deck EQ](m9-deck-eq.md) | M2 | Not started |
 | M10 | [AGC & multiband processing](m10-agc-multiband.md) | M9 | Not started |
 | M11 | [More encoders, sinks & live DJ](m11-sinks-live-dj.md) | M3 | Not started |
