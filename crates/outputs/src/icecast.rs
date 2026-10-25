@@ -192,9 +192,11 @@ impl IcecastSink {
         request
     }
 
-    /// A connection for a metadata update: direct, it is short-lived.
+    /// A connection to the server: through the relay when there is one.
+    /// Metadata updates too: Icecast takes them, with the source's
+    /// credentials, only from the source's address.
     async fn open(&self) -> Result<Connection, SinkError> {
-        Connection::open(&self.config.host, self.config.port, None).await
+        Connection::open(&self.config.host, self.config.port, self.relay.as_deref()).await
     }
 }
 
@@ -205,8 +207,7 @@ impl OutputSink for IcecastSink {
             self.stream = Some(Connection::adopt(connection)?);
             return Ok(());
         }
-        let mut stream =
-            Connection::open(&self.config.host, self.config.port, self.relay.as_deref()).await?;
+        let mut stream = self.open().await?;
         let request = self.source_request();
         timeout(WRITE_TIMEOUT, stream.write_all(request.as_bytes()))
             .await
