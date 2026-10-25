@@ -108,6 +108,9 @@ pub struct IcecastSink {
     config: IcecastConfig,
     info: StreamInfo,
     stream: Option<TcpStream>,
+    /// A source connection handed over by another engine, streaming
+    /// already: the first `connect` takes it instead of connecting.
+    adopted: Option<std::net::TcpStream>,
 }
 
 impl IcecastSink {
@@ -116,6 +119,16 @@ impl IcecastSink {
             config,
             info,
             stream: None,
+            adopted: None,
+        }
+    }
+
+    /// A sink going on with `connection`, a source connection to the same
+    /// server and mount that another engine was streaming to.
+    pub fn adopt(config: IcecastConfig, info: StreamInfo, connection: std::net::TcpStream) -> Self {
+        Self {
+            adopted: Some(connection),
+            ..Self::new(config, info)
         }
     }
 
@@ -181,6 +194,13 @@ impl IcecastSink {
 impl OutputSink for IcecastSink {
     async fn connect(&mut self) -> Result<(), SinkError> {
         self.stream = None;
+        if let Some(connection) = self.adopted.take() {
+            connection.set_nonblocking(true)?;
+            let stream = TcpStream::from_std(connection)?;
+            stream.set_nodelay(true)?;
+            self.stream = Some(stream);
+            return Ok(());
+        }
         let mut stream = self.open().await?;
         stream.set_nodelay(true)?;
         let request = self.source_request();
@@ -245,6 +265,10 @@ impl OutputSink for IcecastSink {
 
     fn disconnect(&mut self) {
         self.stream = None;
+    }
+
+    fn take_connection(&mut self) -> Option<std::net::TcpStream> {
+        self.stream.take()?.into_std().ok()
     }
 }
 

@@ -4,7 +4,7 @@
 
 use heron_core::{EncoderKind, EncoderProfile};
 use heron_dsp::StreamResampler;
-use mp3lame_encoder::{Bitrate, Builder, InterleavedPcm, MonoPcm, Quality, VbrMode};
+use mp3lame_encoder::{Bitrate, Builder, FlushNoGap, InterleavedPcm, MonoPcm, Quality, VbrMode};
 use serde::Deserialize;
 
 use crate::ConfigError;
@@ -35,6 +35,9 @@ pub trait Encoder: Send {
     fn info(&self) -> &StreamInfo;
     /// Encodes interleaved stereo at 48 kHz and appends the result to `out`.
     fn encode(&mut self, pcm: &[f32], out: &mut Vec<u8>) -> Result<(), EncodeError>;
+    /// Appends what the encoder still holds to `out`, when the stream ends
+    /// (an engine handing its outputs over to another).
+    fn flush(&mut self, out: &mut Vec<u8>) -> Result<(), EncodeError>;
 }
 
 /// Builds the encoder of `profile`, or explains why it cannot.
@@ -186,6 +189,14 @@ impl Encoder for Mp3Encoder {
                 .encode_to_vec(InterleavedPcm(self.resampled.as_slice()), out)
         }
         .map_err(|error| EncodeError::Mp3(error.to_string()))?;
+        Ok(())
+    }
+
+    fn flush(&mut self, out: &mut Vec<u8>) -> Result<(), EncodeError> {
+        out.reserve(7_200);
+        self.lame
+            .flush_to_vec::<FlushNoGap>(out)
+            .map_err(|error| EncodeError::Mp3(error.to_string()))?;
         Ok(())
     }
 }

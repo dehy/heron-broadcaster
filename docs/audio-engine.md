@@ -129,7 +129,7 @@ docker compose exec heron-engine heron-engine ctl skip
 
 ## Upgrades and handover
 
-An engine replaced the usual way (stop, then start) is off air for a few seconds, and Icecast disconnects every listener when its source leaves. To upgrade without that, a new engine takes over from the running one: the **hot handover**, built in [M8](roadmap/m8-hot-engine-upgrade.md). The procedures that use it, for Docker Compose and Docker Swarm, are in [Upgrading](upgrading.md).
+An engine replaced the usual way (stop, then start) is off air for a few seconds, and Icecast disconnects every listener when its source leaves. To upgrade without that, a new engine takes over from the running one: the **hot handover**, built in [M8](roadmap/m8-hot-engine-upgrade.md). The procedures that use it, for Docker Compose and Docker Swarm, are in [Upgrading](upgrading.md); its design, in [Engine handover](handover.md).
 
 The running engine (the **active** one) listens on a unix socket in its state directory, `$HERON_STATE_DIR/handover.sock`. Both engines mount the same state volume, so they run on the same host.
 
@@ -140,7 +140,7 @@ On start, the engine connects to `handover.sock`:
 | Answer | The new engine |
 |---|---|
 | None (no socket, or nobody listening) | Starts as usual (a **cold start**): resumes `queue.json` and connects its outputs. |
-| A hello with a compatible protocol version | Becomes the **standby**: it does not play, opens no output and writes no state file. `/healthz` succeeds with `"role": "standby"`, so Docker and Swarm consider it started. Its gRPC calls answer `UNAVAILABLE`, and `heron-api` retries them (during the overlap, the `heron-engine` name points to both engines). |
+| A hello with a compatible protocol version | Becomes the **standby**: it does not play, opens no output and writes no state file. `/healthz` succeeds with `"role": "standby"`, so Docker and Swarm consider it started. It does not serve gRPC yet: calls from `heron-api` that reach it (during the overlap, the `heron-engine` name points to both engines) fail as unavailable and are retried. |
 | A hello with an incompatible version | Waits for the active engine to stop (the socket to disappear), then makes a cold start. |
 
 A standby whose active engine stops without handing over (it crashes, or `handover.sock` closes) makes a cold start.
@@ -149,16 +149,16 @@ A standby whose active engine stops without handing over (it crashes, or `handov
 
 It starts when the active engine receives SIGTERM with a standby connected. Without a standby, the engine stops as before (the queue is saved, then the process exits).
 
-1. **Prepare.** The active engine sends its playout settings, its outputs, the queue (as in `queue.json`) and a **cut frame**: the master bus frame at which the new engine takes over, about 2 s ahead. The cut never falls in a transition or under an FX jingle: the active engine waits for them to end first (within the 30 s stop grace period).
-2. **Ready.** The standby reads the next tracks into memory, opens the track on air at the cut frame (the fast skip used to resume after a restart), builds its encoders and answers `ready`. Without an answer within 5 s, the active engine gives up the handover and stops as before.
-3. **Cut.** The active engine renders up to the cut frame, fading out over the last 20 ms, flushes its encoders to its outputs, then sends the open connections of its outputs (their file descriptors, passed over the socket) and `done`. The new engine starts its clock at the cut frame with a 20 ms fade-in, and streams to the same connections, without connecting again. The listeners hear a short dip (the flush takes tens of milliseconds, covered by their players' buffers), and Icecast never sees the source leave.
+1. **Prepare.** The active engine sends its playout settings, its outputs, the queue (as in `queue.json`) and the **stop**: the position in the track on air where the new engine takes over, about 2 s ahead. The stop never falls in a transition or under an FX jingle, nor less than 1 s before the next transition: the active engine waits for a moment like that first (within the 30 s stop grace period).
+2. **Ready.** The standby opens the track on air at the stop (the fast skip used to resume after a restart), queues the waiting tracks and answers `ready` once enough audio is decoded. An answer later than 300 ms before the stop is too late: the active engine prepares again with a stop three times further ahead (6 s, then 18 s), and gives up after three attempts.
+3. **Cut.** The active engine stops the track on air on the exact frame of the stop, fading out over the last 10 ms, flushes its encoders to its outputs, then sends the open connections of its outputs (their file descriptors, passed over the socket). The new engine plays from that frame with a 10 ms fade-in, and streams to the same connections, without connecting again. Icecast never sees the source leave; the listeners hear about 80 ms of silence.
 4. **Active.** The old engine writes no state any more and exits. The new engine takes `handover.sock` (bound aside, then renamed over it), writes `queue.json`, and serves gRPC; the API's event stream reconnects to it, as after a restart.
 
 The new engine keeps the entry IDs and the position of the track on air, and does not report it as started again, so the play history has one entry for it. Its encoders start fresh: an MP3 stream continues frame after frame, and an Ogg stream (Opus, Vorbis) continues as a new chained stream. Outputs that are not a connection (HLS, file recording, pipes, from [M11](roadmap/m11-sinks-live-dj.md)) are restarted by the new engine. See [Encoders and outputs – Isolation and reliability](outputs.md#isolation-and-reliability).
 
 | Failure during a handover | What happens |
 |---|---|
-| The standby dies, or is not ready within 5 s | The active engine stops as before; the standby, if alive, makes a cold start. |
+| The standby dies, or is not ready after three attempts | The active engine stops as before; the standby, if alive, makes a cold start once the active engine is gone. |
 | The active engine dies before passing its connections | The standby makes a cold start, from the queue saved last (up to 5 s earlier). |
 | The active engine dies after passing its connections | The new engine carries on: it has everything it needs. |
 | An output's connection is not passed (closed, or not a connection) | The new engine connects that output again, as after a restart. |

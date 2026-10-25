@@ -1287,6 +1287,7 @@ dependencies = [
  "lofty",
  "metrics",
  "rtrb",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 /// Now-playing metadata pushed to stream servers.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -55,7 +55,17 @@ pub trait OutputSink: Send + 'static {
     ) -> impl Future<Output = Result<(), SinkError>> + Send;
     /// Closes the stream.
     fn disconnect(&mut self);
+    /// Gives up the open connection, still streaming, for another engine to
+    /// go on writing to it. `None` when the sink has none to give.
+    fn take_connection(&mut self) -> Option<std::net::TcpStream> {
+        None
+    }
 }
+
+/// A request to an output to stop and give up its connection
+/// ([`OutputSink::take_connection`]), answered once the audio already
+/// encoded has been sent.
+pub type ReleaseRequest = oneshot::Sender<Option<std::net::TcpStream>>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutputState {
@@ -108,15 +118,22 @@ fn backoff(attempt: u32) -> Duration {
     Duration::from_secs(1 << attempt.min(6)).min(Duration::from_secs(60))
 }
 
-/// Runs `sink` until the task is aborted: connects, streams the audio
-/// published on `audio`, pushes metadata changes, and reconnects with
-/// exponential backoff after any error.
+/// How [`stream`] ended.
+enum Streamed {
+    Failed(SinkError),
+    Released(ReleaseRequest),
+}
+
+/// Runs `sink` until the task is aborted or a request on `release` asks for
+/// its connection: connects, streams the audio published on `audio`, pushes
+/// metadata changes, and reconnects with exponential backoff after any error.
 pub async fn run<S: OutputSink>(
     mut sink: S,
     name: String,
     audio: broadcast::Sender<Bytes>,
     mut metadata: watch::Receiver<NowPlaying>,
     status: Arc<OutputStatus>,
+    mut release: mpsc::Receiver<ReleaseRequest>,
 ) {
     let labels = [("output", name.clone())];
     let connected = metrics::gauge!("heron_output_connected", &labels);
@@ -139,19 +156,40 @@ pub async fn run<S: OutputSink>(
                 attempt = 0;
                 let current = metadata.borrow_and_update().clone();
                 push_metadata(&mut sink, &name, &current).await;
-                let error = stream(
+                let streamed = stream(
                     &mut sink,
                     &name,
                     &mut receiver,
                     &mut metadata,
+                    &mut release,
                     &status,
                     &bytes,
                     &dropped,
                 )
                 .await;
-                sink.disconnect();
                 connected.set(0.0);
-                error
+                match streamed {
+                    Streamed::Failed(error) => {
+                        sink.disconnect();
+                        error
+                    }
+                    Streamed::Released(request) => {
+                        // What was encoded before the request goes out first.
+                        while let Ok(chunk) = receiver.try_recv() {
+                            if sink.send(&chunk).await.is_err() {
+                                break;
+                            }
+                            status
+                                .bytes_sent
+                                .fetch_add(chunk.len() as u64, Ordering::Relaxed);
+                            bytes.increment(chunk.len() as u64);
+                        }
+                        let connection = sink.take_connection();
+                        tracing::info!(output = %name, handed_over = connection.is_some(), "output released");
+                        let _ = request.send(connection);
+                        return;
+                    }
+                }
             }
             Err(error) => error,
         };
@@ -163,19 +201,28 @@ pub async fn run<S: OutputSink>(
         });
         reconnects.increment(1);
         attempt = attempt.saturating_add(1);
-        tokio::time::sleep(delay).await;
+        tokio::select! {
+            () = tokio::time::sleep(delay) => {}
+            Some(request) = release.recv() => {
+                // Not connected: nothing to hand over.
+                let _ = request.send(None);
+                return;
+            }
+        }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn stream<S: OutputSink>(
     sink: &mut S,
     name: &str,
     receiver: &mut broadcast::Receiver<Bytes>,
     metadata: &mut watch::Receiver<NowPlaying>,
+    release: &mut mpsc::Receiver<ReleaseRequest>,
     status: &OutputStatus,
     bytes: &metrics::Counter,
     dropped: &metrics::Counter,
-) -> SinkError {
+) -> Streamed {
     // An output without metadata has no sender: stop watching once it is gone.
     let mut watch_metadata = true;
     loop {
@@ -183,7 +230,7 @@ async fn stream<S: OutputSink>(
             chunk = receiver.recv() => match chunk {
                 Ok(chunk) => {
                     if let Err(error) = sink.send(&chunk).await {
-                        return error;
+                        return Streamed::Failed(error);
                     }
                     status.bytes_sent.fetch_add(chunk.len() as u64, Ordering::Relaxed);
                     bytes.increment(chunk.len() as u64);
@@ -193,9 +240,10 @@ async fn stream<S: OutputSink>(
                     dropped.increment(missed);
                 }
                 Err(broadcast::error::RecvError::Closed) => {
-                    return SinkError::Io(std::io::Error::other("the encoder stopped"));
+                    return Streamed::Failed(SinkError::Io(std::io::Error::other("the encoder stopped")));
                 }
             },
+            Some(request) = release.recv() => return Streamed::Released(request),
             changed = metadata.changed(), if watch_metadata => {
                 if changed.is_ok() {
                     let current = metadata.borrow_and_update().clone();

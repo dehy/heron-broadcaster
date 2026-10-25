@@ -188,6 +188,15 @@ pub enum Command {
     },
     Pause,
     Resume,
+    /// Pauses at once, without a fade: nothing plays until `Resume`, which
+    /// fades in. For an engine waiting to take over from another.
+    Hold,
+    /// Fades out the track on air and holds the mixer as it reaches
+    /// `position` (frames from its cue-in), then reports [`Event::Halted`].
+    /// For an engine handing over to another, which goes on from there.
+    HaltAt {
+        position: u64,
+    },
     /// Plays a jingle on the FX player, on top of the decks. Replaces the one playing.
     PlayFx(Box<LoadedTrack>),
     StopFx,
@@ -251,6 +260,13 @@ pub enum Event {
     /// A cued track was removed before it started: uncued, replaced, or
     /// its audio ended before it could start.
     Uncued { entry_id: u64 },
+    /// Held after [`Command::HaltAt`]: the track on air stopped at `position`,
+    /// and the master bus at `at_frame` (silence after it).
+    Halted {
+        entry_id: u64,
+        position: u64,
+        at_frame: u64,
+    },
 }
 
 /// Levels of one meter point, as linear values (f32 bits).
@@ -290,6 +306,8 @@ pub struct MixerStatus {
     pub on_air: AtomicU64,
     /// Entry ID of the cued track, 0 for none.
     pub cued: AtomicU64,
+    /// The cued track has enough audio decoded to start.
+    pub cued_ready: AtomicBool,
     pub decks: [DeckStatus; 3],
     pub master: MeterStatus,
     pub underruns: AtomicU64,
@@ -403,6 +421,10 @@ pub struct Mixer {
     pause_gain: f32,
     paused: bool,
     frozen: bool,
+    /// Where the track on air stops for a handover ([`Command::HaltAt`]).
+    halt_at: Option<u64>,
+    /// Slot whose fade-out was set by `HaltAt`, removed on `Resume`.
+    halt_fade: Option<usize>,
     scratch: Vec<f32>,
     meters: [BlockMeter; 3],
     commands: rtrb::Consumer<Command>,
@@ -428,6 +450,8 @@ impl Mixer {
             pause_gain: 1.0,
             paused: false,
             frozen: false,
+            halt_at: None,
+            halt_fade: None,
             scratch: vec![0.0; max_block_frames * CHANNELS],
             meters: [BlockMeter::default(); 3],
             commands: command_rx,
@@ -461,6 +485,7 @@ impl Mixer {
 
         if !self.frozen {
             let mut offset = 0;
+            let mut halted = false;
             while offset < frames {
                 self.retire_finished();
                 self.start_cued_if_due();
@@ -484,10 +509,19 @@ impl Mixer {
                 }
                 offset += segment;
                 self.frame += segment as u64;
+                if self.halt_due() {
+                    self.halt();
+                    // The rest of the block stays silent.
+                    self.frame += (frames - offset) as u64;
+                    halted = true;
+                    break;
+                }
             }
-            self.retire_finished();
-            self.start_cued_if_due();
-            self.apply_pause(out);
+            if !halted {
+                self.retire_finished();
+                self.start_cued_if_due();
+                self.apply_pause(out);
+            }
         } else {
             self.frame += frames as u64;
         }
@@ -541,7 +575,20 @@ impl Mixer {
                 Command::Resume => {
                     self.paused = false;
                     self.frozen = false;
+                    // A handover given up: the track on air plays on.
+                    if let Some(slot) = self.halt_fade.take()
+                        && let Some(voice) = &mut self.voices[slot]
+                        && voice.end_reason == EndReason::Finished
+                    {
+                        voice.fade_out = None;
+                    }
                 }
+                Command::Hold => {
+                    self.paused = true;
+                    self.pause_gain = 0.0;
+                    self.frozen = true;
+                }
+                Command::HaltAt { position } => self.halt_at_position(position),
                 Command::PlayFx(track) => {
                     self.stop_slot(2, EndReason::Replaced);
                     self.start_voice(2, track);
@@ -557,6 +604,57 @@ impl Mixer {
                 }
             }
         }
+    }
+
+    fn halt_at_position(&mut self, position: u64) {
+        if self.frozen {
+            // Paused already: nothing more will play.
+            self.halt();
+            return;
+        }
+        let main = self.main;
+        let Some(voice) = main.and_then(|slot| self.voices[slot].as_mut()) else {
+            // Nothing on air: hold now.
+            self.halt_at = Some(0);
+            return;
+        };
+        let position = position.max(voice.position);
+        let start = position
+            .saturating_sub(SHORT_FADE_FRAMES)
+            .max(voice.position);
+        if voice.fade_out.is_none() {
+            voice.fade_out = Some(FrameRamp {
+                start,
+                length: (position - start).max(1),
+                curve: FadeCurve::Linear,
+                level: 0.0,
+            });
+            self.halt_fade = main;
+        }
+        self.halt_at = Some(position);
+    }
+
+    /// The track on air reached the handover point.
+    fn halt_due(&self) -> bool {
+        self.halt_at.is_some_and(|position| {
+            self.main_voice()
+                .is_none_or(|voice| voice.position >= position)
+        })
+    }
+
+    fn halt(&mut self) {
+        self.halt_at = None;
+        self.paused = true;
+        self.pause_gain = 0.0;
+        self.frozen = true;
+        let (entry_id, position) = self
+            .main_voice()
+            .map_or((0, 0), |voice| (voice.track.entry_id, voice.position));
+        self.emit(Event::Halted {
+            entry_id,
+            position,
+            at_frame: self.frame,
+        });
     }
 
     fn skip(&mut self, fade_frames: u64, curve: FadeCurve) {
@@ -651,6 +749,11 @@ impl Mixer {
             && let Some(voice) = self.main_voice()
         {
             until = until.min(transition.next_start.saturating_sub(voice.position));
+        }
+        if let Some(position) = self.halt_at
+            && let Some(voice) = self.main_voice()
+        {
+            until = until.min(position.saturating_sub(voice.position));
         }
         usize::try_from(until)
             .unwrap_or(usize::MAX)
@@ -788,6 +891,11 @@ impl Mixer {
         status.on_air.store(main_id, Ordering::Relaxed);
         let cued_id = self.cued.as_ref().map_or(0, |(track, _)| track.entry_id);
         status.cued.store(cued_id, Ordering::Relaxed);
+        let cued_ready = self
+            .cued
+            .as_ref()
+            .is_some_and(|(track, _)| track.source.is_ready());
+        status.cued_ready.store(cued_ready, Ordering::Relaxed);
         for (slot, deck) in status.decks.iter().enumerate() {
             let (entry_id, position, length) =
                 self.voices[slot].as_ref().map_or((0, 0, 0), |voice| {

@@ -12,6 +12,7 @@ pub mod decoder;
 pub mod engine;
 pub mod fallback;
 pub mod grpc;
+pub mod handover;
 pub mod mixer;
 #[cfg(feature = "monitor")]
 pub mod monitor;

@@ -149,6 +149,33 @@ pub struct SavedTrack {
     pub entry: QueueEntry,
     /// From the cue-in.
     pub position_ms: u64,
+    /// A track of the fallback directory (handed over to another engine;
+    /// never saved on disk).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fallback: bool,
+}
+
+/// Where an engine handing over can stop the track on air
+/// ([`Player::handover_point`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HandoverPoint {
+    /// Nothing plays (paused, or nothing on air): hold now.
+    Now,
+    /// The track on air stops at this position (frames from its cue-in).
+    At { position: u64 },
+    /// A transition or a jingle is playing, or the track on air ends too
+    /// soon: ask again later.
+    Wait,
+}
+
+/// Where the mixer held after [`Player::halt_at`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Halted {
+    pub entry_id: u64,
+    /// Frames from the cue-in of the track on air.
+    pub position: u64,
+    /// Master bus frame of the stop: silence after it.
+    pub at_frame: u64,
 }
 
 pub struct Player {
@@ -189,6 +216,9 @@ pub struct Player {
     stalled_since: Option<u64>,
     /// Something to save changed since the last [`Self::take_changed`].
     changed: bool,
+    /// Held by [`Self::hold`]: waiting to take over from another engine.
+    held: bool,
+    halted: Option<Halted>,
 }
 
 impl Player {
@@ -222,6 +252,8 @@ impl Player {
             silence_skips: 0,
             stalled_since: None,
             changed: false,
+            held: false,
+            halted: None,
         }
     }
 
@@ -421,6 +453,120 @@ impl Player {
         self.send(Command::StopFx)
     }
 
+    /// Holds the mixer silent at once, until [`Self::unhold`]: an engine
+    /// waiting to take over. Tracks are cued but do not start.
+    pub fn hold(&mut self) -> Result<(), PlayerError> {
+        self.send(Command::Hold)?;
+        self.held = true;
+        Ok(())
+    }
+
+    /// Plays on from where the mixer was held (unless paused), fading in.
+    pub fn unhold(&mut self) -> Result<(), PlayerError> {
+        if !self.paused {
+            self.send(Command::Resume)?;
+        }
+        self.held = false;
+        self.watch_from = self.mixer.status.frame.load(Ordering::Relaxed);
+        self.stalled_since = None;
+        self.idle_since = None;
+        Ok(())
+    }
+
+    pub fn is_held(&self) -> bool {
+        self.held
+    }
+
+    /// Whether the cued track (if any) has enough audio decoded to start.
+    pub fn cued_ready(&self) -> bool {
+        let status = &self.mixer.status;
+        self.cued.is_none()
+            || (status.cued.load(Ordering::Relaxed) == self.cued.unwrap_or(0)
+                && status.cued_ready.load(Ordering::Relaxed))
+    }
+
+    /// Where the track on air can stop for a handover, at least `lead_ms`
+    /// from now: never in a transition or under a jingle, and at least 1 s
+    /// before the next transition. On a millisecond, as saved queues are.
+    pub fn handover_point(&self, lead_ms: u32) -> HandoverPoint {
+        if self.paused || self.held {
+            return HandoverPoint::Now;
+        }
+        let status = &self.mixer.status;
+        if status.decks[Deck::Fx.slot()]
+            .entry_id
+            .load(Ordering::Relaxed)
+            != 0
+        {
+            return HandoverPoint::Wait;
+        }
+        let on_air = status.on_air.load(Ordering::Relaxed);
+        let busy: Vec<&crate::mixer::DeckStatus> = status.decks[..2]
+            .iter()
+            .filter(|deck| deck.entry_id.load(Ordering::Relaxed) != 0)
+            .collect();
+        let Some(deck) = busy
+            .iter()
+            .find(|deck| on_air != 0 && deck.entry_id.load(Ordering::Relaxed) == on_air)
+        else {
+            return if busy.is_empty() {
+                HandoverPoint::Now
+            } else {
+                HandoverPoint::Wait
+            };
+        };
+        if busy.len() > 1 {
+            // The previous track is still fading out.
+            return HandoverPoint::Wait;
+        }
+        let position = deck.position.load(Ordering::Relaxed);
+        let length = deck.length.load(Ordering::Relaxed);
+        let next_start = self
+            .cued
+            .and_then(|cued| self.loaded.get(&cued))
+            .map_or_else(
+                // Nothing cued yet: one may be, with a transition before the end.
+                || length.saturating_sub(ms_to_frames(FALLBACK_LEAD_MS / 2)),
+                |entry| {
+                    let transition = self.transition_into(&entry.track.playout);
+                    self.frame_transition(transition.as_ref())
+                        .next_start
+                        .min(length)
+                },
+            );
+        let stop = ms_to_frames(
+            u32::try_from(frames_to_ms(position))
+                .unwrap_or(u32::MAX)
+                .saturating_add(lead_ms),
+        );
+        if stop.saturating_add(ms_to_frames(1_000)) > next_start {
+            return HandoverPoint::Wait;
+        }
+        HandoverPoint::At { position: stop }
+    }
+
+    /// Stops the track on air at `position` (frames from its cue-in) and
+    /// holds the mixer: reported by [`Self::take_halted`].
+    pub fn halt_at(&mut self, position: u64) -> Result<(), PlayerError> {
+        self.halted = None;
+        self.send(Command::HaltAt { position })?;
+        self.held = true;
+        Ok(())
+    }
+
+    pub fn take_halted(&mut self) -> Option<Halted> {
+        self.halted.take()
+    }
+
+    /// Forgets the queue and the cued track (not what is on air), for a
+    /// handed-over queue to replace them.
+    pub fn reset(&mut self) -> Result<(), PlayerError> {
+        self.uncue_with(false)?;
+        self.queue.clear();
+        self.halted = None;
+        Ok(())
+    }
+
     pub fn settings(&self) -> &PlayoutSettings {
         &self.settings
     }
@@ -460,6 +606,9 @@ impl Player {
     /// Skips a track that stays silent, then goes to the fallback directory
     /// if the next one is silent too.
     fn watch_silence(&mut self) {
+        if self.held {
+            return;
+        }
         let watchdog = self.settings.silence_watchdog;
         let status = &self.mixer.status;
         let frame = status.frame.load(Ordering::Relaxed);
@@ -501,7 +650,10 @@ impl Player {
     /// put back in the queue, and a fallback track plays instead.
     fn watch_stalled_cue(&mut self) {
         let frame = self.mixer.status.frame.load(Ordering::Relaxed);
-        let Some(cued) = self.cued.filter(|_| self.on_air.is_none() && !self.paused) else {
+        let Some(cued) = self
+            .cued
+            .filter(|_| self.on_air.is_none() && !self.paused && !self.held)
+        else {
             self.stalled_since = None;
             return;
         };
@@ -616,6 +768,17 @@ impl Player {
                 self.loaded.remove(&entry_id);
                 self.fallback_entries.remove(&entry_id);
             }
+            Event::Halted {
+                entry_id,
+                position,
+                at_frame,
+            } => {
+                self.halted = Some(Halted {
+                    entry_id,
+                    position,
+                    at_frame,
+                });
+            }
             Event::Underrun { deck, entry_id } => {
                 metrics::counter!("heron_engine_underrun_tracks_total").increment(1);
                 tracing::warn!(?deck, entry_id, "decoding fell behind: silence played");
@@ -635,7 +798,7 @@ impl Player {
                 return;
             }
             let Some(entry) = self.queue.pop_front() else {
-                if self.uncueing.is_empty() && !self.paused && self.fallback_due() {
+                if self.uncueing.is_empty() && !self.paused && !self.held && self.fallback_due() {
                     self.cue_fallback();
                 }
                 self.update_dead_air();
@@ -730,7 +893,7 @@ impl Player {
 
     fn update_dead_air(&mut self) {
         let frame = self.mixer.status.frame.load(Ordering::Relaxed);
-        let idle = self.on_air.is_none() && self.cued.is_none() && !self.paused;
+        let idle = self.on_air.is_none() && self.cued.is_none() && !self.paused && !self.held;
         self.idle_since = idle.then(|| self.idle_since.unwrap_or(frame));
         let dead_air = self
             .idle_since
@@ -829,6 +992,18 @@ impl Player {
         transition: Option<&Transition>,
         start_ms: u32,
     ) -> Result<Box<LoadedTrack>, PlayerError> {
+        self.load_with(entry, transition, start_ms, RESUME_FADE_MS)
+    }
+
+    /// [`Self::load`], fading in over `resume_fade_ms` when starting after
+    /// the cue-in (none: 0).
+    fn load_with(
+        &mut self,
+        entry: &QueueEntry,
+        transition: Option<&Transition>,
+        start_ms: u32,
+        resume_fade_ms: u32,
+    ) -> Result<Box<LoadedTrack>, PlayerError> {
         let playout = &entry.track.playout;
         let path = if self.fallback_entries.contains(&entry.entry_id) {
             let dir = self.fallback.as_ref().map(|fallback| fallback.dir());
@@ -842,9 +1017,9 @@ impl Player {
         let source = (self.load_source)(file, cue_in_ms, playout.cue_out_ms)?;
         let start = ms_to_frames(start_ms);
         let fade_in = if start > 0 {
-            Some(FrameRamp {
+            (resume_fade_ms > 0).then(|| FrameRamp {
                 start,
-                length: ms_to_frames(RESUME_FADE_MS),
+                length: ms_to_frames(resume_fade_ms),
                 curve: FadeCurve::Linear,
                 level: 0.0,
             })
@@ -864,6 +1039,21 @@ impl Player {
     /// The queue to save: the track on air with its position, and the
     /// waiting tracks. Tracks from the fallback directory are left out.
     pub fn saved(&self) -> SavedQueue {
+        self.saved_queue(false)
+    }
+
+    /// The queue to hand over to another engine: as [`Self::saved`], with
+    /// the track on air even from the fallback directory, and stopping at
+    /// `position_ms` when given.
+    pub fn handed_over(&self, position_ms: Option<u64>) -> SavedQueue {
+        let mut queue = self.saved_queue(true);
+        if let (Some(on_air), Some(position_ms)) = (queue.on_air.as_mut(), position_ms) {
+            on_air.position_ms = position_ms;
+        }
+        queue
+    }
+
+    fn saved_queue(&self, fallback_on_air: bool) -> SavedQueue {
         let snapshot = self.snapshot();
         let on_air_deck = snapshot.decks.into_iter().find(|deck| deck.on_air);
         // The audio thread may have started the cued track since the last
@@ -874,9 +1064,11 @@ impl Player {
             .map(|entry| entry.entry_id);
         let on_air = on_air_deck.and_then(|deck| {
             let entry = deck.entry?;
-            (!self.fallback_entries.contains(&entry.entry_id)).then_some(SavedTrack {
+            let fallback = self.fallback_entries.contains(&entry.entry_id);
+            (!fallback || fallback_on_air).then_some(SavedTrack {
                 entry,
                 position_ms: deck.position_ms,
+                fallback,
             })
         });
         let waiting = snapshot
@@ -899,17 +1091,39 @@ impl Player {
     /// Resumes a saved queue: the track on air where it was, then the
     /// waiting tracks. Call it on a new player, before anything is queued.
     pub fn restore(&mut self, saved: SavedQueue) {
+        self.restore_with(saved, RESUME_FADE_MS);
+    }
+
+    /// Goes on with a queue handed over by another engine, after
+    /// [`Self::reset`]: the track on air exactly where the other engine
+    /// stopped it, without a fade of its own (the mixer fades in from
+    /// [`Self::hold`]).
+    pub fn take_over(&mut self, queue: SavedQueue) {
+        self.restore_with(queue, 0);
+    }
+
+    fn restore_with(&mut self, saved: SavedQueue, resume_fade_ms: u32) {
         self.next_entry_id = self.next_entry_id.max(saved.next_entry_id);
-        if saved.paused && self.pause().is_err() {
-            tracing::warn!("cannot restore the pause");
+        if saved.paused != self.paused {
+            let restored = if saved.paused {
+                self.pause()
+            } else {
+                self.resume()
+            };
+            if restored.is_err() {
+                tracing::warn!("cannot restore the pause");
+            }
         }
         if let Some(on_air) = saved.on_air {
             let left = u64::from(on_air.entry.track.playout.playable_ms())
                 .saturating_sub(on_air.position_ms);
-            if left > RESUME_MIN_LEFT_MS {
+            if on_air.fallback && self.fallback.is_some() {
+                self.fallback_entries.insert(on_air.entry.entry_id);
+            }
+            if left > RESUME_MIN_LEFT_MS && (!on_air.fallback || self.fallback.is_some()) {
                 let start_ms = u32::try_from(on_air.position_ms).unwrap_or(u32::MAX);
                 let entry = on_air.entry;
-                match self.load(&entry, None, start_ms) {
+                match self.load_with(&entry, None, start_ms, resume_fade_ms) {
                     Ok(track) => {
                         let transition = FrameTransition::back_to_back();
                         if self
@@ -929,6 +1143,7 @@ impl Player {
                         }
                     }
                     Err(error) => {
+                        self.fallback_entries.remove(&entry.entry_id);
                         tracing::warn!(path = %entry.track.path, %error, "cannot resume the track on air");
                     }
                 }

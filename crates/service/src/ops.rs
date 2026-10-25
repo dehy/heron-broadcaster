@@ -24,6 +24,11 @@ pub trait HealthCheck: Clone + Send + Sync + 'static {
     fn warnings(&self) -> impl Future<Output = Vec<String>> + Send {
         async { Vec::new() }
     }
+
+    /// Fields of the service's own, added to `/healthz` (the engine's `role`).
+    fn details(&self) -> impl Future<Output = serde_json::Map<String, serde_json::Value>> + Send {
+        async { serde_json::Map::new() }
+    }
 }
 
 /// A service with no dependencies to check: healthy as long as it answers.
@@ -99,6 +104,9 @@ async fn healthz<H: HealthCheck>(State(state): State<OpsState<H>>) -> Response {
     let warnings = state.health.warnings().await;
     if !warnings.is_empty() {
         payload["warnings"] = warnings.into();
+    }
+    if let Some(fields) = payload.as_object_mut() {
+        fields.extend(state.health.details().await);
     }
     (status, axum::Json(payload)).into_response()
 }

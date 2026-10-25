@@ -16,6 +16,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use heron_engine::engine::{Engine, EngineHealth, EngineOptions};
 use heron_engine::grpc::EngineService;
+use heron_engine::handover::{self, Followed, Probe};
 use heron_service::{LogArgs, MetricsArgs};
 
 const SERVICE: &str = "heron-engine";
@@ -109,12 +110,31 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             cli.state_dir.display()
         )
     })?;
+    // An engine running already hands over to this one (an upgrade).
+    let state_dir = cli.state_dir.clone();
+    let probe = tokio::task::spawn_blocking(move || handover::probe(&state_dir)).await?;
+    let (follow, standby) = match probe {
+        Probe::Alone => (None, false),
+        Probe::Standby(channel) => {
+            tracing::info!("an engine is on air: standing by to take over from it");
+            (Some(channel), true)
+        }
+        Probe::Incompatible { protocol, version } => {
+            tracing::warn!(
+                protocol,
+                version,
+                "the engine on air cannot hand over to this one: starting once it stops"
+            );
+            (None, true)
+        }
+    };
     let engine = Engine::start(
         EngineOptions {
             fallback_dir: Some(cli.fallback_dir.clone()),
             preload_tracks: cli.preload_tracks,
             exit_when_stuck: true,
             monitor: cli.monitor,
+            standby,
             ..EngineOptions::new(cli.library_dir.clone(), cli.state_dir.clone())
         },
         tokio::runtime::Handle::current(),
@@ -125,17 +145,55 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         "engine ready"
     );
 
+    let health = EngineHealth(std::sync::Arc::clone(&engine));
+    let router = heron_service::ops_router(SERVICE, metrics, health);
+    let http = tokio::spawn(heron_service::serve(cli.http_addr, router));
+
+    // A standby goes on air once the active engine hands over, or stops.
+    let takeover = async {
+        if standby {
+            let following = std::sync::Arc::clone(&engine);
+            let state_dir = cli.state_dir.clone();
+            let followed = tokio::task::spawn_blocking(move || {
+                let followed = match follow {
+                    Some(channel) => handover::follow(&following, channel),
+                    None => Followed::GivenUp("the engine on air speaks another protocol".to_owned()),
+                };
+                if let Followed::GivenUp(reason) = &followed {
+                    tracing::warn!(%reason, "nothing handed over: starting once the other engine stops");
+                    handover::wait_until_alone(&state_dir);
+                    following.cold_start();
+                }
+                followed
+            })
+            .await?;
+            if let Followed::TookOver = followed {
+                tracing::info!("took over from the previous engine");
+            }
+        }
+        anyhow::Ok(
+            handover::Listener::bind(&cli.state_dir)
+                .context("cannot listen for a standby engine")?,
+        )
+    };
+    let listener = tokio::select! {
+        listener = takeover => listener?,
+        () = heron_service::shutdown_signal() => {
+            // A standby stops without touching the state: it is not its own.
+            tracing::info!("stopping before taking over");
+            return Ok(());
+        }
+    };
+
     let grpc = tonic::transport::Server::builder()
         .add_service(EngineService::server(std::sync::Arc::clone(&engine)))
         .serve_with_shutdown(cli.grpc_addr, heron_service::shutdown_signal());
     tracing::info!(addr = %cli.grpc_addr, "grpc server listening");
 
-    let health = EngineHealth(std::sync::Arc::clone(&engine));
-    let router = heron_service::ops_router(SERVICE, metrics, health);
     let servers = async {
-        let (grpc, http) = tokio::join!(grpc, heron_service::serve(cli.http_addr, router));
+        let (grpc, http) = tokio::join!(grpc, http);
         grpc.context("grpc server failed")?;
-        http?;
+        http??;
         anyhow::Ok(())
     };
     tokio::pin!(servers);
@@ -146,9 +204,26 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         () = heron_service::shutdown_signal() => {}
     }
-    // Where the track on air is now, for the next start: first, before
-    // anything can delay the exit.
-    engine.save_queue();
+    match listener.take_standby() {
+        Some(channel) => {
+            let handing = std::sync::Arc::clone(&engine);
+            let runtime = tokio::runtime::Handle::current();
+            let handed = tokio::task::spawn_blocking(move || {
+                handover::hand_over(&handing, channel, &runtime)
+            })
+            .await?;
+            match handed {
+                Ok(()) => tracing::info!("the new engine is on air"),
+                Err(error) => {
+                    tracing::error!(%error, "handover failed: stopping as usual");
+                    engine.save_queue();
+                }
+            }
+        }
+        // Where the track on air is now, for the next start: first, before
+        // anything can delay the exit.
+        None => engine.save_queue(),
+    }
     // Streams (the API's WatchEvents) never end on their own: do not wait
     // for them, or Docker kills the engine after 10 s.
     match tokio::time::timeout(SHUTDOWN_GRACE, &mut servers).await {
