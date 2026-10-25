@@ -1294,6 +1294,21 @@ mod tests {
     }
 
     #[test]
+    fn every_placeholder_is_filled() {
+        let template = "{{event}}|{{artist}}|{{title}}|{{album}}|{{duration_ms}}|{{played_ms}}|\
+                        {{reason}}|{{deck}}|{{source}}|{{track_id}}|{{at_unix_ms}}|{{delivery_id}}";
+        let mut ended = Payload::of(&ended(EndReason::Finished));
+        ended.delivery_id = 4;
+        assert_eq!(
+            render(template, "text/plain", &ended),
+            "track.ended|Simon & Garfunkel|Song||180000|500|finished|a|rotation|3|1000|4"
+        );
+        let mut ping = Payload::ping();
+        ping.at_unix_ms = 7;
+        assert_eq!(render(template, "text/plain", &ping), "ping||||||||||7|0");
+    }
+
+    #[test]
     fn templates_with_unknown_placeholders_are_refused() {
         assert!(check_template("{{artist}} {{ title }} {{reason}}").is_ok());
         let error = check_template("{{artist}} {{song}}").unwrap_err();
@@ -1345,6 +1360,24 @@ mod tests {
         ] {
             assert!(check(input(url, events, content_type)).is_err(), "{url}");
         }
+        let long_url = format!("https://example.org/{}", "a".repeat(2_048));
+        assert!(check(input(&long_url, vec![WebhookEvent::TrackStarted], None)).is_err());
+        for name in ["  ", &"n".repeat(256)] {
+            let mut unnamed = input(
+                "https://example.org",
+                vec![WebhookEvent::TrackStarted],
+                None,
+            );
+            unnamed.name = name.to_owned();
+            assert!(check(unnamed).is_err(), "{name}");
+        }
+        let mut templated = input(
+            "https://example.org",
+            vec![WebhookEvent::TrackStarted],
+            None,
+        );
+        templated.body_template = Some("{{song}}".to_owned());
+        assert!(check(templated).is_err());
     }
 }
 
@@ -1527,6 +1560,32 @@ mod delivery_tests {
             .unwrap()
             .parse()
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn disabled_webhooks_send_nothing() {
+        let Some(db) = ScratchDatabase::create().await else {
+            return;
+        };
+        let webhooks = Webhooks::with_backoff(db.pool.clone(), Backoff(vec![])).unwrap();
+        let (receiver, url) = receiver(0).await;
+        let id = add_webhook(&db.pool, "off", &url).await;
+        // A delivery queued before the webhook was turned off.
+        webhooks.queue(id, Payload::ping()).await.unwrap();
+        sqlx::query("UPDATE webhooks SET enabled = FALSE WHERE id = ?")
+            .bind(id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        webhooks.queue_event(&started(DeckName::A)).await.unwrap();
+        let sender = tokio::spawn(Arc::clone(&webhooks).send_loop());
+        assert_eq!(
+            settled(&db.pool, id).await,
+            [("failed".to_owned(), 0, None)]
+        );
+        assert!(receiver.got.lock().unwrap().is_empty());
+        sender.abort();
+        db.drop().await;
     }
 
     #[tokio::test]

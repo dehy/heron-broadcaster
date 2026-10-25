@@ -2616,10 +2616,106 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let older = plays.last().unwrap()["started_at_unix_ms"]
+        .as_i64()
+        .unwrap();
+    let history: Value = anyone
+        .get(format!("{base}/history?before={older}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        history
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|play| play["started_at_unix_ms"].as_i64().unwrap() < older)
+    );
+
+    // Editing a webhook keeps its secret; a new one replaces it.
+    let edited = json!({"name": "Website", "url": format!("http://{receiver}/json"),
+                        "events": ["track.started"], "enabled": false});
+    let (status, changed) = admin
+        .send(Method::PUT, &format!("/webhooks/{webhook}"), edited.clone())
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(changed["enabled"], false);
+    assert_eq!(changed["events"], json!(["track.started"]));
+    let fetched = admin.get(&format!("/webhooks/{webhook}")).await;
+    assert_eq!(fetched["enabled"], false);
+    assert_eq!(fetched["events"], changed["events"]);
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/webhooks/{webhook}"),
+            json!({"name": "Display", "url": format!("http://{receiver}/json"),
+                   "events": ["track.started"]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = admin.send(Method::PUT, "/webhooks/999999", edited).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, rotated) = admin
+        .request(Method::POST, &format!("/webhooks/{webhook}/secret"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_ne!(rotated["secret"].as_str().unwrap(), secret);
+    let (status, _) = admin
+        .request(Method::POST, "/webhooks/999999/secret", None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A disabled webhook's ping fails; the log filters and pages.
+    let (status, ping) = admin
+        .request(Method::POST, &format!("/webhooks/{webhook}/test"), None)
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let ping = ping["id"].as_u64().unwrap();
+    let failed = eventually("the ping to fail", Duration::from_secs(5), || async {
+        let failed = admin
+            .get(&format!("/webhooks/{webhook}/deliveries?status=failed"))
+            .await;
+        (!failed.as_array().unwrap().is_empty()).then_some(failed)
+    })
+    .await;
+    assert_eq!(failed[0]["id"], ping, "{failed}");
+    let page = admin
+        .get(&format!(
+            "/webhooks/{webhook}/deliveries?before={ping}&limit=2"
+        ))
+        .await;
+    let page = page.as_array().unwrap();
+    assert_eq!(page.len(), 2);
+    assert!(
+        page.iter()
+            .all(|delivery| delivery["id"].as_u64().unwrap() < ping)
+    );
+    let (status, _) = admin
+        .request(
+            Method::GET,
+            &format!("/webhooks/{webhook}/deliveries?limit=0"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let (status, _) = admin
         .request(Method::DELETE, &format!("/webhooks/{webhook}"), None)
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+    for path in [
+        format!("/webhooks/{webhook}"),
+        format!("/webhooks/{webhook}/deliveries"),
+    ] {
+        let (status, _) = admin.request(Method::GET, &path, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+    }
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/webhooks/{webhook}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     station.stop().await;
 }

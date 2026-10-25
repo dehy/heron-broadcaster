@@ -6,37 +6,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { type DeliveryView, type WebhookEvent, type WebhookView, api, done, unwrap } from "../api";
 import { Banner, Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, Modal, PageHead } from "../components/ui";
-import { type PlainKey, rich, t } from "../i18n";
+import { rich, t } from "../i18n";
 import { ago, clockTime, dateTime } from "../lib/format";
 import { useAction, useCan } from "../lib/session";
+import { DEFAULT_TEMPLATE, EVENTS, PLACEHOLDERS, eventLabel, toggleEvent, webhookBody } from "../lib/webhooks";
 
-const EVENTS: { value: WebhookEvent; label: PlainKey }[] = [
-  { value: "track.started", label: "webhooks.event.started" },
-  { value: "track.ended", label: "webhooks.event.ended" },
-  { value: "track.skipped", label: "webhooks.event.skipped" },
-];
-
-const PLACEHOLDERS = [
-  "event",
-  "artist",
-  "title",
-  "album",
-  "duration_ms",
-  "played_ms",
-  "reason",
-  "deck",
-  "source",
-  "track_id",
-  "at_unix_ms",
-  "delivery_id",
-];
-
-function eventLabel(event: string): string {
-  const known = EVENTS.find((e) => e.value === event);
-  return known ? t(known.label) : event === "ping" ? t("webhooks.event.ping") : event;
-}
-
-function StatusBadge({ delivery }: { delivery: Pick<DeliveryView, "status"> & { next_attempt_at_unix_ms?: number | null } }) {
+function StatusBadge({
+  delivery,
+}: Readonly<{ delivery: Pick<DeliveryView, "status"> & { next_attempt_at_unix_ms?: number | null } }>) {
   switch (delivery.status) {
     case "delivered":
       return <span className="badge good">{t("webhooks.status.delivered")}</span>;
@@ -197,7 +174,7 @@ export function Webhooks() {
   );
 }
 
-function Deliveries({ webhook, onRotate }: { webhook: WebhookView; onRotate: () => void }) {
+function Deliveries({ webhook, onRotate }: Readonly<{ webhook: WebhookView; onRotate: () => void }>) {
   const deliveries = useQuery({
     queryKey: ["webhook-deliveries", webhook.id],
     queryFn: () =>
@@ -318,7 +295,7 @@ function SigningHelp() {
   );
 }
 
-function SecretDialog({ name, secret, onClose }: { name: string; secret: string; onClose: () => void }) {
+function SecretDialog({ name, secret, onClose }: Readonly<{ name: string; secret: string; onClose: () => void }>) {
   return (
     <Modal
       title={t("webhooks.secretOf", { name })}
@@ -346,11 +323,11 @@ function WebhookDialog({
   webhook,
   onClose,
   onCreated,
-}: {
+}: Readonly<{
   webhook: WebhookView | null;
   onClose: () => void;
   onCreated: (name: string, secret: string) => void;
-}) {
+}>) {
   const [name, setName] = useState(webhook?.name ?? "");
   const [url, setUrl] = useState(webhook?.url ?? "");
   const [events, setEvents] = useState<WebhookEvent[]>(
@@ -360,18 +337,8 @@ function WebhookDialog({
   const [enabled, setEnabled] = useState(webhook?.enabled ?? true);
   const [custom, setCustom] = useState(Boolean(webhook?.body_template));
   const [contentType, setContentType] = useState(webhook?.content_type ?? "application/json");
-  const [template, setTemplate] = useState(
-    webhook?.body_template ?? '{"text": "Now playing: {{artist}} – {{title}}"}',
-  );
-  const body = {
-    name,
-    url,
-    events,
-    include_fx: includeFx,
-    enabled,
-    content_type: custom ? contentType : "application/json",
-    body_template: custom ? template : null,
-  };
+  const [template, setTemplate] = useState(webhook?.body_template ?? DEFAULT_TEMPLATE);
+  const body = webhookBody({ name, url, events, includeFx, enabled, custom, contentType, template });
   const save = useAction(
     () =>
       webhook
@@ -434,13 +401,7 @@ function WebhookDialog({
                 <input
                   type="checkbox"
                   checked={events.includes(option.value)}
-                  onChange={(e) =>
-                    setEvents(
-                      e.target.checked
-                        ? EVENTS.map((o) => o.value).filter((v) => v === option.value || events.includes(v))
-                        : events.filter((v) => v !== option.value),
-                    )
-                  }
+                  onChange={(e) => setEvents(toggleEvent(events, option.value, e.target.checked))}
                 />{" "}
                 {t(option.label)}
               </label>
