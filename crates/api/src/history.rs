@@ -225,19 +225,23 @@ impl HistoryRecorder {
                 continue;
             }
             let started_at = now.saturating_sub(deck.position_ms);
+            // Not by deck: a restarted engine, or one taking over from
+            // another, resumes the track on air on whichever deck is free.
             let open: Option<u64> = sqlx::query_scalar(
                 "SELECT id FROM play_history
-                 WHERE ended_at IS NULL AND deck = ? AND track_id <=> ?
+                 WHERE ended_at IS NULL AND track_id <=> ? AND title <=> ?
+                   AND (deck = 'fx') = ?
                    AND ABS(TIMESTAMPDIFF(MICROSECOND, started_at, FROM_UNIXTIME(?))) < ?
                  ORDER BY started_at DESC LIMIT 1",
             )
-            .bind(deck.deck.as_str())
             .bind(entry.track.track_id)
+            .bind(&entry.track.title)
+            .bind(deck.deck == DeckName::Fx)
             .bind(seconds(started_at))
             .bind(MATCH_TOLERANCE_MS * 1_000)
             .fetch_optional(&self.pool)
             .await?;
-            let id = match open {
+            let id = match open.filter(|id| !keep.contains(id)) {
                 Some(id) => id,
                 None => self.insert(deck.deck, entry, started_at).await?,
             };
@@ -349,4 +353,119 @@ async fn list_history(
     sql.push(" ORDER BY h.started_at DESC, h.id DESC LIMIT ")
         .push_bind(limit);
     Ok(Json(sql.build_query_as().fetch_all(&state.pool).await?))
+}
+
+#[cfg(test)]
+mod tests {
+    use heron_service::db::ScratchDatabase;
+
+    use super::*;
+    use crate::engine::{DeckState, QueuedTrack};
+
+    fn entry(entry_id: u64, title: &str) -> QueueEntry {
+        QueueEntry {
+            entry_id,
+            track: QueuedTrack {
+                track_id: None,
+                path: format!("{title}.mp3"),
+                title: Some(title.to_owned()),
+                artist: Some("Artist".to_owned()),
+                album: None,
+                duration_ms: 300_000,
+                cue_in_ms: 0,
+                cue_out_ms: 300_000,
+                source: PlaySource::Rotation,
+            },
+        }
+    }
+
+    fn state(engine_started_at: u64, decks: Vec<DeckState>) -> PlayerState {
+        PlayerState {
+            paused: false,
+            decks,
+            cued: None,
+            queue: Vec::new(),
+            outputs: Vec::new(),
+            rendered_ms: 0,
+            underruns: 0,
+            engine_started_at_unix_ms: engine_started_at,
+        }
+    }
+
+    fn on_air(deck: DeckName, entry: QueueEntry, position_ms: u64) -> DeckState {
+        DeckState {
+            deck,
+            entry: Some(entry),
+            position_ms,
+            length_ms: 300_000,
+            on_air: true,
+        }
+    }
+
+    async fn rows(pool: &MySqlPool) -> Vec<(String, String, bool)> {
+        sqlx::query_as::<_, (String, String, bool)>(
+            "SELECT title, deck, ended_at IS NULL FROM play_history ORDER BY id",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    }
+
+    /// A new engine (restarted, or taking over from another) resumes the
+    /// track on air on the other deck: still one play.
+    #[tokio::test]
+    async fn a_track_resumed_on_another_deck_keeps_its_play() {
+        let Some(db) = ScratchDatabase::create().await else {
+            return;
+        };
+        let mut recorder = HistoryRecorder::new(db.pool.clone());
+        let now = unix_ms(SystemTime::now());
+
+        // The first engine plays "Release" on deck B, started 60 s ago.
+        let first = state(
+            now - 600_000,
+            vec![on_air(DeckName::B, entry(41, "Release"), 60_000)],
+        );
+        recorder.reconcile(&first).await.unwrap();
+        // And "Tesla" on deck A had started before, still open.
+        sqlx::query(
+            "INSERT INTO play_history (title, started_at, deck, source)
+             VALUES ('Tesla', FROM_UNIXTIME(?), 'a', 'rotation')",
+        )
+        .bind(seconds(now - 400_000))
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        // The new engine resumes "Release" on deck A, 61 s in.
+        let second = state(now, vec![on_air(DeckName::A, entry(41, "Release"), 61_000)]);
+        recorder.reconcile(&second).await.unwrap();
+
+        assert_eq!(
+            rows(&db.pool).await,
+            vec![
+                ("Release".to_owned(), "b".to_owned(), true),
+                // Not on air any more: closed.
+                ("Tesla".to_owned(), "a".to_owned(), false),
+            ]
+        );
+        // Its end is recorded on the same row.
+        recorder
+            .record(TrackEvent::Ended {
+                deck: DeckName::A,
+                entry: entry(41, "Release"),
+                at_unix_ms: now + 1_000,
+                played_ms: 62_000,
+                reason: EndReason::Finished,
+            })
+            .await
+            .unwrap();
+        let played: Vec<Option<u32>> =
+            sqlx::query_scalar("SELECT played_ms FROM play_history WHERE title = 'Release'")
+                .fetch_all(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(played, vec![Some(62_000)]);
+        db.drop().await;
+    }
 }

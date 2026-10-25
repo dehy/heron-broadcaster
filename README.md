@@ -6,7 +6,7 @@ The name comes from "air on" sounding like *héron*: keeping the air on, 24/7.
 
 ![The On air page: decks A and B, the next tracks, levels, the FX player, outputs and the engine's state](docs/images/on-air.png)
 
-> **Status:** early development, but it plays. Heron imports and analyzes a music library, takes new music by upload or through an incoming folder and files it once you import it, plays a queue with crossfades to Icecast servers, picks the music with categories, clocks and a weekly schedule, keeps the air on when the database, the API or the library goes away, tells websites and bots what plays through signed webhooks and public now-playing endpoints, and is operated from a web interface in English or French. Next: listener statistics (M7b), upgrades that keep the listeners connected (M8) and audio processing (M9, M10). See the [roadmap](docs/roadmap/README.md).
+> **Status:** early development, but it plays. Heron imports and analyzes a music library, takes new music by upload or through an incoming folder and files it once you import it, plays a queue with crossfades to Icecast servers, picks the music with categories, clocks and a weekly schedule, keeps the air on when the database, the API or the library goes away, and when Heron itself is upgraded, tells websites and bots what plays through signed webhooks and public now-playing endpoints, and is operated from a web interface in English or French. Next: listener statistics (M7b) and audio processing (M9, M10). See the [roadmap](docs/roadmap/README.md).
 
 Heron runs on Linux, amd64 and arm64, down to a Raspberry Pi.
 
@@ -16,6 +16,7 @@ Heron runs on Linux, amd64 and arm64, down to a Raspberry Pi.
 - **New music and deletion:** files uploaded from the browser (resumable, folders included) or dropped into the incoming folder wait in a buffer zone, identified (AcoustID, MusicBrainz) and checked for duplicates and unplayable files, until you import them. There you fix their tags and give them categories, labels, mood and sound code, so they are ready to air once imported; they are then tagged and filed as `Artist/Album/01 Title.ext`. Deleted tracks go to a trash they can be restored from for 30 days. Reorganizing the library is a dry run first, journaled, and can be undone. See [Library management](docs/library.md).
 - **Playout:** two decks with crossfades or fixed overlaps, Gap Killer, loudness normalization, an FX player for jingles over the music, a fallback folder, MP3 to one or more Icecast servers with track metadata. See [Audio engine](docs/audio-engine.md) and [Encoders and outputs](docs/outputs.md).
 - **Reliability and monitoring:** the next tracks are read into memory ahead of time, a fallback folder plays when the queue runs dry, a silence watchdog skips dead tracks, and the queue resumes where it was after a restart. Every service pushes its metrics to your Prometheus or Grafana Cloud, with a dashboard and alert rules to import, and errors can go to Sentry. See [Monitoring](docs/monitoring.md).
+- **Upgrades on air:** a new engine takes over from the running one, with its queue and its connection to Icecast, so an upgrade costs listeners about 70 ms of silence instead of a disconnection; when the engine does restart, Icecast's fallback mount keeps them connected. See [Upgrading](docs/upgrading.md) and [Engine handover](docs/handover.md).
 - **Rotation:** categories, clocks of slots, a weekly schedule, separation rules (title, artist, album) relaxed step by step when the library runs short, artists with several names, restrictions (dayparting, date ranges, sequences) that are never relaxed, and a selection log that explains every pick. A simulation checks a day or a week ahead. See [Rotation](docs/rotation.md).
 - **Integrations:** webhooks on track start, end and skip, with Heron's JSON or a template of your own, signed (HMAC-SHA256), retried with backoff and logged; public now-playing and history endpoints for the station's website, readable from any origin. See [API – Webhooks](docs/api.md#webhooks).
 - **Web interface:** on air, queue, history, tracks with their waveform, cue points, details, labels and tags, the buffer and the trash, artists, clocks, schedule, restrictions, outputs, webhooks and settings; live updates, light and dark themes, English and French, from phone width up. Viewer, operator and admin roles. See [Web UI](docs/web.md).
@@ -65,7 +66,7 @@ services:
     image: ghcr.io/dehy/heron-web:0.1.0
 ```
 
-Then `docker compose pull && docker compose up -d --wait`. Setting `HERON_VERSION=0.1.0` in `.env` does the same for all five services at once. To upgrade, change the version and run the same two commands; migrations run when `heron-api` starts. Upgrading the engine this way takes the station off air for a few seconds, and Icecast disconnects the listeners; [Upgrading](docs/upgrading.md) describes how to keep them, with Compose or Swarm (in progress, [M8](docs/roadmap/m8-hot-engine-upgrade.md)).
+Then `docker compose pull && docker compose up -d --wait`. Setting `HERON_VERSION=0.1.0` in `.env` does the same for all five services at once. To upgrade, change the version and run the same two commands; migrations run when `heron-api` starts. Restarting the engine this way leaves a few seconds of fallback on the stream; `scripts/upgrade.sh` instead hands the stream over from the running engine to the new one, without a gap for the listeners. See [Upgrading](docs/upgrading.md), for Compose and Swarm.
 
 Point `HERON_MUSIC_DIR` at your music: new and changed files are picked up automatically, and the **Tracks** page shows them as they are analyzed. See [Import and analysis](docs/analysis.md).
 
@@ -109,7 +110,8 @@ curl -b cookies -X POST -H 'X-Requested-With: curl' $api/player/skip
 | `heron-engine` | Real-time playout, encoders, outputs | 8081, gRPC control on 50051 |
 | `heron-relay` | Holds the engine's connections to stream servers, so an upgrade hands them to the new engine ([Upgrading](docs/upgrading.md)) | Unix socket in the `engine-relay` volume |
 | `mariadb` | Database | 3306 |
-| `icecast` | Optional local Icecast server (`--profile icecast`) | 8000, published on `HERON_ICECAST_PORT` (8010) |
+| `icecast` | Optional local Icecast server (`--profile icecast`), `/live` falling back to `/fallback` | 8000, published on `HERON_ICECAST_PORT` (8010) |
+| `icecast-fallback` | Loops an MP3 (silence by default) on Icecast's `/fallback` (`--profile icecast`) | none |
 
 Every Rust service serves `/healthz` and `/metrics` (Prometheus) on its port. With `HERON_METRICS_REMOTE_WRITE_URL` set, they also push their metrics to your Prometheus or Grafana Cloud (remote write); import `monitoring/grafana/heron-dashboard.json` into Grafana and load the alert rules of `monitoring/prometheus/alerts.yml`. `HERON_SENTRY_DSN` reports errors to Sentry. See [Monitoring](docs/monitoring.md).
 

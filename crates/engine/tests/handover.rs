@@ -280,12 +280,21 @@ async fn hand_over(relay: Option<&Path>) {
     );
     assert!(matches!(follow.await.unwrap(), Followed::TookOver));
 
-    // The new engine plays the same track, on the same connection.
+    // The new engine plays the same track, on the same connection, from
+    // where the old one stopped (held there since).
     assert!(!standby.is_standby());
+    let cut = Instant::now();
     wait_for("the track on air", Duration::from_secs(2), || {
         on_air(&standby).is_some_and(|(id, _)| id == entry_id)
     })
     .await;
+    let (_, stopped_ms) = on_air(&active).unwrap();
+    let (_, resumed_ms) = on_air(&standby).unwrap();
+    let elapsed_ms = cut.elapsed().as_millis() as u64;
+    assert!(
+        resumed_ms >= stopped_ms && resumed_ms <= stopped_ms + elapsed_ms + 50,
+        "stopped at {stopped_ms} ms, resumed at {resumed_ms} ms, {elapsed_ms} ms later"
+    );
     assert_eq!(standby.player().saved().waiting, waiting);
     let before = server.bytes();
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -467,4 +476,104 @@ async fn saves_the_queue_when_nobody_takes_over() {
     // The socket is gone with the listener: the next engine starts alone.
     assert!(!state.path().join("handover.sock").exists());
     assert!(matches!(handover::probe(state.path()), Probe::Alone));
+}
+
+/// A standby that never answers: the active engine plays on, not held.
+async fn standby_failing(answer_prepare: bool) {
+    let (_library, state, active, server) = station(None).await;
+    let listener = handover::Listener::bind(state.path()).unwrap();
+    let Probe::Standby(mut fake) = handover::probe(state.path()) else {
+        panic!("no standby");
+    };
+    let fake = tokio::task::spawn_blocking(move || {
+        // Reads what comes, never ready; or dies at the first Prepare.
+        let mut prepares = 0;
+        while let Ok((message, _)) = fake.recv(None) {
+            if let handover::Message::Prepare { .. } = message {
+                prepares += 1;
+                if !answer_prepare {
+                    break;
+                }
+            }
+        }
+        prepares
+    });
+    let mut channel = None;
+    wait_for("the standby", Duration::from_secs(5), || {
+        channel = listener.take_standby();
+        channel.is_some()
+    })
+    .await;
+
+    let handing = Arc::clone(&active);
+    let runtime = tokio::runtime::Handle::current();
+    let channel = channel.unwrap();
+    let handed =
+        tokio::task::spawn_blocking(move || handover::hand_over(&handing, channel, &runtime))
+            .await
+            .unwrap();
+    assert!(handed.is_err());
+    let prepares = fake.await.unwrap();
+    assert_eq!(prepares, if answer_prepare { 3 } else { 1 });
+
+    // Still on air, on its own connection, never held.
+    assert!(!active.player().is_held());
+    let before = server.bytes();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(server.bytes() - before > 12_000);
+    // The same track, unless it ended during the attempts.
+    assert!(on_air(&active).is_some());
+    assert_eq!(server.sources.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn plays_on_when_the_standby_dies_while_preparing() {
+    let _real_time = REAL_TIME.lock().await;
+    standby_failing(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn plays_on_when_the_standby_is_never_ready() {
+    let _real_time = REAL_TIME.lock().await;
+    standby_failing(true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_old_engine_writes_nothing_after_handing_over() {
+    let _real_time = REAL_TIME.lock().await;
+    let (library, state, active, _server) = station(None).await;
+    let listener = handover::Listener::bind(state.path()).unwrap();
+    let Probe::Standby(channel) = handover::probe(state.path()) else {
+        panic!("no standby");
+    };
+    let standby = engine(library.path(), state.path(), None, true);
+    let following = Arc::clone(&standby);
+    let follow = tokio::task::spawn_blocking(move || handover::follow(&following, channel));
+    let mut channel = None;
+    wait_for("the standby", Duration::from_secs(5), || {
+        channel = listener.take_standby();
+        channel.is_some()
+    })
+    .await;
+    let handing = Arc::clone(&active);
+    let runtime = tokio::runtime::Handle::current();
+    let channel = channel.unwrap();
+    tokio::task::spawn_blocking(move || handover::hand_over(&handing, channel, &runtime))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(follow.await.unwrap(), Followed::TookOver));
+
+    // Only the old engine left running: it must not save the queue any more
+    // (it saves every 5 s while playing).
+    drop(standby);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let queue = state.path().join("queue.json");
+    std::fs::remove_file(&queue).unwrap();
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    assert!(
+        !queue.exists(),
+        "the old engine saved the queue after handing over"
+    );
+    drop(active);
 }
