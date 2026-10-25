@@ -269,6 +269,49 @@ async fn push_metadata<S: OutputSink>(sink: &mut S, name: &str, now_playing: &No
 mod tests {
     use super::*;
 
+    /// A server that is never there.
+    struct Unreachable;
+
+    impl OutputSink for Unreachable {
+        async fn connect(&mut self) -> Result<(), SinkError> {
+            Err(SinkError::Refused("nobody".to_owned()))
+        }
+
+        async fn send(&mut self, _data: &[u8]) -> Result<(), SinkError> {
+            Ok(())
+        }
+
+        async fn update_metadata(&mut self, _now_playing: &NowPlaying) -> Result<(), SinkError> {
+            Ok(())
+        }
+
+        fn disconnect(&mut self) {}
+    }
+
+    #[tokio::test]
+    async fn a_reconnecting_output_has_no_connection_to_give() {
+        let (audio, _) = broadcast::channel(4);
+        let (_metadata_tx, metadata) = watch::channel(NowPlaying::default());
+        let status = Arc::new(OutputStatus::default());
+        let (release, requests) = mpsc::channel(1);
+        let task = tokio::spawn(run(
+            Unreachable,
+            "test".to_owned(),
+            audio,
+            metadata,
+            Arc::clone(&status),
+            requests,
+        ));
+        while !matches!(status.state(), OutputState::Reconnecting { .. }) {
+            tokio::task::yield_now().await;
+        }
+        let (request, connection) = oneshot::channel();
+        release.send(request).await.unwrap();
+        assert!(connection.await.unwrap().is_none());
+        // And the output stops.
+        task.await.unwrap();
+    }
+
     #[test]
     fn backoff_doubles_up_to_a_minute() {
         let delays: Vec<u64> = (0..9).map(|attempt| backoff(attempt).as_secs()).collect();

@@ -9,14 +9,14 @@
 mod ctl;
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use heron_engine::engine::{Engine, EngineHealth, EngineOptions};
 use heron_engine::grpc::EngineService;
-use heron_engine::handover::{self, Followed, Probe};
+use heron_engine::handover;
 use heron_service::{LogArgs, MetricsArgs};
 
 const SERVICE: &str = "heron-engine";
@@ -128,8 +128,10 @@ fn main() -> anyhow::Result<()> {
 #[tokio::main]
 async fn relay(cli: &Cli, socket: PathBuf) -> anyhow::Result<()> {
     let _telemetry = heron_service::telemetry::init_tracing(&cli.log, "heron-relay")?;
-    if let Some(dir) = socket.parent() {
-        std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    if let Some(dir) = socket.parent().map(Path::to_path_buf) {
+        tokio::task::spawn_blocking(move || std::fs::create_dir_all(&dir))
+            .await?
+            .context("cannot create the relay's directory")?;
     }
     tokio::select! {
         served = heron_outputs::connection::serve_relay(socket) => served.context("relay failed"),
@@ -150,22 +152,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     })?;
     // An engine running already hands over to this one (an upgrade).
     let state_dir = cli.state_dir.clone();
-    let probe = tokio::task::spawn_blocking(move || handover::probe(&state_dir)).await?;
-    let (follow, standby) = match probe {
-        Probe::Alone => (None, false),
-        Probe::Standby(channel) => {
-            tracing::info!("an engine is on air: standing by to take over from it");
-            (Some(channel), true)
-        }
-        Probe::Incompatible { protocol, version } => {
-            tracing::warn!(
-                protocol,
-                version,
-                "the engine on air cannot hand over to this one: starting once it stops"
-            );
-            (None, true)
-        }
-    };
+    let start = tokio::task::spawn_blocking(move || handover::start(&state_dir)).await?;
+    let standby = start.standby;
     let engine = Engine::start(
         EngineOptions {
             fallback_dir: Some(cli.fallback_dir.clone()),
@@ -193,22 +181,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         if standby {
             let following = std::sync::Arc::clone(&engine);
             let state_dir = cli.state_dir.clone();
-            let followed = tokio::task::spawn_blocking(move || {
-                let followed = match follow {
-                    Some(channel) => handover::follow(&following, channel),
-                    None => Followed::GivenUp("the engine on air speaks another protocol".to_owned()),
-                };
-                if let Followed::GivenUp(reason) = &followed {
-                    tracing::warn!(%reason, "nothing handed over: starting once the other engine stops");
-                    handover::wait_until_alone(&state_dir);
-                    following.cold_start();
-                }
-                followed
+            tokio::task::spawn_blocking(move || {
+                handover::go_on_air(&following, start.follow, &state_dir)
             })
             .await?;
-            if let Followed::TookOver = followed {
-                tracing::info!("took over from the previous engine");
-            }
         }
         anyhow::Ok(
             handover::Listener::bind(&cli.state_dir)
@@ -243,26 +219,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         () = heron_service::shutdown_signal() => {}
     }
-    match listener.take_standby() {
-        Some(channel) => {
-            let handing = std::sync::Arc::clone(&engine);
-            let runtime = tokio::runtime::Handle::current();
-            let handed = tokio::task::spawn_blocking(move || {
-                handover::hand_over(&handing, channel, &runtime)
-            })
-            .await?;
-            match handed {
-                Ok(()) => tracing::info!("the new engine is on air"),
-                Err(error) => {
-                    tracing::error!(%error, "handover failed: stopping as usual");
-                    engine.save_queue();
-                }
-            }
-        }
-        // Where the track on air is now, for the next start: first, before
-        // anything can delay the exit.
-        None => engine.save_queue(),
-    }
+    let stopping = std::sync::Arc::clone(&engine);
+    let runtime = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || handover::stop(&stopping, &listener, &runtime)).await?;
     // Streams (the API's WatchEvents) never end on their own: do not wait
     // for them, or Docker kills the engine after 10 s.
     match tokio::time::timeout(SHUTDOWN_GRACE, &mut servers).await {

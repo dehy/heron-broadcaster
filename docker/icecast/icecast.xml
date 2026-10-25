@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!--
   Icecast for the `icecast` profile of docker-compose.yml. The passwords
-  below are replaced from ICECAST_*_PASSWORD when the container starts.
+  are set from ICECAST_*_PASSWORD when the container starts.
 
   /live falls back to /fallback, a looping source (the `icecast-fallback`
   service) in the stream's format: when the engine restarts, listeners
@@ -25,10 +25,10 @@
     </limits>
 
     <authentication>
-        <source-password>hackme</source-password>
-        <relay-password>hackme</relay-password>
+        <source-password></source-password>
+        <relay-password></relay-password>
         <admin-user>admin</admin-user>
-        <admin-password>hackme</admin-password>
+        <admin-password></admin-password>
     </authentication>
 
     <listen-socket>

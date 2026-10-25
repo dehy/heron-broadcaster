@@ -179,6 +179,10 @@ fn engine(library: &Path, state: &Path, relay: Option<&Path>, standby: bool) -> 
     .unwrap()
 }
 
+/// The tests play in real time: one at a time, or they starve each other
+/// of CPU and the measured silence grows.
+static REAL_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn wait_for(what: &str, timeout: Duration, mut done: impl FnMut() -> bool) {
     let deadline = Instant::now() + timeout;
     while !done() {
@@ -226,11 +230,13 @@ async fn station(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn hands_over_the_queue_and_the_connection() {
+    let _real_time = REAL_TIME.lock().await;
     hand_over(None).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn hands_over_a_relayed_connection() {
+    let _real_time = REAL_TIME.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let relay = dir.path().join("relay.sock");
     tokio::spawn(heron_outputs::connection::serve_relay(relay.clone()));
@@ -307,6 +313,7 @@ async fn hand_over(relay: Option<&Path>) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn plays_on_when_the_standby_goes_away() {
+    let _real_time = REAL_TIME.lock().await;
     let (_library, state, active, server) = station(None).await;
     let listener = handover::Listener::bind(state.path()).unwrap();
     let Probe::Standby(standby) = handover::probe(state.path()) else {
@@ -340,6 +347,7 @@ async fn plays_on_when_the_standby_goes_away() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn refuses_a_standby_of_another_protocol() {
+    let _real_time = REAL_TIME.lock().await;
     let state = tempfile::tempdir().unwrap();
     let listener = handover::Listener::bind(state.path()).unwrap();
     let path = state.path().join("handover.sock");
@@ -360,4 +368,103 @@ async fn refuses_a_standby_of_another_protocol() {
     let _stream = other.await.unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(listener.take_standby().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn starts_from_the_saved_state_when_nothing_is_handed_over() {
+    let _real_time = REAL_TIME.lock().await;
+    let (library, state, active, _server) = station(None).await;
+    let listener = handover::Listener::bind(state.path()).unwrap();
+    let Probe::Standby(channel) = handover::probe(state.path()) else {
+        panic!("no standby");
+    };
+    let standby = engine(library.path(), state.path(), None, true);
+    let following = Arc::clone(&standby);
+    let state_dir = state.path().to_path_buf();
+    let go_on_air = tokio::task::spawn_blocking(move || {
+        handover::go_on_air(&following, Some(channel), &state_dir)
+    });
+
+    let mut channel = None;
+    wait_for("the standby", Duration::from_secs(5), || {
+        channel = listener.take_standby();
+        channel.is_some()
+    })
+    .await;
+    // The active engine stops the usual way and gives up the handover.
+    let (entry_id, _) = on_air(&active).unwrap();
+    active.save_queue();
+    channel
+        .unwrap()
+        .send(&handover::Message::Abort {
+            reason: "test".to_owned(),
+        })
+        .unwrap();
+    drop(listener);
+    drop(active);
+
+    let followed = go_on_air.await.unwrap();
+    assert!(matches!(followed, Followed::GivenUp(reason) if reason == "test"));
+    assert!(!standby.is_standby());
+    wait_for("the saved track", Duration::from_secs(5), || {
+        on_air(&standby).is_some_and(|(id, _)| id == entry_id)
+    })
+    .await;
+    assert_eq!(standby.config().outputs.outputs.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn hands_over_a_paused_engine() {
+    let _real_time = REAL_TIME.lock().await;
+    let (library, state, active, server) = station(None).await;
+    active.player().pause().unwrap();
+    let listener = handover::Listener::bind(state.path()).unwrap();
+    let start = handover::start(state.path());
+    assert!(start.standby);
+    let standby = engine(library.path(), state.path(), None, true);
+    let following = Arc::clone(&standby);
+    let state_dir = state.path().to_path_buf();
+    let go_on_air = tokio::task::spawn_blocking(move || {
+        handover::go_on_air(&following, start.follow, &state_dir)
+    });
+    wait_for("the standby", Duration::from_secs(5), || {
+        state.path().join("handover.sock").exists()
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let (entry_id, _) = on_air(&active).unwrap();
+    let waiting = active.player().saved().waiting;
+
+    let stopping = Arc::clone(&active);
+    let runtime = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || handover::stop(&stopping, &listener, &runtime))
+        .await
+        .unwrap();
+    assert!(matches!(go_on_air.await.unwrap(), Followed::TookOver));
+
+    // Still paused, on the same connection. As after a restart, the track
+    // on air waits cued at its position until the engine resumes.
+    let snapshot = standby.player().snapshot();
+    assert!(snapshot.paused);
+    assert_eq!(snapshot.cued.map(|entry| entry.entry_id), Some(entry_id));
+    assert_eq!(snapshot.queue, waiting);
+    assert_eq!(server.sources.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn saves_the_queue_when_nobody_takes_over() {
+    let _real_time = REAL_TIME.lock().await;
+    let (_library, state, active, _server) = station(None).await;
+    let listener = handover::Listener::bind(state.path()).unwrap();
+    let queue = state.path().join("queue.json");
+    let _ = std::fs::remove_file(&queue);
+    let stopping = Arc::clone(&active);
+    let runtime = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || handover::stop(&stopping, &listener, &runtime))
+        .await
+        .unwrap();
+    assert!(queue.exists());
+    // The socket is gone with the listener: the next engine starts alone.
+    assert!(!state.path().join("handover.sock").exists());
+    assert!(matches!(handover::probe(state.path()), Probe::Alone));
 }

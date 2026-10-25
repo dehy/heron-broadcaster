@@ -154,8 +154,10 @@ impl Channel {
         &mut self,
         timeout: Option<Duration>,
     ) -> Result<(Message, Vec<OwnedFd>), HandoverError> {
-        self.stream
-            .set_read_timeout(timeout.map(|timeout| timeout.max(Duration::from_millis(1))))?;
+        // Refused on some systems once the peer closed: the read says so.
+        let _ = self
+            .stream
+            .set_read_timeout(timeout.map(|timeout| timeout.max(Duration::from_millis(1))));
         let mut header = [0_u8; 4];
         let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(MAX_CONNECTIONS))];
         let mut control = RecvAncillaryBuffer::new(&mut space);
@@ -206,6 +208,9 @@ fn socket_path(state_dir: &Path) -> PathBuf {
 /// The active engine's end: accepts the standby.
 pub struct Listener {
     standby: Arc<Mutex<Option<Channel>>>,
+    path: PathBuf,
+    /// Identifies our socket file: another engine may have replaced it.
+    inode: u64,
 }
 
 impl Listener {
@@ -220,6 +225,7 @@ impl Listener {
         }
         let listener = UnixListener::bind(&aside)?;
         std::fs::rename(&aside, &path)?;
+        let inode = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&path)?);
         let standby: Arc<Mutex<Option<Channel>>> = Arc::default();
         let accepted = Arc::clone(&standby);
         std::thread::Builder::new()
@@ -238,12 +244,28 @@ impl Listener {
                 }
             })?;
         tracing::info!(path = %path.display(), "listening for a standby engine");
-        Ok(Self { standby })
+        Ok(Self {
+            standby,
+            path,
+            inode,
+        })
     }
 
     /// The standby engine connected last, if any.
     pub fn take_standby(&self) -> Option<Channel> {
         self.standby.lock().ok()?.take()
+    }
+}
+
+impl Drop for Listener {
+    /// Removes the socket, unless a new engine replaced it: a starting
+    /// engine finds nobody on air instead of a socket nobody answers.
+    fn drop(&mut self) {
+        let ours = std::fs::metadata(&self.path)
+            .is_ok_and(|metadata| std::os::unix::fs::MetadataExt::ino(&metadata) == self.inode);
+        if ours {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 }
 
@@ -290,12 +312,83 @@ pub fn probe(state_dir: &Path) -> Probe {
             }
         }
         Ok((message, _)) => {
-            tracing::warn!(?message, "unexpected message from the active engine");
+            tracing::warn!(received = ?message, "unexpected message from the active engine");
             Probe::Alone
         }
         Err(error) => {
             tracing::warn!(%error, "the active engine did not answer");
             Probe::Alone
+        }
+    }
+}
+
+/// How a starting engine begins.
+pub struct Start {
+    /// Another engine is on air: wait for it ([`go_on_air`]).
+    pub standby: bool,
+    /// The engine on air, if it will hand over to this one.
+    pub follow: Option<Channel>,
+}
+
+/// Looks for an engine on air ([`probe`]), and says what it means.
+pub fn start(state_dir: &Path) -> Start {
+    match probe(state_dir) {
+        Probe::Alone => Start {
+            standby: false,
+            follow: None,
+        },
+        Probe::Standby(channel) => {
+            tracing::info!("an engine is on air: standing by to take over from it");
+            Start {
+                standby: true,
+                follow: Some(channel),
+            }
+        }
+        Probe::Incompatible { protocol, version } => {
+            tracing::warn!(
+                protocol,
+                version,
+                "the engine on air cannot hand over to this one: starting once it stops"
+            );
+            Start {
+                standby: true,
+                follow: None,
+            }
+        }
+    }
+}
+
+/// Standby: goes on air, with what the engine on air hands over (`follow`),
+/// or from the saved state once that engine is gone. Blocking.
+pub fn go_on_air(engine: &Engine, active: Option<Channel>, state_dir: &Path) -> Followed {
+    let followed = match active {
+        Some(channel) => follow(engine, channel),
+        None => Followed::GivenUp("the engine on air speaks another protocol".to_owned()),
+    };
+    match &followed {
+        Followed::TookOver => tracing::info!("took over from the previous engine"),
+        Followed::GivenUp(reason) => {
+            tracing::warn!(%reason, "nothing handed over: starting once the other engine stops");
+            wait_until_alone(state_dir);
+            engine.cold_start();
+        }
+    }
+    followed
+}
+
+/// Active engine, asked to stop: hands over to the standby if one waits,
+/// else saves the queue for the next start. Blocking.
+pub fn stop(engine: &Engine, listener: &Listener, runtime: &tokio::runtime::Handle) {
+    let Some(channel) = listener.take_standby() else {
+        // Where the track on air is now, for the next start.
+        engine.save_queue();
+        return;
+    };
+    match hand_over(engine, channel, runtime) {
+        Ok(()) => tracing::info!("the new engine is on air"),
+        Err(error) => {
+            tracing::error!(%error, "handover failed: stopping as usual");
+            engine.save_queue();
         }
     }
 }
@@ -368,7 +461,7 @@ pub fn follow(engine: &Engine, mut channel: Channel) -> Followed {
                 return Followed::TookOver;
             }
             Message::Abort { reason } => return Followed::GivenUp(reason),
-            message => tracing::warn!(?message, "unexpected handover message"),
+            message => tracing::warn!(received = ?message, "unexpected handover message"),
         }
     }
 }
@@ -513,7 +606,7 @@ fn cut_over(
     drop(fds);
     match channel.recv(Some(Duration::from_secs(5))) {
         Ok((Message::Done, _)) => tracing::info!(connections = outputs.len(), "handed over"),
-        Ok((message, _)) => tracing::warn!(?message, "unexpected answer to the cut"),
+        Ok((message, _)) => tracing::warn!(received = ?message, "unexpected answer to the cut"),
         Err(error) => tracing::warn!(%error, "the new engine did not confirm"),
     }
     Ok(())
@@ -546,5 +639,102 @@ fn wait_ready(
             }
             Err(error) => return Err(error),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use super::*;
+
+    fn pair() -> (Channel, Channel) {
+        let (a, b) = UnixStream::pair().unwrap();
+        (Channel::new(a), Channel::new(b))
+    }
+
+    #[test]
+    fn carries_messages_and_descriptors() {
+        let (mut active, mut standby) = pair();
+        active.send(&hello()).unwrap();
+        let (message, fds) = standby.recv(Some(Duration::from_secs(1))).unwrap();
+        assert_eq!(message, hello());
+        assert!(fds.is_empty());
+
+        // A socket travels with the message, still connected.
+        let (mut kept, given) = UnixStream::pair().unwrap();
+        let outputs = vec![HandedOver {
+            output: 7,
+            kind: ConnectionKind::Relayed,
+        }];
+        let cut = Message::Cut {
+            outputs: outputs.clone(),
+        };
+        active.send_with(&cut, &[OwnedFd::from(given)]).unwrap();
+        let (message, mut fds) = standby.recv(Some(Duration::from_secs(1))).unwrap();
+        assert_eq!(message, Message::Cut { outputs });
+        assert_eq!(fds.len(), 1);
+        let mut received = UnixStream::from(fds.remove(0));
+        kept.write_all(b"still here").unwrap();
+        let mut buffer = [0_u8; 10];
+        received.read_exact(&mut buffer).unwrap();
+        assert_eq!(&buffer, b"still here");
+    }
+
+    #[test]
+    fn reports_a_closed_or_silent_peer() {
+        let (mut active, standby) = pair();
+        let timed_out = active.recv(Some(Duration::from_millis(20)));
+        assert!(
+            matches!(&timed_out, Err(HandoverError::Io(error)) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)),
+            "{:?}",
+            timed_out.err()
+        );
+        drop(standby);
+        let closed = active.recv(Some(Duration::from_secs(1)));
+        assert!(
+            matches!(&closed, Err(HandoverError::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof),
+            "{:?}",
+            closed.err()
+        );
+    }
+
+    #[test]
+    fn refuses_invalid_messages() {
+        let (mut active, standby) = pair();
+        let mut raw = standby.stream;
+        raw.write_all(&(MAX_MESSAGE as u32 + 1).to_be_bytes())
+            .unwrap();
+        assert!(matches!(
+            active.recv(Some(Duration::from_secs(1))),
+            Err(HandoverError::Invalid(_))
+        ));
+
+        let (mut active, standby) = pair();
+        let mut raw = standby.stream;
+        raw.write_all(&4_u32.to_be_bytes()).unwrap();
+        raw.write_all(b"nope").unwrap();
+        assert!(matches!(
+            active.recv(Some(Duration::from_secs(1))),
+            Err(HandoverError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn waits_for_the_ready_of_this_attempt() {
+        let (mut active, mut standby) = pair();
+        standby.send(&Message::Ready { attempt: 1 }).unwrap();
+        standby.send(&Message::Ready { attempt: 2 }).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        assert!(wait_ready(&mut active, 2, deadline).unwrap());
+        // Nothing more comes: too late.
+        let deadline = Instant::now() + Duration::from_millis(20);
+        assert!(!wait_ready(&mut active, 3, deadline).unwrap());
+        standby.send(&Message::Done).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        assert!(matches!(
+            wait_ready(&mut active, 3, deadline),
+            Err(HandoverError::Invalid(_))
+        ));
     }
 }

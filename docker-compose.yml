@@ -200,6 +200,7 @@ services:
     command: ["icecast", "-c", "/etc/icecast.xml"]
     environment:
       ICECAST_SOURCE_PASSWORD: hackme
+      ICECAST_RELAY_PASSWORD: ${HERON_ICECAST_ADMIN_PASSWORD:-change-me}
       ICECAST_ADMIN_PASSWORD: ${HERON_ICECAST_ADMIN_PASSWORD:-change-me}
     volumes:
       - ./docker/icecast/icecast.xml:/etc/heron/icecast.xml:ro

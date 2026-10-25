@@ -201,7 +201,9 @@ impl AsyncWrite for Connection {
 /// `OK\n` or `ERR <reason>\n`), then carries bytes both ways until either
 /// side closes. Runs until the task is dropped.
 pub async fn serve_relay(path: PathBuf) -> io::Result<()> {
-    match std::fs::remove_file(&path) {
+    // The socket of a relay that ran before.
+    let stale = path.clone();
+    match tokio::task::spawn_blocking(move || std::fs::remove_file(stale)).await? {
         Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
         _ => {}
     }
