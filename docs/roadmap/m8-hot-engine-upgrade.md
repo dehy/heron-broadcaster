@@ -29,6 +29,7 @@ Two steps, usable separately:
 
 - `docker/icecast/icecast.xml`, the `icecast-fallback` service and a fallback file in the `MP3 128k` format, in the `icecast` profile of `docker-compose.yml`.
 - `heron-engine`: standby mode, the handover protocol (`crates/engine/src/handover.rs`), adopting connections in `heron-outputs`, encoder flush, the role in `/healthz`, no gRPC while in standby. Design: [Engine handover](../handover.md).
+- `heron-relay` (`heron-engine relay`): holds the TCP connections to stream servers so they outlive the engine's container; engines reach it through a Unix socket in a shared volume.
 - `scripts/upgrade.sh` (Compose and Swarm); `stop_grace_period: 30s` for `heron-engine`.
 - An "engine upgrade" case in `scripts/chaos-test.sh`.
 - [Upgrading](../upgrading.md), [Audio engine – Upgrades and handover](../audio-engine.md#upgrades-and-handover), [Encoders and outputs – Isolation and reliability](../outputs.md#isolation-and-reliability).

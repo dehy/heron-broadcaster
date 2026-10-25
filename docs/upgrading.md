@@ -2,7 +2,6 @@
 
 How to move a station to a new version of Heron without taking it off air, with Docker Compose or Docker Swarm. Built in [M8](roadmap/m8-hot-engine-upgrade.md).
 
-> **Not built yet.** Until M8 is done, `scripts/upgrade.sh`, the hot handover and the `icecast-fallback` service do not exist: upgrade with `docker compose pull && docker compose up -d`, and expect the engine to be off air for a few seconds.
 
 ## What an upgrade touches
 
@@ -10,6 +9,7 @@ How to move a station to a new version of Heron without taking it off air, with 
 |---|---|
 | `heron-web`, `heron-api`, `heron-librarian`, `heron-analyzer` | At any time: the engine plays without them (queue in memory, then the fallback directory). The web interface reconnects; `heron-api` runs the database migrations when it starts. |
 | `heron-engine` | Off air for a few seconds when it is simply restarted, and Icecast disconnects the listeners when its source leaves. Without a gap with the **hot handover**: the new engine takes over from the old one ([Audio engine – Upgrades and handover](audio-engine.md#upgrades-and-handover)). |
+| `heron-relay` | Holds the engine's connections to the stream servers, so they outlive the engine's container ([Engine handover](handover.md#why-the-connections-go-through-a-relay)). It only carries bytes and almost never changes: `scripts/upgrade.sh` leaves it running. Restart it (`docker compose up -d heron-relay`) when a release says so; it is a short break covered by the fallback mount. |
 | `mariadb`, `icecast` | Not covered here. Restarting Icecast disconnects the listeners; the engine reconnects to it. |
 
 Two things keep the listeners: the hot handover (no gap at all), and an Icecast **fallback mount** for the times the engine does restart (a crash, a host reboot, an upgrade done the plain way). Set up both.
@@ -61,10 +61,12 @@ It sets `HERON_VERSION=0.2.0` in `.env`, then:
 1. pulls every image;
 2. upgrades every service except the engine (`docker compose up -d --no-deps --wait`);
 3. starts a second `heron-engine` container from the new image, next to the running one: it becomes the standby;
-4. waits for the standby to be healthy, then stops the old engine: the old engine hands over to the new one and exits;
+4. waits for the standby to be healthy, then stops the old engine: the old engine hands over to the new one (its connections to `heron-relay`) and exits;
 5. removes the old container, and checks that one engine is on air.
 
 If the standby does not become healthy within 2 min, the script removes it, leaves the running engine alone, and fails: the station stays on air on the old version.
+
+With images built locally (`docker compose build`), add `--no-pull`. The handover happens even when the engine's image did not change: it is harmless, and a way to try it.
 
 A plain `docker compose pull && docker compose up -d` also works, but Compose stops the old engine before starting the new one: a cold restart of a few seconds, which the fallback mount covers.
 
@@ -72,12 +74,19 @@ To go back to the previous version, run the script with it. Migrations are not u
 
 ## Docker Swarm
 
-A Swarm stack can start the new engine before stopping the old one (`start-first`). Give `heron-engine` this in the stack file:
+A Swarm stack can start the new engine before stopping the old one (`start-first`). Give `heron-engine` this in the stack file, and add `heron-relay` and its volume:
 
 ```yaml
   heron-engine:
     image: ghcr.io/dehy/heron-engine:${HERON_VERSION:-latest}
     stop_grace_period: 30s
+    environment:
+      # …the other variables
+      HERON_RELAY_SOCKET: /run/heron/relay/relay.sock
+    volumes:
+      # …the other volumes
+      - engine-state:/var/lib/heron/engine
+      - engine-relay:/run/heron/relay
     deploy:
       replicas: 1
       update_config:
@@ -86,9 +95,27 @@ A Swarm stack can start the new engine before stopping the old one (`start-first
       restart_policy:
         condition: any
         delay: 10s
+
+  heron-relay:
+    image: ghcr.io/dehy/heron-engine:${HERON_VERSION:-latest}
+    command: ["relay"]
+    environment:
+      HERON_RELAY_SOCKET: /run/heron/relay/relay.sock
+    volumes:
+      - engine-relay:/run/heron/relay
+    healthcheck:
+      test: ["CMD", "heron-engine", "relay", "--check"]
+      interval: 10s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+volumes:
+  engine-relay:
 ```
 
-`heron-engine` and its `engine-state` volume must stay on one node (the volume is local, and the handover passes connections between processes): pin it with a placement constraint on a multi-node swarm.
+`heron-engine`, `heron-relay` and their volumes must stay on one node (the volumes are local, and the handover passes connections between processes): pin them with a placement constraint on a multi-node swarm. The relay must be on the network the stream servers are reached from: it connects to them, not the engine.
 
 Then upgrade with the script, giving the stack's name:
 
@@ -96,9 +123,9 @@ Then upgrade with the script, giving the stack's name:
 scripts/upgrade.sh --swarm heron 0.2.0
 ```
 
-It pulls the images on the node first, so the update does not wait for the download, then runs `docker service update --image …` for each service, the engine last. Swarm starts the new engine, waits for it to be healthy (the standby), then stops the old one, which hands over.
+It pulls the images on the node first, so the update does not wait for the download, then runs `docker service update --image …` for each Heron service but the relay, the engine last, with `start-first`, a rollback on failure and a 30 s stop grace period (set even if the stack file lacks them). The engine is always updated (`--force`), even when its image did not change. Swarm starts the new engine, waits for it to be healthy (the standby), then stops the old one, which hands over.
 
-From Portainer, update the stack's `HERON_VERSION` and redeploy it with *Re-pull image*: the `start-first` update works the same way.
+From Portainer, update the stack's `HERON_VERSION` and redeploy it with *Re-pull image*: the `start-first` update works the same way, but the relay is updated too (a short break, covered by the fallback mount). To leave it running, give `heron-relay` an image tag of its own instead of `${HERON_VERSION}`.
 
 ## Checking an upgrade
 

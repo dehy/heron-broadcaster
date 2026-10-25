@@ -107,6 +107,7 @@ curl -b cookies -X POST -H 'X-Requested-With: curl' $api/player/skip
 | `heron-librarian` | Incoming folder, buffer zone, identification, tags, library layout, trash | 8083 |
 | `heron-analyzer` | Track analysis workers | 8082 |
 | `heron-engine` | Real-time playout, encoders, outputs | 8081, gRPC control on 50051 |
+| `heron-relay` | Holds the engine's connections to stream servers, so an upgrade hands them to the new engine ([Upgrading](docs/upgrading.md)) | Unix socket in the `engine-relay` volume |
 | `mariadb` | Database | 3306 |
 | `icecast` | Optional local Icecast server (`--profile icecast`) | 8000, published on `HERON_ICECAST_PORT` (8010) |
 

@@ -10,13 +10,22 @@ The fix has to keep **one source connection** open on Icecast from the old engin
 
 ## The idea
 
-Run both engines side by side for a few seconds. The new one (the **standby**) prepares everything that takes time: it reads the track on air, seeks into it, and builds its encoders. Then the old one (the **active** engine) stops at an agreed sample and hands its open TCP connections to the standby, which goes on writing to them. A Unix process can give another process an open file descriptor over a Unix socket (`SCM_RIGHTS`), so Icecast sees the same connection carry on: no new `PUT`, no listener moved.
+Run both engines side by side for a few seconds. The new one (the **standby**) prepares everything that takes time: it reads the track on air, seeks into it, and builds its encoders. Then the old one (the **active** engine) stops at an agreed sample and hands its open connections to the standby, which goes on writing to them. A Unix process can give another process an open file descriptor over a Unix socket (`SCM_RIGHTS`), so Icecast sees the same connection carry on: no new `PUT`, no listener moved.
+
+### Why the connections go through a relay
+
+A TCP socket belongs to the network namespace of the process that opened it. Two containers have two namespaces, and Docker deletes a container's network interface when it stops. A TCP socket passed from the old engine's container to the new one keeps working only until the old container stops; then its packets have nowhere to go. (Seen in a first version: 2 s after the handover the stream stalled, Icecast dropped the source after its timeout, and the new engine had to reconnect.)
+
+So the TCP connections to stream servers are held by a third, long-lived process: **`heron-relay`** (`heron-engine relay`, same image). An engine connects to it through a Unix socket in a volume they share, asks for `CONNECT host:port`, and the relay opens the TCP connection from its own container and carries bytes both ways. The engine hands over its **Unix** connection to the relay: Unix sockets do not depend on a network namespace, so the new engine keeps writing to it after the old container is gone, and the relay's TCP connection to Icecast never changes.
+
+The relay only carries bytes: no audio, no encoding, no configuration. It almost never needs changing, so `scripts/upgrade.sh` leaves it running. Restarting it is a short break, like an engine restart, covered by the fallback mount. While it is down, the engine connects directly (and then hands over a TCP connection, which works only when both engines share a network, as in the tests).
 
 Alternatives considered:
 
 | Option | Why not |
 |---|---|
-| A separate streaming service holding the connections, fed PCM by the engine | Its own upgrades would still drop the listeners; one more service on a Raspberry Pi. |
+| A streaming service doing the encoding and holding the connections, fed PCM by the engine | Its own upgrades would still drop the listeners, and it would change as often as the encoders. The relay chosen instead only carries bytes, so it is upgraded almost never. |
+| Both engines in one network namespace (a container holding it, `network_mode: service:`) | Not available in Docker Swarm; the two engines would also share their HTTP and gRPC ports. |
 | Two Icecast mounts and `fallback-override`, the new engine on the other mount | Icecast only (not HLS or Shoutcast), the mount names alternate between upgrades, and listeners are moved, not kept. |
 | Start the new engine first and let it connect when the old one leaves | A gap of a few seconds anyway (backoff after `403 mount in use`), and two engines writing `queue.json`. |
 
@@ -33,6 +42,7 @@ The Icecast fallback mount ([Upgrading](upgrading.md#icecast-fallback-mount)) is
 | `crates/engine/src/mixer.rs` | `Command::Hold`, `Command::HaltAt` and `Event::Halted`; `MixerStatus::cued_ready` |
 | `crates/outputs/src/pipeline.rs` | `Outputs::stop_after` (no audio after a frame), `Outputs::release` (flush, then give up the connections), `Outputs::apply_adopting` |
 | `crates/outputs/src/sink.rs`, `icecast.rs` | `OutputSink::take_connection`, the release request in `sink::run`, `IcecastSink::adopt` |
+| `crates/outputs/src/connection.rs` | `Connection` (TCP, or relayed through a Unix socket), handing it over and adopting it, and the relay itself (`serve_relay`) |
 | `crates/outputs/src/encoder.rs` | `Encoder::flush` |
 
 ## Roles and the socket
@@ -60,7 +70,7 @@ Length-prefixed JSON: a 4-byte big-endian length, then the message. A message is
 | `Hello { protocol, version }` | both | First message each way |
 | `Prepare { attempt, config, queue }` | active → standby | Get ready to go on with this queue (the `queue.json` format), the track on air stopping at `queue.on_air.position_ms`. A later `Prepare` replaces it. |
 | `Ready { attempt }` | standby → active | The track on air is open at that position, with enough audio decoded |
-| `Cut { outputs }` | active → standby | Stopped. The connections of `outputs` (output IDs) come with it, in that order |
+| `Cut { outputs }` | active → standby | Stopped. The connections of `outputs` (output ID and kind: `relayed` or `tcp`) come with it, in that order |
 | `Done` | standby → active | On air |
 | `Abort { reason }` | active → standby | The handover is given up |
 
@@ -71,6 +81,7 @@ sequenceDiagram
     participant D as Docker / Swarm
     participant A as Active engine
     participant S as Standby engine
+    participant R as heron-relay
     participant I as Icecast
     D->>S: start (new image)
     S->>A: connect handover.sock
@@ -83,10 +94,11 @@ sequenceDiagram
     Note over S: opens the track at P, decodes ahead
     S->>A: Ready
     Note over A: HaltAt(P): fades out over 10 ms,<br/>holds at exactly P
-    A->>I: last audio up to P, encoders flushed
-    A->>S: Cut + connection fds
+    A->>R: last audio up to P, encoders flushed
+    R->>I: (one TCP connection throughout)
+    A->>S: Cut + fds of its connections to the relay
     Note over S: adopts the connections,<br/>Resume: fades in over 10 ms from P
-    S->>I: audio from P, same connection
+    S->>R: audio from P, same connection
     S->>A: Done
     Note over A: writes nothing more, exits
     Note over S: binds handover.sock, writes state, serves gRPC
@@ -126,9 +138,9 @@ The outputs must not carry the silence that follows. `Outputs::stop_after(at_fra
 2. Each output task gets a release request. It sends what is already encoded, then `take_connection` gives its socket back instead of closing it. An output that was not connected answers `None` and simply restarts in the new engine.
 3. The active engine collects the sockets (2 s at most per output), sets `closing` (no more saves), and sends `Cut { outputs }` with the descriptors.
 
-The standby turns each descriptor back into a `TcpStream`, calls `Outputs::apply_adopting` (an `IcecastSink` built with `adopt` takes the connection on its first `connect`, without a request), then `unhold`: `Resume` fades in over 10 ms from the stop. The new encoders start from scratch. An MP3 stream is a sequence of independent frames, so players carry on. An Ogg stream will need a new chained stream (M11).
+The standby turns each descriptor back into a connection of its kind, calls `Outputs::apply_adopting` (an `IcecastSink` built with `adopt` takes the connection on its first `connect`, without a request), then `unhold`: `Resume` fades in over 10 ms from the stop. The new encoders start from scratch. An MP3 stream is a sequence of independent frames, so players carry on. An Ogg stream will need a new chained stream (M11).
 
-Measured in the test below: **80 ms** of silence in the stream at the cut, made of the two fades and the MP3 encoder's start-up delay. The time between the old engine's last byte and the new engine's first byte comes out of the players' buffers: it is never heard.
+Measured: **70 to 90 ms** of silence in the stream at the cut in the tests below, 68 ms through Docker Compose and 72 ms through Docker Swarm with real containers, made of the two fades and the MP3 encoder's start-up delay. The time between the old engine's last byte and the new engine's first byte comes out of the players' buffers: it is never heard.
 
 ## The state
 
@@ -153,10 +165,12 @@ The rule: whatever fails, it ends as a cold restart covered by the fallback moun
 | The active engine dies after `Cut` | Gone | On air already |
 | Incompatible protocol | Keeps no standby; stops as before when asked | Waits, then cold start |
 | SIGTERM to the standby | Not affected | Exits without touching the state |
+| The relay is down | Connects directly; its TCP connections are handed over, and die when the old container stops: the new engine reconnects (fallback mount) | Same |
+| The relay restarts | Its connections end: the outputs reconnect, through the relay once it is back | — |
 
 ## Orchestration
 
-The protocol needs the new engine started while the old one runs, on the same host and state volume, and then SIGTERM to the old one.
+The protocol needs the new engine started while the old one runs, on the same host, with the same state volume and the relay's socket volume, and then SIGTERM to the old one.
 
 - **Docker Swarm**: `update_config.order: start-first` does exactly that: Swarm starts the new task, waits until it is healthy (a standby is), then stops the old one.
 - **Docker Compose** has no `start-first`. `scripts/upgrade.sh` scales `heron-engine` to two containers without recreating the old one, waits for the new one's health, then stops and removes the old one.
@@ -167,7 +181,8 @@ The protocol needs the new engine started while the old one runs, on the same ho
 
 `crates/engine/tests/handover.rs` runs two real engines on one state directory against a fake Icecast server:
 
-- **hands over the queue and the connection**: one source connection throughout, never closed; the same track on air with the same entry ID and the same waiting tracks; audio keeps coming; the longest silence in the received stream is under 200 ms (80 ms measured).
+- **hands over the queue and the connection**, directly and **through the relay**: one source connection throughout, never closed; the same track on air with the same entry ID and the same waiting tracks; audio keeps coming; the longest silence in the received stream is under 200 ms.
+- `crates/outputs/src/connection.rs`: the relay carries bytes both ways, a relayed connection keeps working after being handed over and adopted, and closing it closes the server's side.
 - **plays on when the standby goes away**: the handover fails and the active engine is still on air, not held.
 - **refuses a standby of another protocol**.
 

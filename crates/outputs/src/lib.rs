@@ -6,11 +6,13 @@
 //!
 //! See `docs/outputs.md`.
 
+pub mod connection;
 pub mod encoder;
 pub mod icecast;
 pub mod pipeline;
 pub mod sink;
 
+pub use connection::{ConnectionKind, HandedConnection};
 pub use pipeline::{OutputSnapshot, Outputs};
 pub use sink::{NowPlaying, OutputSink, OutputState};
 

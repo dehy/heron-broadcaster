@@ -42,6 +42,9 @@ pub struct EngineOptions {
     pub exit_when_stuck: bool,
     /// Play the master bus on the local sound card (`monitor` feature).
     pub monitor: bool,
+    /// The relay network outputs connect through (`heron-engine relay`), so
+    /// their connections can be handed over to an engine in another container.
+    pub relay_socket: Option<PathBuf>,
     /// Start as a standby, to take over from a running engine: silent, no
     /// outputs, the saved state neither read nor written, until
     /// [`Engine::complete_takeover`] or [`Engine::cold_start`].
@@ -58,6 +61,7 @@ impl EngineOptions {
             preload_tracks: crate::player::PRELOAD_TRACKS,
             exit_when_stuck: false,
             monitor: false,
+            relay_socket: None,
             standby: false,
         }
     }
@@ -128,6 +132,7 @@ impl Engine {
         let (events, _) = broadcast::channel(256);
 
         let mut outputs = Outputs::new(master_rx, now_playing_rx, runtime.clone())?;
+        outputs.set_relay(options.relay_socket.clone());
         if let Err(error) = outputs.apply(&config.outputs) {
             tracing::error!(%error, "cannot start the saved outputs");
         }
@@ -296,7 +301,7 @@ impl Engine {
     /// Standby: goes on air, streaming to the outputs handed over
     /// (`connections`, by output ID; the others connect), and becomes the
     /// active engine, saving its state.
-    pub fn complete_takeover(&self, connections: HashMap<u64, std::net::TcpStream>) {
+    pub fn complete_takeover(&self, connections: HashMap<u64, heron_outputs::HandedConnection>) {
         let outputs = self
             .takeover_outputs
             .lock()
@@ -391,7 +396,7 @@ impl Engine {
         after_frame: Option<u64>,
     ) -> Vec<(
         u64,
-        tokio::sync::oneshot::Receiver<Option<std::net::TcpStream>>,
+        tokio::sync::oneshot::Receiver<Option<heron_outputs::HandedConnection>>,
     )> {
         let mut outputs = self.outputs();
         if let Some(frame) = after_frame {

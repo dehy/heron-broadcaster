@@ -3,16 +3,17 @@
 //! Icecast source client: HTTP `PUT` to the mount (Icecast 2.4 and later),
 //! metadata through `/admin/metadata`.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use base64::Engine;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::Deserialize;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::time::timeout;
 
 use crate::ConfigError;
+use crate::connection::{Connection, HandedConnection};
 use crate::encoder::StreamInfo;
 use crate::sink::{NowPlaying, OutputSink, SinkError};
 
@@ -107,10 +108,12 @@ impl IcecastConfig {
 pub struct IcecastSink {
     config: IcecastConfig,
     info: StreamInfo,
-    stream: Option<TcpStream>,
+    stream: Option<Connection>,
     /// A source connection handed over by another engine, streaming
     /// already: the first `connect` takes it instead of connecting.
-    adopted: Option<std::net::TcpStream>,
+    adopted: Option<HandedConnection>,
+    /// The relay socket the source connection goes through, if any.
+    relay: Option<PathBuf>,
 }
 
 impl IcecastSink {
@@ -120,12 +123,19 @@ impl IcecastSink {
             info,
             stream: None,
             adopted: None,
+            relay: None,
         }
+    }
+
+    /// Connects through the relay listening on `relay` (`heron-engine relay`).
+    pub fn with_relay(mut self, relay: Option<PathBuf>) -> Self {
+        self.relay = relay;
+        self
     }
 
     /// A sink going on with `connection`, a source connection to the same
     /// server and mount that another engine was streaming to.
-    pub fn adopt(config: IcecastConfig, info: StreamInfo, connection: std::net::TcpStream) -> Self {
+    pub fn adopt(config: IcecastConfig, info: StreamInfo, connection: HandedConnection) -> Self {
         Self {
             adopted: Some(connection),
             ..Self::new(config, info)
@@ -182,12 +192,9 @@ impl IcecastSink {
         request
     }
 
-    async fn open(&self) -> Result<TcpStream, SinkError> {
-        let address = (self.config.host.as_str(), self.config.port);
-        timeout(CONNECT_TIMEOUT, TcpStream::connect(address))
-            .await
-            .map_err(|_| SinkError::Timeout("connecting"))?
-            .map_err(SinkError::Connect)
+    /// A connection for a metadata update: direct, it is short-lived.
+    async fn open(&self) -> Result<Connection, SinkError> {
+        Connection::open(&self.config.host, self.config.port, None).await
     }
 }
 
@@ -195,14 +202,11 @@ impl OutputSink for IcecastSink {
     async fn connect(&mut self) -> Result<(), SinkError> {
         self.stream = None;
         if let Some(connection) = self.adopted.take() {
-            connection.set_nonblocking(true)?;
-            let stream = TcpStream::from_std(connection)?;
-            stream.set_nodelay(true)?;
-            self.stream = Some(stream);
+            self.stream = Some(Connection::adopt(connection)?);
             return Ok(());
         }
-        let mut stream = self.open().await?;
-        stream.set_nodelay(true)?;
+        let mut stream =
+            Connection::open(&self.config.host, self.config.port, self.relay.as_deref()).await?;
         let request = self.source_request();
         timeout(WRITE_TIMEOUT, stream.write_all(request.as_bytes()))
             .await
@@ -267,13 +271,13 @@ impl OutputSink for IcecastSink {
         self.stream = None;
     }
 
-    fn take_connection(&mut self) -> Option<std::net::TcpStream> {
-        self.stream.take()?.into_std().ok()
+    fn take_connection(&mut self) -> Option<HandedConnection> {
+        self.stream.take()?.hand_over().ok()
     }
 }
 
 /// Reads an HTTP response header and returns the status code and line.
-async fn read_status(stream: &mut TcpStream) -> Result<(u16, String), SinkError> {
+async fn read_status(stream: &mut (impl AsyncRead + Unpin)) -> Result<(u16, String), SinkError> {
     let mut header = Vec::new();
     let mut byte = [0_u8; 1];
     while !header.ends_with(b"\r\n\r\n") && !header.ends_with(b"\n\n") {

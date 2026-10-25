@@ -57,7 +57,7 @@ pub trait OutputSink: Send + 'static {
     fn disconnect(&mut self);
     /// Gives up the open connection, still streaming, for another engine to
     /// go on writing to it. `None` when the sink has none to give.
-    fn take_connection(&mut self) -> Option<std::net::TcpStream> {
+    fn take_connection(&mut self) -> Option<crate::HandedConnection> {
         None
     }
 }
@@ -65,7 +65,7 @@ pub trait OutputSink: Send + 'static {
 /// A request to an output to stop and give up its connection
 /// ([`OutputSink::take_connection`]), answered once the audio already
 /// encoded has been sent.
-pub type ReleaseRequest = oneshot::Sender<Option<std::net::TcpStream>>;
+pub type ReleaseRequest = oneshot::Sender<Option<crate::HandedConnection>>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutputState {

@@ -34,8 +34,8 @@ USER heron
 
 FROM runtime AS heron-engine
 USER root
-RUN mkdir -p /var/lib/heron/engine /var/lib/heron/fallback \
-    && chown -R heron:heron /var/lib/heron
+RUN mkdir -p /var/lib/heron/engine /var/lib/heron/fallback /run/heron/relay \
+    && chown -R heron:heron /var/lib/heron /run/heron
 USER heron
 COPY --from=builder /out/heron-engine /usr/local/bin/heron-engine
 ENV HERON_HTTP_ADDR=0.0.0.0:8081

@@ -68,6 +68,12 @@ struct Cli {
     #[arg(long, env = "HERON_MONITOR")]
     monitor: bool,
 
+    /// Socket of the relay (`heron-engine relay`) network outputs connect
+    /// through, so an upgrade hands them over without a gap. Direct
+    /// connections when unset or unreachable.
+    #[arg(long, env = "HERON_RELAY_SOCKET", global = true)]
+    relay_socket: Option<PathBuf>,
+
     /// Directory where the engine persists its state (configuration, queue) between restarts.
     #[arg(long, env = "HERON_STATE_DIR", default_value = "/var/lib/heron/engine")]
     state_dir: PathBuf,
@@ -85,6 +91,14 @@ enum Command {
     Healthcheck,
     /// Control a running engine.
     Ctl(ctl::Args),
+    /// Hold the engine's connections to stream servers, so they outlive
+    /// the engine's container (`docs/handover.md`). Listens on
+    /// `--relay-socket`.
+    Relay {
+        /// Exit 0 if a relay listens (used by Docker).
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -95,7 +109,31 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(Command::Ctl(args)) => ctl::run(args, &cli.library_dir),
+        Some(Command::Relay { check }) => {
+            let socket = cli
+                .relay_socket
+                .clone()
+                .context("the relay needs --relay-socket (HERON_RELAY_SOCKET)")?;
+            if check {
+                std::os::unix::net::UnixStream::connect(&socket)
+                    .with_context(|| format!("no relay on {}", socket.display()))?;
+                return Ok(());
+            }
+            relay(&cli, socket)
+        }
         None => run(cli),
+    }
+}
+
+#[tokio::main]
+async fn relay(cli: &Cli, socket: PathBuf) -> anyhow::Result<()> {
+    let _telemetry = heron_service::telemetry::init_tracing(&cli.log, "heron-relay")?;
+    if let Some(dir) = socket.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    }
+    tokio::select! {
+        served = heron_outputs::connection::serve_relay(socket) => served.context("relay failed"),
+        () = heron_service::shutdown_signal() => Ok(()),
     }
 }
 
@@ -134,6 +172,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             preload_tracks: cli.preload_tracks,
             exit_when_stuck: true,
             monitor: cli.monitor,
+            relay_socket: cli.relay_socket.clone(),
             standby,
             ..EngineOptions::new(cli.library_dir.clone(), cli.state_dir.clone())
         },

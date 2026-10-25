@@ -157,11 +157,36 @@ services:
     environment:
       <<: *rust-env
       HERON_LIBRARY_DIR: /music
+      # Connections to stream servers go through heron-relay, so an upgrade
+      # hands them over to the new engine (docs/handover.md).
+      HERON_RELAY_SOCKET: /run/heron/relay/relay.sock
     volumes:
       - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
       - ${HERON_FALLBACK_DIR:-./data/fallback}:/var/lib/heron/fallback:ro
       # Configuration (outputs, playout settings) kept across restarts.
       - engine-state:/var/lib/heron/engine
+      - engine-relay:/run/heron/relay
+
+  # Holds the engine's connections to stream servers, so they outlive the
+  # engine's container on upgrades. Tiny and seldom changed: scripts/upgrade.sh
+  # leaves it running; restarting it is a short break covered by Icecast's
+  # fallback mount. The engine connects directly while it is down.
+  heron-relay:
+    image: ghcr.io/dehy/heron-engine:${HERON_VERSION:-latest}
+    restart: unless-stopped
+    cpu_shares: 8192
+    oom_score_adj: -500
+    command: ["relay"]
+    environment:
+      <<: *rust-env
+      HERON_RELAY_SOCKET: /run/heron/relay/relay.sock
+    volumes:
+      - engine-relay:/run/heron/relay
+    healthcheck:
+      test: ["CMD", "heron-engine", "relay", "--check"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   # A local Icecast server to try outputs: `docker compose --profile icecast up -d`.
   # Source password `hackme`; listen on http://localhost:${HERON_ICECAST_PORT:-8010}/.
@@ -215,3 +240,4 @@ services:
 volumes:
   mariadb-data:
   engine-state:
+  engine-relay:

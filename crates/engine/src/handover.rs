@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use heron_outputs::{ConnectionKind, HandedConnection};
 use rustix::net::{
     RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendAncillaryBuffer,
     SendAncillaryMessage, SendFlags,
@@ -79,11 +80,18 @@ pub enum Message {
     Ready { attempt: u32 },
     /// Active → standby: stopped. The connections of `outputs` come with
     /// the message, in that order.
-    Cut { outputs: Vec<u64> },
+    Cut { outputs: Vec<HandedOver> },
     /// Standby → active: on air.
     Done,
     /// Active → standby: the handover is given up.
     Abort { reason: String },
+}
+
+/// One output's connection, in a `Cut`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HandedOver {
+    pub output: u64,
+    pub kind: ConnectionKind,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -346,10 +354,10 @@ pub fn follow(engine: &Engine, mut channel: Channel) -> Followed {
                         "connections missing: those outputs connect again"
                     );
                 }
-                let connections: HashMap<u64, std::net::TcpStream> = outputs
+                let connections: HashMap<u64, HandedConnection> = outputs
                     .into_iter()
                     .zip(fds)
-                    .map(|(output, fd)| (output, std::net::TcpStream::from(fd)))
+                    .map(|(handed, fd)| (handed.output, HandedConnection::from_fd(handed.kind, fd)))
                     .collect();
                 let handed = connections.len();
                 engine.complete_takeover(connections);
@@ -483,7 +491,10 @@ fn cut_over(
         for (output, connection) in released {
             match tokio::time::timeout(RELEASE_TIMEOUT, connection).await {
                 Ok(Ok(Some(connection))) => {
-                    outputs.push(output);
+                    outputs.push(HandedOver {
+                        output,
+                        kind: connection.kind(),
+                    });
                     fds.push(OwnedFd::from(connection));
                 }
                 Ok(_) => tracing::info!(output, "no connection to hand over"),

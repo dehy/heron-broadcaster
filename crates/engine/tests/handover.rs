@@ -167,10 +167,11 @@ fn track(library: &Path, name: &str, seconds: f64) -> TrackRequest {
     }
 }
 
-fn engine(library: &Path, state: &Path, standby: bool) -> Arc<Engine> {
+fn engine(library: &Path, state: &Path, relay: Option<&Path>, standby: bool) -> Arc<Engine> {
     Engine::start(
         EngineOptions {
             standby,
+            relay_socket: relay.map(Path::to_path_buf),
             ..EngineOptions::new(library.to_path_buf(), state.to_path_buf())
         },
         tokio::runtime::Handle::current(),
@@ -196,8 +197,11 @@ fn on_air(engine: &Engine) -> Option<(u64, u64)> {
         .and_then(|deck| Some((deck.entry?.entry_id, deck.position_ms)))
 }
 
-/// An engine on air with two tracks queued, streaming to `server`.
-async fn station() -> (
+/// An engine on air with two tracks queued, streaming to `server`, through
+/// a relay listening on `relay` when given.
+async fn station(
+    relay: Option<&Path>,
+) -> (
     tempfile::TempDir,
     tempfile::TempDir,
     Arc<Engine>,
@@ -206,7 +210,7 @@ async fn station() -> (
     let library = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let (port, server) = Server::start().await;
-    let active = engine(library.path(), state.path(), false);
+    let active = engine(library.path(), state.path(), relay, false);
     active.set_outputs(&outputs(port)).unwrap();
     let tracks = vec![
         track(library.path(), "first.wav", 30.0),
@@ -222,13 +226,26 @@ async fn station() -> (
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn hands_over_the_queue_and_the_connection() {
-    let (library, state, active, server) = station().await;
+    hand_over(None).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn hands_over_a_relayed_connection() {
+    let dir = tempfile::tempdir().unwrap();
+    let relay = dir.path().join("relay.sock");
+    tokio::spawn(heron_outputs::connection::serve_relay(relay.clone()));
+    wait_for("the relay", Duration::from_secs(2), || relay.exists()).await;
+    hand_over(Some(&relay)).await;
+}
+
+async fn hand_over(relay: Option<&Path>) {
+    let (library, state, active, server) = station(relay).await;
     let listener = handover::Listener::bind(state.path()).unwrap();
 
     let Probe::Standby(channel) = handover::probe(state.path()) else {
         panic!("no standby");
     };
-    let standby = engine(library.path(), state.path(), true);
+    let standby = engine(library.path(), state.path(), relay, true);
     assert!(standby.is_standby());
     let following = Arc::clone(&standby);
     let follow = tokio::task::spawn_blocking(move || handover::follow(&following, channel));
@@ -290,7 +307,7 @@ async fn hands_over_the_queue_and_the_connection() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn plays_on_when_the_standby_goes_away() {
-    let (_library, state, active, server) = station().await;
+    let (_library, state, active, server) = station(None).await;
     let listener = handover::Listener::bind(state.path()).unwrap();
     let Probe::Standby(standby) = handover::probe(state.path()) else {
         panic!("no standby");

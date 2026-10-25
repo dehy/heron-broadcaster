@@ -13,6 +13,7 @@
 //! slowing its encoder or the other outputs.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
@@ -24,6 +25,7 @@ use heron_core::{EncoderProfile, OutputConfig, OutputKind, OutputsConfig};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 use crate::ConfigError;
+use crate::connection::HandedConnection;
 use crate::encoder::{self, Encoder, INPUT_CHANNELS};
 use crate::icecast::{IcecastConfig, IcecastSink};
 use crate::sink::{self, NowPlaying, OutputState, OutputStatus, ReleaseRequest};
@@ -260,6 +262,8 @@ pub struct Outputs {
     config: OutputsConfig,
     encoders: HashMap<u64, EncoderPipeline>,
     running: HashMap<u64, RunningOutput>,
+    /// The relay network outputs connect through (`heron-engine relay`).
+    relay: Option<PathBuf>,
 }
 
 impl Outputs {
@@ -277,7 +281,14 @@ impl Outputs {
             config: OutputsConfig::default(),
             encoders: HashMap::new(),
             running: HashMap::new(),
+            relay: None,
         })
+    }
+
+    /// Network outputs connect through the relay listening on `relay`
+    /// from now on (when they next connect).
+    pub fn set_relay(&mut self, relay: Option<PathBuf>) {
+        self.relay = relay;
     }
 
     /// Checks a configuration without applying it.
@@ -321,7 +332,7 @@ impl Outputs {
     pub fn apply_adopting(
         &mut self,
         config: &OutputsConfig,
-        mut adopted: HashMap<u64, std::net::TcpStream>,
+        mut adopted: HashMap<u64, HandedConnection>,
     ) -> Result<(), ConfigError> {
         Self::validate(config)?;
         let profiles: HashMap<u64, &EncoderProfile> = config
@@ -398,7 +409,8 @@ impl Outputs {
                             IcecastSink::adopt(icecast, info, connection)
                         }
                         None => IcecastSink::new(icecast, info),
-                    };
+                    }
+                    .with_relay(self.relay.clone());
                     self.runtime.spawn(sink::run(
                         sink,
                         output.name.clone(),
@@ -435,7 +447,7 @@ impl Outputs {
     /// sends what was encoded and gives up its connection. Returns, per
     /// output ID, where its connection will come (`None`: it had none to
     /// give). The configuration is kept.
-    pub fn release(&mut self) -> Vec<(u64, oneshot::Receiver<Option<std::net::TcpStream>>)> {
+    pub fn release(&mut self) -> Vec<(u64, oneshot::Receiver<Option<HandedConnection>>)> {
         // The encoders stop, but keep their streams open: an output must not
         // see its stream end before it is asked for its connection.
         for pipeline in self.encoders.values_mut() {
