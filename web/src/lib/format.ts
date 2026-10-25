@@ -70,6 +70,7 @@ let zoned: { key: string; formats: ReturnType<typeof formats> } | undefined;
 function formats(language: string, timeZone?: string) {
   return {
     time: new Intl.DateTimeFormat(language, { timeStyle: "medium", timeZone }),
+    shortTime: new Intl.DateTimeFormat(language, { timeStyle: "short", timeZone }),
     dateTime: new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short", timeZone }),
     fullDate: new Intl.DateTimeFormat(language, { dateStyle: "full", timeZone }),
     relative: new Intl.RelativeTimeFormat(language, { numeric: "auto" }),
@@ -106,6 +107,11 @@ export function timeZone(): string | undefined {
 /** Time of day of a Unix time in ms. */
 export function clockTime(unixMs: number): string {
   return current().time.format(new Date(unixMs));
+}
+
+/** Time of day of a Unix time in ms, without the seconds. */
+export function shortTime(unixMs: number): string {
+  return current().shortTime.format(new Date(unixMs));
 }
 
 /** Date and time of a Unix time in ms. */

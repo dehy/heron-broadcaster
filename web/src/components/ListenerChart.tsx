@@ -122,7 +122,8 @@ export function MinuteChart({
   // Every few hours from the start (midnight, station time).
   const hours: number[] = [];
   const step = (width < 480 ? 6 : 3) * 3_600_000;
-  for (let at = from; at <= to; at += step) {
+  // Not the end: its label would leave the chart.
+  for (let at = from; at < to - step / 2; at += step) {
     hours.push(at);
   }
 
@@ -160,6 +161,10 @@ export function MinuteChart({
           <g key={segment[0]?.at}>
             <path d={area(segment)} className="chart-area" />
             <path d={path(segment)} className="chart-line" />
+            {/* A minute alone between gaps: a dot, a line would not show. */}
+            {segment.length === 1 && segment[0] && (
+              <circle cx={x(segment[0].at)} cy={y(segment[0].value)} r={2.5} className="chart-dot" />
+            )}
           </g>
         ))}
         {hover && (

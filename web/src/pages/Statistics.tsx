@@ -10,7 +10,7 @@ import { type Schemas, api, query, unwrap } from "../api";
 import { type Bar, BarChart, MinuteChart } from "../components/ListenerChart";
 import { Card, Empty, ErrorView, Loading, PageHead, Segmented } from "../components/ui";
 import { type PlainKey, locale, number, t } from "../i18n";
-import { clockTime, duration } from "../lib/format";
+import { duration, shortTime } from "../lib/format";
 import { addDays, dayOf, dayStart, percent, useListenersNow } from "../lib/listeners";
 import { Link } from "../lib/router";
 
@@ -29,6 +29,11 @@ const MEASURES: { value: Measure; label: PlainKey }[] = [
 
 function decimal(value: number | null | undefined, digits = 1): string {
   return value === null || value === undefined ? "–" : number(value, { maximumFractionDigits: digits });
+}
+
+/** Listening hours: hundredths while they are few. */
+function hours(value: number | null | undefined): string {
+  return decimal(value, value !== null && value !== undefined && value < 10 ? 2 : 1);
 }
 
 /** A day (`YYYY-MM-DD`) written short, `Oct 19`. */
@@ -84,6 +89,7 @@ export function Statistics() {
         actions={
           <select
             className="input"
+            style={{ width: "auto" }}
             aria-label={t("statistics.output")}
             value={output ?? ""}
             onChange={(e) => setOutput(e.target.value === "" ? undefined : Number(e.target.value))}
@@ -160,7 +166,7 @@ function Today({ zone, output }: { zone: string | undefined; output: number | un
         <div className="stats-tiles">
           <Tile label={t("statistics.now")} value={current === undefined || current === null ? "–" : number(current)} />
           <Tile label={t("statistics.peak")} value={day ? number(day.peak) : "–"} />
-          <Tile label={t("statistics.listeningHours")} value={decimal(day?.listening_hours)} />
+          <Tile label={t("statistics.listeningHours")} value={hours(day?.listening_hours)} />
           <Tile
             label={t("statistics.listeners")}
             value={decimal(day?.distinct_listeners, 0)}
@@ -181,10 +187,10 @@ function Today({ zone, output }: { zone: string | undefined; output: number | un
               points={samples.data.map((s) => ({ at: s.at_unix_ms, value: s.listeners }))}
               from={from}
               to={to}
-              tickLabel={(at) => clockTime(at).replace(/:\d\d$/, "")}
+              tickLabel={(at) => shortTime(at)}
               tooltip={(point) => (
                 <>
-                  <strong>{number(point.value)}</strong> · {clockTime(point.at).replace(/:\d\d$/, "")}
+                  <strong>{number(point.value)}</strong> · {shortTime(point.at)}
                 </>
               )}
             />
@@ -197,7 +203,7 @@ function Today({ zone, output }: { zone: string | undefined; output: number | un
 
 function RangeSelect({ value, onChange }: { value: number; onChange: (days: number) => void }) {
   return (
-    <select className="input" aria-label={t("statistics.range")} value={value} onChange={(e) => onChange(Number(e.target.value))}>
+    <select className="input" style={{ width: "auto" }} aria-label={t("statistics.range")} value={value} onChange={(e) => onChange(Number(e.target.value))}>
       {RANGES.map((days) => (
         <option key={days} value={days}>
           {t("statistics.lastDays", { count: days })}
@@ -216,7 +222,7 @@ function measureText(row: PeriodTotals, measure: Measure): string {
     case "distinct_listeners":
       return decimal(row.distinct_listeners);
     default:
-      return decimal(row.listening_hours);
+      return hours(row.listening_hours);
   }
 }
 
@@ -304,7 +310,7 @@ function OverTime({ zone, output }: { zone: string | undefined; output: number |
                       <td className="num">{decimal(row.distinct_listeners, grouping === "day" ? 0 : 1)}</td>
                       <td className="num">{number(row.peak)}</td>
                       <td className="num hide-narrow">{decimal(row.average)}</td>
-                      <td className="num">{decimal(row.listening_hours)}</td>
+                      <td className="num">{hours(row.listening_hours)}</td>
                       <td className="num hide-narrow">{row.sessions == null ? "–" : number(row.sessions)}</td>
                       <td className="num hide-narrow">
                         {row.average_session_s == null ? "–" : duration(row.average_session_s * 1000)}
@@ -325,14 +331,14 @@ function HoursOfDay({ zone, output }: { zone: string | undefined; output: number
   const [range, setRange] = useState(30);
   const to = dayOf(Date.now(), zone);
   const from = addDays(to, 1 - range);
-  const hours = useQuery({
+  const byHour = useQuery({
     queryKey: ["listeners", "hours", from, to, output],
     queryFn: () =>
       unwrap(api.GET("/api/v1/listeners/hours-of-day", { params: { query: { from, to, ...query({ output_id: output }) } } })),
   });
   const label = (hour: number) => `${String(hour).padStart(2, "0")}h`;
   const bars: Bar[] = Array.from({ length: 24 }, (_, hour) => {
-    const row = hours.data?.find((h) => h.hour === hour);
+    const row = byHour.data?.find((h) => h.hour === hour);
     return {
       key: String(hour),
       label: hour % 3 === 0 ? label(hour) : "",
@@ -341,7 +347,7 @@ function HoursOfDay({ zone, output }: { zone: string | undefined; output: number
         <>
           <strong>{decimal(row.average)}</strong> {t("statistics.onAverage")} · {label(hour)}
           <br />
-          {t("statistics.peak")} {number(row.peak)} · {t("statistics.listeningHours")} {decimal(row.listening_hours)}
+          {t("statistics.peak")} {number(row.peak)} · {t("statistics.listeningHours")} {hours(row.listening_hours)}
         </>
       ) : (
         <>
@@ -360,10 +366,10 @@ function HoursOfDay({ zone, output }: { zone: string | undefined; output: number
         </>
       }
     >
-      {hours.isPending && <Loading />}
-      {hours.isError && <ErrorView error={hours.error} />}
-      {hours.data &&
-        (hours.data.length === 0 ? (
+      {byHour.isPending && <Loading />}
+      {byHour.isError && <ErrorView error={byHour.error} />}
+      {byHour.data &&
+        (byHour.data.length === 0 ? (
           <Empty>{t("statistics.noData")}</Empty>
         ) : (
           <>
@@ -465,11 +471,11 @@ function Players({ zone, output }: { zone: string | undefined; output: number | 
             <tbody>
               {players.data.map((player) => (
                 <tr key={player.user_agent}>
-                  <td className="ellipsis small mono">
+                  <td className="small mono" style={{ overflowWrap: "anywhere" }}>
                     {player.user_agent || <span className="muted">{t("statistics.unknownPlayer")}</span>}
                   </td>
                   <td className="num">{number(player.sessions)}</td>
-                  <td className="num">{decimal(player.listening_hours)}</td>
+                  <td className="num">{hours(player.listening_hours)}</td>
                 </tr>
               ))}
             </tbody>

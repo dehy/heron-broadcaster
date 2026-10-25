@@ -48,8 +48,7 @@ pub struct Total {
 }
 
 fn hour_of(ms: i64, tz: &TimeZone) -> u8 {
-    Timestamp::from_millisecond(ms)
-        .map_or(0, |at| at.to_zoned(tz.clone()).hour().unsigned_abs())
+    Timestamp::from_millisecond(ms).map_or(0, |at| at.to_zoned(tz.clone()).hour().unsigned_abs())
 }
 
 /// The local hours a span of time covers.
