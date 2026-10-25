@@ -11,6 +11,7 @@
 //! - `station`: the time zone clocks and restrictions follow.
 //! - `programming`: what counts as a play, eras, and the mood and sound
 //!   code scales.
+//! - `statistics`: listener statistics (the minimum session, retention).
 
 use axum::Json;
 use axum::extract::State;
@@ -90,6 +91,40 @@ impl Default for StationSettings {
         };
         Self {
             timezone: from_env.or_else(system).unwrap_or_else(|| "UTC".to_owned()),
+        }
+    }
+}
+
+/// Listener statistics. See `docs/statistics.md#settings`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct StatisticsSettings {
+    /// Shortest session that counts as a listener, in seconds (0 counts
+    /// every one), at most 3600.
+    pub min_session_s: u32,
+    /// How long sessions and minute samples are kept, 7 to 3650 days.
+    pub retention_days: u32,
+}
+
+impl StatisticsSettings {
+    pub const SETTINGS_NAME: &'static str = "statistics";
+
+    fn check(&self) -> Result<(), String> {
+        if self.min_session_s > 3_600 {
+            return Err("min_session_s is at most 3600".to_owned());
+        }
+        if !(7..=3_650).contains(&self.retention_days) {
+            return Err("retention_days is 7 to 3650".to_owned());
+        }
+        Ok(())
+    }
+}
+
+impl Default for StatisticsSettings {
+    fn default() -> Self {
+        Self {
+            min_session_s: 60,
+            retention_days: 90,
         }
     }
 }
@@ -297,6 +332,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_rotation_settings, put_rotation_settings))
         .routes(routes!(get_station, put_station))
         .routes(routes!(get_programming, put_programming))
+        .routes(routes!(get_statistics, put_statistics))
 }
 
 /// Crossfades and loudness normalization.
@@ -590,6 +626,40 @@ async fn put_programming(
     Ok(Json(settings))
 }
 
+/// Listener statistics: the minimum session, how long sessions are kept.
+#[utoipa::path(get, path = "/settings/statistics", tag = "settings",
+    responses((status = 200, body = StatisticsSettings), (status = "4XX", body = ErrorBody)))]
+async fn get_statistics(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<StatisticsSettings>> {
+    Ok(Json(
+        load(&state.pool, StatisticsSettings::SETTINGS_NAME).await?,
+    ))
+}
+
+/// Replaces the listener statistics settings (missing fields take the
+/// defaults). A new minimum session recomputes the totals the sessions
+/// kept still cover. Admins only.
+#[utoipa::path(put, path = "/settings/statistics", tag = "settings",
+    request_body = StatisticsSettings,
+    responses((status = 200, body = StatisticsSettings), (status = "4XX", body = ErrorBody)))]
+async fn put_statistics(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(settings): Json<StatisticsSettings>,
+) -> ApiResult<Json<StatisticsSettings>> {
+    user.require(Role::Admin)?;
+    settings.check().map_err(ApiError::Invalid)?;
+    let before: StatisticsSettings = load(&state.pool, StatisticsSettings::SETTINGS_NAME).await?;
+    save(&state.pool, StatisticsSettings::SETTINGS_NAME, &settings).await?;
+    if before.min_session_s != settings.min_session_s {
+        state.listeners.settings_changed();
+    }
+    tracing::info!(user = %user.username, ?settings, "statistics settings changed");
+    Ok(Json(settings))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -604,6 +674,21 @@ mod tests {
         assert_eq!(keep.acoustid_key, None);
         let set: LibrarySettingsPatch = serde_json::from_str(r#"{"acoustid_key": "k"}"#).unwrap();
         assert_eq!(set.acoustid_key, Some(Some("k".to_owned())));
+    }
+
+    #[test]
+    fn statistics_settings_are_checked() {
+        assert!(StatisticsSettings::default().check().is_ok());
+        let partial: StatisticsSettings = serde_json::from_str(r#"{"min_session_s": 0}"#).unwrap();
+        assert_eq!(partial.retention_days, 90);
+        assert!(partial.check().is_ok());
+        for (min_session_s, retention_days) in [(3_601, 90), (60, 6), (60, 3_651)] {
+            let settings = StatisticsSettings {
+                min_session_s,
+                retention_days,
+            };
+            assert!(settings.check().is_err());
+        }
     }
 
     #[test]

@@ -124,7 +124,7 @@ See [Listener statistics](statistics.md). No IP address is ever stored.
 |---|---|
 | `outputs` (added) | statistics (JSON: the stream server's `admin_username`, `admin_password`; never pushed to the engine) |
 | `listener_samples` | output_id (deleted with the output), sampled_at (the minute), listeners. Kept `retention_days` |
-| `listener_sessions` | id, output_id (deleted with the output), listener_key (BLAKE3 of address and player, keyed with the day's key), user_agent, client_id (the server's ID for the connection), day (station time), started_at, last_seen_at, ended_at (NULL while connected), duration_s. Kept `retention_days` |
+| `listener_sessions` | id, output_id (deleted with the output), listener_key (BLAKE3 of address and player, keyed with the day's key), user_agent, client_id (the server's ID for the connection), day (station time), started_at, last_seen_at, ended_at (NULL while connected), split (ended at midnight, still connected), duration_s. Kept `retention_days` |
 | `listener_day_keys` | day, key (random, 32 bytes). Deleted once its day can get no more sessions |
 | `listener_totals` | output_id (NULL: the whole station; deleted with the output), day, hour (NULL: the whole day), minutes (measured), peak, average, listening_hours, sessions, session_s (their total length), distinct_listeners (NULL without sessions). Kept |
 

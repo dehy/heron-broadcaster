@@ -2027,6 +2027,428 @@
         }
       }
     },
+    "/api/v1/listeners/days": {
+      "get": {
+        "tags": [
+          "listeners"
+        ],
+        "summary": "Totals per hour, day, week or month: distinct listeners, peak, average,\nlistening hours, sessions. Today's change until midnight.",
+        "operationId": "days",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "First day (`YYYY-MM-DD`, station time).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Last day, included.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "output_id",
+            "in": "query",
+            "description": "Only this output; the whole station otherwise.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "description": "Rows per hour, day (by default), week or month.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hour",
+                "day",
+                "week",
+                "month"
+              ]
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "JSON, or CSV for spreadsheets.",
+              "enum": [
+                "json",
+                "csv"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PeriodTotals"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/listeners/hours-of-day": {
+      "get": {
+        "tags": [
+          "listeners"
+        ],
+        "summary": "Each hour of the day (station time), averaged over the days of the\nperiod.",
+        "operationId": "hours_of_day",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "First day (`YYYY-MM-DD`, station time).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Last day, included.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "output_id",
+            "in": "query",
+            "description": "Only this output; the whole station otherwise.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "JSON, or CSV for spreadsheets.",
+              "enum": [
+                "json",
+                "csv"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HourOfDay"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/listeners/now": {
+      "get": {
+        "tags": [
+          "listeners"
+        ],
+        "summary": "Each output's listeners at the last minute, and the station's.",
+        "operationId": "now",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListenersNow"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/listeners/players": {
+      "get": {
+        "tags": [
+          "listeners"
+        ],
+        "summary": "Sessions and listening hours by player (user agent), most listened\nfirst.",
+        "operationId": "players",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "First day (`YYYY-MM-DD`, station time).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Last day, included.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "output_id",
+            "in": "query",
+            "description": "Only this output; the whole station otherwise.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1 to 100, 20 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlayerListening"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/listeners/samples": {
+      "get": {
+        "tags": [
+          "listeners"
+        ],
+        "summary": "Listeners minute by minute. Minutes no server could be read are\nmissing.",
+        "operationId": "samples",
+        "parameters": [
+          {
+            "name": "from_unix_ms",
+            "in": "query",
+            "description": "From this time (Unix ms).",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "to_unix_ms",
+            "in": "query",
+            "description": "Until this time (Unix ms), at most 8 days after `from_unix_ms`.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "output_id",
+            "in": "query",
+            "description": "Only this output; the whole station otherwise.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MinuteSample"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/listeners/tracks": {
+      "get": {
+        "tags": [
+          "listeners"
+        ],
+        "summary": "Tracks of the period, those listeners left the most first (by\ndeparture rate, or by the change of listeners without sessions).",
+        "operationId": "tracks",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "First day (`YYYY-MM-DD`, station time).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Last day, included.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "min_plays",
+            "in": "query",
+            "description": "Tracks played fewer times are left out, 3 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1 to 500, 50 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "JSON, or CSV for spreadsheets.",
+              "enum": [
+                "json",
+                "csv"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrackListeners"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/live": {
       "get": {
         "tags": [
@@ -2180,7 +2602,7 @@
         "tags": [
           "outputs"
         ],
-        "summary": "Replaces an output. Credentials left out of `config` are kept. Admins only.",
+        "summary": "Replaces an output. Credentials left out of `config` are kept, and so\nare the statistics settings when `statistics` is left out. Admins only.",
         "operationId": "update_output",
         "parameters": [
           {
@@ -3625,6 +4047,72 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/StationSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/statistics": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Listener statistics: the minimum session, how long sessions are kept.",
+        "operationId": "get_statistics",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatisticsSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Replaces the listener statistics settings (missing fields take the\ndefaults). A new minimum session recomputes the totals the sessions\nkept still cover. Admins only.",
+        "operationId": "put_statistics",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatisticsSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatisticsSettings"
                 }
               }
             }
@@ -7278,6 +7766,47 @@
           "incoming"
         ]
       },
+      "HourOfDay": {
+        "type": "object",
+        "description": "An hour of the day, over the days of a period.",
+        "required": [
+          "hour",
+          "days",
+          "average",
+          "peak",
+          "listening_hours"
+        ],
+        "properties": {
+          "average": {
+            "type": "number",
+            "format": "double",
+            "description": "Mean of the listeners over the minutes measured."
+          },
+          "days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days with a minute measured in that hour.",
+            "minimum": 0
+          },
+          "hour": {
+            "type": "integer",
+            "format": "int32",
+            "description": "0 to 23, station time.",
+            "minimum": 0
+          },
+          "listening_hours": {
+            "type": "number",
+            "format": "double",
+            "description": "Listening hours, on average per day."
+          },
+          "peak": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The highest peak.",
+            "minimum": 0
+          }
+        }
+      },
       "Label": {
         "type": "object",
         "required": [
@@ -7693,6 +8222,30 @@
           }
         }
       },
+      "ListenersNow": {
+        "type": "object",
+        "required": [
+          "outputs"
+        ],
+        "properties": {
+          "outputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OutputListeners"
+            },
+            "description": "Each enabled output read at the last minute."
+          },
+          "total": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The outputs' listeners added up; missing before the first reading or\nwhen no server could be read.",
+            "minimum": 0
+          }
+        }
+      },
       "LiveMessage": {
         "oneOf": [
           {
@@ -7853,6 +8406,25 @@
           "random",
           "weighted"
         ]
+      },
+      "MinuteSample": {
+        "type": "object",
+        "required": [
+          "at_unix_ms",
+          "listeners"
+        ],
+        "properties": {
+          "at_unix_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The start of the minute."
+          },
+          "listeners": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
       },
       "Mode": {
         "type": "string",
@@ -8066,6 +8638,17 @@
           },
           "name": {
             "type": "string"
+          },
+          "statistics": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OutputStatisticsInput",
+                "description": "The stream server's admin credentials, for listener statistics.\nLeft out, the stored ones are kept."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -8080,6 +8663,91 @@
           "file",
           "pipe"
         ]
+      },
+      "OutputListeners": {
+        "type": "object",
+        "description": "An output's listeners at the last minute.",
+        "required": [
+          "output_id",
+          "name",
+          "sampled_at_unix_ms",
+          "sessions"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the server, or its listener list, could not be read."
+          },
+          "listeners": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Missing when its server could not be read.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "output_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sampled_at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sessions": {
+            "type": "boolean",
+            "description": "Whether the listener list was read: sessions are up to date."
+          }
+        }
+      },
+      "OutputStatisticsInput": {
+        "type": "object",
+        "description": "Replaces the statistics settings of an output.",
+        "properties": {
+          "admin_password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its password: left out, the stored one is kept; `null` removes it."
+          },
+          "admin_username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The server's admin user; `admin` when missing."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OutputStatisticsView": {
+        "type": "object",
+        "description": "What listener statistics read the stream server with.",
+        "required": [
+          "admin_password_set"
+        ],
+        "properties": {
+          "admin_password_set": {
+            "type": "boolean",
+            "description": "Whether its password is set (never sent back): without it, only\nconcurrent listeners are counted."
+          },
+          "admin_username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The server's admin user (`admin` when missing)."
+          }
+        }
       },
       "OutputStatus": {
         "type": "object",
@@ -8144,7 +8812,8 @@
           "config",
           "secrets_set",
           "metadata_enabled",
-          "enabled"
+          "enabled",
+          "statistics"
         ],
         "properties": {
           "config": {
@@ -8187,6 +8856,9 @@
             },
             "description": "Credentials set in the settings (e.g. `password`), never sent back."
           },
+          "statistics": {
+            "$ref": "#/components/schemas/OutputStatisticsView"
+          },
           "status": {
             "oneOf": [
               {
@@ -8215,6 +8887,93 @@
           }
         },
         "additionalProperties": false
+      },
+      "PeriodTotals": {
+        "type": "object",
+        "description": "The totals of a period.",
+        "required": [
+          "day",
+          "days",
+          "minutes",
+          "peak",
+          "average",
+          "listening_hours"
+        ],
+        "properties": {
+          "average": {
+            "type": "number",
+            "format": "double",
+            "description": "Mean of the listeners over the minutes measured."
+          },
+          "average_session_s": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "day": {
+            "type": "string",
+            "description": "The first day of the period (`YYYY-MM-DD`)."
+          },
+          "days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days with a minute measured.",
+            "minimum": 0
+          },
+          "distinct_listeners": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Distinct listeners; for weeks and months, the average per day."
+          },
+          "hour": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The hour (0 to 23), with `group=hour`.",
+            "minimum": 0
+          },
+          "listener_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Distinct listeners of each day, added up.",
+            "minimum": 0
+          },
+          "listening_hours": {
+            "type": "number",
+            "format": "double",
+            "description": "Total listening hours."
+          },
+          "minutes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Minutes measured.",
+            "minimum": 0
+          },
+          "peak": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "sessions": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Sessions of the minimum length started in the period; missing\nwithout listener lists.",
+            "minimum": 0
+          }
+        }
       },
       "PlannedMove": {
         "type": "object",
@@ -8355,6 +9114,29 @@
           "fallback",
           "manual"
         ]
+      },
+      "PlayerListening": {
+        "type": "object",
+        "required": [
+          "user_agent",
+          "sessions",
+          "listening_hours"
+        ],
+        "properties": {
+          "listening_hours": {
+            "type": "number",
+            "format": "double"
+          },
+          "sessions": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sessions of the minimum length."
+          },
+          "user_agent": {
+            "type": "string",
+            "description": "As the player sends it."
+          }
+        }
       },
       "PlayerState": {
         "type": "object",
@@ -10299,6 +11081,27 @@
         },
         "additionalProperties": false
       },
+      "StatisticsSettings": {
+        "type": "object",
+        "description": "Listener statistics. See `docs/statistics.md#settings`.",
+        "properties": {
+          "min_session_s": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Shortest session that counts as a listener, in seconds (0 counts\nevery one), at most 3600.",
+            "default": 60,
+            "minimum": 0
+          },
+          "retention_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How long sessions and minute samples are kept, 7 to 3650 days.",
+            "default": 90,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "Status": {
         "type": "object",
         "required": [
@@ -11136,6 +11939,68 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "TrackListeners": {
+        "type": "object",
+        "description": "A track's listeners over its plays of a period.",
+        "required": [
+          "track_id",
+          "plays",
+          "listeners_start",
+          "listeners_end"
+        ],
+        "properties": {
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "departure_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Departures over the listeners at the start."
+          },
+          "departures": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Sessions of the minimum length that ended during its plays; missing\nwithout listener lists.",
+            "minimum": 0
+          },
+          "listeners_end": {
+            "type": "number",
+            "format": "double",
+            "description": "When it ended, on average."
+          },
+          "listeners_start": {
+            "type": "number",
+            "format": "double",
+            "description": "The station's listeners when it started, on average."
+          },
+          "plays": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Plays with listeners measured when they started.",
+            "minimum": 0
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "track_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -12267,6 +13132,10 @@
     {
       "name": "outputs",
       "description": "Encoder profiles and outputs"
+    },
+    {
+      "name": "listeners",
+      "description": "Listener statistics, from the stream servers"
     },
     {
       "name": "live",

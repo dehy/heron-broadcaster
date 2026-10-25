@@ -24,12 +24,13 @@ use crate::auth::{Passwords, SESSION_COOKIE};
 use crate::engine::EngineLink;
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::library::{Library, LibraryStatus};
+use crate::listeners::Collector;
 use crate::queue::QueueManager;
 use crate::sync::ConfigSync;
 use crate::webhooks::Webhooks;
 use crate::{
-    artists, categories, clocks, history, labels, librarian, live, outputs, player, public,
-    restrictions, rotation, selection, settings, staging, tracks, users, webhooks,
+    artists, categories, clocks, history, labels, librarian, listeners, live, outputs, player,
+    public, restrictions, rotation, selection, settings, staging, tracks, users, webhooks,
 };
 
 pub const SERVICE: &str = "heron-api";
@@ -46,6 +47,8 @@ pub struct AppState {
     /// The buffer zone, as mounted in this container (read-write).
     pub staging: Arc<std::path::PathBuf>,
     pub webhooks: Arc<Webhooks>,
+    /// Listener statistics from the stream servers.
+    pub listeners: Arc<Collector>,
 }
 
 #[derive(OpenApi)]
@@ -75,6 +78,7 @@ pub struct AppState {
         (name = "history", description = "What was played"),
         (name = "settings", description = "Station settings"),
         (name = "outputs", description = "Encoder profiles and outputs"),
+        (name = "listeners", description = "Listener statistics, from the stream servers"),
         (name = "live", description = "Live state over a WebSocket"),
         (name = "webhooks", description = "Webhooks on track changes, and their deliveries (admins)"),
         (name = "public", description = "Now playing and history for station websites: no sign-in, any origin"),
@@ -117,6 +121,7 @@ fn api() -> OpenApiRouter<AppState> {
         .merge(history::router())
         .merge(settings::router())
         .merge(outputs::router())
+        .merge(listeners::router())
         .merge(live::router())
         .merge(webhooks::router())
         .merge(public::router())

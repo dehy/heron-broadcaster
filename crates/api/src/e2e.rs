@@ -152,6 +152,8 @@ impl Station {
             passwords: Arc::new(Passwords::default()),
             staging: Arc::new(staging.path().to_path_buf()),
             webhooks,
+            // Driven by the tests, minute by minute.
+            listeners: crate::listeners::Collector::new(pool.clone()).unwrap(),
         };
         let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = http.local_addr().unwrap();
@@ -664,6 +666,233 @@ async fn settings_and_outputs_reach_the_engine() {
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    station.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn listener_statistics_through_the_api() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+    eventually("the engine", Duration::from_secs(10), || async {
+        let engine = admin.get("/engine").await;
+        (engine["config"]["state"] == "synced").then_some(())
+    })
+    .await;
+
+    // The stream server's admin credentials: never shown, never pushed.
+    let profile = admin.get("/encoder-profiles").await[0]["id"]
+        .as_u64()
+        .unwrap();
+    let config = json!({"host": "127.0.0.1", "port": 9, "mount": "/live", "password": "hackme"});
+    let (status, output) = admin
+        .send(
+            Method::POST,
+            "/outputs",
+            json!({"name": "Icecast", "kind": "icecast", "encoder_profile_id": profile,
+                   "config": config, "statistics": {"admin_password": "adm1n-pw"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{output}");
+    assert_eq!(
+        output["statistics"],
+        json!({"admin_username": null, "admin_password_set": true})
+    );
+    assert!(!output.to_string().contains("adm1n-pw"));
+    let id = output["id"].as_u64().unwrap();
+    let pushed = eventually(
+        "the output in the engine",
+        Duration::from_secs(10),
+        || async {
+            let config = station.state.engine.config().await.ok()?;
+            config
+                .outputs_json
+                .contains("hackme")
+                .then_some(config.outputs_json)
+        },
+    )
+    .await;
+    assert!(!pushed.contains("adm1n-pw") && !pushed.contains("statistics"));
+
+    // Changing them leaves the engine's configuration as it was.
+    let (status, changed) = admin
+        .send(
+            Method::PUT,
+            &format!("/outputs/{id}"),
+            json!({"name": "Icecast", "kind": "icecast", "encoder_profile_id": profile,
+                   "config": {"host": "127.0.0.1", "port": 9, "mount": "/live"},
+                   "statistics": {"admin_username": "ops"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(
+        changed["statistics"],
+        json!({"admin_username": "ops", "admin_password_set": true})
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        station.state.engine.config().await.unwrap().outputs_json,
+        pushed
+    );
+    let (_, removed) = admin
+        .send(
+            Method::PUT,
+            &format!("/outputs/{id}"),
+            json!({"name": "Icecast", "kind": "icecast", "encoder_profile_id": profile,
+                   "config": {"host": "127.0.0.1", "port": 9, "mount": "/live"},
+                   "statistics": {"admin_password": null}}),
+        )
+        .await;
+    assert_eq!(removed["statistics"]["admin_password_set"], false);
+
+    // Settings.
+    assert_eq!(
+        viewer.get("/settings/statistics").await,
+        json!({"min_session_s": 60, "retention_days": 90})
+    );
+    let (status, _) = viewer
+        .send(
+            Method::PUT,
+            "/settings/statistics",
+            json!({"min_session_s": 30}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/statistics",
+            json!({"retention_days": 3}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, saved) = admin
+        .send(
+            Method::PUT,
+            "/settings/statistics",
+            json!({"min_session_s": 30}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved, json!({"min_session_s": 30, "retention_days": 90}));
+
+    // Totals as the collector stores them; viewers read them.
+    let pool = &station.state.pool;
+    for (output_id, day, hour, minutes, peak, average, distinct) in [
+        (None, "2026-10-19", None, 1_440, 12, 4.0, Some(30)),
+        (None, "2026-10-19", Some(8), 60, 12, 9.0, Some(20)),
+        (None, "2026-10-25", None, 720, 20, 8.0, Some(50)),
+        (Some(id), "2026-10-25", None, 720, 20, 8.0, Some(50)),
+    ] {
+        sqlx::query(
+            "INSERT INTO listener_totals (output_id, day, hour, minutes, peak, average,
+                 listening_hours, sessions, session_s, distinct_listeners)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(output_id)
+        .bind(day)
+        .bind(hour)
+        .bind(minutes)
+        .bind(peak)
+        .bind(average)
+        .bind(average * f64::from(minutes) / 60.0)
+        .bind(distinct.map(|d: u32| d * 2))
+        .bind(distinct.map(|d: u32| u64::from(d) * 600))
+        .bind(distinct)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    let days = viewer
+        .get("/listeners/days?from=2026-10-19&to=2026-10-25")
+        .await;
+    assert_eq!(days.as_array().unwrap().len(), 2);
+    assert_eq!(days[0]["day"], "2026-10-19");
+    assert_eq!(days[0]["distinct_listeners"], 30.0);
+    assert_eq!(days[0]["average_session_s"], 300.0);
+    let week = viewer
+        .get("/listeners/days?from=2026-10-19&to=2026-10-25&group=week")
+        .await;
+    assert_eq!(week.as_array().unwrap().len(), 1);
+    assert_eq!(week[0]["distinct_listeners"], 40.0);
+    assert_eq!(week[0]["listener_days"], 80);
+    assert_eq!(week[0]["peak"], 20);
+    let output_days = viewer
+        .get(&format!(
+            "/listeners/days?from=2026-10-19&to=2026-10-25&output_id={id}"
+        ))
+        .await;
+    assert_eq!(output_days.as_array().unwrap().len(), 1);
+    let hours = viewer
+        .get("/listeners/hours-of-day?from=2026-10-19&to=2026-10-25")
+        .await;
+    assert_eq!(
+        hours,
+        json!([{"hour": 8, "days": 1, "average": 9.0, "peak": 12, "listening_hours": 9.0}])
+    );
+
+    // CSV.
+    let csv = viewer
+        .http
+        .get(format!(
+            "{}/listeners/days?from=2026-10-19&to=2026-10-25&format=csv",
+            viewer.base
+        ))
+        .header("cookie", viewer.cookie.as_deref().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(csv.status(), StatusCode::OK);
+    assert_eq!(csv.headers()["content-type"], "text/csv; charset=utf-8");
+    assert!(
+        csv.headers()["content-disposition"]
+            .to_str()
+            .unwrap()
+            .contains("listeners-2026-10-19-2026-10-25.csv")
+    );
+    let csv = csv.text().await.unwrap();
+    let lines: Vec<&str> = csv.lines().collect();
+    assert_eq!(lines.len(), 3, "{csv}");
+    assert!(lines[0].starts_with("day,hour,days,minutes,peak,average,listening_hours"));
+    assert_eq!(
+        lines[1],
+        "2026-10-19,,1,1440,12,4.00,96.00,60,300.00,30.00,30"
+    );
+
+    // The other routes answer, and check their parameters.
+    assert_eq!(
+        viewer.get("/listeners/now").await,
+        json!({"outputs": [], "total": null})
+    );
+    assert_eq!(
+        viewer
+            .get("/listeners/tracks?from=2026-10-19&to=2026-10-25")
+            .await,
+        json!([])
+    );
+    assert_eq!(
+        viewer
+            .get("/listeners/players?from=2026-10-19&to=2026-10-25")
+            .await,
+        json!([])
+    );
+    assert_eq!(
+        viewer
+            .get("/listeners/samples?from_unix_ms=0&to_unix_ms=60000")
+            .await,
+        json!([])
+    );
+    for bad in [
+        "/listeners/samples?from_unix_ms=0&to_unix_ms=999999999",
+        "/listeners/days?from=2026-10-25&to=2026-10-19",
+        "/listeners/days?from=yesterday&to=2026-10-19",
+        "/listeners/tracks?from=2026-10-19&to=2026-10-25&limit=0",
+    ] {
+        let (status, _) = viewer.request(Method::GET, bad, None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+    }
     station.stop().await;
 }
 

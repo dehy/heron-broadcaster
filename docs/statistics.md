@@ -56,7 +56,7 @@ The station's figures add up the outputs minute by minute: its peak is the highe
 
 For each play of the music decks (not the FX player), from the [play history](api.md#play-history): the station's listeners when it started and when it ended, the change, and its departures. Over a period, tracks are compared by their **departure rate**: departures over listeners at the start, so that a track played at a busy hour does not look worse than one played at night. Tracks played fewer than 3 times in the period (`min_plays`) are left out of that ranking.
 
-Departures are counted to the minute: a listener who leaves in the first seconds of a track may be counted on the one before. With many plays the error averages out; a single play says little.
+Departures are counted to the minute: a session ends when its listener was last seen, so they left within the next minute, half a minute later on average, and that is when the departure is counted. A listener who leaves in the first seconds of a track may be counted on the one before. A session split at midnight is not a departure. With many plays the error averages out; a single play says little.
 
 ## Privacy
 
@@ -91,7 +91,7 @@ Viewers can read every statistic; the routes are under `/api/v1/listeners`. Peri
 |---|---|
 | `GET /listeners/now` | Each enabled output's listeners at the last minute, when that was, whether its sessions are available, and the error if its server could not be read; the station's total |
 | `GET /listeners/samples` (`from_unix_ms`, `to_unix_ms`, at most 8 days; `output_id`) | Concurrent listeners minute by minute, gaps as missing minutes |
-| `GET /listeners/days` (`from`, `to`, `output_id`, `hourly`) | Per day, or per hour with `hourly=true`: distinct listeners, peak, average, listening hours, sessions, average session, minutes measured |
+| `GET /listeners/days` (`from`, `to`, `output_id`, `group`: `hour`, `day` (by default), `week`, `month`) | Per period: days and minutes measured, peak, average, listening hours, sessions, average session, distinct listeners (for weeks and months, the average per day) and listener-days |
 | `GET /listeners/hours-of-day` (`from`, `to`, `output_id`) | For each hour of the day (0 to 23), averaged over the days of the period: average and peak listeners, listening hours |
 | `GET /listeners/tracks` (`from`, `to`, `min_plays` (3), `limit`) | Tracks of the period by departure rate: plays, average listeners at start and end, departures, departure rate |
 | `GET /listeners/players` (`from`, `to`, `output_id`, `limit`) | Sessions and listening hours by player (user agent) |
@@ -106,7 +106,7 @@ The **Statistics** page: today live (listeners minute by minute, now, peak and l
 
 ## Metrics
 
-`heron-api` exports `heron_listeners{output}`, each enabled output's listeners at the last minute (absent while its server cannot be read), and `heron_api_listener_polls_total{result}` (`ok`, `error`). The Grafana dashboard shows them in its **On air** row. See [Monitoring](monitoring.md#heron-api).
+`heron-api` exports `heron_listeners{output}`, each enabled output's listeners at the last minute (`NaN`, a gap in graphs, while its server cannot be read), and `heron_api_listener_polls_total{result}` (`ok`, `error`). The Grafana dashboard shows them in its **On air** row. See [Monitoring](monitoring.md#heron-api).
 
 ## Storage
 

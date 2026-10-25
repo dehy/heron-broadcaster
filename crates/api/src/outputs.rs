@@ -6,7 +6,11 @@
 //! Every change is checked as a whole configuration, the way the engine
 //! would, before it is saved: an invalid change saves nothing.
 //! Credentials in an output's settings (`password`) are never sent back;
-//! an update without them keeps the stored ones.
+//! an update without them keeps the stored ones. The statistics settings
+//! (the stream server's admin credentials, `outputs.statistics`) are not
+//! part of the engine's configuration: changing them does not reconnect.
+
+use std::collections::HashMap;
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -23,6 +27,8 @@ use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
 use crate::engine::OutputStatus;
 use crate::error::{ApiError, ApiResult, ErrorBody, is_duplicate, is_still_used};
+use crate::listeners::collector::StoredStatistics;
+use crate::settings::some_or_null;
 
 /// Settings never sent back to clients.
 const SECRET_KEYS: [&str; 1] = ["password"];
@@ -73,6 +79,51 @@ pub struct OutputView {
     /// Live state from the engine; missing while it is unreachable or
     /// before the output reaches it.
     pub status: Option<OutputStatus>,
+    pub statistics: OutputStatisticsView,
+}
+
+/// What listener statistics read the stream server with.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, ToSchema)]
+pub struct OutputStatisticsView {
+    /// The server's admin user (`admin` when missing).
+    pub admin_username: Option<String>,
+    /// Whether its password is set (never sent back): without it, only
+    /// concurrent listeners are counted.
+    pub admin_password_set: bool,
+}
+
+impl From<StoredStatistics> for OutputStatisticsView {
+    fn from(stored: StoredStatistics) -> Self {
+        Self {
+            admin_username: stored.admin_username,
+            admin_password_set: stored.admin_password.is_some(),
+        }
+    }
+}
+
+/// Replaces the statistics settings of an output.
+#[derive(Clone, Debug, Default, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OutputStatisticsInput {
+    /// The server's admin user; `admin` when missing.
+    #[serde(default)]
+    pub admin_username: Option<String>,
+    /// Its password: left out, the stored one is kept; `null` removes it.
+    #[serde(default, deserialize_with = "some_or_null")]
+    #[schema(value_type = Option<String>)]
+    pub admin_password: Option<Option<String>>,
+}
+
+impl OutputStatisticsInput {
+    fn merge(self, stored: StoredStatistics) -> StoredStatistics {
+        StoredStatistics {
+            admin_username: self.admin_username.filter(|name| !name.trim().is_empty()),
+            admin_password: match self.admin_password {
+                None => stored.admin_password,
+                Some(password) => password.filter(|password| !password.is_empty()),
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
@@ -88,6 +139,10 @@ pub struct OutputInput {
     pub metadata_enabled: bool,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// The stream server's admin credentials, for listener statistics.
+    /// Left out, the stored ones are kept.
+    #[serde(default)]
+    pub statistics: Option<OutputStatisticsInput>,
 }
 
 fn yes() -> bool {
@@ -213,7 +268,11 @@ fn keep_secrets(new: &mut serde_json::Value, old: &serde_json::Value) {
     }
 }
 
-fn output_view(output: OutputConfig, status: Option<OutputStatus>) -> OutputView {
+fn output_view(
+    output: OutputConfig,
+    status: Option<OutputStatus>,
+    statistics: StoredStatistics,
+) -> OutputView {
     let listen_url = match output.kind {
         OutputKind::Icecast => IcecastConfig::parse(&output.name, &output.config)
             .ok()
@@ -232,7 +291,24 @@ fn output_view(output: OutputConfig, status: Option<OutputStatus>) -> OutputView
         enabled: output.enabled,
         listen_url,
         status,
+        statistics: statistics.into(),
     }
+}
+
+/// The statistics settings of every output.
+async fn statistics(state: &AppState) -> ApiResult<HashMap<u64, StoredStatistics>> {
+    let rows: Vec<(u64, Option<String>)> =
+        sqlx::query_as("SELECT id, CAST(statistics AS CHAR) FROM outputs")
+            .fetch_all(&state.pool)
+            .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, json)| (id, StoredStatistics::parse(json.as_deref())))
+        .collect())
+}
+
+fn statistics_json(statistics: &StoredStatistics) -> ApiResult<String> {
+    serde_json::to_string(statistics).map_err(|error| ApiError::Internal(error.to_string()))
 }
 
 fn profile_view(profile: EncoderProfile, config: &OutputsConfig) -> EncoderProfileView {
@@ -436,12 +512,14 @@ async fn list_outputs(
 ) -> ApiResult<Json<Vec<OutputView>>> {
     let config = current(&state).await?;
     let statuses = statuses(&state);
+    let mut statistics = statistics(&state).await?;
     let outputs = config
         .outputs
         .into_iter()
         .map(|output| {
             let status = statuses.iter().find(|s| s.id == output.id).cloned();
-            output_view(output, status)
+            let stored = statistics.remove(&output.id).unwrap_or_default();
+            output_view(output, status, stored)
         })
         .collect();
     Ok(Json(outputs))
@@ -462,7 +540,8 @@ async fn get_output(
         .find(|output| output.id == id)
         .ok_or_else(|| ApiError::not_found("output"))?;
     let status = statuses(&state).into_iter().find(|s| s.id == id);
-    Ok(Json(output_view(output, status)))
+    let stored = statistics(&state).await?.remove(&id).unwrap_or_default();
+    Ok(Json(output_view(output, status, stored)))
 }
 
 /// Adds an output; the engine starts streaming to it if it is enabled.
@@ -480,15 +559,21 @@ async fn create_output(
     if !input.config.is_object() {
         return Err(ApiError::Invalid("config must be an object".to_owned()));
     }
+    let statistics = input
+        .statistics
+        .unwrap_or_default()
+        .merge(StoredStatistics::default());
     let mut tx = state.pool.begin().await?;
     let id = sqlx::query(
-        "INSERT INTO outputs (name, kind, encoder_profile_id, config, metadata_enabled, enabled)
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO outputs (name, kind, encoder_profile_id, config, statistics,
+                              metadata_enabled, enabled)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&name)
     .bind(enum_text(input.kind))
     .bind(input.encoder_profile_id)
     .bind(input.config.to_string())
+    .bind(statistics_json(&statistics)?)
     .bind(input.metadata_enabled)
     .bind(input.enabled)
     .execute(&mut *tx)
@@ -507,7 +592,8 @@ async fn create_output(
     Ok((StatusCode::CREATED, Json(view)))
 }
 
-/// Replaces an output. Credentials left out of `config` are kept. Admins only.
+/// Replaces an output. Credentials left out of `config` are kept, and so
+/// are the statistics settings when `statistics` is left out. Admins only.
 #[utoipa::path(put, path = "/outputs/{id}", tag = "outputs",
     params(("id" = u64, Path)), request_body = OutputInput,
     responses((status = 200, body = OutputView), (status = "4XX", body = ErrorBody)))]
@@ -523,24 +609,32 @@ async fn update_output(
         return Err(ApiError::Invalid("config must be an object".to_owned()));
     }
     let mut tx = state.pool.begin().await?;
-    let stored: Option<String> =
-        sqlx::query_scalar("SELECT CAST(config AS CHAR) FROM outputs WHERE id = ? FOR UPDATE")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await?;
-    let Some(stored) = stored else {
+    let stored: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT CAST(config AS CHAR), CAST(statistics AS CHAR) FROM outputs
+         WHERE id = ? FOR UPDATE",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((stored, stored_statistics)) = stored else {
         return Err(ApiError::not_found("output"));
     };
     keep_secrets(&mut input.config, &parse_json(Some(stored)));
+    let stored_statistics = StoredStatistics::parse(stored_statistics.as_deref());
+    let statistics = match input.statistics.take() {
+        Some(statistics) => statistics.merge(stored_statistics),
+        None => stored_statistics,
+    };
     sqlx::query(
         "UPDATE outputs SET name = ?, kind = ?, encoder_profile_id = ?, config = ?,
-                metadata_enabled = ?, enabled = ?
+                statistics = ?, metadata_enabled = ?, enabled = ?
          WHERE id = ?",
     )
     .bind(&name)
     .bind(enum_text(input.kind))
     .bind(input.encoder_profile_id)
     .bind(input.config.to_string())
+    .bind(statistics_json(&statistics)?)
     .bind(input.metadata_enabled)
     .bind(input.enabled)
     .bind(id)
@@ -672,6 +766,28 @@ pub async fn adopt(pool: &sqlx::MySqlPool, engine: &OutputsConfig) -> ApiResult<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn statistics_credentials_are_kept_or_removed() {
+        let stored = StoredStatistics {
+            admin_username: Some("ops".to_owned()),
+            admin_password: Some("secret".to_owned()),
+        };
+        let input: OutputStatisticsInput =
+            serde_json::from_str(r#"{"admin_username": "ops"}"#).unwrap();
+        assert_eq!(input.merge(stored.clone()), stored);
+        let input: OutputStatisticsInput =
+            serde_json::from_str(r#"{"admin_password": null}"#).unwrap();
+        assert_eq!(input.merge(stored.clone()), StoredStatistics::default());
+        let input: OutputStatisticsInput =
+            serde_json::from_str(r#"{"admin_username": "", "admin_password": "new"}"#).unwrap();
+        let merged = input.merge(stored);
+        assert_eq!(merged.admin_username, None);
+        assert_eq!(merged.admin_password.as_deref(), Some("new"));
+        let view = OutputStatisticsView::from(merged);
+        assert!(view.admin_password_set);
+        assert!(!serde_json::to_string(&view).unwrap().contains("new"));
+    }
 
     #[test]
     fn credentials_are_hidden_and_kept() {

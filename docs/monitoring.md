@@ -215,7 +215,7 @@ Every service also exports `heron_build_info{service, version}` (always 1), and,
 | `heron_api_autofill_tracks_total` | counter | | Tracks queued by autofill (rotation) |
 | `heron_api_rotation_relaxed_total` | counter | | Picks that needed relaxed rules |
 | `heron_api_logins_total` | counter | `result` (`ok`, `failed`) | Sign-ins |
-| `heron_listeners` | gauge | `output` | Listeners of the output at the last minute, from its stream server; absent while the server cannot be read ([Listener statistics](statistics.md)) |
+| `heron_listeners` | gauge | `output` | Listeners of the output at the last minute, from its stream server; `NaN` while the server cannot be read ([Listener statistics](statistics.md)) |
 | `heron_api_listener_polls_total` | counter | `result` (`ok`, `error`) | Requests to stream servers for listener statistics |
 | `heron_library_files` | gauge | | Audio files found by the last library scan |
 | `heron_library_scan_duration_seconds` | gauge | | Duration of the last scan |
