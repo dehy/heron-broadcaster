@@ -31,6 +31,7 @@ import { Settings } from "./pages/Settings";
 import { Track } from "./pages/Track";
 import { Trash } from "./pages/Trash";
 import { Users } from "./pages/Users";
+import { Webhooks } from "./pages/Webhooks";
 
 applyTheme(storedTheme());
 
@@ -96,6 +97,7 @@ const PAGES: Page[] = [
   { path: "/playout", label: "nav.playout", icon: "fade", section: "nav.station" },
   { path: "/outputs", label: "nav.outputs", icon: "output" },
   { path: "/settings", label: "nav.settings", icon: "settings" },
+  { path: "/webhooks", label: "nav.webhooks", icon: "bolt", admin: true },
   { path: "/users", label: "nav.users", icon: "users", admin: true },
 ];
 
@@ -143,6 +145,8 @@ function route(pathname: string): ReactNode {
       return <Outputs />;
     case "/settings":
       return <Settings />;
+    case "/webhooks":
+      return <Webhooks />;
     case "/users":
       return <Users />;
     case "/account":
