@@ -203,7 +203,7 @@ Exactly one engine writes the state at any time:
 - The active engine writes until it sends `Cut`, then never again (`stop_saving`).
 - The standby writes nothing until it is on air: `complete_takeover` or `cold_start` clears `closing`, saves the queue and the configuration, and only then does `main.rs` bind `handover.sock` and serve gRPC.
 
-The track on air keeps its entry ID and is not reported as a new play. `heron-api` sees a new engine (another `engine_started_at`) and matches the track on air to its open play, as after a restart, so the history has one entry. A fallback track on air is handed over too (`SavedTrack::fallback`), although it is never saved on disk.
+The track on air keeps its entry ID and is not reported as a new play. `heron-api` sees a new engine (another `engine_started_at`) and matches the track on air to its open play, as after a restart, so the history has one entry. It matches by track and start time, not by deck: a new engine starts with an empty mixer, so it plays the track on deck A even when it was on deck B (the row keeps the deck the track started on). A fallback track on air is handed over too (`SavedTrack::fallback`), although it is never saved on disk.
 
 ## Failures
 
