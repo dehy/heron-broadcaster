@@ -170,7 +170,9 @@ on_air_line() {
 # The track on air has played at least $1 s and has at least $2 s left:
 # `A (on air)    10.2 /    21.0 s  #11 …`.
 on_air_between() {
-    on_air_line | awk -v played="$1" -v left="$2" \
+    min_played=$1
+    min_left=$2
+    on_air_line | awk -v played="$min_played" -v left="$min_left" \
         '{ found = 1; if ($4 + 0 >= played + 0 && $6 - $4 >= left + 0) ok = 1 } END { exit !(found && ok) }'
 }
 
