@@ -37,13 +37,13 @@ How many people listen, each day, each hour, to each output and to each track. H
 
 ## Acceptance criteria
 
-- [ ] Against a test Icecast server with simulated listeners (connections of known length), the concurrent counts, sessions, daily distinct listeners and listening hours match what was simulated; a reconnection within a minute continues its session, sessions under the minimum are not counted.
-- [ ] Against a real Icecast server (the `icecast` Compose profile) with a few players connected, the Statistics page shows them, live and in today's totals.
-- [ ] An Icecast server without admin credentials still gives concurrent listeners, peak, average and listening hours.
-- [ ] No IP address is stored anywhere in the database, and listener keys of two days differ for the same listener.
-- [ ] A stream server going down leaves a gap in the statistics, keeps the sessions of listeners still connected when it is back, and does not affect the air.
-- [ ] Departures are attributed to the track on air when sessions ended; CSV exports open in a spreadsheet with the same figures as the page.
-- [ ] Changing the statistics settings of an output does not reconnect it.
+- [x] Against a test Icecast server with simulated listeners (connections of known length), the concurrent counts, sessions, daily distinct listeners and listening hours match what was simulated; a reconnection within a minute continues its session, sessions under the minimum are not counted.
+- [x] Against a real Icecast server (the `icecast` Compose profile) with a few players connected, the Statistics page shows them, live and in today's totals.
+- [x] An Icecast server without admin credentials still gives concurrent listeners, peak, average and listening hours.
+- [x] No IP address is stored anywhere in the database, and listener keys of two days differ for the same listener.
+- [x] A stream server going down leaves a gap in the statistics, keeps the sessions of listeners still connected when it is back, and does not affect the air.
+- [x] Departures are attributed to the track on air when sessions ended; CSV exports open in a spreadsheet with the same figures as the page.
+- [x] Changing the statistics settings of an output does not reconnect it.
 
 ## References
 
