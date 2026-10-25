@@ -1,6 +1,6 @@
 # API and control plane
 
-`heron-api` is the station's control plane: the REST API and live WebSocket the [web UI](web.md) uses, the queue manager feeding the engine, the play history, and the configuration it pushes to the engine. Built in [M4](roadmap/m4-api-control-plane.md), completed for the web UI in [M5](roadmap/m5-web-ui.md); rotation came with [M6](roadmap/m6-rotation-clockwheels.md).
+`heron-api` is the station's control plane: the REST API and live WebSocket the [web UI](web.md) uses, the queue manager feeding the engine, the play history, and the configuration it pushes to the engine. Built in [M4](roadmap/m4-api-control-plane.md), completed for the web UI in [M5](roadmap/m5-web-ui.md); rotation came with [M6](roadmap/m6-rotation-clockwheels.md), webhooks and the public endpoints with [M7](roadmap/m7-webhooks-output-api.md).
 
 The engine never depends on it: when the API is down, the engine plays what it has queued with the configuration it last received ([Audio engine](audio-engine.md)).
 
@@ -19,7 +19,7 @@ Local users only for now ([Decisions](decisions.md#decisions-made-after-the-hand
 |---|---|
 | `viewer` | See everything except users and secrets (output passwords, the AcoustID key are never sent back to anyone) |
 | `operator` | Also run the station: queue, skip, pause, FX, track overrides and categories, queue and rotation settings, clocks, the schedule, restrictions, artists, simulations, the review of identifications |
-| `admin` | Also playout, analysis, library and station (time zone) settings, organizing the library and undoing batches, encoder profiles, outputs and users |
+| `admin` | Also playout, analysis, library and station (time zone) settings, organizing the library and undoing batches, encoder profiles, outputs, webhooks and users |
 
 Create the first admin on the command line (the password is read without echo; from stdin when it is not a terminal):
 
@@ -34,7 +34,7 @@ Then:
 - **Web app:** `POST /api/v1/auth/login` with `{"username", "password"}` sets a session cookie (`heron_session`, `HttpOnly`, `SameSite=Strict`, `Secure` when the proxy reports HTTPS through `X-Forwarded-Proto`). Sessions last 30 days from the last use. Requests that change something with a cookie must also send an `X-Requested-With` header (any value): pages on other sites cannot add it, so they cannot act on your behalf.
 - **Scripts:** create an API token (`POST /api/v1/tokens`, shown once) and send `Authorization: Bearer heron_…`. Tokens act as their user, with its role; they can expire and be revoked.
 - Passwords (8 characters at least) are hashed with Argon2id, one at a time so sign-ins never take CPU from the engine on a Raspberry Pi. After 5 failed sign-ins a username is locked for a minute. Only hashes of session and API tokens are stored. Changing a password signs the user out everywhere else; disabling a user ends their sessions and stops their tokens. The last enabled admin cannot be demoted, disabled or deleted.
-- `GET /api/v1/status`, `/api/v1/library/status` and `/api/v1/openapi.json` need no sign-in. `/status` also reports the server clock's synchronization (`clock`, read from the kernel with a read-only `adjtimex`: containers share the host's clock), with a `warning` when it is not synchronized or may be off by more than a second; the web UI shows it on every page.
+- `GET /api/v1/status`, `/api/v1/library/status`, `/api/v1/openapi.json` and the [public endpoints](#public-endpoints) (`/api/v1/public/…`) need no sign-in. `/status` also reports the server clock's synchronization (`clock`, read from the kernel with a read-only `adjtimex`: containers share the host's clock), with a `warning` when it is not synchronized or may be off by more than a second; the web UI shows it on every page.
 
 ## Routes
 
@@ -55,6 +55,8 @@ Then:
 | History | `GET /history` (`before`, `after`, `track_id`, `exclude_fx`, `limit`) |
 | Settings | `GET`, `PUT /settings/playout`, `/settings/analysis`, `/settings/queue`, `/settings/rotation`, `/settings/station`, `/settings/programming`; `GET`, `PATCH /settings/library` |
 | Outputs | `GET`, `POST /encoder-profiles`; `GET`, `PUT`, `DELETE /encoder-profiles/{id}`; `GET`, `POST /outputs`; `GET`, `PUT`, `DELETE /outputs/{id}` (with each output's live state) |
+| Webhooks (admins) | `GET`, `POST /webhooks`; `GET`, `PUT`, `DELETE /webhooks/{id}`; `POST /webhooks/{id}/secret`; `POST /webhooks/{id}/test`; `GET /webhooks/{id}/deliveries` (`before`, `status`, `limit`); `POST /webhook-deliveries/{id}/retry` — see [below](#webhooks) |
+| Public | `GET /public/now-playing`, `GET /public/history` (`before`, `limit`) — no sign-in, see [below](#public-endpoints) |
 | Live | `GET /live` (WebSocket) |
 
 Every engine action is there: queue (enqueue, remove, clear, move, and replace, which the queue manager uses), transport (skip, pause, resume), FX player, state, levels, track changes (WebSocket), playout settings and outputs. Tracks the engine plays from its fallback directory show with the source `fallback`; autofill does not count them as queued, and anything queued replaces a cued one.
@@ -71,6 +73,41 @@ Every engine action is there: queue (enqueue, remove, clear, move, and replace, 
 | `track` | Each track change | `event`: `started` or `ended` (with `played_ms` and `reason`: finished, skipped, stopped, replaced) |
 
 The API polls the engine's state twice a second and its levels ten times a second, only while someone watches them.
+
+## Webhooks
+
+Webhooks tell other systems (a website, a chat bot, a studio display) about track changes as they happen. Admins manage them; their secrets are never sent back.
+
+- **Events:** `track.started`, `track.ended` and `track.skipped`, as the engine reports them: a skip is `track.skipped` (not also `track.ended`), any other end (played to its transition, an FX stopped or replaced) is `track.ended`. Tracks of the FX player are only sent to webhooks with `include_fx`; tracks from the fallback directory are sent like any other.
+- **Body:** by default the JSON `Payload` of the OpenAPI document:
+
+  ```json
+  {"event": "track.started", "delivery_id": 42, "at_unix_ms": 1792917865323,
+   "track": {"track_id": 17, "artist": "Artist", "title": "Title", "album": "Album",
+             "duration_ms": 215000, "deck": "a", "source": "rotation"},
+   "played_ms": null, "reason": null}
+  ```
+
+  Or a **body template** of your own, with its content type, for receivers that want a format of their own (Discord, Slack, a display). Placeholders: `{{event}}`, `{{delivery_id}}`, `{{at_unix_ms}}`, `{{track_id}}`, `{{artist}}`, `{{title}}`, `{{album}}`, `{{duration_ms}}`, `{{deck}}`, `{{source}}`, `{{played_ms}}`, `{{reason}}` (spaces inside the braces are allowed). When the content type is JSON, values are escaped to fit between quotes: `{"content": "Now playing: {{artist}} – {{title}}"}`. Missing values are empty; unknown placeholders are refused (`422`).
+- **Requests:** `POST` to the webhook's URL (`http` or `https`; it may be an address of your network: only admins can set it), with `X-Heron-Event`, `X-Heron-Delivery` (the delivery's ID), `X-Heron-Timestamp` (Unix seconds) and `X-Heron-Signature`. Redirects are not followed.
+- **Signature:** `X-Heron-Signature: sha256=<hex>`, the HMAC-SHA256 of `"{timestamp}.{body}"` with the webhook's secret (`whsec_…`, shown once when the webhook is created or given a new secret with `POST /webhooks/{id}/secret`). Receivers should compare it in constant time and refuse old timestamps. In Python:
+
+  ```python
+  expected = "sha256=" + hmac.new(secret.encode(), f"{timestamp}.{body}".encode(), hashlib.sha256).hexdigest()
+  ok = hmac.compare_digest(expected, request.headers["X-Heron-Signature"])
+  ```
+
+- **Delivery and retries:** deliveries are sent as soon as the engine reports the change, at most 8 at a time. A delivery that does not get a `2xx` within 10 seconds is retried after 10 s, 30 s, 2 min, 10 min, 30 min, 1 h and 3 h, then marked `failed` (8 attempts). Deliveries are rows in the database, so retries survive a restart of the API; one being sent when the API stopped is sent again a minute later, so receivers may see a delivery twice (same `X-Heron-Delivery`). Deliveries of a disabled webhook that were still pending fail.
+- **Delivery log:** `GET /webhooks/{id}/deliveries` lists what was sent, its status (`pending`, `delivered`, `failed`), attempts, the receiver's status code, the error and the start of its answer (1 KiB). `POST /webhooks/{id}/test` sends a `ping` (even to a disabled webhook); `POST /webhook-deliveries/{id}/retry` sends a delivered or failed delivery again, with every attempt again. Deliveries are kept 30 days.
+
+## Public endpoints
+
+For station websites, apps and displays: no sign-in, readable from any origin (`Access-Control-Allow-Origin: *`, `GET` only, no credentials), the music only (decks A and B, not the FX player), without IDs or paths.
+
+- `GET /api/v1/public/now-playing`: `now` (artist, title, album, `started_at_unix_ms`, `duration_ms`, `position_ms`), `null` while nothing plays or the engine is unreachable, and `server_time_unix_ms`. Cached 5 seconds (`Cache-Control: public, max-age=5`).
+- `GET /api/v1/public/history`: the latest plays, most recent first (artist, title, album, `started_at_unix_ms`, `ended_at_unix_ms`); `limit` 1 to 50 (20), `before` for the next page. Cached 15 seconds.
+
+They answer through `heron-web` like the rest of the API (`http://<host>:8000/api/v1/public/now-playing`). Put a cache or rate limit in the reverse proxy in front of it if the station is busy.
 
 ## Queue manager
 
@@ -159,11 +196,12 @@ CI fails when either file is out of date. The generator (`openapi-typescript`) l
 
 ## Metrics
 
-On top of the scanner's: `heron_api_uploads_total`, `heron_api_engine_connected` (0 or 1), `heron_api_engine_disconnections_total`, `heron_api_autofill_tracks_total`, `heron_api_rotation_relaxed_total`, `heron_api_logins_total{result}` and `heron_api_live_clients`.
+On top of the scanner's: `heron_api_uploads_total`, `heron_api_engine_connected` (0 or 1), `heron_api_engine_disconnections_total`, `heron_api_autofill_tracks_total`, `heron_api_rotation_relaxed_total`, `heron_api_logins_total{result}`, `heron_api_live_clients` and `heron_api_webhook_deliveries_total{result}` (`delivered`, `retrying`, `failed`).
 
 ## Limitations
 
 - Planned starts ignore crossfades, and a skip or a track queued by hand moves the tracks after it: their dayparting and clock slot were decided for the planned time.
 - The clock follows its slots in order; the top of the hour is not hit exactly (no hard sync).
-- Plays made while the API is away are not recorded (the engine keeps no event history).
+- Plays made while the API is away are not recorded (the engine keeps no event history), and webhooks are not told about them.
+- Deliveries to one webhook may arrive out of order when one is retried or several are sent at once: order them by `at_unix_ms`.
 - HTTPS is left to a reverse proxy in front of `heron-web`.

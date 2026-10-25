@@ -17,14 +17,16 @@ flowchart TB
     storage["<b>Music storage</b><br/>[External system]<br/>Host folders: music library,<br/>incoming folder, buffer zone,<br/>fallback directory"]:::external
     musicdb["<b>AcoustID, MusicBrainz,<br/>Cover Art Archive</b><br/>[External systems]<br/>Fingerprints, releases, covers"]:::external
     streamers["<b>Stream servers</b><br/>[External system]<br/>Icecast; Shoutcast and HLS planned.<br/>Several at once"]:::external
-    receivers["<b>Webhook receivers</b><br/>[External system, planned M7]<br/>Websites, bots, displays"]:::planned
+    receivers["<b>Webhook receivers</b><br/>[External system]<br/>Websites, bots, displays"]:::external
+    website["<b>Station website</b><br/>[External system]<br/>Now playing, history"]:::external
 
     staff -- "Operates<br/>[HTTPS]" --> heron
     scripts -- "Controls<br/>[REST, WebSocket]" --> heron
     heron -- "Reads music,<br/>files incoming tracks" --> storage
     heron -- "Identifies incoming files<br/>[HTTPS]" --> musicdb
     heron -- "Streams audio and now playing<br/>[HTTP source]" --> streamers
-    heron -. "Notifies track changes<br/>[HTTPS webhooks]" .-> receivers
+    heron -- "Notifies track changes<br/>[HTTPS webhooks, signed]" --> receivers
+    website -- "Reads now playing<br/>[public REST, CORS]" --> heron
     listener -- "Listens<br/>[HTTP]" --> streamers
 
     classDef person fill:#08427b,stroke:#052e56,color:#fff
@@ -43,17 +45,18 @@ flowchart TB
 
     subgraph heron ["Heron Broadcaster (Docker Compose)"]
         web["<b>heron-web</b><br/>[Container: nginx, React, TypeScript]<br/>Static web app; proxies /api,<br/>WebSocket included"]:::container
-        api["<b>heron-api</b><br/>[Container: Rust, axum]<br/>REST and WebSocket API, auth, library scanner,<br/>queue manager, play history,<br/>engine configuration, OpenAPI"]:::container
+        api["<b>heron-api</b><br/>[Container: Rust, axum]<br/>REST and WebSocket API, auth, library scanner,<br/>queue manager, play history, webhooks,<br/>engine configuration, OpenAPI"]:::container
         analyzer["<b>heron-analyzer</b><br/>[Container: Rust, worker pool]<br/>Loudness, cue and crossfade points,<br/>Chromaprint fingerprints"]:::container
         librarian["<b>heron-librarian</b><br/>[Container: Rust]<br/>Buffer zone: identifies new files;<br/>tags and files them on import;<br/>organizes, deletes to a trash, undoes;<br/>journaled moves"]:::container
         engine["<b>heron-engine</b><br/>[Container: Rust, real time]<br/>Decks, mixer, crossfades, loudness,<br/>encoders, outputs. Plays on when<br/>everything else is down"]:::container
-        db[("<b>mariadb</b><br/>[Container: MariaDB 11]<br/>Tracks, analysis, jobs, users,<br/>settings, outputs, history,<br/>move journal")]:::container
+        db[("<b>mariadb</b><br/>[Container: MariaDB 11]<br/>Tracks, analysis, jobs, users,<br/>settings, outputs, history,<br/>webhook deliveries, move journal")]:::container
         state[("<b>engine-state</b><br/>[Volume: JSON]<br/>The engine's copy of its<br/>outputs and playout settings")]:::container
     end
 
     storage["<b>Music storage</b><br/>[External system]<br/>Library, incoming folder,<br/>buffer zone, fallback directory"]:::external
     musicdb["<b>AcoustID, MusicBrainz,<br/>Cover Art Archive</b><br/>[External systems]"]:::external
     streamers["<b>Stream servers</b><br/>[External system]<br/>Icecast"]:::external
+    receivers["<b>Webhook receivers</b><br/>[External system]<br/>Websites, bots, displays"]:::external
 
     staff -- "Uses<br/>[HTTPS]" --> web
     scripts -- "Calls /api<br/>[HTTPS]" --> web
@@ -65,6 +68,7 @@ flowchart TB
     engine -- "Configuration" --> state
     engine -- "Streams audio, now playing<br/>[HTTP PUT]" --> streamers
     librarian -- "Fingerprints<br/>[HTTPS, rate limited]" --> musicdb
+    api -- "Track changes<br/>[HTTPS webhooks, retried]" --> receivers
     api -. "scans<br/>[ro]" .-> storage
     analyzer -. "decodes<br/>[ro]" .-> storage
     engine -. "plays<br/>[ro]" .-> storage

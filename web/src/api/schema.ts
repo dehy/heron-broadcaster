@@ -876,6 +876,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What was played, most recent first, the FX player left out. No sign-in
+         *     needed; any website may read it.
+         */
+        get: operations["public_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/now-playing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The track on air. No sign-in needed; any website may read it. */
+        get: operations["now_playing"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/queue": {
         parameters: {
             query?: never;
@@ -1732,6 +1769,122 @@ export interface paths {
         patch: operations["update_user"];
         trace?: never;
     };
+    "/api/v1/webhook-deliveries/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sends a delivered or failed delivery again, with every attempt again.
+         *     Admins only.
+         */
+        post: operations["retry_delivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Webhooks, by name. Admins only. */
+        get: operations["list_webhooks"];
+        put?: never;
+        /**
+         * Adds a webhook. The answer holds its secret, shown only this once.
+         *     Admins only.
+         */
+        post: operations["create_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/webhooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_webhook"];
+        /** Replaces a webhook; its secret is kept. Admins only. */
+        put: operations["update_webhook"];
+        post?: never;
+        /** Deletes a webhook and its deliveries. Admins only. */
+        delete: operations["delete_webhook"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/webhooks/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A webhook's deliveries, most recent first. Admins only. */
+        get: operations["list_deliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/webhooks/{id}/secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gives a webhook a new secret, shown only this once; deliveries not sent
+         *     yet are signed with it. Admins only.
+         */
+        post: operations["rotate_secret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/webhooks/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sends a `ping` delivery now, whether the webhook is enabled or not.
+         *     Admins only.
+         */
+        post: operations["test_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2070,6 +2223,11 @@ export interface components {
             /** @description Send it as `Authorization: Bearer <token>`. Shown only once. */
             token: string;
         };
+        /** @description A new webhook, with its secret: the only time it is shown. */
+        CreatedWebhook: {
+            secret: string;
+            webhook: components["schemas"]["WebhookView"];
+        };
         /**
          * @description Where the next track starts.
          * @enum {string}
@@ -2166,6 +2324,47 @@ export interface components {
              * @description From the cue-in.
              */
             position_ms: number;
+        };
+        /** @enum {string} */
+        DeliveryStatus: "pending" | "delivered" | "failed";
+        DeliverySummary: {
+            /** Format: int64 */
+            created_at_unix_ms: number;
+            /** Format: int32 */
+            last_status_code?: number | null;
+            status: components["schemas"]["DeliveryStatus"];
+        };
+        DeliveryView: {
+            /** Format: int32 */
+            attempts: number;
+            /** @description What was sent. */
+            body: string;
+            /** Format: int64 */
+            created_at_unix_ms: number;
+            /** Format: int64 */
+            delivered_at_unix_ms?: number | null;
+            event: components["schemas"]["WebhookEvent"];
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            last_attempt_at_unix_ms?: number | null;
+            /** @description Why the last attempt failed. */
+            last_error?: string | null;
+            /** @description The start of the receiver's last answer. */
+            last_response?: string | null;
+            /**
+             * Format: int32
+             * @description The receiver's HTTP status.
+             */
+            last_status_code?: number | null;
+            /**
+             * Format: int64
+             * @description While pending.
+             */
+            next_attempt_at_unix_ms?: number | null;
+            status: components["schemas"]["DeliveryStatus"];
+            /** Format: int64 */
+            webhook_id: number;
         };
         /** @description What a MusicBrainz details lookup did. */
         DetailsReport: {
@@ -2621,6 +2820,14 @@ export interface components {
             role: components["schemas"]["Role"];
             username: string;
         };
+        NowPlaying: {
+            now?: components["schemas"]["PublicTrack"] | null;
+            /**
+             * Format: int64
+             * @description To tell how far the track has gone since.
+             */
+            server_time_unix_ms: number;
+        };
         /** @description The dry run of an organization. */
         OrganizePlan: {
             moves: components["schemas"]["PlannedMove"][];
@@ -2875,6 +3082,34 @@ export interface components {
              *     ]
              */
             sound_codes: string[];
+        };
+        /** @description One play. */
+        PublicPlay: {
+            album?: string | null;
+            artist?: string | null;
+            /**
+             * Format: int64
+             * @description Missing while the track plays.
+             */
+            ended_at_unix_ms?: number | null;
+            /** Format: int64 */
+            started_at_unix_ms: number;
+            title?: string | null;
+        };
+        /** @description What plays on air. */
+        PublicTrack: {
+            album?: string | null;
+            artist?: string | null;
+            /**
+             * Format: int64
+             * @description From the cue-in to the cue-out.
+             */
+            duration_ms: number;
+            /** Format: int64 */
+            position_ms: number;
+            /** Format: int64 */
+            started_at_unix_ms: number;
+            title?: string | null;
         };
         /** @description What a purge of the trash did. */
         PurgeReport: {
@@ -3986,6 +4221,50 @@ export interface components {
             interval_ms: number;
             /** @description One byte per point, base64: the highest sample peak in the interval. */
             peaks: string;
+        };
+        /**
+         * @description What a delivery reports.
+         * @enum {string}
+         */
+        WebhookEvent: "track.started" | "track.ended" | "track.skipped" | "ping";
+        WebhookInput: {
+            /**
+             * @description With `{{placeholders}}`: `event`, `delivery_id`, `at_unix_ms`,
+             *     `track_id`, `artist`, `title`, `album`, `duration_ms`, `deck`,
+             *     `source`, `played_ms`, `reason`. Missing or empty: the default JSON
+             *     body.
+             */
+            body_template?: string | null;
+            /** @description `application/json` by default. */
+            content_type?: string | null;
+            enabled?: boolean;
+            /** @description At least one of `track.started`, `track.ended`, `track.skipped`. */
+            events: components["schemas"]["WebhookEvent"][];
+            include_fx?: boolean;
+            name: string;
+            /** @description `http` or `https`. It may be an address of your network. */
+            url: string;
+        };
+        WebhookSecret: {
+            /** @description Shown once. */
+            secret: string;
+        };
+        /** @description A webhook, without its secret. */
+        WebhookView: {
+            /** @description Missing: the default JSON body (`Payload`). */
+            body_template?: string | null;
+            content_type: string;
+            /** Format: int64 */
+            created_at_unix_ms: number;
+            enabled: boolean;
+            events: components["schemas"]["WebhookEvent"][];
+            /** Format: int64 */
+            id: number;
+            /** @description Also send the FX player's tracks (jingles, liners). */
+            include_fx: boolean;
+            last_delivery?: components["schemas"]["DeliverySummary"] | null;
+            name: string;
+            url: string;
         };
         /** @description Weights move with plays and requests (multiplied by these factors). */
         WeightSettings: {
@@ -5984,6 +6263,57 @@ export interface operations {
             };
         };
     };
+    public_history: {
+        parameters: {
+            query?: {
+                /** @description Plays started before this time (Unix ms), for the next page. */
+                before?: number;
+                /** @description 1 to 50, 20 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicPlay"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    now_playing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NowPlaying"];
+                };
+            };
+        };
+    };
     get_queue: {
         parameters: {
             query?: never;
@@ -7872,6 +8202,275 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["User"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    retry_delivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_webhooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookView"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedWebhook"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_deliveries: {
+        parameters: {
+            query?: {
+                /** @description Deliveries older than this one (its ID), for the next page. */
+                before?: number;
+                status?: components["schemas"]["DeliveryStatus"];
+                /** @description 1 to 200, 50 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryView"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    rotate_secret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookSecret"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryView"];
                 };
             };
             "4XX": {

@@ -49,6 +49,9 @@ export type Explanation = Schemas["Explanation"];
 export type SeparationOverrides = Schemas["SeparationOverrides"];
 export type Windows = Schemas["Windows"];
 export type SimulationReport = Schemas["SimulationReport"];
+export type WebhookView = Schemas["WebhookView"];
+export type WebhookEvent = Schemas["WebhookEvent"];
+export type DeliveryView = Schemas["DeliveryView"];
 
 export type TrackFilter = NonNullable<
   NonNullable<paths["/api/v1/tracks"]["get"]["parameters"]["query"]>["filter"]

@@ -167,6 +167,15 @@ on_air_line() {
     ctl state | grep '(on air)'
 }
 
+# The track on air has played at least $1 s and has at least $2 s left:
+# `A (on air)    10.2 /    21.0 s  #11 …`.
+on_air_between() {
+    min_played=$1
+    min_left=$2
+    on_air_line | awk -v played="$min_played" -v left="$min_left" \
+        '{ found = 1; if ($4 + 0 >= played + 0 && $6 - $4 >= left + 0) ok = 1 } END { exit !(found && ok) }'
+}
+
 # All in a function: the shell reads it whole before running, so editing
 # this file during a run cannot break the run.
 main() {
@@ -260,6 +269,10 @@ main() {
 
     step "6. heron-engine restarted"
     for how in restart kill; do
+        # A track that cannot end during the restart, and that the queue,
+        # saved every 5 s, already holds as on air.
+        wait_for 40 on_air_between 6 10 ||
+            echo "  no track on air with 6 s played and 10 s left"
         before=$(on_air_line || true)
         entry=$(printf '%s\n' "$before" | sed -n 's/.*#\([0-9]*\) .*/\1/p')
         if [ "$how" = restart ]; then
