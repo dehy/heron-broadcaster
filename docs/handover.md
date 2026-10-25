@@ -31,6 +31,35 @@ Alternatives considered:
 
 The Icecast fallback mount ([Upgrading](upgrading.md#icecast-fallback-mount)) is still needed for the restarts that are not handovers: a crash, a reboot, an incompatible version.
 
+### During an upgrade
+
+For a few seconds, two engines run side by side on the same host. Everything that must survive the swap lives outside both: the state and `handover.sock` in `engine-state`, the TCP connection to Icecast in `heron-relay`.
+
+```mermaid
+flowchart LR
+    api["heron-api"]
+    subgraph host ["One Docker host"]
+        old["heron-engine (old)<br/>active, then handing over"]
+        new["heron-engine (new)<br/>standby, then active"]
+        relay["heron-relay<br/>holds the TCP connections"]
+        state[("engine-state volume<br/>handover.sock, queue.json, config.json")]
+        sock[("engine-relay volume<br/>relay.sock")]
+    end
+    icecast["Icecast<br/>one source connection throughout"]
+    listeners(["Listeners"])
+
+    old -- "Hello, Prepare, Cut + fds<br/>[handover.sock]" --- new
+    old -. "writes until the cut" .-> state
+    new -. "writes after the cut" .-> state
+    old -- "audio up to the stop<br/>[Unix socket]" --> relay
+    new -- "audio from the stop,<br/>same Unix connection" --> relay
+    old --- sock
+    new --- sock
+    relay -- "HTTP PUT /live, metadata" --> icecast
+    icecast --> listeners
+    api -- "gRPC: the active engine only" --> new
+```
+
 ## Pieces
 
 | Where | What |
@@ -49,12 +78,27 @@ The Icecast fallback mount ([Upgrading](upgrading.md#icecast-fallback-mount)) is
 
 The active engine listens on `$HERON_STATE_DIR/handover.sock`. It binds it under another name and renames it over the path, so an engine taking over replaces its predecessor's socket atomically, while that one is still running.
 
-On start, an engine connects to that socket:
+On start, an engine connects to that socket, and goes through these roles:
 
-```
-no answer ────────────────► cold start (queue.json, config.json), then listen
-Hello, same protocol ─────► standby: held, no outputs, no gRPC, writes nothing
-Hello, other protocol ────► wait until nobody listens any more, then cold start
+```mermaid
+stateDiagram-v2
+    [*] --> Probing: start
+    Probing --> Active: no answer<br/>cold start from queue.json and config.json
+    Probing --> Standby: Hello, same protocol
+    Probing --> Waiting: Hello, another protocol
+    Waiting --> Active: nobody listens any more<br/>cold start
+    Standby --> Active: Cut<br/>takes over the queue and the connections
+    Standby --> Active: Abort, or the active engine went away<br/>cold start once it is gone
+    Active --> HandingOver: SIGTERM, a standby waits
+    Active --> [*]: SIGTERM alone<br/>queue saved
+    HandingOver --> [*]: Done
+    HandingOver --> [*]: failure<br/>queue saved, stops as before
+
+    note right of Standby
+        held silent, no outputs,
+        no gRPC, writes nothing,
+        healthy as "standby"
+    end note
 ```
 
 Each side sends `Hello { protocol, version }`. The active engine keeps a standby only if it speaks the same `PROTOCOL` (`handover.rs`). Bump it whenever a message changes in a way an older engine cannot read.
@@ -127,6 +171,16 @@ The active engine needs `Ready` at least 300 ms (`READY_MARGIN`) before the trac
 - It sets a 10 ms linear fade-out on the track on air, ending at `position`.
 - `next_segment` ends a segment exactly at `position`, so the render loop lands on it. There the mixer holds: paused, gain 0, frozen. The rest of the block is silence, and `Event::Halted { position, at_frame }` reports the master frame.
 - `Resume` removes the halt's fade, in case the handover is given up and the engine plays on.
+
+What the listeners hear around the stop P:
+
+```mermaid
+flowchart LR
+    a["Old engine<br/>the track up to P,<br/>fading out over the last 10 ms"]
+    b["About 70 ms of silence<br/>the two fades and the new<br/>MP3 encoder's start-up"]
+    c["New engine<br/>the same track from P,<br/>fading in over 10 ms"]
+    a --> b --> c
+```
 
 The outputs must not carry the silence that follows. `Outputs::stop_after(at_frame)` makes the fan-out thread hand nothing to the encoders after that master frame (it counts the frames it reads, which match the frames rendered unless blocks were dropped). The active engine waits 100 ms for the audio rendered ahead (the clock renders 50 ms ahead) to reach the encoders.
 
