@@ -38,7 +38,7 @@ Two steps, usable separately:
 
 - [x] With the fallback mount, `docker compose restart heron-engine` keeps a listener connected: it hears the fallback, then the station again, without reconnecting (a source stopped for 5 s: about 4.5 s of fallback, the listener back on `/live` within a second; chaos test step 6).
 - [ ] `scripts/upgrade.sh` upgrades a running Compose stack to another image tag while a listener is connected: the listener's connection survives, Icecast sees one source connection throughout (no new `PUT`), and the audio gap at the cut is under 200 ms. On amd64 and arm64. (arm64, Docker Desktop: 68 ms, one source connection, chaos test step 7 passing; amd64 still to run, in CI.)
-- [x] The same with Docker Swarm (single node, `start-first`): `docker service update --image …` on `heron-engine` (72 ms, one source connection; the Morow demo still to upgrade).
+- [x] The same with Docker Swarm (single node, `start-first`): `docker service update --image …` on `heron-engine` (72 ms, one source connection).
 - [ ] After a handover, the new engine plays the same queue with the same entry IDs, the track on air within 50 ms of the cut position; the play history has one entry for the track on air, not two; the old engine writes nothing to `queue.json` after the handover. (Queue, entry IDs and position: `tests/handover.rs`; the history and `queue.json` still to check.)
 - [ ] Failures end as a cold restart, never off air for longer than today: standby killed while preparing, standby never ready (5 s), incompatible protocol version, old engine killed after passing its connections.
 - [ ] A plain `docker compose pull && docker compose up -d` still upgrades the stack (cold restart, listeners kept by the fallback mount).

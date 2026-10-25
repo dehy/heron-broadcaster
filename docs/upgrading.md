@@ -74,7 +74,29 @@ To go back to the previous version, run the script with it. Migrations are not u
 
 ## Docker Swarm
 
-A Swarm stack can start the new engine before stopping the old one (`start-first`). Give `heron-engine` this in the stack file, and add `heron-relay` and its volume:
+A Swarm stack is deployed with `docker stack deploy` from a directory of its own. Keep there everything the stack mounts, and write its paths relative to the stack file (`docker stack deploy` resolves them from the file's directory):
+
+```
+docker-stack.yml           the stack
+.env                       its settings (versions, passwords, folders)
+icecast/icecast.xml        copied from docker/icecast/ in the repository
+icecast/fallback-source.sh
+data/                      the incoming, fallback and fallback-stream folders, unless .env points elsewhere
+```
+
+`docker stack deploy` does not read `.env` itself: load it into the shell first.
+
+```sh
+cd /path/to/the/stack
+set -a; . ./.env; set +a
+docker stack deploy -c docker-stack.yml heron
+```
+
+Swarm has no Compose profiles (`profiles:` is refused): to deploy the stack with or without its own Icecast, put `icecast` and `icecast-fallback` in a second file and add it with another `-c`.
+
+### What the stack needs
+
+A Swarm stack can start the new engine before stopping the old one (`start-first`). Give `heron-engine` this, and add `heron-relay` and its volume:
 
 ```yaml
   heron-engine:
@@ -97,7 +119,7 @@ A Swarm stack can start the new engine before stopping the old one (`start-first
         delay: 10s
 
   heron-relay:
-    image: ghcr.io/dehy/heron-engine:${HERON_VERSION:-latest}
+    image: ghcr.io/dehy/heron-engine:${HERON_RELAY_VERSION:-latest}
     command: ["relay"]
     environment:
       HERON_RELAY_SOCKET: /run/heron/relay/relay.sock
@@ -115,9 +137,39 @@ volumes:
   engine-relay:
 ```
 
+And Icecast with its fallback mount, from the files next to the stack:
+
+```yaml
+  icecast:
+    image: libretime/icecast:2.4.4
+    # The image edits its configuration in place: start from a copy of ours.
+    entrypoint: ["sh", "-c", "cp /etc/heron/icecast.xml /etc/icecast.xml && exec docker-entrypoint \"$$@\"", "--"]
+    command: ["icecast", "-c", "/etc/icecast.xml"]
+    environment:
+      ICECAST_SOURCE_PASSWORD: ${HERON_ICECAST_SOURCE_PASSWORD}
+      ICECAST_RELAY_PASSWORD: ${HERON_ICECAST_ADMIN_PASSWORD}
+      ICECAST_ADMIN_PASSWORD: ${HERON_ICECAST_ADMIN_PASSWORD}
+    volumes:
+      - ./icecast/icecast.xml:/etc/heron/icecast.xml:ro
+    ports:
+      - "8000:8000"
+
+  icecast-fallback:
+    image: linuxserver/ffmpeg:7.1.1
+    entrypoint: ["/fallback-source.sh"]
+    command: ["/fallback", "icecast://source:${HERON_ICECAST_SOURCE_PASSWORD}@icecast:8000/fallback"]
+    volumes:
+      - ./icecast/fallback-source.sh:/fallback-source.sh:ro
+      - ./data/fallback-stream:/fallback:ro
+```
+
+Swarm refuses to start a task whose bind-mounted folder does not exist: create the `data/` folders before deploying.
+
 `heron-engine`, `heron-relay` and their volumes must stay on one node (the volumes are local, and the handover passes connections between processes): pin them with a placement constraint on a multi-node swarm. The relay must be on the network the stream servers are reached from: it connects to them, not the engine.
 
-Then upgrade with the script, giving the stack's name:
+### Upgrading
+
+Upgrade with the script, giving the stack's name:
 
 ```sh
 scripts/upgrade.sh --swarm heron 0.2.0
@@ -125,7 +177,7 @@ scripts/upgrade.sh --swarm heron 0.2.0
 
 It pulls the images on the node first, so the update does not wait for the download, then runs `docker service update --image …` for each Heron service but the relay, the engine last, with `start-first`, a rollback on failure and a 30 s stop grace period (set even if the stack file lacks them). The engine is always updated (`--force`), even when its image did not change. Swarm starts the new engine, waits for it to be healthy (the standby), then stops the old one, which hands over.
 
-From Portainer, update the stack's `HERON_VERSION` and redeploy it with *Re-pull image*: the `start-first` update works the same way, but the relay is updated too (a short break, covered by the fallback mount). To leave it running, give `heron-relay` an image tag of its own instead of `${HERON_VERSION}`.
+Deploying the stack again (`docker stack deploy`, after changing `HERON_VERSION` in `.env`) upgrades it the same way, `start-first`, with one difference: `docker stack deploy` checks every image again, so it also replaces `heron-relay` whenever its image changed, a short break covered by the fallback mount. To leave the relay running, give it a version of its own in `.env` (`HERON_RELAY_VERSION`), changed only when a release says so.
 
 ## Checking an upgrade
 
