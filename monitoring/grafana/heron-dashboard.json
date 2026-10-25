@@ -722,6 +722,72 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "Listeners",
+      "id": 37,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Listeners of each output, as its stream server counts them, read by heron-api once a minute. Gaps: the server could not be read (the air is not affected).",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "heron_listeners{station=~\"$station\"}",
+          "refId": "A",
+          "legendFormat": "{{output}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(heron_listeners{station=~\"$station\"})",
+          "refId": "B",
+          "legendFormat": "Total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
       "type": "row",
       "title": "Audio engine health",
       "id": 12,
@@ -730,7 +796,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 29
       },
       "panels": []
     },
@@ -747,7 +813,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 22
+        "y": 30
       },
       "targets": [
         {
@@ -802,7 +868,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 22
+        "y": 30
       },
       "targets": [
         {
@@ -878,7 +944,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 22
+        "y": 30
       },
       "targets": [
         {
@@ -936,7 +1002,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 30
+        "y": 38
       },
       "targets": [
         {
@@ -993,7 +1059,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 30
+        "y": 38
       },
       "targets": [
         {
@@ -1048,7 +1114,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 30
+        "y": 38
       },
       "targets": [
         {
@@ -1129,7 +1195,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 46
       },
       "panels": []
     },
@@ -1146,7 +1212,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 39
+        "y": 47
       },
       "targets": [
         {
@@ -1210,7 +1276,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 39
+        "y": 47
       },
       "targets": [
         {
@@ -1263,7 +1329,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 47
+        "y": 55
       },
       "panels": []
     },
@@ -1280,7 +1346,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 48
+        "y": 56
       },
       "targets": [
         {
@@ -1350,7 +1416,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 48
+        "y": 56
       },
       "targets": [
         {
@@ -1420,7 +1486,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 48
+        "y": 56
       },
       "targets": [
         {
@@ -1476,7 +1542,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 48
+        "y": 56
       },
       "targets": [
         {
@@ -1546,7 +1612,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 48
+        "y": 56
       },
       "targets": [
         {
@@ -1616,7 +1682,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 48
+        "y": 56
       },
       "targets": [
         {
@@ -1672,7 +1738,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 60
       },
       "targets": [
         {
@@ -1739,7 +1805,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 52
+        "y": 60
       },
       "targets": [
         {
@@ -1793,7 +1859,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 68
       },
       "panels": []
     },
@@ -1810,7 +1876,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 61
+        "y": 69
       },
       "targets": [
         {
@@ -1868,7 +1934,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 61
+        "y": 69
       },
       "targets": [
         {
@@ -1932,7 +1998,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 61
+        "y": 69
       },
       "targets": [
         {
@@ -1995,7 +2061,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 69
+        "y": 77
       },
       "panels": []
     },
@@ -2011,7 +2077,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 78
       },
       "targets": [
         {

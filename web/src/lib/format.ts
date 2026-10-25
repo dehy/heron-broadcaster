@@ -98,6 +98,11 @@ export function setTimeZone(timeZone: string) {
   }
 }
 
+/** The zone times are shown in: the station's, once known. */
+export function timeZone(): string | undefined {
+  return zone;
+}
+
 /** Time of day of a Unix time in ms. */
 export function clockTime(unixMs: number): string {
   return current().time.format(new Date(unixMs));

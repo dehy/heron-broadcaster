@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Station settings: autofill, rotation, time zone, programming details,
-// analysis and library management.
+// listener statistics, analysis and library management.
 
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
@@ -21,6 +21,7 @@ export function Settings() {
       <RotationCard />
       <StationCard />
       <ProgrammingCard />
+      <StatisticsCard />
       <LibraryCard />
       <AnalysisCard />
     </>
@@ -280,6 +281,61 @@ function StationCard() {
             ))}
           </datalist>
         </Field>
+      )}
+    </SettingsCard>
+  );
+}
+
+function StatisticsCard() {
+  const isAdmin = useCan("admin");
+  const settings = useQuery({
+    queryKey: ["settings", "statistics"],
+    queryFn: () => unwrap(api.GET("/api/v1/settings/statistics")),
+  });
+  const save = useAction(
+    (body: Schemas["StatisticsSettings"]) => unwrap(api.PUT("/api/v1/settings/statistics", { body })),
+    { success: t("categories.saved"), invalidate: [["settings", "statistics"], ["listeners"]] },
+  );
+  if (settings.isPending) {
+    return <Loading />;
+  }
+  if (settings.isError) {
+    return <ErrorView error={settings.error} />;
+  }
+  return (
+    <SettingsCard
+      title={t("nav.statistics")}
+      description={rich("settings.statisticsHelp", { page: <Link to="/statistics">{t("nav.statistics")}</Link> })}
+      value={settings.data}
+      save={(value) => save.mutate(value)}
+      saving={save.isPending}
+      canEdit={isAdmin}
+    >
+      {(draft, set) => (
+        <div className="form-grid">
+          <Field label={t("settings.minSession")} hint={t("settings.minSessionHint")}>
+            <NumberInput
+              value={draft.min_session_s}
+              min={0}
+              max={3600}
+              step={1}
+              suffix={t("settings.seconds")}
+              disabled={!isAdmin}
+              onChange={(min_session_s) => set({ min_session_s: Math.round(min_session_s) })}
+            />
+          </Field>
+          <Field label={t("settings.retention")} hint={t("settings.retentionHint")}>
+            <NumberInput
+              value={draft.retention_days}
+              min={7}
+              max={3650}
+              step={1}
+              suffix={t("settings.days")}
+              disabled={!isAdmin}
+              onChange={(retention_days) => set({ retention_days: Math.round(retention_days) })}
+            />
+          </Field>
+        </div>
       )}
     </SettingsCard>
   );

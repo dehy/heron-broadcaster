@@ -13,6 +13,7 @@ import { Card, ConfirmButton, Empty, Icon, Modal, PageHead } from "../components
 import { type PlainKey, number, rich, t } from "../i18n";
 import { ago, bytes, clockTime, duration, trackName } from "../lib/format";
 import { sourceLabel } from "../lib/labels";
+import { useListenersNow } from "../lib/listeners";
 import { positionNow, useLive } from "../lib/live";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
@@ -411,9 +412,21 @@ function OutputsCard({ outputs }: { outputs: OutputStatus[] }) {
   // The live state has no settings: the listen links come from the outputs.
   const configured = useQuery({ queryKey: ["outputs"], queryFn: () => unwrap(api.GET("/api/v1/outputs")) });
   const listenUrl = (id: number) => configured.data?.find((output) => output.id === id)?.listen_url;
+  const listeners = useListenersNow();
+  const listenersOf = (id: number) => listeners.data?.outputs.find((o) => o.output_id === id)?.listeners;
+  const total = listeners.data?.total;
   return (
     <Card
-      title={t("nav.outputs")}
+      title={
+        <h2>
+          {t("nav.outputs")}
+          {total !== undefined && total !== null && (
+            <Link to="/statistics" className="muted small" style={{ fontWeight: 400, marginLeft: "0.5rem" }}>
+              {t("dashboard.listeners", { count: total })}
+            </Link>
+          )}
+        </h2>
+      }
       actions={<Link to="/outputs" className="btn small">{t("dashboard.configure")}</Link>}
       flush
     >
@@ -439,6 +452,9 @@ function OutputsCard({ outputs }: { outputs: OutputStatus[] }) {
                     : output.error
                       ? <span className="bad">{output.error}</span>
                       : null}
+                  {listenersOf(output.id) !== undefined && listenersOf(output.id) !== null && (
+                    <span> · {t("dashboard.listeners", { count: listenersOf(output.id) ?? 0 })}</span>
+                  )}
                   {output.dropped_chunks > 0 && (
                     <span className="warn"> · {t("dashboard.dropped", { count: output.dropped_chunks })}</span>
                   )}

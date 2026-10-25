@@ -115,7 +115,7 @@ Provisioning it from files instead (self-hosted Grafana): put the JSON in a dire
 
 | Row | Panels |
 |---|---|
-| **On air** | Whether the engine sends metrics, dead air, how long the master bus has been silent, outputs connected, tracks queued, server clock synchronized, listeners. Master level, each output's bitrate and listeners, fallback tracks and silence watchdog skips per minute, pause and queue length. |
+| **On air** | Whether the engine sends metrics, dead air, how long the master bus has been silent, outputs connected, tracks queued, server clock synchronized. Master level, each output's bitrate, its listeners and the total, fallback tracks and silence watchdog skips per minute, pause and queue length. |
 | **Audio engine health** | Underruns (decoding fell behind), audio dropped by the engine, an encoder or an output, output reconnections, the pacing clock's lateness and drift, stalls, tracks that could not be preloaded. |
 | **Server clock** | The kernel's clock offset, estimated error and synchronization. |
 | **Control plane** | heron-api and its link to the engine, web clients, the analyzer and the librarian, library size, tracks queued by rotation and picks with relaxed rules, sign-ins. |
