@@ -23,7 +23,7 @@ use tokio_tungstenite::tungstenite;
 use crate::app::{self, AppState};
 use crate::auth::{Passwords, Role};
 use crate::library::Library;
-use crate::{engine, history, queue, sync, users};
+use crate::{engine, history, queue, sync, users, webhooks};
 
 /// Tracks short enough to see several play during a test.
 const TRACK_SECONDS: f64 = 3.0;
@@ -127,10 +127,18 @@ impl Station {
         let queue = queue::QueueManager::new(pool.clone(), Arc::clone(&link));
         let sync = sync::ConfigSync::new(pool.clone(), Arc::clone(&link));
         let history_events = link.events();
+        let webhook_events = link.events();
+        let webhooks = webhooks::Webhooks::with_backoff(
+            pool.clone(),
+            webhooks::Backoff(vec![Duration::from_millis(200); 2]),
+        )
+        .unwrap();
         tasks.extend(link.spawn());
         tasks.push(tokio::spawn(
             history::HistoryRecorder::new(pool.clone()).run(history_events),
         ));
+        tasks.push(tokio::spawn(Arc::clone(&webhooks).dispatch(webhook_events)));
+        tasks.push(tokio::spawn(Arc::clone(&webhooks).send_loop()));
         tasks.push(tokio::spawn(Arc::clone(&queue).run()));
         tasks.push(tokio::spawn(Arc::clone(&sync).run()));
 
@@ -143,6 +151,7 @@ impl Station {
             sync,
             passwords: Arc::new(Passwords::default()),
             staging: Arc::new(staging.path().to_path_buf()),
+            webhooks,
         };
         let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = http.local_addr().unwrap();
@@ -2371,5 +2380,246 @@ async fn deleted_tracks_leave_the_queue_and_go_to_the_trash() {
         .request(Method::GET, &format!("/tracks/{queued}"), None)
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    station.stop().await;
+}
+
+/// What a webhook receiver got: when, on which path, the headers, the body.
+type Received = (u64, String, axum::http::HeaderMap, String);
+
+async fn webhook_receiver() -> (tokio::sync::mpsc::UnboundedReceiver<Received>, SocketAddr) {
+    let (sender, received) = tokio::sync::mpsc::unbounded_channel();
+    let app = axum::Router::new().route(
+        "/{name}",
+        axum::routing::post(
+            move |axum::extract::Path(name): axum::extract::Path<String>,
+                  headers: axum::http::HeaderMap,
+                  body: String| {
+                let sender = sender.clone();
+                async move {
+                    let at = engine::unix_ms(std::time::SystemTime::now());
+                    let _ = sender.send((at, name, headers, body));
+                    "ok"
+                }
+            },
+        ),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (received, addr)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+    let (mut received, receiver) = webhook_receiver().await;
+
+    let (status, created) = admin
+        .send(
+            Method::POST,
+            "/webhooks",
+            json!({"name": "Website", "url": format!("http://{receiver}/json"),
+                   "events": ["track.started", "track.ended", "track.skipped"]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let secret = created["secret"].as_str().unwrap().to_owned();
+    assert!(secret.starts_with("whsec_"));
+    let webhook = created["webhook"]["id"].as_u64().unwrap();
+    let (status, created) = admin
+        .send(
+            Method::POST,
+            "/webhooks",
+            json!({"name": "Display", "url": format!("http://{receiver}/text"),
+                   "events": ["track.started"], "content_type": "text/plain",
+                   "body_template": "{{artist}} – {{title}}"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let (status, refused) = admin
+        .send(
+            Method::POST,
+            "/webhooks",
+            json!({"name": "Bad", "url": format!("http://{receiver}/bad"),
+                   "events": ["track.started"], "body_template": "{{song}}"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    let listed = admin.get("/webhooks").await;
+    assert_eq!(listed.as_array().unwrap().len(), 2);
+    assert!(!listed.to_string().contains(&secret), "the secret leaked");
+    let (status, _) = viewer.request(Method::GET, "/webhooks", None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Every track change the engine reports reaches the receiver within a
+    // second, signed; a skip is reported as such.
+    let mut events = station.state.engine.events();
+    let mut expected = Vec::new();
+    let mut got = Vec::new();
+    let mut skipped = false;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline && (expected.len() < 6 || !skipped) {
+        tokio::select! {
+            event = events.recv() => {
+                if let Ok(engine::LinkEvent::Track(event)) = event {
+                    let kind = webhooks::WebhookEvent::of(&event).as_str();
+                    let at = match &event {
+                        engine::TrackEvent::Started { at_unix_ms, .. }
+                        | engine::TrackEvent::Ended { at_unix_ms, .. } => *at_unix_ms,
+                    };
+                    expected.push((kind.to_owned(), at));
+                    let starts = expected.iter().filter(|(kind, _)| kind == "track.started").count();
+                    if kind == "track.started" && starts == 2 {
+                        let (status, _) = admin.request(Method::POST, "/player/skip", None).await;
+                        assert_eq!(status, StatusCode::NO_CONTENT);
+                    }
+                }
+            }
+            Some(delivery) = received.recv() => got.push(delivery),
+        }
+        skipped = got
+            .iter()
+            .any(|(_, _, headers, _)| headers["x-heron-event"] == "track.skipped");
+    }
+    // Deliveries of the last events may still be on their way.
+    while let Ok(Some(delivery)) =
+        tokio::time::timeout(Duration::from_secs(1), received.recv()).await
+    {
+        got.push(delivery);
+    }
+    assert!(skipped, "no track.skipped among {expected:?}");
+    let mut reported = Vec::new();
+    for (at, name, headers, body) in &got {
+        if name == "text" {
+            assert!(
+                body.starts_with("Artist ") && body.contains(" – Track "),
+                "{body}"
+            );
+            assert_eq!(headers["content-type"], "text/plain");
+            continue;
+        }
+        let timestamp: u64 = headers["x-heron-timestamp"]
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            headers["x-heron-signature"].to_str().unwrap(),
+            webhooks::signature(&secret, timestamp, body)
+        );
+        let payload: Value = serde_json::from_str(body).unwrap();
+        let event_at = payload["at_unix_ms"].as_u64().unwrap();
+        assert!(
+            at.saturating_sub(event_at) < 1_000,
+            "{} arrived {} ms late",
+            payload["event"],
+            at - event_at
+        );
+        assert_eq!(headers["x-heron-event"], payload["event"].as_str().unwrap());
+        reported.push((payload["event"].as_str().unwrap().to_owned(), event_at));
+    }
+    for change in &expected {
+        assert!(
+            reported.contains(change),
+            "{change:?} was not reported: {reported:?}"
+        );
+    }
+    let texts = got.iter().filter(|(_, name, ..)| name == "text").count();
+    let starts = expected
+        .iter()
+        .filter(|(kind, _)| kind == "track.started")
+        .count();
+    assert!(
+        texts >= starts,
+        "{texts} templated deliveries for {starts} starts"
+    );
+
+    // The delivery log, a test ping and a retry.
+    let log = admin.get(&format!("/webhooks/{webhook}/deliveries")).await;
+    let log = log.as_array().unwrap();
+    assert!(log.len() >= expected.len());
+    assert!(
+        log.iter()
+            .all(|delivery| delivery["status"] == "delivered" && delivery["attempts"] == 1)
+    );
+    let (status, ping) = admin
+        .request(Method::POST, &format!("/webhooks/{webhook}/test"), None)
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{ping}");
+    let ping_id = ping["id"].as_u64().unwrap();
+    let ping_got = loop {
+        let (_, name, headers, body) = received.recv().await.unwrap();
+        if name == "json" && headers["x-heron-event"] == "ping" {
+            break serde_json::from_str::<Value>(&body).unwrap();
+        }
+    };
+    assert_eq!(ping_got["delivery_id"], ping_id);
+    let delivered = log[0]["id"].as_u64().unwrap();
+    let (status, retried) = admin
+        .request(
+            Method::POST,
+            &format!("/webhook-deliveries/{delivered}/retry"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{retried}");
+    loop {
+        let (_, _, headers, _) = received.recv().await.unwrap();
+        if headers["x-heron-delivery"] == delivered.to_string().as_str() {
+            break;
+        }
+    }
+
+    // Public endpoints: no sign-in, any origin, no IDs.
+    let anyone = reqwest::Client::new();
+    let base = format!("http://{}/api/v1/public", station.api);
+    let response = anyone
+        .get(format!("{base}/now-playing"))
+        .header("origin", "https://station.example")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["access-control-allow-origin"], "*");
+    assert_eq!(response.headers()["cache-control"], "public, max-age=5");
+    let now: Value = response.json().await.unwrap();
+    assert!(
+        now["now"]["title"].as_str().unwrap().starts_with("Track "),
+        "{now}"
+    );
+    assert!(now["now"].get("track_id").is_none());
+    let response = anyone
+        .get(format!("{base}/history?limit=5"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let history: Value = response.json().await.unwrap();
+    let plays = history.as_array().unwrap();
+    assert!(!plays.is_empty() && plays.len() <= 5);
+    for play in plays {
+        assert!(
+            play.get("id").is_none() && play.get("track_id").is_none(),
+            "{play}"
+        );
+        assert!(play["artist"].is_string());
+    }
+    let response = anyone
+        .get(format!("{base}/history?limit=500"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/webhooks/{webhook}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
     station.stop().await;
 }

@@ -17,6 +17,8 @@ base64.workspace = true
 blake3.workspace = true
 clap.workspace = true
 getrandom.workspace = true
+# Signs webhook deliveries.
+hmac.workspace = true
 heron-analysis = { workspace = true, features = ["mysql"] }
 heron-core = { workspace = true, features = ["openapi"] }
 heron-library.workspace = true
@@ -30,8 +32,11 @@ metrics.workspace = true
 notify.workspace = true
 # Reads passwords without echoing them.
 rustix = { workspace = true, features = ["termios"] }
+# Sends webhook deliveries.
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
@@ -39,7 +44,8 @@ tokio-stream = { workspace = true, features = ["net"] }
 tonic.workspace = true
 # Track audio for previews, with range requests.
 tower.workspace = true
-tower-http.workspace = true
+# Public endpoints answer any origin.
+tower-http = { workspace = true, features = ["cors"] }
 tracing.workspace = true
 utoipa.workspace = true
 utoipa-axum.workspace = true
@@ -52,7 +58,6 @@ heron-engine.workspace = true
 heron-librarian.workspace = true
 heron-service = { workspace = true, features = ["test-util"] }
 hound.workspace = true
-reqwest.workspace = true
 tempfile.workspace = true
 tokio-tungstenite.workspace = true
 

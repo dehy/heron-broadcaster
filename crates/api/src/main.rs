@@ -22,6 +22,7 @@ mod library;
 mod live;
 mod outputs;
 mod player;
+mod public;
 mod queue;
 mod restrictions;
 mod rotation;
@@ -31,6 +32,7 @@ mod staging;
 mod sync;
 mod tracks;
 mod users;
+mod webhooks;
 
 use std::io::{BufRead, IsTerminal, Write};
 use std::net::SocketAddr;
@@ -187,6 +189,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 
     let mut tasks = engine.spawn();
     let history_events = engine.events();
+    let webhook_events = engine.events();
+    let webhooks = webhooks::Webhooks::new(pool.clone()).context("cannot set up webhooks")?;
     tasks.push(tokio::spawn(library.clone().run(ScanOptions {
         interval: Duration::from_secs(cli.scan_interval.max(60)),
         watch: cli.library_watch,
@@ -195,6 +199,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     tasks.push(tokio::spawn(
         history::HistoryRecorder::new(pool.clone()).run(history_events),
     ));
+    tasks.push(tokio::spawn(Arc::clone(&webhooks).dispatch(webhook_events)));
+    tasks.push(tokio::spawn(Arc::clone(&webhooks).send_loop()));
     tasks.push(tokio::spawn(Arc::clone(&queue).run()));
     tasks.push(tokio::spawn(artists::run_linker(
         pool.clone(),
@@ -213,6 +219,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         sync,
         passwords: Arc::new(Passwords::default()),
         staging: Arc::new(cli.staging_dir),
+        webhooks,
     };
     let router = app::router(state).merge(heron_service::ops_router(SERVICE, metrics, health));
 

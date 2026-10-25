@@ -26,9 +26,10 @@ use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::library::{Library, LibraryStatus};
 use crate::queue::QueueManager;
 use crate::sync::ConfigSync;
+use crate::webhooks::Webhooks;
 use crate::{
-    artists, categories, clocks, history, labels, librarian, live, outputs, player, restrictions,
-    rotation, selection, settings, staging, tracks, users,
+    artists, categories, clocks, history, labels, librarian, live, outputs, player, public,
+    restrictions, rotation, selection, settings, staging, tracks, users, webhooks,
 };
 
 pub const SERVICE: &str = "heron-api";
@@ -44,6 +45,7 @@ pub struct AppState {
     pub passwords: Arc<Passwords>,
     /// The buffer zone, as mounted in this container (read-write).
     pub staging: Arc<std::path::PathBuf>,
+    pub webhooks: Arc<Webhooks>,
 }
 
 #[derive(OpenApi)]
@@ -74,6 +76,8 @@ pub struct AppState {
         (name = "settings", description = "Station settings"),
         (name = "outputs", description = "Encoder profiles and outputs"),
         (name = "live", description = "Live state over a WebSocket"),
+        (name = "webhooks", description = "Webhooks on track changes, and their deliveries (admins)"),
+        (name = "public", description = "Now playing and history for station websites: no sign-in, any origin"),
     )
 )]
 struct ApiDoc;
@@ -114,6 +118,8 @@ fn api() -> OpenApiRouter<AppState> {
         .merge(settings::router())
         .merge(outputs::router())
         .merge(live::router())
+        .merge(webhooks::router())
+        .merge(public::router())
 }
 
 /// The OpenAPI document, as served.
