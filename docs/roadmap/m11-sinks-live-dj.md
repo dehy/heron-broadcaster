@@ -1,4 +1,4 @@
-# M10 – More encoders, sinks & live DJ
+# M11 – More encoders, sinks & live DJ
 
 **Depends on:** M3
 

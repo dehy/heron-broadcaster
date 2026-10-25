@@ -494,7 +494,7 @@ impl Mixer {
 
         let mut master = BlockMeter::default();
         for frame in out.as_chunks_mut::<CHANNELS>().0 {
-            // No limiter before M9: never let anything over full scale out.
+            // No limiter before M10: never let anything over full scale out.
             frame[0] = frame[0].clamp(-1.0, 1.0);
             frame[1] = frame[1].clamp(-1.0, 1.0);
             master.add(frame[0], frame[1]);

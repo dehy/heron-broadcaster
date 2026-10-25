@@ -27,7 +27,7 @@ import { ListenLink, OutputState } from "./Dashboard";
 type Encoder = Schemas["EncoderKind"];
 type Kind = Schemas["OutputKind"];
 
-// Built in so far; the others arrive in M10 and the engine refuses them.
+// Built in so far; the others arrive in M11 and the engine refuses them.
 // Labels are functions: some are words of the current language.
 const ENCODERS: { value: Encoder; label: () => string; available: boolean }[] = [
   { value: "mp3", label: () => "MP3 (LAME)", available: true },

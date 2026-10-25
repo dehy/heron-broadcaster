@@ -4,7 +4,7 @@ Raise these when they become relevant instead of guessing.
 
 | Question | Relevant to |
 |---|---|
-| HLS details: segment container (MPEG-TS/ADTS or fMP4), now-playing metadata in segments (ID3 timed metadata), and whether `heron-web` serves the HLS directory. | [M10](roadmap/m10-sinks-live-dj.md) |
+| HLS details: segment container (MPEG-TS/ADTS or fMP4), now-playing metadata in segments (ID3 timed metadata), and whether `heron-web` serves the HLS directory. | [M11](roadmap/m11-sinks-live-dj.md) |
 | Name of the analysis service: `heron-analyzer` was chosen as a working name. | [M0](roadmap/m0-foundations.md) |
 | Silence ceiling: −50 dBFS trims inaudible fade-ins but also quiet deliberate intros (Pink Floyd's wind, Yes' nature sounds, 23–27 s). −60 dBFS keeps most of them. Which default? | [M1](roadmap/m1-import-analysis.md) |
 | Opus and HE-AAC decoding, not supported by Symphonia: add libopus (BSD) and an HE-AAC-capable decoder, or report them as unsupported. | [M2](roadmap/m2-engine-core.md) |

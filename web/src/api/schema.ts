@@ -2751,7 +2751,7 @@ export interface components {
             /**
              * Format: double
              * @description Boosts never push the track's true peak above this. There is no
-             *     limiter before M9, so a boost that clips would distort.
+             *     limiter before M10, so a boost that clips would distort.
              * @default -1
              */
             peak_ceiling_dbtp: number;

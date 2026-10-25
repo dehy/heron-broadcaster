@@ -43,7 +43,7 @@ pub fn build(profile: &EncoderProfile) -> Result<Box<dyn Encoder>, ConfigError> 
         EncoderKind::Mp3 => Ok(Box::new(Mp3Encoder::new(profile)?)),
         kind => Err(ConfigError::Profile {
             profile: profile.name.clone(),
-            reason: format!("the {kind:?} encoder arrives in M10; only MP3 is available"),
+            reason: format!("the {kind:?} encoder arrives in M11; only MP3 is available"),
         }),
     }
 }
@@ -341,6 +341,6 @@ mod tests {
         bad.options = serde_json::Value::Null;
         bad.encoder = EncoderKind::Opus;
         let error = build(&bad).err().unwrap();
-        assert!(error.to_string().contains("M10"), "{error}");
+        assert!(error.to_string().contains("M11"), "{error}");
     }
 }

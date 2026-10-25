@@ -428,7 +428,7 @@ fn sink_config(output: &OutputConfig) -> Result<SinkConfig, ConfigError> {
         )?)),
         kind => Err(ConfigError::Output {
             output: output.name.clone(),
-            reason: format!("{kind:?} outputs arrive in M10; only Icecast is available"),
+            reason: format!("{kind:?} outputs arrive in M11; only Icecast is available"),
         }),
     }
 }

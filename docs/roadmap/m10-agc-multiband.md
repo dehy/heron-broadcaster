@@ -1,6 +1,6 @@
-# M9 – AGC & multiband processing
+# M10 – AGC & multiband processing
 
-**Depends on:** M8
+**Depends on:** M9
 
 ## Scope
 

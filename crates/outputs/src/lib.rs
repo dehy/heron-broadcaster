@@ -2,7 +2,7 @@
 
 //! Encoders and output sinks: the `OutputSink` trait, the MP3 encoder and the
 //! Icecast sink, and the pipeline feeding several outputs at once.
-//! Shoutcast, HLS, file recording, pipes and more encoders arrive in M10.
+//! Shoutcast, HLS, file recording, pipes and more encoders arrive in M11.
 //!
 //! See `docs/outputs.md`.
 
