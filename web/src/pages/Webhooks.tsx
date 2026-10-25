@@ -7,7 +7,7 @@ import { useState } from "react";
 import { type DeliveryView, type WebhookEvent, type WebhookView, api, done, unwrap } from "../api";
 import { Banner, Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, Modal, PageHead } from "../components/ui";
 import { type PlainKey, rich, t } from "../i18n";
-import { ago, dateTime } from "../lib/format";
+import { ago, clockTime, dateTime } from "../lib/format";
 import { useAction, useCan } from "../lib/session";
 
 const EVENTS: { value: WebhookEvent; label: PlainKey }[] = [
@@ -249,13 +249,13 @@ function Deliveries({ webhook, onRotate }: { webhook: WebhookView; onRotate: () 
             <tbody>
               {deliveries.data.map((delivery) => (
                 <tr key={delivery.id}>
-                  <td className="nowrap">{dateTime(delivery.created_at_unix_ms)}</td>
-                  <td>{eventLabel(delivery.event)}</td>
-                  <td>
+                  <td style={{ whiteSpace: "nowrap" }}>{dateTime(delivery.created_at_unix_ms)}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{eventLabel(delivery.event)}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
                     <StatusBadge delivery={delivery} />
                     {delivery.status === "pending" && delivery.next_attempt_at_unix_ms && delivery.attempts > 0 && (
                       <div className="muted small">
-                        {t("webhooks.nextAttempt", { time: dateTime(delivery.next_attempt_at_unix_ms) })}
+                        {t("webhooks.nextAttempt", { time: clockTime(delivery.next_attempt_at_unix_ms) })}
                       </div>
                     )}
                   </td>
