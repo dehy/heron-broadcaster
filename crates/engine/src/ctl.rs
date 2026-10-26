@@ -217,7 +217,9 @@ async fn execute(args: Args, library_dir: &Path) -> anyhow::Result<()> {
             println!("settings applied");
         }
         CtlCommand::SetEq { file } => {
-            let settings_json = std::fs::read_to_string(&file)
+            let path = file.clone();
+            let settings_json = tokio::task::spawn_blocking(move || std::fs::read_to_string(path))
+                .await?
                 .with_context(|| format!("cannot read {}", file.display()))?;
             client
                 .set_eq_settings(pb::SetEqSettingsRequest { settings_json })

@@ -23,7 +23,7 @@ pub struct EqSettings {
 
 impl EqSettings {
     /// Name of the row in the `settings` table.
-    pub const SETTINGS_NAME: &'static str = "eq";
+    pub const SETTINGS_NAME: &str = "eq";
 
     pub fn check(&self) -> Result<(), String> {
         self.music

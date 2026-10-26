@@ -20,15 +20,21 @@ import {
 } from "../components/ui";
 import { t } from "../i18n";
 import {
+  CURVE_HEIGHT,
+  CURVE_WIDTH,
   EQ_KEY,
   FREQUENCIES,
   MAX_GAIN_DB,
+  arrowStep,
   bandLabel,
+  curvePath,
+  curveX,
+  curveY,
+  formatGain,
   latestSender,
-  filterGains,
-  filtersResponseDb,
-  roundGain,
+  presetWithGains,
   useEqSettings,
+  withGain,
 } from "../lib/eq";
 import { useAction, useCan } from "../lib/session";
 
@@ -50,7 +56,7 @@ export function Eq() {
   return <EqEditor saved={data} />;
 }
 
-function EqEditor({ saved }: { saved: EqSettings }) {
+function EqEditor({ saved }: Readonly<{ saved: EqSettings }>) {
   const canEdit = useCan("operator");
   const client = useQueryClient();
   const toast = useToast();
@@ -120,17 +126,16 @@ function EqPanel({
   value,
   disabled,
   onChange,
-}: {
+}: Readonly<{
   title: string;
   hint: string;
   value: DeckEq;
   disabled: boolean;
   onChange: (eq: DeckEq) => void;
-}) {
+}>) {
   const presets = usePresets();
-  const setGain = (band: number, gain: number) =>
-    onChange({ ...value, gains_db: value.gains_db.map((g, i) => (i === band ? roundGain(gain) : g)) });
-  const loaded = presets.data?.find((preset) => sameGains(preset.gains_db, value.gains_db));
+  const setGain = (band: number, gain: number) => onChange(withGain(value, band, gain));
+  const loaded = presetWithGains(presets.data, value.gains_db);
 
   return (
     <Card
@@ -206,10 +211,10 @@ function EqPanel({
                   onDoubleClick={() => setGain(band, 0)}
                   onKeyDown={(event) => {
                     // Half a decibel a press; the number above for finer.
-                    const direction = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[event.key];
-                    if (direction) {
+                    const step = arrowStep(event.key);
+                    if (step) {
                       event.preventDefault();
-                      setGain(band, gain + direction * 0.5);
+                      setGain(band, gain + step);
                     }
                   }}
                 />
@@ -224,54 +229,37 @@ function EqPanel({
   );
 }
 
-function formatGain(gain: number): string {
-  return gain > 0 ? `+${gain.toFixed(1)}` : gain.toFixed(1);
-}
-
-function sameGains(a: number[], b: number[]): boolean {
-  return a.length === b.length && a.every((gain, i) => gain === b[i]);
-}
-
-// The curve: 20 Hz to 20 kHz on a log scale, ±15 dB: a band's ±12 and
-// some of what neighbours add up to.
-const WIDTH = 600;
-const HEIGHT = 140;
-const RANGE_DB = 15;
-const x = (frequency: number) => (Math.log10(frequency / 20) / 3) * WIDTH;
-const y = (db: number) => HEIGHT / 2 - (Math.max(-RANGE_DB, Math.min(RANGE_DB, db)) / RANGE_DB) * (HEIGHT / 2);
-
 /** The response of the EQ, as the engine's filters have it. */
-function Curve({ gains, enabled }: { gains: number[]; enabled: boolean }) {
-  const path = useMemo(() => {
-    const filters = filterGains(gains);
-    const points: string[] = [];
-    for (let step = 0; step <= 150; step++) {
-      const frequency = 20 * 1000 ** (step / 150);
-      points.push(`${x(frequency).toFixed(1)},${y(filtersResponseDb(filters, frequency)).toFixed(1)}`);
-    }
-    return `M${points.join("L")}`;
-  }, [gains]);
+function Curve({ gains, enabled }: Readonly<{ gains: number[]; enabled: boolean }>) {
+  const path = useMemo(() => curvePath(gains, 150, 1), [gains]);
   return (
     <svg
       className="eq-curve"
-      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+      viewBox={`0 0 ${CURVE_WIDTH} ${CURVE_HEIGHT}`}
       preserveAspectRatio="none"
       role="img"
       aria-label={t("eq.curve")}
     >
       {[-12, -6, 6, 12].map((db) => (
-        <line key={db} className="eq-grid" x1={0} x2={WIDTH} y1={y(db)} y2={y(db)} />
+        <line key={db} className="eq-grid" x1={0} x2={CURVE_WIDTH} y1={curveY(db)} y2={curveY(db)} />
       ))}
       {FREQUENCIES.map((frequency) => (
-        <line key={frequency} className="eq-grid" x1={x(frequency)} x2={x(frequency)} y1={0} y2={HEIGHT} />
+        <line
+          key={frequency}
+          className="eq-grid"
+          x1={curveX(frequency)}
+          x2={curveX(frequency)}
+          y1={0}
+          y2={CURVE_HEIGHT}
+        />
       ))}
-      <line className="eq-zero" x1={0} x2={WIDTH} y1={y(0)} y2={y(0)} />
+      <line className="eq-zero" x1={0} x2={CURVE_WIDTH} y1={curveY(0)} y2={curveY(0)} />
       <path className={enabled ? "eq-line" : "eq-line off"} d={path} vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }
 
-function Presets({ current, canEdit }: { current: EqSettings; canEdit: boolean }) {
+function Presets({ current, canEdit }: Readonly<{ current: EqSettings; canEdit: boolean }>) {
   const presets = usePresets();
   const [naming, setNaming] = useState<{ preset: EqPreset | null; gains: number[] } | null>(null);
   const save = useAction(
@@ -381,13 +369,13 @@ function NameModal({
   busy,
   onClose,
   onSave,
-}: {
+}: Readonly<{
   initial: string;
   title: string;
   busy: boolean;
   onClose: () => void;
   onSave: (name: string) => void;
-}) {
+}>) {
   const [name, setName] = useState(initial);
   const valid = name.trim().length > 0;
   return (
@@ -425,7 +413,6 @@ function NameModal({
             className="input"
             value={name}
             maxLength={100}
-            autoFocus
             onChange={(event) => setName(event.target.value)}
           />
         </Field>
@@ -435,19 +422,11 @@ function NameModal({
 }
 
 /** A preset's curve, small. */
-function MiniCurve({ gains }: { gains: number[] }) {
-  const path = useMemo(() => {
-    const filters = filterGains(gains);
-    const points: string[] = [];
-    for (let step = 0; step <= 40; step++) {
-      const frequency = 20 * 1000 ** (step / 40);
-      points.push(`${x(frequency).toFixed(0)},${y(filtersResponseDb(filters, frequency)).toFixed(0)}`);
-    }
-    return `M${points.join("L")}`;
-  }, [gains]);
+function MiniCurve({ gains }: Readonly<{ gains: number[] }>) {
+  const path = useMemo(() => curvePath(gains, 40, 0), [gains]);
   return (
-    <svg className="eq-mini" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" aria-hidden="true">
-      <line className="eq-zero" x1={0} x2={WIDTH} y1={y(0)} y2={y(0)} />
+    <svg className="eq-mini" viewBox={`0 0 ${CURVE_WIDTH} ${CURVE_HEIGHT}`} preserveAspectRatio="none" aria-hidden="true">
+      <line className="eq-zero" x1={0} x2={CURVE_WIDTH} y1={curveY(0)} y2={curveY(0)} />
       <path className="eq-line" d={path} vectorEffect="non-scaling-stroke" />
     </svg>
   );

@@ -1642,9 +1642,6 @@ ul.steps .bar {
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.eq-frequency {
   color: var(--muted);
 }
 

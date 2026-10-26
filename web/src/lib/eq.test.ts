@@ -2,8 +2,17 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  CURVE_HEIGHT,
+  CURVE_WIDTH,
   FREQUENCIES,
+  arrowStep,
   bandLabel,
+  curvePath,
+  curveX,
+  curveY,
+  formatGain,
+  presetWithGains,
+  withGain,
   bandQ,
   filterGains,
   filtersResponseDb,
@@ -136,5 +145,57 @@ describe("the latest sender", () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(errors).toHaveLength(1);
     expect(sent).toEqual([1, 2]);
+  });
+});
+
+describe("the page's helpers", () => {
+  it("format gains with their sign", () => {
+    expect(formatGain(3.5)).toBe("+3.5");
+    expect(formatGain(0)).toBe("0.0");
+    expect(formatGain(-12)).toBe("-12.0");
+  });
+
+  it("change one band, rounded and within range", () => {
+    const eq = { enabled: true, gains_db: flat() };
+    const changed = withGain(eq, 2, 3.26);
+    expect(changed.gains_db[2]).toBe(3.3);
+    expect(changed.gains_db.filter((gain) => gain !== 0)).toHaveLength(1);
+    expect(withGain(eq, 0, 40).gains_db[0]).toBe(12);
+    // The EQ given is left as it was.
+    expect(eq.gains_db[2]).toBe(0);
+  });
+
+  it("move a slider by half a decibel with the arrows", () => {
+    expect(arrowStep("ArrowUp")).toBe(0.5);
+    expect(arrowStep("ArrowRight")).toBe(0.5);
+    expect(arrowStep("ArrowDown")).toBe(-0.5);
+    expect(arrowStep("ArrowLeft")).toBe(-0.5);
+    expect(arrowStep("Enter")).toBeUndefined();
+  });
+
+  it("find the preset loaded, by its gains", () => {
+    const presets = [
+      { id: 1, name: "Flat", gains_db: flat() },
+      { id: 2, name: "Bass", gains_db: [3, ...flat().slice(1)] },
+    ];
+    expect(presetWithGains(presets, [3, ...flat().slice(1)])?.name).toBe("Bass");
+    expect(presetWithGains(presets, flat())?.name).toBe("Flat");
+    expect(presetWithGains(presets, [1, ...flat().slice(1)])).toBeUndefined();
+    expect(presetWithGains(undefined, flat())).toBeUndefined();
+  });
+
+  it("draw the curve across 20 Hz to 20 kHz, clamped to ±15 dB", () => {
+    expect(curveX(20)).toBeCloseTo(0, 9);
+    expect(curveX(20_000)).toBeCloseTo(CURVE_WIDTH, 9);
+    expect(curveY(0)).toBe(CURVE_HEIGHT / 2);
+    expect(curveY(15)).toBe(0);
+    expect(curveY(40)).toBe(0);
+    expect(curveY(-40)).toBe(CURVE_HEIGHT);
+    // Flat: a straight line through the middle, from end to end.
+    const path = curvePath(flat(), 4, 0);
+    expect(path).toBe(`M0,${CURVE_HEIGHT / 2}L150,70L300,70L450,70L600,70`);
+    // A boost at 60 Hz lifts the start of the curve.
+    const boosted = curvePath([12, ...flat().slice(1)], 4, 0);
+    expect(Number(boosted.split(",")[1]?.split("L")[0])).toBeLessThan(CURVE_HEIGHT / 2);
   });
 });

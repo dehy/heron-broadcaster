@@ -23,7 +23,10 @@ const BANDS = FREQUENCIES.length;
 type Shape = "low_shelf" | "peaking" | "high_shelf";
 
 function shape(band: number): Shape {
-  return band === 0 ? "low_shelf" : band === BANDS - 1 ? "high_shelf" : "peaking";
+  if (band === 0) {
+    return "low_shelf";
+  }
+  return band === BANDS - 1 ? "high_shelf" : "peaking";
 }
 
 /** A peaking band is as wide as the distances to its neighbours. */
@@ -146,6 +149,56 @@ export function useEqSettings(): { data: EqSettings | undefined; error: unknown 
     queryFn: () => unwrap(api.GET("/api/v1/settings/eq")),
   });
   return { data: live ?? query.data, error: query.error };
+}
+
+/** "+3.5", "0.0", "-12.0". */
+export function formatGain(gain: number): string {
+  return gain > 0 ? `+${gain.toFixed(1)}` : gain.toFixed(1);
+}
+
+/** The EQ with one band's gain changed, rounded and within ±12 dB. */
+export function withGain(eq: DeckEq, band: number, gain: number): DeckEq {
+  return { ...eq, gains_db: eq.gains_db.map((g, i) => (i === band ? roundGain(gain) : g)) };
+}
+
+/** What an arrow key does to a slider: half a decibel up or down. */
+export function arrowStep(key: string): number | undefined {
+  return { ArrowUp: 0.5, ArrowRight: 0.5, ArrowDown: -0.5, ArrowLeft: -0.5 }[key];
+}
+
+/** The preset with exactly these gains, if any. */
+export function presetWithGains<T extends { gains_db: number[] }>(presets: T[] | undefined, gains: number[]): T | undefined {
+  return presets?.find(
+    (preset) => preset.gains_db.length === gains.length && preset.gains_db.every((gain, i) => gain === gains[i]),
+  );
+}
+
+// The curve: 20 Hz to 20 kHz on a log scale, ±15 dB: a band's ±12 and
+// some of what neighbours add up to.
+export const CURVE_WIDTH = 600;
+export const CURVE_HEIGHT = 140;
+const CURVE_RANGE_DB = 15;
+
+/** Where a frequency is across the curve. */
+export function curveX(frequency: number): number {
+  return (Math.log10(frequency / 20) / 3) * CURVE_WIDTH;
+}
+
+/** Where a gain is up the curve, clamped to its range. */
+export function curveY(db: number): number {
+  const clamped = Math.max(-CURVE_RANGE_DB, Math.min(CURVE_RANGE_DB, db));
+  return CURVE_HEIGHT / 2 - (clamped / CURVE_RANGE_DB) * (CURVE_HEIGHT / 2);
+}
+
+/** The SVG path of the EQ's curve for these sliders, in `steps` segments. */
+export function curvePath(sliders: number[], steps: number, decimals: number): string {
+  const filters = filterGains(sliders);
+  const points: string[] = [];
+  for (let step = 0; step <= steps; step++) {
+    const frequency = 20 * 1000 ** (step / steps);
+    points.push(`${curveX(frequency).toFixed(decimals)},${curveY(filtersResponseDb(filters, frequency)).toFixed(decimals)}`);
+  }
+  return `M${points.join("L")}`;
 }
 
 /** "60", "1k", "12k". */
