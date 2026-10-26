@@ -36,6 +36,7 @@ const ICONS = {
   play: "M6 4l14 8-14 8z",
   stop: "M6 6h12v12H6z",
   plus: "M12 5v14M5 12h14",
+  eq: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   next: "M4 12h12M12 6l6 6-6 6M20 5v14",
   trash: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6",
   close: "M18 6 6 18M6 6l12 12",
