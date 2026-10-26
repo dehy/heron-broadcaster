@@ -28,14 +28,16 @@ import { ListenLink, OutputState } from "./Dashboard";
 type Encoder = Schemas["EncoderKind"];
 type Kind = Schemas["OutputKind"];
 
-// Built in so far; the others arrive in M11 and the engine refuses them.
+// Available so far: MP3 built in, and the external FFmpeg encoder (the
+// station's own ffmpeg, for HE-AAC with libfdk_aac); the others arrive in
+// M11 and the engine refuses them.
 // Labels are functions: some are words of the current language.
 const ENCODERS: { value: Encoder; label: () => string; available: boolean }[] = [
   { value: "mp3", label: () => "MP3 (LAME)", available: true },
   { value: "aac", label: () => "AAC-LC", available: false },
   { value: "opus", label: () => "Opus", available: false },
   { value: "vorbis", label: () => "Vorbis", available: false },
-  { value: "external_ffmpeg", label: () => t("outputs.externalFfmpeg"), available: false },
+  { value: "external_ffmpeg", label: () => t("outputs.externalFfmpeg"), available: true },
 ];
 
 const KINDS: { value: Kind; label: () => string; available: boolean }[] = [
@@ -48,6 +50,10 @@ const KINDS: { value: Kind; label: () => string; available: boolean }[] = [
 ];
 
 const MP3_BITRATES = [32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+const FFMPEG_BITRATES = [24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 256, 320];
+// Suggested encoders of the external FFmpeg; any name its ffmpeg has works.
+const FFMPEG_CODECS = ["libfdk_aac", "aac", "libopus", "libmp3lame", "libvorbis"];
+const AAC_PROFILES = ["aac_low", "aac_he", "aac_he_v2"];
 const SAMPLE_RATES = [22_050, 32_000, 44_100, 48_000];
 
 /** An output's listeners at the last minute, and whether sessions are counted too. */
@@ -290,10 +296,29 @@ export function Outputs() {
   );
 }
 
+/** HE-AAC profiles by name; other names as they are. */
+function aacProfileLabel(name: string): string {
+  switch (name) {
+    case "aac_low":
+      return t("outputs.aacProfile.aac_low");
+    case "aac_he":
+      return t("outputs.aacProfile.aac_he");
+    case "aac_he_v2":
+      return t("outputs.aacProfile.aac_he_v2");
+    default:
+      return name;
+  }
+}
+
 function describeProfile(profile: EncoderProfileView): string {
   const encoder = ENCODERS.find((e) => e.value === profile.encoder)?.label() ?? profile.encoder;
   const options = profile.options as Record<string, unknown>;
-  const mode = typeof options.mode === "string" ? ` ${options.mode.toUpperCase()}` : "";
+  const mode =
+    profile.encoder === "external_ffmpeg"
+      ? [options.codec, options.profile].filter((part) => typeof part === "string").map((part) => ` ${part}`).join("")
+      : typeof options.mode === "string"
+        ? ` ${options.mode.toUpperCase()}`
+        : "";
   const bitrate = profile.bitrate_kbps ? ` ${t("outputs.kbps", { rate: profile.bitrate_kbps })}` : "";
   const rate = t("outputs.khz", {
     rate: number(profile.sample_rate / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
@@ -553,19 +578,47 @@ function ProfileDialog({ profile, onClose }: { profile: EncoderProfileView | nul
   const [mode, setMode] = useState(text(options.mode) || "cbr");
   const [quality, setQuality] = useState(Number(options.quality ?? 3));
   const [vbrQuality, setVbrQuality] = useState(Number(options.vbr_quality ?? 4));
+  // The external FFmpeg encoder: HE-AAC v2 by default, AAC+ at 48 kbps.
+  const [codec, setCodec] = useState(text(options.codec) || "libfdk_aac");
+  const [aacProfile, setAacProfile] = useState(text(options.profile) || (profile ? "" : "aac_he_v2"));
+  const [ffmpegVbr, setFfmpegVbr] = useState(typeof options.vbr === "number" ? options.vbr : 0);
+  const [format, setFormat] = useState(text(options.format));
+  const external = encoder === "external_ffmpeg";
+  const chooseEncoder = (next: Encoder) => {
+    setEncoder(next);
+    if (next === "external_ffmpeg" && !profile) {
+      setBitrate(48);
+    }
+  };
+  const ffmpegOptions = () => {
+    const chosen: Record<string, string | number> = { codec: codec.trim() };
+    if (aacProfile) {
+      chosen.profile = aacProfile;
+    }
+    if (ffmpegVbr > 0) {
+      chosen.vbr = ffmpegVbr;
+    }
+    if (format) {
+      chosen.format = format;
+    }
+    return chosen;
+  };
+  const bitrates = external ? FFMPEG_BITRATES : MP3_BITRATES;
   const save = useAction(
     () => {
       const body = {
         name,
         encoder,
-        bitrate_kbps: bitrate,
+        bitrate_kbps: external && ffmpegVbr > 0 ? null : bitrate,
         sample_rate: sampleRate,
         channels,
         options: (encoder === "mp3"
           ? mode === "vbr"
             ? { mode, quality, vbr_quality: vbrQuality }
             : { mode, quality }
-          : options) as Record<string, never>,
+          : external
+            ? ffmpegOptions()
+            : options) as Record<string, never>,
       };
       return profile
         ? unwrap(api.PUT("/api/v1/encoder-profiles/{id}", { params: { path: { id: profile.id } }, body }))
@@ -602,7 +655,7 @@ function ProfileDialog({ profile, onClose }: { profile: EncoderProfileView | nul
           {row(t("categories.name"), <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />)}
           {row(
             t("outputs.encoder"),
-            <select className="input" value={encoder} onChange={(e) => setEncoder(e.target.value as Encoder)}>
+            <select className="input" value={encoder} onChange={(e) => chooseEncoder(e.target.value as Encoder)}>
               {ENCODERS.map((e) => (
                 <option key={e.value} value={e.value} disabled={!e.available && e.value !== profile?.encoder}>
                   {e.available ? e.label() : t("outputs.comingLater", { name: e.label() })}
@@ -611,9 +664,9 @@ function ProfileDialog({ profile, onClose }: { profile: EncoderProfileView | nul
             </select>,
           )}
           {row(
-            mode === "vbr" ? t("outputs.bitrateVbr") : t("outputs.bitrate"),
+            (external ? ffmpegVbr > 0 : mode === "vbr") ? t("outputs.bitrateVbr") : t("outputs.bitrate"),
             <select className="input" value={bitrate} onChange={(e) => setBitrate(Number(e.target.value))}>
-              {MP3_BITRATES.map((b) => (
+              {[...new Set([...bitrates, bitrate])].sort((a, b) => a - b).map((b) => (
                 <option key={b} value={b}>
                   {t("outputs.kbps", { rate: b })}
                 </option>
@@ -640,6 +693,68 @@ function ProfileDialog({ profile, onClose }: { profile: EncoderProfileView | nul
             </select>,
           )}
         </div>
+        {external && (
+          <fieldset>
+            <legend>FFmpeg</legend>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              {t("outputs.ffmpegHelp")}
+            </p>
+            <div className="form-grid">
+              {row(
+                t("outputs.ffmpegCodec"),
+                <>
+                  <input
+                    className="input mono"
+                    value={codec}
+                    list="ffmpeg-codecs"
+                    required
+                    pattern="[a-z0-9_]{1,32}"
+                    onChange={(e) => setCodec(e.target.value)}
+                  />
+                  <datalist id="ffmpeg-codecs">
+                    {FFMPEG_CODECS.map((name) => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
+                </>,
+                t("outputs.ffmpegCodecHint"),
+              )}
+              {row(
+                t("outputs.ffmpegProfile"),
+                <select className="input" value={aacProfile} onChange={(e) => setAacProfile(e.target.value)}>
+                  <option value="">{t("outputs.ffmpegDefault")}</option>
+                  {[...new Set([...AAC_PROFILES, aacProfile].filter(Boolean))].map((name) => (
+                    <option key={name} value={name}>
+                      {aacProfileLabel(name)}
+                    </option>
+                  ))}
+                </select>,
+                t("outputs.ffmpegProfileHint"),
+              )}
+              {row(
+                t("outputs.ffmpegVbr"),
+                <select className="input" value={ffmpegVbr} onChange={(e) => setFfmpegVbr(Number(e.target.value))}>
+                  <option value={0}>{t("outputs.ffmpegVbrOff")}</option>
+                  {[1, 2, 3, 4, 5].map((vbr) => (
+                    <option key={vbr} value={vbr}>
+                      {vbr}
+                    </option>
+                  ))}
+                </select>,
+                t("outputs.ffmpegVbrHint"),
+              )}
+              {row(
+                t("outputs.ffmpegFormat"),
+                <select className="input" value={format} onChange={(e) => setFormat(e.target.value)}>
+                  <option value="">{t("outputs.ffmpegFormatAuto")}</option>
+                  <option value="adts">ADTS (AAC)</option>
+                  <option value="mp3">MP3</option>
+                  <option value="ogg">Ogg</option>
+                </select>,
+              )}
+            </div>
+          </fieldset>
+        )}
         {encoder === "mp3" && (
           <fieldset>
             <legend>MP3</legend>

@@ -52,8 +52,31 @@ Plain AAC-LC without HE (SBR/PS) is sufficient for current players and bitrates,
 
 - Heron **never ships, builds or links fdk-aac**. Selecting an fdk-aac codec requires the user to provide their own fdk-aac-enabled `ffmpeg` binary (configured path, e.g. mounted into the `heron-engine` container or in a custom image).
 - The engine spawns the binary, writes raw PCM (f32le, stereo, 48 kHz) to its stdin and reads the encoded stream from its stdout, which is then sent to the outputs like any built-in encoder.
-- Heron checks at configuration time that the binary exists and supports the chosen codec (`ffmpeg -encoders`), and reports a clear error otherwise.
-- If the process dies, it is restarted with backoff; other encoders and outputs are not affected.
+- When it starts the binary, the engine checks that it runs and has the chosen codec (`ffmpeg -encoders`), and reports a clear error otherwise, on the profile's outputs (*Outputs* and *On air*): `ffmpeg has no libfdk_aac encoder (…)`.
+- If the process dies, or writes nothing for 10 s while it is fed, it is killed and started again after 1 s, then 2, 4… up to 30 s; other encoders and outputs are not affected. The engine never waits on it: audio it does not take in time is dropped (`heron_external_encoder_dropped_chunks_total`), failures are counted (`heron_external_encoder_failures_total`).
+- On an engine upgrade, the new engine starts its own `ffmpeg` ([Upgrading](upgrading.md)).
+
+**The binary** is a deployment setting of the engine, never an API one: `HERON_FFMPEG` (`ffmpeg` on the engine's `PATH` when unset; the engine's image has none). A static build avoids libraries missing from the engine's Debian image. With Docker Compose, mount it with a `docker-compose.override.yml` next to `docker-compose.yml`:
+
+```yaml
+services:
+  heron-engine:
+    volumes:
+      - /opt/ffmpeg-fdk:/opt/ffmpeg-fdk:ro
+```
+
+and set `HERON_FFMPEG=/opt/ffmpeg-fdk/ffmpeg` in `.env`. Such a binary is built with `--enable-libfdk-aac --enable-nonfree`, which makes it non-redistributable: build it for the station's own use.
+
+**Profile fields**: `bitrate_kbps` (8 to 512, unless `vbr`), `sample_rate` (8 to 96 kHz; ffmpeg resamples the 48 kHz master bus), `channels` (1 or 2; HE-AAC v2 needs 2). Options (`encoder_profiles.options`), and nothing else: no free command-line arguments, so a profile cannot make the engine run anything but the configured binary with these values.
+
+| Option | Values | Default |
+|---|---|---|
+| `codec` | An FFmpeg encoder name, as `ffmpeg -encoders` lists it: `libfdk_aac`, `aac`, `libopus`, `libmp3lame`… (letters, digits, `_`) | required |
+| `profile` | The encoder's profile (`-profile:a`): `aac_low`, `aac_he` (HE-AAC, AAC+), `aac_he_v2` (HE-AAC v2, for 32 to 48 kbps) | the encoder's |
+| `vbr` | Variable bitrate mode (`-vbr`, `libfdk_aac`), 1 to 5, instead of `bitrate_kbps` | none |
+| `format` | The stream's container: `adts` (AAC, `audio/aac`), `mp3` (`audio/mpeg`), `ogg` (`audio/ogg`) | `adts` for AAC encoders, `mp3` for MP3, `ogg` otherwise |
+
+An AAC+ stream for mobile listeners: `{"codec": "libfdk_aac", "profile": "aac_he_v2"}` at 48 kbps, 44.1 kHz, stereo.
 
 ### Default profiles
 
