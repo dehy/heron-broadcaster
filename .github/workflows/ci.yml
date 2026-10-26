@@ -161,6 +161,8 @@ jobs:
           sed -i "s/^HERON_LIBRARIAN_USER=.*/HERON_LIBRARIAN_USER=$(id -u):$(id -g)/" .env
           # The tested images are the ones published, per architecture.
           echo "HERON_VERSION=sha-${GITHUB_SHA::7}-${{ matrix.arch }}" >> "$GITHUB_ENV"
+          # Images go to the packages of the repository's owner (a fork's own).
+          echo "HERON_REGISTRY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
       - name: Generate a test library and fallback tracks
         # The generator runs as root in Docker; the librarian runs as us.
         run: |
@@ -217,10 +219,11 @@ jobs:
     strategy:
       matrix:
         image: [heron-api, heron-analyzer, heron-librarian, heron-engine, heron-web]
-    env:
-      IMAGE: ghcr.io/dehy/${{ matrix.image }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # The packages of the repository's owner (a fork's own); GHCR names
+      # are lowercase.
+      - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.image }}" >> "$GITHUB_ENV"
       - name: The tag matches the version in Cargo.toml and web/package.json
         if: startsWith(github.ref, 'refs/tags/v')
         run: |

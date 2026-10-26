@@ -58,7 +58,7 @@ if [ -n "$swarm" ]; then
         image=$(docker service inspect -f '{{.Spec.TaskTemplate.ContainerSpec.Image}}' "$service")
         image=${image%%@*}
         case $image in
-        ghcr.io/dehy/heron-* | heron-*) ;;
+        ghcr.io/*/heron-* | heron-*) ;;
         *) continue ;;
         esac
         if [ -n "$version" ]; then
