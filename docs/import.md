@@ -61,4 +61,4 @@ The markers are shown on the track's waveform and in its legend. Heron keeps the
 | `GET /library/imports` | The last 50 imports |
 | `POST /library/imports/{id}/undo` | Undoes an import (`409` if it was undone already) |
 
-Admins only. Request bodies up to 64 MiB, 50,000 rows.
+Admins only. Request bodies up to 64 MiB, 50,000 rows. The web container's nginx lets these two routes through up to that size (`docker/nginx.conf`); a reverse proxy of your own in front of Heron needs the same (`client_max_body_size 65m` for nginx), or it answers `413`.
