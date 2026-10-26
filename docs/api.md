@@ -40,7 +40,7 @@ Then:
 
 | Area | Routes |
 |---|---|
-| Account | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `PUT /auth/password`, `PUT /auth/preferences` (`{"theme", "language"}`, each optional: the theme is system, light or dark; the language is system or a language tag such as `fr`); `GET`, `POST /tokens`, `DELETE /tokens/{id}` |
+| Account | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `PUT /auth/password`, `PUT /auth/preferences` (`{"theme", "language", "full_width"}`, each optional: the theme is system, light or dark; the language is system or a language tag such as `fr`; `full_width` drops the centred column); `GET`, `POST /tokens`, `DELETE /tokens/{id}` |
 | Users (admins) | `GET`, `POST /users`; `PATCH`, `DELETE /users/{id}` |
 | Engine and decks | `GET /engine` (reachable, configuration in sync), `GET /player` (decks, cued track, queue, outputs), `GET /player/levels`, `POST /player/skip`, `/player/pause`, `/player/resume`, `POST /player/fx` (`{"track_id"}`), `DELETE /player/fx` |
 | Queue | `GET /queue` (the cued track first), `POST /queue` (`{"track_ids", "position"}`), `DELETE /queue`, `DELETE /queue/{entry_id}`, `PUT /queue/{entry_id}/position` |

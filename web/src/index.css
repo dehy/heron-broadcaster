@@ -279,6 +279,11 @@ code,
   gap: 1.25rem;
 }
 
+/* The user's choice: the whole width of the screen (Account › Display). */
+:root[data-width="full"] .content {
+  max-width: none;
+}
+
 .page-head {
   display: flex;
   align-items: center;

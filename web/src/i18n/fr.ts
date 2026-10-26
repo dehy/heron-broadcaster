@@ -141,6 +141,7 @@ const fr = {
   "account.dark": "Sombre",
   "account.language": "Langue",
   "account.systemLanguage": "Système ({language})",
+  "account.fullWidth": "Utiliser toute la largeur de l’écran",
   "account.displayHelp": "Système suit les réglages de votre appareil. Vos choix vous suivent sur chaque navigateur où vous vous connectez.",
   "account.passwordChanged": "Mot de passe modifié : vos autres sessions sont déconnectées",
   "account.currentPassword": "Mot de passe actuel",

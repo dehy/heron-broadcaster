@@ -1163,6 +1163,22 @@ async fn web_ui_routes() {
         (&me["language"], &me["theme"]),
         (&json!("fr"), &json!("dark"))
     );
+
+    // And the width: a centred column unless the user wants the whole screen.
+    assert_eq!(me["full_width"], false);
+    let (status, me) = admin
+        .send(
+            Method::PUT,
+            "/auth/preferences",
+            json!({"full_width": true}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(
+        (&me["full_width"], &me["language"], &me["theme"]),
+        (&json!(true), &json!("fr"), &json!("dark"))
+    );
+    assert_eq!(viewer.get("/auth/me").await["full_width"], false);
     let (status, _) = admin
         .send(
             Method::PUT,
