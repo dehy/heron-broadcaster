@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Keeps the engine's configuration (playout settings, encoder profiles and
-//! outputs) equal to the database's.
+//! outputs, deck EQ) equal to the database's.
 //!
 //! The engine keeps its own copy on disk and plays on with it while the API
 //! or the database are down. This task pushes the database's version when
@@ -9,13 +9,16 @@
 //!
 //! The first time, the API adopts the engine's configuration instead of
 //! replacing it (stations configured with `heron-engine ctl` before M4):
-//! playout settings never saved through the API and outputs, when the
-//! database has none, are copied from the engine.
+//! playout settings and deck EQ never saved through the API and outputs,
+//! when the database has none, are copied from the engine.
+//!
+//! Engines from before the deck EQ send no EQ settings: none are pushed to
+//! them.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use heron_core::{OutputsConfig, PlayoutSettings};
+use heron_core::{EqSettings, OutputsConfig, PlayoutSettings};
 use serde::Serialize;
 use sqlx::MySqlPool;
 use tokio::sync::{Notify, watch};
@@ -149,11 +152,20 @@ impl ConfigSync {
                 .map_err(|error| ApiError::Internal(format!("engine playout settings: {error}")))?;
         let engine_outputs: OutputsConfig = serde_json::from_str(&config.outputs_json)
             .map_err(|error| ApiError::Internal(format!("engine outputs: {error}")))?;
+        let engine_eq: Option<EqSettings> = if config.eq_settings_json.is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::from_str(&config.eq_settings_json)
+                    .map_err(|error| ApiError::Internal(format!("engine EQ settings: {error}")))?,
+            )
+        };
 
         let management: EngineManagement =
             settings::load(&self.pool, EngineManagement::SETTINGS_NAME).await?;
         if !management.managed {
-            self.adopt(&engine_playout, &engine_outputs).await?;
+            self.adopt(&engine_playout, engine_eq.as_ref(), &engine_outputs)
+                .await?;
             settings::save(
                 &self.pool,
                 EngineManagement::SETTINGS_NAME,
@@ -171,6 +183,16 @@ impl ConfigSync {
             tracing::info!("playout settings applied to the engine");
         }
 
+        if let Some(engine_eq) = engine_eq {
+            let eq: EqSettings = settings::load(&self.pool, EqSettings::SETTINGS_NAME).await?;
+            if eq != engine_eq {
+                let json = serde_json::to_string(&eq)
+                    .map_err(|error| ApiError::Internal(error.to_string()))?;
+                self.engine.set_eq_settings(json).await?;
+                tracing::info!("deck EQ applied to the engine");
+            }
+        }
+
         let mut connection = self.pool.acquire().await?;
         let outputs = outputs::load_config(&mut connection).await?;
         drop(connection);
@@ -186,10 +208,21 @@ impl ConfigSync {
         Ok(())
     }
 
-    async fn adopt(&self, playout: &PlayoutSettings, outputs: &OutputsConfig) -> ApiResult<()> {
+    async fn adopt(
+        &self,
+        playout: &PlayoutSettings,
+        eq: Option<&EqSettings>,
+        outputs: &OutputsConfig,
+    ) -> ApiResult<()> {
         if !settings::exists(&self.pool, PlayoutSettings::SETTINGS_NAME).await? {
             settings::save(&self.pool, PlayoutSettings::SETTINGS_NAME, playout).await?;
             tracing::info!("copied the engine's playout settings into the database");
+        }
+        if let Some(eq) = eq
+            && !settings::exists(&self.pool, EqSettings::SETTINGS_NAME).await?
+        {
+            settings::save(&self.pool, EqSettings::SETTINGS_NAME, eq).await?;
+            tracing::info!("copied the engine's deck EQ into the database");
         }
         outputs::adopt(&self.pool, outputs).await?;
         Ok(())

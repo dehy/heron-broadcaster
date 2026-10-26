@@ -391,6 +391,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/eq-presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every EQ preset, by name. */
+        get: operations["list_presets"];
+        put?: never;
+        /** Saves gains as a new preset. Operators and admins. */
+        post: operations["create_preset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/eq-presets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Renames a preset or saves new gains in it. The EQs it was loaded into
+         *     keep their gains. Operators and admins.
+         */
+        put: operations["update_preset"];
+        post?: never;
+        /**
+         * Deletes a preset. The EQs it was loaded into keep their gains.
+         *     Operators and admins.
+         */
+        delete: operations["delete_preset"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/history": {
         parameters: {
             query?: never;
@@ -1197,6 +1239,28 @@ export interface paths {
          *     new settings, in the background. Admins only.
          */
         put: operations["put_analysis"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/eq": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Both deck EQs. */
+        get: operations["get_eq"];
+        /**
+         * Replaces both deck EQs and pushes them to the engine at once, where
+         *     they glide in. Every open live WebSocket gets an `eq` message.
+         *     Operators and admins.
+         */
+        put: operations["put_eq"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2445,6 +2509,27 @@ export interface components {
              */
             skip_fade_ms: number;
         };
+        /** @description One deck EQ. Flat and bypassed by default. */
+        DeckEq: {
+            /** @default false */
+            enabled: boolean;
+            /**
+             * @description Gain of each band in dB, from 60 Hz up, −12 to +12.
+             * @default [
+             *       0,
+             *       0,
+             *       0,
+             *       0,
+             *       0,
+             *       0,
+             *       0,
+             *       0,
+             *       0,
+             *       0
+             *     ]
+             */
+            gains_db: number[];
+        };
         /** @enum {string} */
         DeckName: "a" | "b" | "fx";
         DeckPosition: {
@@ -2607,6 +2692,60 @@ export interface components {
         };
         EnqueueResponse: {
             entry_ids: number[];
+        };
+        EqPreset: {
+            /** @description Gain of each band in dB, from 60 Hz up. */
+            gains_db: number[];
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        EqPresetInput: {
+            /** @description Gain of each band in dB, from 60 Hz up, −12 to +12. */
+            gains_db: number[];
+            /** @description Unique, ignoring case. */
+            name: string;
+        };
+        /** @description The two deck EQs. */
+        EqSettings: {
+            /**
+             * @description The FX player.
+             * @default {
+             *       "enabled": false,
+             *       "gains_db": [
+             *         0,
+             *         0,
+             *         0,
+             *         0,
+             *         0,
+             *         0,
+             *         0,
+             *         0,
+             *         0,
+             *         0
+             *       ]
+             *     }
+             */
+            fx: components["schemas"]["DeckEq"];
+            /**
+             * @description Decks A and B: they take turns, so they share one EQ.
+             * @default {
+             *       "enabled": false,
+             *       "gains_db": [
+             *         0,
+             *         0,
+             *         0,
+             *         0,
+             *         0,
+             *         0,
+             *         0,
+             *         0,
+             *         0,
+             *         0
+             *       ]
+             *     }
+             */
+            music: components["schemas"]["DeckEq"];
         };
         Era: {
             /**
@@ -2913,6 +3052,10 @@ export interface components {
             event: components["schemas"]["TrackEvent"];
             /** @enum {string} */
             type: "track";
+        } | {
+            settings: components["schemas"]["EqSettings"];
+            /** @enum {string} */
+            type: "eq";
         };
         LoginRequest: {
             password: string;
@@ -5607,6 +5750,124 @@ export interface operations {
             };
         };
     };
+    list_presets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EqPreset"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_preset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EqPresetInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EqPreset"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_preset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EqPresetInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EqPreset"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_preset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     list_history: {
         parameters: {
             query?: {
@@ -7327,6 +7588,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AnalysisSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_eq: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EqSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_eq: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EqSettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EqSettings"];
                 };
             };
             "4XX": {

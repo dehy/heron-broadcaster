@@ -182,7 +182,7 @@ While the API is down or cannot reach the engine, the engine plays on and those 
 
 The [deck EQ](audio-engine.md#deck-eq) of the music (Decks A and B) and of the FX player, operators only.
 
-- `GET /settings/eq` gives both EQs; `PUT /settings/eq` replaces them (`{"music": {"enabled", "gains_db"}, "fx": {…}}`, ten gains from −12 to +12 dB, from 60 Hz up; anything else is refused with `400`). The API saves them, pushes them to the engine at once and sends the `eq` live message, so every open Deck EQ page follows. The web UI sends a dragged slider at most every 100 ms; the engine glides between the values it receives.
+- `GET /settings/eq` gives both EQs; `PUT /settings/eq` replaces them (`{"music": {"enabled", "gains_db"}, "fx": {…}}`, ten gains from −12 to +12 dB, from 60 Hz up; anything else is refused with `422`). The API saves them, pushes them to the engine at once and sends the `eq` live message, so every open Deck EQ page follows. The web UI sends a dragged slider at most every 100 ms; the engine glides between the values it receives.
 - Presets: `GET /eq-presets`; `POST /eq-presets` (`{"name", "gains_db"}`, the name unique); `PUT /eq-presets/{id}` (rename, or new gains); `DELETE /eq-presets/{id}`. Loading a preset is the web UI copying its gains into an EQ with `PUT /settings/eq`: presets are never sent to the engine.
 - When the API first reaches an engine that has EQ settings and the database has none (set with `ctl set-eq` before the API ran), it adopts the engine's, as it does for the playout settings.
 

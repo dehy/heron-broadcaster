@@ -154,6 +154,7 @@ impl Station {
             webhooks,
             // Driven by the tests, minute by minute.
             listeners: crate::listeners::Collector::new(pool.clone()).unwrap(),
+            eq_changes: tokio::sync::broadcast::channel(16).0,
         };
         let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = http.local_addr().unwrap();
@@ -1097,6 +1098,7 @@ async fn queued_tracks_follow_the_library() {
 async fn adopts_outputs_configured_on_the_engine() {
     let engine_config: EngineConfig = serde_json::from_value(json!({
         "playout": {"crossfade": {"min_track_ms": 25000}},
+        "eq": {"music": {"enabled": true, "gains_db": [2, 0, 0, 0, 0, 0, 0, 0, 0, 0]}},
         "outputs": {
             "encoder_profiles": [
                 {"id": 1, "name": "MP3 128k", "encoder": "mp3", "bitrate_kbps": 128,
@@ -1125,6 +1127,9 @@ async fn adopts_outputs_configured_on_the_engine() {
     assert_eq!(outputs[0]["encoder_profile_id"], 7);
     let playout = admin.get("/settings/playout").await;
     assert_eq!(playout["crossfade"]["min_track_ms"], 25000);
+    let eq = admin.get("/settings/eq").await;
+    assert_eq!(eq["music"]["enabled"], true);
+    assert_eq!(eq["music"]["gains_db"][0], 2.0);
 
     // Same IDs: the engine kept its configuration as it was.
     let config = station.state.engine.config().await.unwrap();
@@ -2969,5 +2974,126 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
         .request(Method::DELETE, &format!("/webhooks/{webhook}"), None)
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    station.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deck_eq_and_presets() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+
+    // Flat and bypassed until set.
+    let eq = admin.get("/settings/eq").await;
+    assert_eq!(eq["music"]["enabled"], false);
+    assert_eq!(eq["fx"]["gains_db"].as_array().unwrap().len(), 10);
+
+    let settings = json!({
+        "music": {"enabled": true, "gains_db": [3.0, 2.0, 0.0, 0.0, -1.5, 0.0, 0.0, 1.0, 1.0, 0.0]},
+        "fx": {"enabled": false, "gains_db": vec![0.0; 10]}
+    });
+    let (status, _) = viewer
+        .send(Method::PUT, "/settings/eq", settings.clone())
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let mut too_much = settings.clone();
+    too_much["music"]["gains_db"][0] = json!(12.5);
+    let (status, body) = admin.send(Method::PUT, "/settings/eq", too_much).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // Every live socket follows, and the engine has it at once.
+    let url = format!("ws://{}/api/v1/live?levels=false", station.api);
+    let mut request = tungstenite::client::IntoClientRequest::into_client_request(url).unwrap();
+    request
+        .headers_mut()
+        .insert("cookie", viewer.cookie.as_deref().unwrap().parse().unwrap());
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    let mut next = async || -> Value {
+        let message = tokio::time::timeout(Duration::from_secs(10), socket.next())
+            .await
+            .expect("live message")
+            .unwrap()
+            .unwrap();
+        serde_json::from_str(message.to_text().unwrap()).unwrap()
+    };
+    assert_eq!(next().await["type"], "state");
+    let (status, body) = admin
+        .send(Method::PUT, "/settings/eq", settings.clone())
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let mut eq_message = None;
+    for _ in 0..50 {
+        let message = next().await;
+        if message["type"] == "eq" {
+            eq_message = Some(message);
+            break;
+        }
+    }
+    assert_eq!(eq_message.expect("an eq message")["settings"], settings);
+    let config = station.state.engine.config().await.unwrap();
+    let engine_eq: Value = serde_json::from_str(&config.eq_settings_json).unwrap();
+    assert_eq!(engine_eq, settings);
+    assert_eq!(admin.get("/settings/eq").await, settings);
+
+    // Presets: Flat is there; save, rename, delete.
+    let presets = viewer.get("/eq-presets").await;
+    assert_eq!(presets[0]["name"], "Flat");
+    assert_eq!(presets[0]["gains_db"], json!(vec![0.0; 10]));
+    let gains = settings["music"]["gains_db"].clone();
+    let (status, _) = viewer
+        .send(
+            Method::POST,
+            "/eq-presets",
+            json!({"name": "Warm", "gains_db": gains}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, preset) = admin
+        .send(
+            Method::POST,
+            "/eq-presets",
+            json!({"name": "Warm", "gains_db": gains}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{preset}");
+    assert_eq!(preset["gains_db"], settings["music"]["gains_db"]);
+    let id = preset["id"].as_u64().unwrap();
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/eq-presets",
+            json!({"name": "flat", "gains_db": gains}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/eq-presets",
+            json!({"name": "Nine", "gains_db": vec![0; 9]}),
+        )
+        .await;
+    assert!(status.is_client_error());
+    let (status, renamed) = admin
+        .send(
+            Method::PUT,
+            &format!("/eq-presets/{id}"),
+            json!({"name": "Warm vinyl", "gains_db": gains}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    assert_eq!(renamed["name"], "Warm vinyl");
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/eq-presets/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/eq-presets/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // The EQ keeps what was loaded.
+    assert_eq!(admin.get("/settings/eq").await, settings);
     station.stop().await;
 }
