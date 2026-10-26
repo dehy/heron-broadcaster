@@ -630,14 +630,18 @@ function LibraryCard() {
                 />
                 {t("settings.embedCover")}
               </label>
-              <Field label={t("settings.writeTags")} hint={t("settings.writeTagsHint")}>
+            </div>
+            <div className="stack" style={{ gap: "0.2rem" }}>
+              <label className="check">
                 <input
                   type="checkbox"
                   checked={draft.write_tags}
                   disabled={!isAdmin}
                   onChange={(e) => set({ write_tags: e.target.checked })}
                 />
-              </Field>
+                {t("settings.writeTags")}
+              </label>
+              <span className="muted small">{t("settings.writeTagsHint")}</span>
             </div>
             <div className="form-grid">
               <Field label={t("settings.maxUpload")} hint={t("settings.maxUploadHint")}>
