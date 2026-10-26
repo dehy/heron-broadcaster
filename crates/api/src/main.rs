@@ -16,6 +16,7 @@ mod e2e;
 mod engine;
 mod error;
 mod history;
+mod import;
 mod labels;
 mod librarian;
 mod library;

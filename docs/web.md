@@ -20,6 +20,7 @@
 | **Categories** | Create, rename, recolor and delete categories; the separation windows they override; whether the FX player offers them (liners, power intros, voice tracks); fill a category from a label | operator |
 | **Restrictions** | Dayparting, date ranges and sequences on tracks, artists and categories; turn them on and off | operator |
 | **Selection log** | Each track rotation picked: clock and slot, rules held or relaxed, and the details (windows, tracks held back, candidates); a simulation of the next day or week, checked rule by rule | operator (simulations) |
+| **Import** | Import another software's export: categories and problems named in Heron, conflicts settled, applied as one import; past imports, with undo ([Importing from another software](import.md)) | admin |
 | **Review & organize** | Identifications waiting for review (apply a candidate release, or keep the file's tags); organize the library after a dry run; every batch of file changes (tag edits included), with undo | operator (review), admin (organize, undo) |
 | **Crossfade & loudness** | Station crossfade, loudness and silence watchdog settings, with a live preview of the transition between two tracks (the one on air and the next by default) as you change them, which can be listened to | admin |
 | **Outputs** | Outputs (Icecast for now) and encoder profiles (MP3 for now), with each output's live state: connected, reconnecting and why, bytes sent, listeners; the stream server's admin credentials, for listener sessions | admin |

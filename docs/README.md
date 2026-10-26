@@ -19,6 +19,7 @@ The name comes from "air on" sounding like *héron* (French for heron): keeping 
 | [Requirements](requirements.md) | Library, playout, audio processing, outputs, reliability |
 | [Rotation](rotation.md) | Separation rules, clockwheels, relaxation, rotation model |
 | [Import and analysis](analysis.md) | Library scanner, job queue, silence and crossfade detection |
+| [Importing from another software](import.md) | Bringing another radio software's tags, categories, fades, intros and hooks into the library, with a dry run, conflicts and undo |
 | [Library management](library.md) | Incoming folder, buffer zone and uploads, identification, tags, layout, journaled moves, organize, trash and undo |
 | [Encoders and outputs](outputs.md) | Encoder selection, multiple outputs, Icecast, Shoutcast, HLS |
 | [Listener statistics](statistics.md) | Listeners per day, hour, output and track from the stream servers, sessions, privacy, CSV export |

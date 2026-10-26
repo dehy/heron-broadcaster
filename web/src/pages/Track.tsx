@@ -272,6 +272,23 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
     });
   }
 
+  // Points imported from another software: shown, not played by Heron.
+  const imported = track.markers;
+  if (imported?.intro_ms != null) {
+    markers.push({ id: "intro", label: t("track.introEnds"), ms: imported.intro_ms, color: "var(--fx)", row: 2 });
+  }
+  if (imported?.intro2_ms != null) {
+    markers.push({ id: "intro2", label: t("track.intro2Ends"), ms: imported.intro2_ms, color: "var(--fx)", row: 2 });
+  }
+  if (imported?.hook_in_ms != null && imported.hook_out_ms != null && imported.hook_out_ms > imported.hook_in_ms) {
+    regions.push({
+      startMs: imported.hook_in_ms,
+      endMs: imported.hook_out_ms,
+      color: getVar("--deck-b"),
+      label: t("track.hook"),
+    });
+  }
+
   const view: [number, number] | undefined =
     zoom === "intro"
       ? [Math.max(0, cueIn - 5_000), Math.min(length, cueIn + 20_000)]
@@ -458,6 +475,34 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
               </strong>
             </span>
             <span>{t("track.plays", { duration: duration(cueOut - cueIn) })}</span>
+            {imported?.intro_ms != null && (
+              <span>
+                <span className="swatch" style={{ background: "var(--fx)" }} /> {t("track.introEnds")}{" "}
+                <strong className="num">{duration(imported.intro_ms, true)}</strong>
+                {imported.intro2_ms != null && (
+                  <>
+                    {" · "}
+                    {t("track.intro2Ends")} <strong className="num">{duration(imported.intro2_ms, true)}</strong>
+                  </>
+                )}
+              </span>
+            )}
+            {imported?.hook_in_ms != null && imported.hook_out_ms != null && (
+              <span>
+                <span className="swatch" style={{ background: "var(--deck-b)" }} /> {t("track.hook")}{" "}
+                <strong className="num">
+                  {duration(imported.hook_in_ms, true)} – {duration(imported.hook_out_ms, true)}
+                </strong>
+              </span>
+            )}
+            {(imported?.next_soft_ms != null || imported?.next_hard_ms != null) && (
+              <span title={t("track.importedNextHelp")}>
+                {t("track.importedNext", {
+                  soft: imported.next_soft_ms != null ? duration(imported.next_soft_ms, true) : "–",
+                  hard: imported.next_hard_ms != null ? duration(imported.next_hard_ms, true) : "–",
+                })}
+              </span>
+            )}
             {canEdit && <span>{t("track.dragHelp")}</span>}
           </div>
           <audio
