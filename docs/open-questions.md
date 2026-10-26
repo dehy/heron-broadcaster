@@ -8,12 +8,12 @@ Raise these when they become relevant instead of guessing.
 | Name of the analysis service: `heron-analyzer` was chosen as a working name. | [M0](roadmap/m0-foundations.md) |
 | Silence ceiling: −50 dBFS trims inaudible fade-ins but also quiet deliberate intros (Pink Floyd's wind, Yes' nature sounds, 23–27 s). −60 dBFS keeps most of them. Which default? | [M1](roadmap/m1-import-analysis.md) |
 | Opus and HE-AAC decoding, not supported by Symphonia: add libopus (BSD) and an HE-AAC-capable decoder, or report them as unsupported. | [M2](roadmap/m2-engine-core.md) |
-| Listener statistics: how long to keep listener sessions (daily totals are kept indefinitely), the minimum session length that counts as a listener (1 min proposed), and whether reports must follow a given audience-measurement standard. | [M7b](roadmap/m7b-listener-statistics.md) |
 
 ## Resolved
 
 | Question | Answer | Recorded in |
 |---|---|---|
+| Listener statistics: how long to keep sessions, the minimum session length that counts as a listener, and whether reports follow an audience-measurement standard. | **Sessions (and minute samples) kept 90 days**, a setting; daily and hourly totals kept. **1 min minimum**, a setting. **No standard**: the measures are defined in the docs, with a CSV export. | [Listener statistics](statistics.md) |
 | Authentication model: local users only, or OIDC as well? | **Local users only for now.** OIDC may come later. | [Decisions](decisions.md#decisions-made-after-the-handoff) |
 | Does the analysis worker stay inside `heron-api` or become its own service? | **Its own modular service** (`heron-analyzer`). | [Decisions](decisions.md#decisions-made-after-the-handoff), [Architecture](architecture.md) |
 | Rotation relaxation order. | Album → artist → title → track, each halved before being dropped, then the fallback category. | [Rotation](rotation.md#rule-relaxation) |

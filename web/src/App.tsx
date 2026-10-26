@@ -28,6 +28,7 @@ import { Review } from "./pages/Review";
 import { Rotation } from "./pages/Rotation";
 import { Schedule } from "./pages/Schedule";
 import { Settings } from "./pages/Settings";
+import { Statistics } from "./pages/Statistics";
 import { Track } from "./pages/Track";
 import { Trash } from "./pages/Trash";
 import { Users } from "./pages/Users";
@@ -83,6 +84,7 @@ const PAGES: Page[] = [
   { path: "/", label: "nav.onAir", icon: "air" },
   { path: "/queue", label: "nav.queue", icon: "queue" },
   { path: "/history", label: "nav.history", icon: "history" },
+  { path: "/statistics", label: "nav.statistics", icon: "chart" },
   { path: "/library", label: "nav.tracks", icon: "library", section: "nav.library" },
   { path: "/buffer", label: "nav.buffer", icon: "upload" },
   { path: "/labels", label: "nav.labels", icon: "label" },
@@ -117,6 +119,8 @@ function route(pathname: string): ReactNode {
       return <QueuePage />;
     case "/history":
       return <History />;
+    case "/statistics":
+      return <Statistics />;
     case "/library":
       return <Library />;
     case "/buffer":

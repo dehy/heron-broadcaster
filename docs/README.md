@@ -21,6 +21,7 @@ The name comes from "air on" sounding like *héron* (French for heron): keeping 
 | [Import and analysis](analysis.md) | Library scanner, job queue, silence and crossfade detection |
 | [Library management](library.md) | Incoming folder, buffer zone and uploads, identification, tags, layout, journaled moves, organize, trash and undo |
 | [Encoders and outputs](outputs.md) | Encoder selection, multiple outputs, Icecast, Shoutcast, HLS |
+| [Listener statistics](statistics.md) | Listeners per day, hour, output and track from the stream servers, sessions, privacy, CSV export |
 
 ## Technical design
 

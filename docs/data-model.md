@@ -105,7 +105,7 @@ Targets are not foreign keys: restrictions on a deleted category go with it, mer
 
 | Table | Columns |
 |---|---|
-| `settings` | name, JSON value. `analysis`: Gap Killer and crossfade point detection ([Import and analysis](analysis.md#settings)); `library`: AcoustID key, layout, covers ([Library management](library.md#settings)); `playout`: crossfade and loudness ([Audio engine](audio-engine.md#playout-settings)); `queue`: autofill and how many tracks wait ([API](api.md#queue-manager)); `engine`: whether the API manages the engine's configuration yet ([API](api.md#engine-configuration)); `rotation`: separation windows, fallback category, weight factors; `station`: time zone ([Rotation](rotation.md#scheduling)); `programming`: what counts as a play, eras, mood and sound code scales ([API](api.md#track-details)) |
+| `settings` | name, JSON value. `analysis`: Gap Killer and crossfade point detection ([Import and analysis](analysis.md#settings)); `library`: AcoustID key, layout, covers ([Library management](library.md#settings)); `playout`: crossfade and loudness ([Audio engine](audio-engine.md#playout-settings)); `queue`: autofill and how many tracks wait ([API](api.md#queue-manager)); `engine`: whether the API manages the engine's configuration yet ([API](api.md#engine-configuration)); `rotation`: separation windows, fallback category, weight factors; `station`: time zone ([Rotation](rotation.md#scheduling)); `programming`: what counts as a play, eras, mood and sound code scales ([API](api.md#track-details)); `statistics`: minimum session length, retention ([Listener statistics](statistics.md#settings)) |
 
 ## Encoders and outputs
 
@@ -118,13 +118,17 @@ See [Encoders and outputs](outputs.md). The engine never reads these tables: the
 
 ## Listener statistics
 
-See [M7b](roadmap/m7b-listener-statistics.md). Sketch, defined with that milestone. No IP address is ever stored.
+See [Listener statistics](statistics.md). No IP address is ever stored.
 
 | Table | Columns |
 |---|---|
-| `listener_samples` | output_id, sampled_at (each minute), listeners |
-| `listener_sessions` | id, output_id, listener_key (daily salted hash of IP and player), user_agent, started_at, ended_at, duration_s |
-| `listener_daily` | output_id, day, hour (NULL for the whole day), distinct_listeners, peak, average, listening_hours, sessions |
+| `outputs` (added) | statistics (JSON: the stream server's `admin_username`, `admin_password`; never pushed to the engine) |
+| `listener_samples` | output_id (deleted with the output), sampled_at (the minute), listeners. Kept `retention_days` |
+| `listener_sessions` | id, output_id (deleted with the output), listener_key (BLAKE3 of address and player, keyed with the day's key), user_agent, client_id (the server's ID for the connection), day (station time), started_at, last_seen_at, ended_at (NULL while connected), split (ended at midnight, still connected), duration_s. Kept `retention_days` |
+| `listener_day_keys` | day, key (random, 32 bytes). Deleted once its day can get no more sessions |
+| `listener_totals` | output_id (NULL: the whole station; deleted with the output), day, hour (NULL: the whole day), minutes (measured), peak, average, listening_hours, sessions, session_s (their total length), distinct_listeners (NULL without sessions). Kept |
+
+Statistics settings are in `settings` (`statistics`: `min_session_s`, `retention_days`).
 
 ## Integrations and access
 
@@ -157,6 +161,7 @@ restrictions *──1 tracks | artists | categories
 clocks 1──* clock_slots *──1 categories
 clock_schedule *──1 clocks
 rotation_picks *──1 tracks, 0..1 play_history
+outputs 1──* listener_samples, listener_sessions, listener_totals
 play_history *──1 tracks
 webhooks 1──* webhook_deliveries
 users 1──* sessions, api_tokens

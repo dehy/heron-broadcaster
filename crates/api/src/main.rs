@@ -19,6 +19,7 @@ mod history;
 mod labels;
 mod librarian;
 mod library;
+mod listeners;
 mod live;
 mod outputs;
 mod player;
@@ -191,6 +192,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let history_events = engine.events();
     let webhook_events = engine.events();
     let webhooks = webhooks::Webhooks::new(pool.clone()).context("cannot set up webhooks")?;
+    let listeners =
+        listeners::Collector::new(pool.clone()).context("cannot set up listener statistics")?;
     tasks.push(tokio::spawn(library.clone().run(ScanOptions {
         interval: Duration::from_secs(cli.scan_interval.max(60)),
         watch: cli.library_watch,
@@ -201,6 +204,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     ));
     tasks.push(tokio::spawn(Arc::clone(&webhooks).dispatch(webhook_events)));
     tasks.push(tokio::spawn(Arc::clone(&webhooks).send_loop()));
+    tasks.push(tokio::spawn(Arc::clone(&listeners).run()));
     tasks.push(tokio::spawn(Arc::clone(&queue).run()));
     tasks.push(tokio::spawn(artists::run_linker(
         pool.clone(),
@@ -220,6 +224,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         passwords: Arc::new(Passwords::default()),
         staging: Arc::new(cli.staging_dir),
         webhooks,
+        listeners,
     };
     let router = app::router(state).merge(heron_service::ops_router(SERVICE, metrics, health));
 
@@ -346,6 +351,10 @@ mod tests {
             "clock_slots",
             "clocks",
             "encoder_profiles",
+            "listener_day_keys",
+            "listener_samples",
+            "listener_sessions",
+            "listener_totals",
             "outputs",
             "play_history",
             "restrictions",

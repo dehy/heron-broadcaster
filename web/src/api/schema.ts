@@ -695,6 +695,123 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/listeners/days": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Totals per hour, day, week or month: distinct listeners, peak, average,
+         *     listening hours, sessions. Today's change until midnight.
+         */
+        get: operations["days"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/listeners/hours-of-day": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Each hour of the day (station time), averaged over the days of the
+         *     period.
+         */
+        get: operations["hours_of_day"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/listeners/now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Each output's listeners at the last minute, and the station's. */
+        get: operations["now"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/listeners/players": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sessions and listening hours by player (user agent), most listened
+         *     first.
+         */
+        get: operations["players"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/listeners/samples": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Listeners minute by minute. Minutes no server could be read are
+         *     missing.
+         */
+        get: operations["samples"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/listeners/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tracks of the period, those listeners left the most first (by
+         *     departure rate, or by the change of listeners without sessions).
+         */
+        get: operations["tracks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/live": {
         parameters: {
             query?: never;
@@ -741,7 +858,10 @@ export interface paths {
             cookie?: never;
         };
         get: operations["get_output"];
-        /** Replaces an output. Credentials left out of `config` are kept. Admins only. */
+        /**
+         * Replaces an output. Credentials left out of `config` are kept, and so
+         *     are the statistics settings when `statistics` is left out. Admins only.
+         */
         put: operations["update_output"];
         post?: never;
         /** Deletes an output; the engine stops streaming to it. Admins only. */
@@ -1193,6 +1313,28 @@ export interface paths {
         get: operations["get_station"];
         /** Replaces the station settings. Admins only. */
         put: operations["put_station"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/statistics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listener statistics: the minimum session, how long sessions are kept. */
+        get: operations["get_statistics"];
+        /**
+         * Replaces the listener statistics settings (missing fields take the
+         *     defaults). A new minimum session recomputes the totals the sessions
+         *     kept still cover. Admins only.
+         */
+        put: operations["put_statistics"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2579,6 +2721,34 @@ export interface components {
         };
         /** @enum {string} */
         GroupSource: "upload" | "incoming";
+        /** @description An hour of the day, over the days of a period. */
+        HourOfDay: {
+            /**
+             * Format: double
+             * @description Mean of the listeners over the minutes measured.
+             */
+            average: number;
+            /**
+             * Format: int32
+             * @description Days with a minute measured in that hour.
+             */
+            days: number;
+            /**
+             * Format: int32
+             * @description 0 to 23, station time.
+             */
+            hour: number;
+            /**
+             * Format: double
+             * @description Listening hours, on average per day.
+             */
+            listening_hours: number;
+            /**
+             * Format: int32
+             * @description The highest peak.
+             */
+            peak: number;
+        };
         Label: {
             /** @description `#rrggbb`. */
             color?: string | null;
@@ -2714,6 +2884,16 @@ export interface components {
             started_at_unix_ms?: number | null;
             status: components["schemas"]["TaskStatus"];
         };
+        ListenersNow: {
+            /** @description Each enabled output read at the last minute. */
+            outputs: components["schemas"]["OutputListeners"][];
+            /**
+             * Format: int32
+             * @description The outputs' listeners added up; missing before the first reading or
+             *     when no server could be read.
+             */
+            total?: number | null;
+        };
         /** @description A message on the live WebSocket. */
         LiveMessage: {
             player?: components["schemas"]["PlayerState"] | null;
@@ -2773,6 +2953,15 @@ export interface components {
          * @enum {string}
          */
         Method: "least_recently_played" | "random" | "weighted";
+        MinuteSample: {
+            /**
+             * Format: int64
+             * @description The start of the minute.
+             */
+            at_unix_ms: number;
+            /** Format: int32 */
+            listeners: number;
+        };
         /** @enum {string} */
         Mode: "allow" | "ban";
         MoveName: {
@@ -2850,9 +3039,44 @@ export interface components {
             kind: components["schemas"]["OutputKind"];
             metadata_enabled?: boolean;
             name: string;
+            statistics?: components["schemas"]["OutputStatisticsInput"] | null;
         };
         /** @enum {string} */
         OutputKind: "icecast" | "shoutcast_v1" | "shoutcast_v2" | "hls" | "file" | "pipe";
+        /** @description An output's listeners at the last minute. */
+        OutputListeners: {
+            /** @description Why the server, or its listener list, could not be read. */
+            error?: string | null;
+            /**
+             * Format: int32
+             * @description Missing when its server could not be read.
+             */
+            listeners?: number | null;
+            name: string;
+            /** Format: int64 */
+            output_id: number;
+            /** Format: int64 */
+            sampled_at_unix_ms: number;
+            /** @description Whether the listener list was read: sessions are up to date. */
+            sessions: boolean;
+        };
+        /** @description Replaces the statistics settings of an output. */
+        OutputStatisticsInput: {
+            /** @description Its password: left out, the stored one is kept; `null` removes it. */
+            admin_password?: string | null;
+            /** @description The server's admin user; `admin` when missing. */
+            admin_username?: string | null;
+        };
+        /** @description What listener statistics read the stream server with. */
+        OutputStatisticsView: {
+            /**
+             * @description Whether its password is set (never sent back): without it, only
+             *     concurrent listeners are counted.
+             */
+            admin_password_set: boolean;
+            /** @description The server's admin user (`admin` when missing). */
+            admin_username?: string | null;
+        };
         /** @description The live state of an output, as the engine reports it. */
         OutputStatus: {
             /** Format: int64 */
@@ -2884,11 +3108,62 @@ export interface components {
             name: string;
             /** @description Credentials set in the settings (e.g. `password`), never sent back. */
             secrets_set: string[];
+            statistics: components["schemas"]["OutputStatisticsView"];
             status?: components["schemas"]["OutputStatus"] | null;
         };
         PasswordChange: {
             current_password: string;
             new_password: string;
+        };
+        /** @description The totals of a period. */
+        PeriodTotals: {
+            /**
+             * Format: double
+             * @description Mean of the listeners over the minutes measured.
+             */
+            average: number;
+            /** Format: double */
+            average_session_s?: number | null;
+            /** @description The first day of the period (`YYYY-MM-DD`). */
+            day: string;
+            /**
+             * Format: int32
+             * @description Days with a minute measured.
+             */
+            days: number;
+            /**
+             * Format: double
+             * @description Distinct listeners; for weeks and months, the average per day.
+             */
+            distinct_listeners?: number | null;
+            /**
+             * Format: int32
+             * @description The hour (0 to 23), with `group=hour`.
+             */
+            hour?: number | null;
+            /**
+             * Format: int32
+             * @description Distinct listeners of each day, added up.
+             */
+            listener_days?: number | null;
+            /**
+             * Format: double
+             * @description Total listening hours.
+             */
+            listening_hours: number;
+            /**
+             * Format: int32
+             * @description Minutes measured.
+             */
+            minutes: number;
+            /** Format: int32 */
+            peak: number;
+            /**
+             * Format: int32
+             * @description Sessions of the minimum length started in the period; missing
+             *     without listener lists.
+             */
+            sessions?: number | null;
         };
         PlannedMove: {
             /** @description Relative to the library root. */
@@ -2935,6 +3210,17 @@ export interface components {
          * @enum {string}
          */
         PlaySource: "rotation" | "request" | "fallback" | "manual";
+        PlayerListening: {
+            /** Format: double */
+            listening_hours: number;
+            /**
+             * Format: int64
+             * @description Sessions of the minimum length.
+             */
+            sessions: number;
+            /** @description As the player sends it. */
+            user_agent: string;
+        };
         /** @description Decks, queue and outputs of the engine. */
         PlayerState: {
             cued?: components["schemas"]["QueueEntry"] | null;
@@ -3706,6 +3992,22 @@ export interface components {
              */
             timezone: string;
         };
+        /** @description Listener statistics. See `docs/statistics.md#settings`. */
+        StatisticsSettings: {
+            /**
+             * Format: int32
+             * @description Shortest session that counts as a listener, in seconds (0 counts
+             *     every one), at most 3600.
+             * @default 60
+             */
+            min_session_s: number;
+            /**
+             * Format: int32
+             * @description How long sessions and minute samples are kept, 7 to 3650 days.
+             * @default 90
+             */
+            retention_days: number;
+        };
         Status: {
             /** @description The server clock's synchronization (the host's: containers share it). */
             clock: components["schemas"]["ClockStatus"];
@@ -3934,6 +4236,39 @@ export interface components {
             /** Format: int64 */
             id: number;
             title?: string | null;
+        };
+        /** @description A track's listeners over its plays of a period. */
+        TrackListeners: {
+            artist?: string | null;
+            /**
+             * Format: double
+             * @description Departures over the listeners at the start.
+             */
+            departure_rate?: number | null;
+            /**
+             * Format: int32
+             * @description Sessions of the minimum length that ended during its plays; missing
+             *     without listener lists.
+             */
+            departures?: number | null;
+            /**
+             * Format: double
+             * @description When it ended, on average.
+             */
+            listeners_end: number;
+            /**
+             * Format: double
+             * @description The station's listeners when it started, on average.
+             */
+            listeners_start: number;
+            /**
+             * Format: int32
+             * @description Plays with listeners measured when they started.
+             */
+            plays: number;
+            title?: string | null;
+            /** Format: int64 */
+            track_id: number;
         };
         /** @description What MusicBrainz says about the track. */
         TrackMusicBrainz: {
@@ -5811,6 +6146,212 @@ export interface operations {
             };
         };
     };
+    days: {
+        parameters: {
+            query: {
+                /** @description First day (`YYYY-MM-DD`, station time). */
+                from: string;
+                /** @description Last day, included. */
+                to: string;
+                /** @description Only this output; the whole station otherwise. */
+                output_id?: number;
+                /** @description Rows per hour, day (by default), week or month. */
+                group?: "hour" | "day" | "week" | "month";
+                format?: "json" | "csv";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PeriodTotals"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    hours_of_day: {
+        parameters: {
+            query: {
+                /** @description First day (`YYYY-MM-DD`, station time). */
+                from: string;
+                /** @description Last day, included. */
+                to: string;
+                /** @description Only this output; the whole station otherwise. */
+                output_id?: number;
+                format?: "json" | "csv";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HourOfDay"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    now: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListenersNow"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    players: {
+        parameters: {
+            query: {
+                /** @description First day (`YYYY-MM-DD`, station time). */
+                from: string;
+                /** @description Last day, included. */
+                to: string;
+                /** @description Only this output; the whole station otherwise. */
+                output_id?: number;
+                /** @description 1 to 100, 20 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerListening"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    samples: {
+        parameters: {
+            query: {
+                /** @description From this time (Unix ms). */
+                from_unix_ms: number;
+                /** @description Until this time (Unix ms), at most 8 days after `from_unix_ms`. */
+                to_unix_ms: number;
+                /** @description Only this output; the whole station otherwise. */
+                output_id?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MinuteSample"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    tracks: {
+        parameters: {
+            query: {
+                /** @description First day (`YYYY-MM-DD`, station time). */
+                from: string;
+                /** @description Last day, included. */
+                to: string;
+                /** @description Tracks played fewer times are left out, 3 by default. */
+                min_plays?: number;
+                /** @description 1 to 500, 50 by default. */
+                limit?: number;
+                format?: "json" | "csv";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackListeners"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     live: {
         parameters: {
             query?: {
@@ -7134,6 +7675,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StationSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_statistics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatisticsSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_statistics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatisticsSettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatisticsSettings"];
                 };
             };
             "4XX": {

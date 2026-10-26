@@ -28,6 +28,8 @@ heron-proto.workspace = true
 heron-rotation = { workspace = true, features = ["openapi"] }
 heron-service = { workspace = true, features = ["mysql", "openapi"] }
 jiff.workspace = true
+# Reads Icecast's listener lists.
+quick-xml.workspace = true
 metrics.workspace = true
 notify.workspace = true
 # Reads passwords without echoing them.

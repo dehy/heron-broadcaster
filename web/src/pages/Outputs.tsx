@@ -20,6 +20,7 @@ import {
 } from "../components/ui";
 import { number, t } from "../i18n";
 import { bytes, clockTime } from "../lib/format";
+import { statisticsInput, useListenersNow } from "../lib/listeners";
 import { useLive } from "../lib/live";
 import { useAction, useCan } from "../lib/session";
 import { ListenLink, OutputState } from "./Dashboard";
@@ -49,6 +50,28 @@ const KINDS: { value: Kind; label: () => string; available: boolean }[] = [
 const MP3_BITRATES = [32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
 const SAMPLE_RATES = [22_050, 32_000, 44_100, 48_000];
 
+/** An output's listeners at the last minute, and whether sessions are counted too. */
+function ListenerCount({ now, sessions }: Readonly<{ now: Schemas["OutputListeners"] | undefined; sessions: boolean }>) {
+  if (!now) {
+    return <span className="muted">–</span>;
+  }
+  if (now.listeners === null || now.listeners === undefined) {
+    return (
+      <span className="warn small" title={now.error ?? undefined}>
+        {t("outputs.statsUnread")}
+      </span>
+    );
+  }
+  return (
+    <>
+      <div>{number(now.listeners)}</div>
+      <div className="muted small" title={now.error ?? undefined}>
+        {sessions && now.sessions ? t("outputs.withSessions") : t("outputs.countOnly")}
+      </div>
+    </>
+  );
+}
+
 export function Outputs() {
   const isAdmin = useCan("admin");
   const outputs = useQuery({ queryKey: ["outputs"], queryFn: () => unwrap(api.GET("/api/v1/outputs")) });
@@ -57,6 +80,7 @@ export function Outputs() {
     queryFn: () => unwrap(api.GET("/api/v1/encoder-profiles")),
   });
   const live = useLive((state) => state.player?.outputs);
+  const listeners = useListenersNow();
   const [editingOutput, setEditingOutput] = useState<OutputView | "new" | null>(null);
   const [editingProfile, setEditingProfile] = useState<EncoderProfileView | "new" | null>(null);
   const removeOutput = useAction(
@@ -118,6 +142,7 @@ export function Outputs() {
                   <th className="hide-narrow">{t("outputs.server")}</th>
                   <th className="hide-narrow">{t("outputs.encoding")}</th>
                   <th>{t("review.state")}</th>
+                  <th className="num">{t("statistics.listeners")}</th>
                   <th>
                     <span className="visually-hidden">{t("library.actions")}</span>
                   </th>
@@ -147,6 +172,12 @@ export function Outputs() {
                           </div>
                         )}
                         {status?.error && <div className="bad small">{status.error}</div>}
+                      </td>
+                      <td className="num">
+                        <ListenerCount
+                          now={listeners.data?.outputs.find((o) => o.output_id === output.id)}
+                          sessions={output.statistics.admin_password_set}
+                        />
                       </td>
                       <td className="actions">
                         {output.listen_url && <ListenLink url={output.listen_url} />}{" "}
@@ -313,6 +344,11 @@ function OutputDialog({
   const [json, setJson] = useState(JSON.stringify(initial, null, 2));
   const [jsonError, setJsonError] = useState<string | null>(null);
   const passwordSet = output?.secrets_set.includes("password") ?? false;
+  // The stream server's admin credentials, for listener statistics.
+  const adminPasswordSet = output?.statistics.admin_password_set ?? false;
+  const [adminUser, setAdminUser] = useState(output?.statistics.admin_username ?? "");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [removeAdmin, setRemoveAdmin] = useState(false);
   const set = (key: string, value: unknown) => setConfig((c) => ({ ...c, [key]: value }));
 
   const save = useAction(
@@ -336,6 +372,7 @@ function OutputDialog({
         config: body as Record<string, never>,
         enabled,
         metadata_enabled: metadata,
+        statistics: kind === "icecast" ? statisticsInput(adminUser, adminPassword, removeAdmin) : null,
       };
       return output
         ? unwrap(api.PUT("/api/v1/outputs/{id}", { params: { path: { id: output.id } }, body: input }))
@@ -458,6 +495,42 @@ function OutputDialog({
               <input type="checkbox" checked={config.public === true} onChange={(e) => set("public", e.target.checked)} />
               {t("outputs.public")}
             </label>
+          </fieldset>
+        ) : null}
+        {kind === "icecast" ? (
+          <fieldset>
+            <legend>{t("outputs.statistics")}</legend>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              {t("outputs.statisticsHelp")}
+            </p>
+            <div className="form-grid">
+              <Field label={t("outputs.adminUser")}>
+                <input
+                  className="input"
+                  value={adminUser}
+                  placeholder="admin"
+                  autoComplete="off"
+                  onChange={(e) => setAdminUser(e.target.value)}
+                />
+              </Field>
+              <Field label={t("outputs.adminPassword")} hint={adminPasswordSet ? t("outputs.keepPassword") : undefined}>
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="new-password"
+                  value={adminPassword}
+                  placeholder={adminPasswordSet && !removeAdmin ? "••••••••" : ""}
+                  disabled={removeAdmin}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                />
+              </Field>
+            </div>
+            {adminPasswordSet && (
+              <label className="check" style={{ marginTop: "0.75rem" }}>
+                <input type="checkbox" checked={removeAdmin} onChange={(e) => setRemoveAdmin(e.target.checked)} />
+                {t("outputs.removeAdminPassword")}
+              </label>
+            )}
           </fieldset>
         ) : (
           <Field label={t("outputs.json")} hint={t("outputs.jsonHint")}>
