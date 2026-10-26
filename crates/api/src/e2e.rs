@@ -3039,16 +3039,36 @@ async fn deck_eq_and_presets() {
 
     // Presets: those of a fresh install are there; save, rename, delete.
     let presets = viewer.get("/eq-presets").await;
-    let names: Vec<&str> = presets
+    // As a set: the database's collation decides how "R&B / soul" sorts.
+    let mut names: Vec<&str> = presets
         .as_array()
         .unwrap()
         .iter()
         .map(|preset| preset["name"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        names,
-        ["Dance", "Flat", "Pop", "Rock", "Soft rock", "Voice (FX)"]
-    );
+    names.sort_unstable();
+    let mut expected = [
+        "Acoustic",
+        "Chill",
+        "Classical",
+        "Country",
+        "Dance",
+        "Flat",
+        "Hip-hop",
+        "Jazz",
+        "Latin",
+        "Pop",
+        "Progressive metal",
+        "Progressive rock",
+        "R&B / soul",
+        "Reggae",
+        "Rock",
+        "Soft rock",
+        "Talk",
+        "Voice (FX)",
+    ];
+    expected.sort_unstable();
+    assert_eq!(names, expected);
     let flat = presets
         .as_array()
         .unwrap()
