@@ -26,7 +26,9 @@ impl EqSettings {
     pub const SETTINGS_NAME: &'static str = "eq";
 
     pub fn check(&self) -> Result<(), String> {
-        self.music.check().map_err(|error| format!("music: {error}"))?;
+        self.music
+            .check()
+            .map_err(|error| format!("music: {error}"))?;
         self.fx.check().map_err(|error| format!("fx: {error}"))
     }
 }
