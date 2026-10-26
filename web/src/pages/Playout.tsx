@@ -3,8 +3,8 @@
 // Crossfade and loudness settings, with a live preview of a transition.
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { type PlayoutSettings, type TrackSummary, api, unwrap } from "../api";
+import { useCallback, useEffect, useState } from "react";
+import { type PlayoutSettings, type TrackSummary, api, errorMessage, unwrap } from "../api";
 import { FadeEditor } from "../components/FadeEditor";
 import { TrackSearch, useDebounced } from "../components/TrackSearch";
 import { TransitionGraph } from "../components/TransitionGraph";
@@ -14,16 +14,19 @@ import {
   Empty,
   ErrorView,
   Field,
+  Icon,
   Loading,
   Modal,
   NumberInput,
   PageHead,
   Segmented,
+  useToast,
 } from "../components/ui";
 import { t } from "../i18n";
 import { db, trackName } from "../lib/format";
 import { useLive } from "../lib/live";
 import { useAction, useCan } from "../lib/session";
+import { useTransitionPlayer } from "../lib/transitionPlayer";
 
 export function Playout() {
   const settings = useQuery({
@@ -301,6 +304,14 @@ function Preview({ settings }: { settings: PlayoutSettings }) {
   const outgoingWave = useWaveform(outgoing?.id);
   const incomingWave = useWaveform(incoming?.id);
 
+  const toast = useToast();
+  const failed = useCallback((error: unknown) => toast(errorMessage(error), true), [toast]);
+  const listening = useTransitionPlayer(failed);
+  const { stop } = listening;
+  // A change of tracks or settings makes another transition: stop this one.
+  useEffect(() => stop(), [stop, preview.data]);
+  const active = listening.loading || listening.position !== null;
+
   const choose = (track: TrackSummary) => {
     const pick = { id: track.id, name: trackName(track) };
     if (picking === "outgoing") {
@@ -335,6 +346,25 @@ function Preview({ settings }: { settings: PlayoutSettings }) {
               {incoming?.name ?? t("playout.pickIncoming")}
             </span>
           </button>
+          <button
+            type="button"
+            className="btn small"
+            disabled={!preview.data || !outgoing || !incoming}
+            onClick={() => {
+              if (active) {
+                listening.stop();
+              } else if (preview.data && outgoing && incoming) {
+                listening.play(outgoing.id, incoming.id, preview.data);
+              }
+            }}
+          >
+            <Icon name={active ? "stop" : "play"} size={14} />{" "}
+            {listening.loading
+              ? t("playout.loadingTransition")
+              : active
+                ? t("playout.stopTransition")
+                : t("playout.listen")}
+          </button>
           {preview.data && (
             <span className="muted small">
               {t("playout.gains", { outgoing: db(preview.data.outgoing.gain_db), incoming: db(preview.data.incoming.gain_db) })}
@@ -349,6 +379,7 @@ function Preview({ settings }: { settings: PlayoutSettings }) {
             preview={preview.data}
             outgoingWave={outgoingWave.data ?? null}
             incomingWave={incomingWave.data ?? null}
+            playhead={listening.position}
           />
         ) : (
           <Loading />

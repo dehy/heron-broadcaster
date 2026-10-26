@@ -20,21 +20,34 @@ function peakAt(data: WaveformData | null | undefined, ms: number): number {
   return (data.peaks[Math.floor(ms / data.intervalMs)] ?? 0) / 255;
 }
 
+/**
+ * A window around the transition, on the outgoing track's timeline: from a
+ * few seconds before it starts to a few seconds after it ends. The graph
+ * shows it, and the preview player plays it.
+ */
+export function transitionWindow(preview: TransitionPreview): { from: number; to: number } {
+  const out = preview.outgoing;
+  const fadeStart = preview.fade_out?.start_ms ?? preview.next_start_ms;
+  const from = Math.max(out.cue_in_ms, Math.min(fadeStart, preview.next_start_ms) - 4_000);
+  const to = Math.max(out.cue_out_ms, preview.next_start_ms + (preview.fade_in?.length_ms ?? 0)) + 4_000;
+  return { from, to };
+}
+
 export function TransitionGraph({
   preview,
   outgoingWave,
   incomingWave,
+  playhead,
 }: {
   preview: TransitionPreview;
   outgoingWave?: WaveformData | null;
   incomingWave?: WaveformData | null;
+  /** Where the preview player is, on the outgoing track's timeline. */
+  playhead?: number | null;
 }) {
   const out = preview.outgoing;
   const into = preview.incoming;
-  // A window around the transition, on the outgoing track's timeline.
-  const fadeStart = preview.fade_out?.start_ms ?? preview.next_start_ms;
-  const from = Math.max(out.cue_in_ms, Math.min(fadeStart, preview.next_start_ms) - 4_000);
-  const to = Math.max(out.cue_out_ms, preview.next_start_ms + (preview.fade_in?.length_ms ?? 0)) + 4_000;
+  const { from, to } = transitionWindow(preview);
   const span = Math.max(1, to - from);
   const plotW = W - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
@@ -119,6 +132,16 @@ export function TransitionGraph({
           stroke="var(--bad)"
           strokeDasharray="4 3"
         />
+        {playhead !== null && playhead !== undefined && playhead >= from && playhead <= to && (
+          <line
+            x1={x(playhead)}
+            x2={x(playhead)}
+            y1={PAD.top}
+            y2={PAD.top + plotH}
+            stroke="var(--fg)"
+            strokeWidth="1.5"
+          />
+        )}
         {timeTicks.map((ms, index) => (
           <text
             key={ms}
