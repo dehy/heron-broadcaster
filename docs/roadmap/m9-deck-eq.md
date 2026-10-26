@@ -35,7 +35,7 @@ Stations shape the sound of what they play: more bass for a dance format, less h
 ## Acceptance criteria
 
 - [ ] Frequency response tests match expected curves: each band alone at ±12 dB and in between, and random settings of all ten, match the response of the filter design computed in `f64` within 0.1 dB from 20 Hz to 20 kHz. A band alone at +12 dB gives +12 dB at its centre frequency; a flat EQ changes nothing, and a bypassed one is bit-identical to no EQ.
-- [ ] No clicks when moving sliders during playback: a sine and a music track rendered while a band jumps between −12 and +12 dB, while a preset is loaded, and while the EQ is enabled and bypassed, show no step (no sample-to-sample change larger than the steady signal's own) and no energy away from the sine's frequency beyond that of the reference. Checked by ear on a stack too.
+- [ ] No clicks when moving sliders during playback: sines rendered while a band goes from −12 to +12 dB and back, while a preset is loaded, and while the EQ is enabled and bypassed show no step (no sample-to-sample change larger than the steady sine's own), and their energy more than 500 Hz from the sine stays within 10 dB of an ideal glide's (the level and phase of the design moving with the gains, which no filter can follow instantly) and 30 dB under that of the same change made at once, which clicks. Checked by ear on a stack too.
 - [ ] The audio thread still never allocates: `tests/no_alloc.rs` moves and toggles both EQs during crossfades.
 - [ ] A slider moved in the web UI is heard within 200 ms, and other open pages follow it.
 - [ ] Presets: save, load into either EQ, rename, delete, through the API and the web UI. `Flat` is there on a fresh install.
