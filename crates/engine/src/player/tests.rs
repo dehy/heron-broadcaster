@@ -695,3 +695,52 @@ fn a_track_that_just_started_is_saved_once() {
     let waiting: Vec<u64> = saved.waiting.iter().map(|entry| entry.entry_id).collect();
     assert_eq!(waiting, [ids[2]]);
 }
+
+#[test]
+fn the_eq_plays_the_filter_gains_solved_from_the_sliders() {
+    use heron_core::{DeckEq, EqSettings};
+    use heron_dsp::eq::{filter_gains, filters_response_db};
+
+    // The tone of `write_tone`: 0.06 rad a sample at 44.1 kHz.
+    let tone_hz = 0.06 * 44_100.0 / std::f64::consts::TAU;
+    let level = |eq: Option<EqSettings>| {
+        let mut station = Station::new();
+        if let Some(eq) = eq {
+            station.player.set_eq(eq, false).unwrap();
+        }
+        let track = station.file("tone.wav", 3.0);
+        station.player.enqueue(vec![track], None).unwrap();
+        let output = station.play(2.0);
+        // The second second, left channel.
+        let middle = &output[SAMPLE_RATE as usize * CHANNELS..2 * SAMPLE_RATE as usize * CHANNELS];
+        let power = middle
+            .iter()
+            .step_by(CHANNELS)
+            .map(|s| f64::from(*s).powi(2))
+            .sum::<f64>()
+            / (middle.len() / CHANNELS) as f64;
+        10.0 * power.log10()
+    };
+    let sliders = [6.0; heron_core::EQ_BANDS];
+    let music = DeckEq {
+        enabled: true,
+        gains_db: sliders,
+    };
+    let gain = level(Some(EqSettings {
+        music,
+        fx: DeckEq::default(),
+    })) - level(None);
+
+    let rate = f64::from(SAMPLE_RATE);
+    let solved = filters_response_db(rate, &filter_gains(rate, &sliders), tone_hz);
+    let unsolved = filters_response_db(rate, &sliders.map(f64::from), tone_hz);
+    assert!(
+        (gain - solved).abs() < 0.2,
+        "{gain:.2} dB, solved {solved:.2} dB"
+    );
+    // Telling the two apart is the point.
+    assert!(
+        (solved - unsolved).abs() > 0.5,
+        "{solved:.2} and {unsolved:.2} dB"
+    );
+}

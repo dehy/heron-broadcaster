@@ -486,14 +486,14 @@ fn tracks_without_audio_never_go_on_air() {
     assert!(handle.trash.pop().is_ok());
 }
 
-fn set_eq(handle: &mut MixerHandle, eq: EqTarget, gains_db: [f32; EQ_BANDS], glide: bool) {
+fn set_eq(handle: &mut MixerHandle, eq: EqTarget, filter_gains_db: [f32; EQ_BANDS], glide: bool) {
     assert!(
         handle
             .commands
             .push(Command::SetEq {
                 eq,
                 enabled: true,
-                gains_db,
+                filter_gains_db,
                 glide,
             })
             .is_ok()

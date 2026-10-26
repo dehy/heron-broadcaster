@@ -127,7 +127,7 @@ fn the_mixer_does_not_allocate() {
     let eq = |eq, enabled, gain, glide| Command::SetEq {
         eq,
         enabled,
-        gains_db: [gain; 10],
+        filter_gains_db: [gain; 10],
         glide,
     };
     // Every command is prepared (and allocated) outside the audio thread.

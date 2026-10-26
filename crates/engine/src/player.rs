@@ -28,7 +28,7 @@ use crate::decoder::{DecodedSource, SourceFile};
 use crate::fallback::Fallback;
 use crate::mixer::{
     AudioSource, Command, Deck, EndReason, EqTarget, Event, FrameRamp, FrameTransition,
-    LoadedTrack, MixerHandle, MixerStatus, frames_to_ms, ms_to_frames,
+    LoadedTrack, MixerHandle, MixerStatus, SAMPLE_RATE, frames_to_ms, ms_to_frames,
 };
 use crate::preload::Preloader;
 
@@ -582,13 +582,15 @@ impl Player {
         &self.eq
     }
 
-    /// New deck EQ settings. They glide in, or with `glide: false` apply
-    /// at once: only while nothing plays (starting, taking over).
+    /// New deck EQ settings. The filter gains are solved from the sliders
+    /// here, not on the audio thread. They glide in, or with `glide: false`
+    /// apply at once: only while nothing plays (starting, taking over).
     pub fn set_eq(&mut self, eq: EqSettings, glide: bool) -> Result<(), PlayerError> {
         let commands = |target, deck: DeckEq| Command::SetEq {
             eq: target,
             enabled: deck.enabled,
-            gains_db: deck.gains_db,
+            filter_gains_db: heron_dsp::eq::filter_gains(f64::from(SAMPLE_RATE), &deck.gains_db)
+                .map(|gain| gain as f32),
             glide,
         };
         self.send(commands(EqTarget::Music, eq.music))?;

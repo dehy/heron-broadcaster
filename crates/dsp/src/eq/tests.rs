@@ -26,7 +26,8 @@ fn amplitude(samples: &[f32], frequency: f64) -> f64 {
     2.0 * sin.hypot(cos) / frames as f64
 }
 
-/// Gain of the processed EQ at `frequency`, measured on a sine, in dB.
+/// Gain of the processed EQ at `frequency` with these filter gains,
+/// measured on a sine, in dB.
 fn measured_db(gains: [f32; BANDS], frequency: f64) -> f64 {
     // 0.25 s to settle, then 0.25 s measured: frequencies are multiples of
     // 4 Hz, so the measure holds whole periods.
@@ -59,47 +60,138 @@ fn random_gains(seed: &mut u64) -> [f32; BANDS] {
     })
 }
 
+const FS: f64 = RATE as f64;
+
 #[test]
-fn a_band_alone_peaks_at_its_gain() {
-    for (band, &centre) in FREQUENCIES.iter().enumerate() {
+fn each_band_has_its_shape() {
+    for band in 0..BANDS {
+        let centre = FREQUENCIES[band];
         for gain in [-12.0, -6.0, 3.0, 12.0] {
-            let coefficients = Coefficients::peaking(f64::from(RATE), centre, Q, gain);
-            let at_centre = coefficients.response_db(f64::from(RATE), centre);
-            assert!(
-                (at_centre - gain).abs() < 1e-9,
-                "band {band}: {at_centre} dB"
-            );
-            // Far from it, nothing.
-            let far = if centre < 1_000.0 { 20_000.0 } else { 20.0 };
-            assert!(coefficients.response_db(f64::from(RATE), far).abs() < 0.5);
+            let design = Coefficients::band(FS, band, gain);
+            let at = |frequency| design.response_db(FS, frequency);
+            match SHAPES[band] {
+                Shape::Peaking => {
+                    assert!((at(centre) - gain).abs() < 1e-9, "band {band}");
+                    let far = if centre < 1_000.0 { 20_000.0 } else { 20.0 };
+                    assert!(at(far).abs() < 0.5, "band {band}");
+                }
+                // Half the gain at the shelf's frequency, all of it on its
+                // side, nothing on the other.
+                Shape::LowShelf => {
+                    assert!((at(centre) - gain / 2.0).abs() < 1e-6);
+                    assert!((at(10.0) - gain).abs() < 0.3);
+                    assert!(at(2_000.0).abs() < 0.1);
+                }
+                Shape::HighShelf => {
+                    assert!((at(centre) - gain / 2.0).abs() < 1e-6);
+                    assert!((at(23_000.0) - gain).abs() < 1.0);
+                    assert!(at(2_000.0).abs() < 0.1);
+                }
+            }
         }
     }
 }
 
 #[test]
+fn bands_are_as_wide_as_their_neighbours_are_far() {
+    let qs: Vec<f64> = (0..BANDS).map(band_q).collect();
+    // 3k sits 1.6 and 1 octave from its neighbours, 14k a quarter of one.
+    assert!((qs[5] - 1.08).abs() < 0.01, "{qs:?}");
+    assert!((qs[8] - 6.95).abs() < 0.01, "{qs:?}");
+    assert!((qs[0] - FRAC_1_SQRT_2).abs() < 1e-12);
+    assert!((qs[9] - FRAC_1_SQRT_2).abs() < 1e-12);
+}
+
+#[test]
 fn flat_is_zero_everywhere() {
+    assert_eq!(filter_gains(FS, &[0.0; BANDS]), [0.0; BANDS]);
     for frequency in test_frequencies() {
-        assert!(response_db(f64::from(RATE), &[0.0; BANDS], frequency).abs() < 1e-9);
+        assert!(response_db(FS, &[0.0; BANDS], frequency).abs() < 1e-9);
     }
 }
 
 #[test]
+fn the_curve_meets_every_slider_at_its_band() {
+    let mut settings: Vec<[f32; BANDS]> = (0..BANDS)
+        .flat_map(|band| {
+            [-MAX_GAIN_DB, MAX_GAIN_DB].map(|gain| {
+                let mut sliders = [0.0; BANDS];
+                sliders[band] = gain;
+                sliders
+            })
+        })
+        .collect();
+    let mut seed = 21;
+    settings.extend((0..1_000).map(|_| random_gains(&mut seed)));
+    let mut limited = 0;
+    for sliders in &settings {
+        let gains = filter_gains(FS, sliders);
+        // Sliders pulling hard in opposite directions on close bands need
+        // filter gains past the limit: their curve is less exact.
+        let at_limit = gains.iter().any(|gain| gain.abs() >= MAX_FILTER_GAIN_DB);
+        limited += usize::from(at_limit);
+        let tolerance = if at_limit { 4.0 } else { 0.2 };
+        for (band, &centre) in FREQUENCIES.iter().enumerate() {
+            let at = filters_response_db(FS, &gains, centre);
+            let wanted = f64::from(sliders[band]);
+            assert!(
+                (at - wanted).abs() < tolerance,
+                "{sliders:?}: {at:.2} dB at {centre} Hz, the slider {wanted}"
+            );
+        }
+    }
+    // About one random setting in six.
+    assert!(
+        limited * 4 < settings.len(),
+        "{limited} settings reached the limit"
+    );
+}
+
+#[test]
+fn equal_sliders_give_a_nearly_flat_curve() {
+    for gain in [-12.0, -6.0, 6.0, 12.0] {
+        let gains = filter_gains(FS, &[gain; BANDS]);
+        for step in 0..=200 {
+            let frequency = 60.0 * (16_000f64 / 60.0).powf(f64::from(step) / 200.0);
+            let at = filters_response_db(FS, &gains, frequency);
+            // Within half the sliders' gain, between bands.
+            assert!(
+                (at - f64::from(gain)).abs() < f64::from(gain.abs()) / 2.0,
+                "all at {gain} dB: {at:.2} dB at {frequency:.0} Hz"
+            );
+        }
+    }
+}
+
+#[test]
+fn opposite_close_bands_stay_within_the_limit() {
+    let sliders = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 12.0, -12.0, 12.0];
+    let gains = filter_gains(FS, &sliders);
+    assert!(
+        gains
+            .iter()
+            .all(|gain| gain.is_finite() && gain.abs() <= MAX_FILTER_GAIN_DB)
+    );
+}
+
+#[test]
 fn the_processed_response_matches_the_design() {
-    let mut settings = Vec::new();
+    let mut settings: Vec<[f64; BANDS]> = Vec::new();
     for band in 0..BANDS {
-        for gain in [-MAX_GAIN_DB, MAX_GAIN_DB] {
+        for gain in [-MAX_FILTER_GAIN_DB, -12.0, 12.0, MAX_FILTER_GAIN_DB] {
             let mut gains = [0.0; BANDS];
             gains[band] = gain;
             settings.push(gains);
         }
     }
     let mut seed = 9;
-    settings.extend((0..3).map(|_| random_gains(&mut seed)));
+    settings.extend((0..3).map(|_| filter_gains(FS, &random_gains(&mut seed))));
 
     for gains in settings {
+        let filters = gains.map(|gain| gain as f32);
         for frequency in test_frequencies() {
-            let expected = response_db(f64::from(RATE), &gains, frequency);
-            let measured = measured_db(gains, frequency);
+            let expected = filters_response_db(FS, &filters.map(f64::from), frequency);
+            let measured = measured_db(filters, frequency);
             assert!(
                 (measured - expected).abs() < 0.1,
                 "{gains:?} at {frequency} Hz: {measured:.3} dB, expected {expected:.3} dB"
@@ -214,7 +306,7 @@ fn steepness(samples: &[f32]) -> f64 {
 fn steady_steepness(frequency: f64, settings: &[[f32; BANDS]]) -> f64 {
     let loudest = settings
         .iter()
-        .map(|gains| response_db(f64::from(RATE), gains, frequency))
+        .map(|gains| filters_response_db(FS, &gains.map(f64::from), frequency))
         .fold(f64::MIN, f64::max);
     let amplitude = 0.25 * 10f64.powf(loudest / 20.0);
     let w = TAU * frequency / f64::from(RATE);
@@ -297,11 +389,11 @@ fn change_start(frequency: f64) -> usize {
 fn complex_response(gains: &[f64; BANDS], frequency: f64) -> (f64, f64) {
     let w = TAU * frequency / f64::from(RATE);
     let (c1, s1, c2, s2) = (w.cos(), w.sin(), (2.0 * w).cos(), (2.0 * w).sin());
-    FREQUENCIES
+    gains
         .iter()
-        .zip(gains)
-        .fold((1.0, 0.0), |(gain, phase), (&centre, &gain_db)| {
-            let c = Coefficients::peaking(f64::from(RATE), centre, Q, gain_db);
+        .enumerate()
+        .fold((1.0, 0.0), |(gain, phase), (band, &gain_db)| {
+            let c = Coefficients::band(FS, band, gain_db);
             let (num_re, num_im) = (c.b0 + c.b1 * c1 + c.b2 * c2, -(c.b1 * s1 + c.b2 * s2));
             let (den_re, den_im) = (1.0 + c.a1 * c1 + c.a2 * c2, -(c.a1 * s1 + c.a2 * s2));
             (
@@ -443,4 +535,82 @@ fn enabling_and_bypassing_do_not_click() {
     // Bypassed once the glide is over.
     eq.process(&mut sine(170.0, 0.25, 0, 9_600));
     assert!(!eq.is_active());
+}
+
+/// The web UI draws the EQ's curve with its own copy of the design
+/// (`web/src/lib/eq.ts`): both are checked against this fixture. Write it
+/// again with `HERON_UPDATE_FIXTURES=1 cargo test -p heron-dsp`.
+const FIXTURE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../web/src/lib/eq.fixture.json"
+);
+
+fn fixture() -> serde_json::Value {
+    let round = |value: f64| (value * 1e6).round() / 1e6;
+    let mut seed = 5;
+    let mut settings: Vec<[f32; BANDS]> = vec![
+        [0.0; BANDS],
+        [6.0; BANDS],
+        [-12.0; BANDS],
+        [0.0, 7.0, -8.0, 5.0, 7.5, 7.0, 6.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 12.0, -12.0, 12.0],
+        [12.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -12.0],
+    ];
+    settings.extend((0..2).map(|_| random_gains(&mut seed).map(|gain| (gain * 2.0).round() / 2.0)));
+    let frequencies = test_frequencies();
+    let cases: Vec<serde_json::Value> = settings
+        .iter()
+        .map(|sliders| {
+            let gains = filter_gains(FS, sliders);
+            serde_json::json!({
+                "sliders_db": sliders,
+                "filter_gains_db": gains.map(round),
+                "response_db": frequencies
+                    .iter()
+                    .map(|&frequency| [frequency, round(filters_response_db(FS, &gains, frequency))])
+                    .collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    serde_json::json!({ "sample_rate": FS, "cases": cases })
+}
+
+#[test]
+fn the_web_fixture_is_current() {
+    let current = fixture();
+    if std::env::var_os("HERON_UPDATE_FIXTURES").is_some() {
+        let mut json = serde_json::to_string_pretty(&current).unwrap();
+        json.push('\n');
+        std::fs::write(FIXTURE, json).unwrap();
+        return;
+    }
+    let stored: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(FIXTURE)
+            .expect("the fixture: write it with HERON_UPDATE_FIXTURES=1"),
+    )
+    .unwrap();
+    assert!(
+        close(&stored, &current),
+        "web/src/lib/eq.fixture.json is out of date: write it again with HERON_UPDATE_FIXTURES=1"
+    );
+}
+
+/// Equal, numbers within 1e-5: the last bits of `cos` or `log10` may
+/// differ from one CPU to another.
+fn close(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => {
+            (a.as_f64().unwrap_or(f64::NAN) - b.as_f64().unwrap_or(f64::NAN)).abs() < 1e-5
+        }
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| close(a, b))
+        }
+        (Value::Object(a), Value::Object(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(key, a)| b.get(key).is_some_and(|b| close(a, b)))
+        }
+        (a, b) => a == b,
+    }
 }

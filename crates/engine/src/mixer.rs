@@ -204,12 +204,14 @@ pub enum Command {
     /// Plays a jingle on the FX player, on top of the decks. Replaces the one playing.
     PlayFx(Box<LoadedTrack>),
     StopFx,
-    /// New settings for a deck EQ. They glide in, or with `glide: false`
-    /// apply at once with the filters at rest: only while nothing plays.
+    /// New settings for a deck EQ: its filter gains, solved from the
+    /// sliders by the control thread ([`heron_dsp::eq::filter_gains`]). They
+    /// glide in, or with `glide: false` apply at once with the filters at
+    /// rest: only while nothing plays.
     SetEq {
         eq: EqTarget,
         enabled: bool,
-        gains_db: [f32; EQ_BANDS],
+        filter_gains_db: [f32; EQ_BANDS],
         glide: bool,
     },
 }
@@ -638,14 +640,14 @@ impl Mixer {
                 Command::SetEq {
                     eq,
                     enabled,
-                    gains_db,
+                    filter_gains_db,
                     glide,
                 } => {
                     for &slot in eq.slots() {
                         if glide {
-                            self.eqs[slot].set(enabled, gains_db);
+                            self.eqs[slot].set(enabled, filter_gains_db);
                         } else {
-                            self.eqs[slot].restart(enabled, gains_db);
+                            self.eqs[slot].restart(enabled, filter_gains_db);
                         }
                     }
                 }
