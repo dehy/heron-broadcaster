@@ -35,6 +35,6 @@
 
 ## Releases
 
-- CI publishes the images it has tested to GHCR (`ghcr.io/dehy/heron-*`), for amd64 and arm64. Pull requests never publish.
+- CI publishes the images it has tested to GHCR, under the repository owner's packages (`ghcr.io/dehy/heron-*`; a fork publishes its own, `ghcr.io/<owner>/heron-*`), for amd64 and arm64. Pull requests never publish. `HERON_REGISTRY` in `.env` picks where a station pulls them from.
 - Every push to `main` publishes `edge` and `sha-<commit>`.
 - To release `X.Y.Z`: set the version in `Cargo.toml` (`[workspace.package]`) and `web/package.json`, merge, then tag `main` with `vX.Y.Z` and push the tag. CI checks that the tag matches both versions and publishes `X.Y.Z`, `X.Y` and `latest`.

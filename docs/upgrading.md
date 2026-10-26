@@ -100,7 +100,7 @@ A Swarm stack can start the new engine before stopping the old one (`start-first
 
 ```yaml
   heron-engine:
-    image: ghcr.io/dehy/heron-engine:${HERON_VERSION:-latest}
+    image: ${HERON_REGISTRY:-ghcr.io/dehy}/heron-engine:${HERON_VERSION:-latest}
     stop_grace_period: 30s
     environment:
       # …the other variables
@@ -119,7 +119,7 @@ A Swarm stack can start the new engine before stopping the old one (`start-first
         delay: 10s
 
   heron-relay:
-    image: ghcr.io/dehy/heron-engine:${HERON_RELAY_VERSION:-latest}
+    image: ${HERON_REGISTRY:-ghcr.io/dehy}/heron-engine:${HERON_RELAY_VERSION:-latest}
     command: ["relay"]
     environment:
       HERON_RELAY_SOCKET: /run/heron/relay/relay.sock

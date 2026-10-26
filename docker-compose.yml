@@ -59,7 +59,7 @@ services:
       context: .
       dockerfile: docker/rust.Dockerfile
       target: heron-api
-    image: ghcr.io/dehy/heron-api:${HERON_VERSION:-latest}
+    image: ${HERON_REGISTRY:-ghcr.io/dehy}/heron-api:${HERON_VERSION:-latest}
     restart: unless-stopped
     user: ${HERON_LIBRARIAN_USER:-10001:10001}
     cpu_shares: 1024
@@ -85,7 +85,7 @@ services:
       context: .
       dockerfile: docker/rust.Dockerfile
       target: heron-analyzer
-    image: ghcr.io/dehy/heron-analyzer:${HERON_VERSION:-latest}
+    image: ${HERON_REGISTRY:-ghcr.io/dehy}/heron-analyzer:${HERON_VERSION:-latest}
     restart: unless-stopped
     # Background work: last for the CPU, first to go when memory runs out.
     # Its workers also run at nice 10 (HERON_NICE).
@@ -115,7 +115,7 @@ services:
       context: .
       dockerfile: docker/rust.Dockerfile
       target: heron-librarian
-    image: ghcr.io/dehy/heron-librarian:${HERON_VERSION:-latest}
+    image: ${HERON_REGISTRY:-ghcr.io/dehy}/heron-librarian:${HERON_VERSION:-latest}
     restart: unless-stopped
     # Background work, like the analyzer; nice 10 (HERON_NICE).
     cpu_shares: 256
@@ -147,7 +147,7 @@ services:
       context: .
       dockerfile: docker/rust.Dockerfile
       target: heron-engine
-    image: ghcr.io/dehy/heron-engine:${HERON_VERSION:-latest}
+    image: ${HERON_REGISTRY:-ghcr.io/dehy}/heron-engine:${HERON_VERSION:-latest}
     restart: unless-stopped
     # Room for a hot handover to a new engine on upgrade (docs/upgrading.md).
     stop_grace_period: 30s
@@ -172,7 +172,7 @@ services:
   # leaves it running; restarting it is a short break covered by Icecast's
   # fallback mount. The engine connects directly while it is down.
   heron-relay:
-    image: ghcr.io/dehy/heron-engine:${HERON_VERSION:-latest}
+    image: ${HERON_REGISTRY:-ghcr.io/dehy}/heron-engine:${HERON_VERSION:-latest}
     restart: unless-stopped
     cpu_shares: 8192
     oom_score_adj: -500
@@ -227,7 +227,7 @@ services:
       context: .
       dockerfile: docker/web.Dockerfile
       target: heron-web
-    image: ghcr.io/dehy/heron-web:${HERON_VERSION:-latest}
+    image: ${HERON_REGISTRY:-ghcr.io/dehy}/heron-web:${HERON_VERSION:-latest}
     restart: unless-stopped
     cpu_shares: 1024
     environment:
