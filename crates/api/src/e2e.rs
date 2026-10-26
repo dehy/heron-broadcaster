@@ -3037,10 +3037,32 @@ async fn deck_eq_and_presets() {
     assert_eq!(engine_eq, settings);
     assert_eq!(admin.get("/settings/eq").await, settings);
 
-    // Presets: Flat is there; save, rename, delete.
+    // Presets: those of a fresh install are there; save, rename, delete.
     let presets = viewer.get("/eq-presets").await;
-    assert_eq!(presets[0]["name"], "Flat");
-    assert_eq!(presets[0]["gains_db"], json!(vec![0.0; 10]));
+    let names: Vec<&str> = presets
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|preset| preset["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["Dance", "Flat", "Pop", "Rock", "Soft rock", "Voice (FX)"]
+    );
+    let flat = presets
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Flat")
+        .unwrap();
+    assert_eq!(flat["gains_db"], json!(vec![0.0; 10]));
+    let rock = presets
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Rock")
+        .unwrap();
+    assert_eq!(rock["gains_db"][0], 5.0);
     let gains = settings["music"]["gains_db"].clone();
     let (status, _) = viewer
         .send(
