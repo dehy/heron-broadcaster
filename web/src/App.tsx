@@ -24,6 +24,7 @@ import { Outputs } from "./pages/Outputs";
 import { Playout } from "./pages/Playout";
 import { QueuePage } from "./pages/Queue";
 import { Restrictions } from "./pages/Restrictions";
+import { Import } from "./pages/Import";
 import { Review } from "./pages/Review";
 import { Rotation } from "./pages/Rotation";
 import { Schedule } from "./pages/Schedule";
@@ -93,6 +94,7 @@ const PAGES: Page[] = [
   { path: "/artists", label: "nav.artists", icon: "mic" },
   { path: "/review", label: "nav.review", icon: "review" },
   { path: "/trash", label: "nav.trash", icon: "trash" },
+  { path: "/import", label: "nav.import", icon: "upload", admin: true },
   { path: "/clocks", label: "nav.clocks", icon: "clock", section: "nav.programming" },
   { path: "/schedule", label: "nav.schedule", icon: "calendar" },
   { path: "/categories", label: "nav.categories", icon: "tag" },
@@ -145,6 +147,8 @@ function route(pathname: string): ReactNode {
       return <Rotation />;
     case "/review":
       return <Review />;
+    case "/import":
+      return <Import />;
     case "/playout":
       return <Playout />;
     case "/outputs":
