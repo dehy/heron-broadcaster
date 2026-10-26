@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Your account: theme, language, password and API tokens.
+// Your account: theme, language, width, password and API tokens.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
@@ -9,7 +9,7 @@ import { Banner, Card, ConfirmButton, Empty, Field, Icon, NumberInput, PageHead,
 import { LANGUAGES, type LanguageSetting, resolve, rich, setLanguage, t, toSetting } from "../i18n";
 import { ago, dateTime } from "../lib/format";
 import { ME_KEY, useAction, useUser } from "../lib/session";
-import { applyTheme } from "../lib/theme";
+import { applyFullWidth, applyTheme } from "../lib/theme";
 
 export function Account() {
   const user = useUser();
@@ -20,7 +20,7 @@ export function Account() {
         description={t("account.signedInAs", { user: user.username, role: t(`role.${user.role}`) })}
       />
       <div className="grid two">
-        <DisplayCard theme={user.theme} language={toSetting(user.language)} />
+        <DisplayCard theme={user.theme} language={toSetting(user.language)} fullWidth={user.full_width} />
         <PasswordCard />
       </div>
       <TokensCard />
@@ -28,10 +28,18 @@ export function Account() {
   );
 }
 
-function DisplayCard({ theme, language }: { theme: Theme; language: LanguageSetting }) {
+function DisplayCard({
+  theme,
+  language,
+  fullWidth,
+}: {
+  theme: Theme;
+  language: LanguageSetting;
+  fullWidth: boolean;
+}) {
   const client = useQueryClient();
   const save = useAction(
-    (preferences: { theme?: Theme; language?: LanguageSetting }) =>
+    (preferences: { theme?: Theme; language?: LanguageSetting; full_width?: boolean }) =>
       unwrap(api.PUT("/api/v1/auth/preferences", { body: preferences })),
     { onSuccess: (user) => client.setQueryData(ME_KEY, user) },
   );
@@ -72,6 +80,17 @@ function DisplayCard({ theme, language }: { theme: Theme; language: LanguageSett
             ))}
           </select>
         </Field>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={fullWidth}
+            onChange={(event) => {
+              applyFullWidth(event.target.checked);
+              save.mutate({ full_width: event.target.checked });
+            }}
+          />
+          {t("account.fullWidth")}
+        </label>
         <p className="muted small" style={{ margin: 0 }}>
           {t("account.displayHelp")}
         </p>

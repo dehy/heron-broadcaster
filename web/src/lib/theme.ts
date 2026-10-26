@@ -33,3 +33,30 @@ export function applyTheme(theme: Theme) {
     // Not remembered in this browser; the API still has it.
   }
 }
+
+// The page's width: a centred column, or the whole screen (wide screens,
+// long tables). Saved per user by the API, remembered in this browser too.
+
+const WIDTH_KEY = "heron.fullWidth";
+
+export function storedFullWidth(): boolean {
+  try {
+    return window.localStorage.getItem(WIDTH_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function applyFullWidth(fullWidth: boolean) {
+  const root = document.documentElement;
+  if (fullWidth) {
+    root.dataset.width = "full";
+  } else {
+    delete root.dataset.width;
+  }
+  try {
+    window.localStorage.setItem(WIDTH_KEY, String(fullWidth));
+  } catch {
+    // Not remembered in this browser; the API still has it.
+  }
+}

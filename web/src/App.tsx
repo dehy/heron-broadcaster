@@ -9,7 +9,7 @@ import { setTimeZone } from "./lib/format";
 import { startLive, stopLive, useLive } from "./lib/live";
 import { Link, match, navigate, useLocation } from "./lib/router";
 import { ME_KEY, UserContext, useCan, useMeQuery } from "./lib/session";
-import { applyTheme, storedTheme } from "./lib/theme";
+import { applyFullWidth, applyTheme, storedFullWidth, storedTheme } from "./lib/theme";
 import { Account } from "./pages/Account";
 import { Artists } from "./pages/Artists";
 import { Buffer } from "./pages/Buffer";
@@ -35,6 +35,7 @@ import { Users } from "./pages/Users";
 import { Webhooks } from "./pages/Webhooks";
 
 applyTheme(storedTheme());
+applyFullWidth(storedFullWidth());
 
 export function App() {
   const me = useMeQuery();
@@ -45,6 +46,7 @@ export function App() {
   useEffect(() => {
     if (user) {
       applyTheme(user.theme);
+      applyFullWidth(user.full_width);
       void setLanguage(toSetting(user.language));
       startLive();
     } else if (user === null) {

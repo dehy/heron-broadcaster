@@ -45,6 +45,9 @@ pub struct User {
     /// The web UI's language: a language tag (`en`, `fr`…), or `system` to
     /// follow the browser's languages.
     pub language: String,
+    /// The web UI uses the whole width of the screen instead of a centred
+    /// column.
+    pub full_width: bool,
     pub last_login_at_unix_ms: Option<i64>,
     pub created_at_unix_ms: i64,
 }
@@ -78,14 +81,26 @@ impl Theme {
     }
 }
 
-type UserRow = (u64, String, String, bool, String, String, Option<i64>, i64);
+type UserRow = (
+    u64,
+    String,
+    String,
+    bool,
+    String,
+    String,
+    bool,
+    Option<i64>,
+    i64,
+);
 
 const USER_COLUMNS: &str =
-    "id, username, CAST(role AS CHAR), enabled, CAST(theme AS CHAR), language,
+    "id, username, CAST(role AS CHAR), enabled, CAST(theme AS CHAR), language, full_width,
     CAST(UNIX_TIMESTAMP(last_login_at) * 1000 AS SIGNED),
     CAST(UNIX_TIMESTAMP(created_at) * 1000 AS SIGNED)";
 
-fn user((id, username, role, enabled, theme, language, last_login, created): UserRow) -> User {
+fn user(
+    (id, username, role, enabled, theme, language, full_width, last_login, created): UserRow,
+) -> User {
     User {
         id,
         username,
@@ -93,6 +108,7 @@ fn user((id, username, role, enabled, theme, language, last_login, created): Use
         enabled,
         theme: Theme::parse(&theme),
         language,
+        full_width,
         last_login_at_unix_ms: last_login,
         created_at_unix_ms: created,
     }
@@ -256,6 +272,9 @@ pub struct Preferences {
     /// lacks.
     #[serde(default)]
     pub language: Option<String>,
+    /// Use the whole width of the screen instead of a centred column.
+    #[serde(default)]
+    pub full_width: Option<bool>,
 }
 
 /// `system`, or a language tag: a 2 or 3 letter language and optional
@@ -279,7 +298,7 @@ fn check_language(language: &str) -> ApiResult<()> {
     }
 }
 
-/// Saves your preferences: the web UI's theme and language.
+/// Saves your preferences: the web UI's theme, language and width.
 #[utoipa::path(put, path = "/auth/preferences", tag = "auth",
     request_body = Preferences,
     responses((status = 200, body = User), (status = "4XX", body = ErrorBody)))]
@@ -292,11 +311,13 @@ async fn set_preferences(
         check_language(language)?;
     }
     sqlx::query(
-        "UPDATE users SET theme = COALESCE(?, theme), language = COALESCE(?, language)
+        "UPDATE users SET theme = COALESCE(?, theme), language = COALESCE(?, language),
+             full_width = COALESCE(?, full_width)
          WHERE id = ?",
     )
     .bind(preferences.theme.map(Theme::as_str))
     .bind(preferences.language)
+    .bind(preferences.full_width)
     .bind(user.id)
     .execute(&state.pool)
     .await?;

@@ -229,7 +229,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Saves your preferences: the web UI's theme and language. */
+        /** Saves your preferences: the web UI's theme, language and width. */
         put: operations["set_preferences"];
         post?: never;
         delete?: never;
@@ -3337,6 +3337,8 @@ export interface components {
         };
         /** @description What to change; what is left out stays as it is. */
         Preferences: {
+            /** @description Use the whole width of the screen instead of a centred column. */
+            full_width?: boolean | null;
             /**
              * @description A language tag (`en`, `fr`…) or `system`. The API does not know which
              *     languages the web UI has: it falls back on the browser's for one it
@@ -4571,6 +4573,11 @@ export interface components {
             /** Format: int64 */
             created_at_unix_ms: number;
             enabled: boolean;
+            /**
+             * @description The web UI uses the whole width of the screen instead of a centred
+             *     column.
+             */
+            full_width: boolean;
             /** Format: int64 */
             id: number;
             /**

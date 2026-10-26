@@ -27,7 +27,7 @@
 | **Settings** | Autofill, rotation (separation windows, fallback category, weights), the station's time zone, programming (what counts as a play, eras, mood and sound code scales) and the MusicBrainz details lookup, library layout and identification (AcoustID key), upload limits and how long the trash keeps tracks, analysis thresholds, listener statistics (minimum session, how long sessions are kept) | operator (queue, rotation, programming), admin (others) |
 | **Webhooks** | Webhooks on track changes: address, events, FX or not, the default JSON body or a template; the secret, shown once (and a new one); a test ping; each webhook's deliveries, with their status, attempts, what was sent and answered, and send again | admin |
 | **Users** | Users and roles, passwords, enable or disable | admin |
-| **Account** | Theme, language, password, API tokens | |
+| **Account** | Theme, language, width, password, API tokens | |
 
 Viewers see every page (except users and webhooks) without the controls. Every page shows a banner when something needs attention: the API, the database or the engine unreachable, live updates disconnected, the engine refusing the configuration, or the **server clock** not synchronized or off by more than about a second (from `GET /api/v1/status`, see [API](api.md#authentication)).
 
@@ -48,6 +48,8 @@ Every time and date is shown in the station's time zone (`station` settings, see
 ## Themes
 
 Light and dark themes. *System* (the default) follows the device's setting (`prefers-color-scheme`); *Light* or *Dark* is saved per user by the API (`PUT /api/v1/auth/preferences`) and also remembered by the browser, so the first paint uses it.
+
+Pages are a centred column by default. *Use the whole width of the screen* (Account › Display) drops that limit, for wide screens and the many columns of the track list; it is saved and remembered like the theme (`{"full_width": true}`).
 
 ## Languages
 

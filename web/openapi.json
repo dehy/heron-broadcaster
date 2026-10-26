@@ -588,7 +588,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "Saves your preferences: the web UI's theme and language.",
+        "summary": "Saves your preferences: the web UI's theme, language and width.",
         "operationId": "set_preferences",
         "requestBody": {
           "content": {
@@ -9340,6 +9340,13 @@
         "type": "object",
         "description": "What to change; what is left out stays as it is.",
         "properties": {
+          "full_width": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Use the whole width of the screen instead of a centred column."
+          },
           "language": {
             "type": [
               "string",
@@ -12816,6 +12823,7 @@
           "enabled",
           "theme",
           "language",
+          "full_width",
           "created_at_unix_ms"
         ],
         "properties": {
@@ -12825,6 +12833,10 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "full_width": {
+            "type": "boolean",
+            "description": "The web UI uses the whole width of the screen instead of a centred\ncolumn."
           },
           "id": {
             "type": "integer",

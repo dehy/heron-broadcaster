@@ -138,6 +138,7 @@ const en = {
   "account.dark": "Dark",
   "account.language": "Language",
   "account.systemLanguage": "System ({language})",
+  "account.fullWidth": "Use the whole width of the screen",
   "account.displayHelp": "System follows your device's settings. Your choices follow you on every browser you sign in with.",
   "account.passwordChanged": "Password changed: your other sessions are signed out",
   "account.currentPassword": "Current password",

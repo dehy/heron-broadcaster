@@ -137,7 +137,7 @@ Statistics settings are in `settings` (`statistics`: `min_session_s`, `retention
 |---|---|
 | `webhooks` | id, name (unique), url, enabled, events (JSON: `track.started`, `track.ended`, `track.skipped`), include_fx, secret (in clear: it signs the deliveries; never sent back), content_type, body_template (NULL: the default JSON body), created_at, updated_at |
 | `webhook_deliveries` | id, webhook_id (deleted with the webhook), event (or `ping`), body (as sent), status (pending, delivered, failed), attempts, next_attempt_at (while pending), last_attempt_at, last_status_code, last_error, last_response (first 1 KiB), created_at, delivered_at. Kept 30 days |
-| `users` | id, username, password_hash (Argon2id), role (viewer, operator, admin), enabled, theme (system, light, dark: the web UI's), language (system or a language tag: the web UI's), last_login_at, created_at, updated_at |
+| `users` | id, username, password_hash (Argon2id), role (viewer, operator, admin), enabled, theme (system, light, dark: the web UI's), language (system or a language tag: the web UI's), full_width (the web UI uses the whole screen), last_login_at, created_at, updated_at |
 | `sessions` | token_hash (BLAKE3 of the cookie's token), user_id, created_at, last_seen_at, expires_at (30 days after the last use) |
 | `api_tokens` | id, user_id, name, token_hash, created_at, last_used_at, expires_at, revoked_at |
 
