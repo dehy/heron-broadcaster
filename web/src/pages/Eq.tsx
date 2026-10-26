@@ -6,7 +6,18 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type DeckEq, type EqPreset, type EqSettings, api, done, errorMessage, unwrap } from "../api";
-import { Card, ConfirmButton, ErrorView, Field, Icon, Loading, Modal, PageHead, useToast } from "../components/ui";
+import {
+  Card,
+  ConfirmButton,
+  ErrorView,
+  Field,
+  Icon,
+  Loading,
+  Modal,
+  NumberInput,
+  PageHead,
+  useToast,
+} from "../components/ui";
 import { t } from "../i18n";
 import {
   EQ_KEY,
@@ -14,7 +25,8 @@ import {
   MAX_GAIN_DB,
   bandLabel,
   latestSender,
-  responseDb,
+  filterGains,
+  filtersResponseDb,
   roundGain,
   useEqSettings,
 } from "../lib/eq";
@@ -168,21 +180,38 @@ function EqPanel({
         <div className="eq-bands">
           {FREQUENCIES.map((frequency, band) => {
             const gain = value.gains_db[band] ?? 0;
+            const name = t("eq.band", { frequency: bandLabel(frequency) });
             return (
               <div className="eq-band" key={frequency}>
-                <span className="eq-gain">{formatGain(gain)}</span>
+                <NumberInput
+                  value={gain}
+                  min={-MAX_GAIN_DB}
+                  max={MAX_GAIN_DB}
+                  step={0.1}
+                  disabled={disabled}
+                  label={t("eq.bandGain", { frequency: bandLabel(frequency) })}
+                  onChange={(next) => setGain(band, next)}
+                />
                 <input
                   type="range"
                   min={-MAX_GAIN_DB}
                   max={MAX_GAIN_DB}
-                  step={0.5}
+                  step={0.1}
                   value={gain}
                   disabled={disabled}
-                  aria-label={t("eq.band", { frequency: bandLabel(frequency) })}
+                  aria-label={name}
                   aria-valuetext={`${formatGain(gain)} dB`}
                   title={t("eq.resetBand")}
                   onChange={(event) => setGain(band, Number(event.target.value))}
                   onDoubleClick={() => setGain(band, 0)}
+                  onKeyDown={(event) => {
+                    // Half a decibel a press; the number above for finer.
+                    const direction = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[event.key];
+                    if (direction) {
+                      event.preventDefault();
+                      setGain(band, gain + direction * 0.5);
+                    }
+                  }}
                 />
                 <span className="eq-frequency">{bandLabel(frequency)}</span>
               </div>
@@ -214,10 +243,11 @@ const y = (db: number) => HEIGHT / 2 - (Math.max(-RANGE_DB, Math.min(RANGE_DB, d
 /** The response of the EQ, as the engine's filters have it. */
 function Curve({ gains, enabled }: { gains: number[]; enabled: boolean }) {
   const path = useMemo(() => {
+    const filters = filterGains(gains);
     const points: string[] = [];
     for (let step = 0; step <= 150; step++) {
       const frequency = 20 * 1000 ** (step / 150);
-      points.push(`${x(frequency).toFixed(1)},${y(responseDb(gains, frequency)).toFixed(1)}`);
+      points.push(`${x(frequency).toFixed(1)},${y(filtersResponseDb(filters, frequency)).toFixed(1)}`);
     }
     return `M${points.join("L")}`;
   }, [gains]);
@@ -407,10 +437,11 @@ function NameModal({
 /** A preset's curve, small. */
 function MiniCurve({ gains }: { gains: number[] }) {
   const path = useMemo(() => {
+    const filters = filterGains(gains);
     const points: string[] = [];
     for (let step = 0; step <= 40; step++) {
       const frequency = 20 * 1000 ** (step / 40);
-      points.push(`${x(frequency).toFixed(0)},${y(responseDb(gains, frequency)).toFixed(0)}`);
+      points.push(`${x(frequency).toFixed(0)},${y(filtersResponseDb(filters, frequency)).toFixed(0)}`);
     }
     return `M${points.join("L")}`;
   }, [gains]);

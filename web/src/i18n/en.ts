@@ -942,6 +942,7 @@ const en = {
   "eq.bypassedHint": "Off: the sound is untouched. Turn it on to hear these settings.",
   "eq.loadPreset": "Load a preset",
   "eq.band": "{frequency} Hz",
+  "eq.bandGain": "Gain at {frequency} Hz, in dB",
   "eq.resetBand": "Double-click for 0 dB",
   "eq.curve": "Response of the EQ from 20 Hz to 20 kHz",
   "eq.headroom": "There is no limiter yet: boosts can make loud tracks clip. Cut what is too much rather than boosting the rest.",

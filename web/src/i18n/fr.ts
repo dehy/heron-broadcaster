@@ -951,6 +951,7 @@ const fr = {
   "eq.bypassedHint": "Désactivé : le son n’est pas modifié. Activez-le pour entendre ces réglages.",
   "eq.loadPreset": "Charger un préréglage",
   "eq.band": "{frequency} Hz",
+  "eq.bandGain": "Gain à {frequency} Hz, en dB",
   "eq.resetBand": "Double-cliquez pour 0 dB",
   "eq.curve": "Réponse de l’égaliseur de 20 Hz à 20 kHz",
   "eq.headroom": "Il n’y a pas encore de limiteur : les gains peuvent faire saturer les titres forts. Atténuez ce qui est en trop plutôt que d’amplifier le reste.",

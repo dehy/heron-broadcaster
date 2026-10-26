@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // The deck EQ: its bands, the response curve the engine's filters have
-// (the RBJ cookbook's peaking EQ, as in heron_dsp::eq), and how slider
+// (shelves and peaking bands of the RBJ cookbook, their gains solved from
+// the sliders, as in heron_dsp::eq; eq.fixture.json keeps both equal), and how slider
 // moves are sent: the latest value, one request at a time, at most every
 // 100 ms. See docs/audio-engine.md#deck-eq.
 
@@ -9,11 +10,127 @@ import { useQuery } from "@tanstack/react-query";
 import { type DeckEq, type EqSettings, api, unwrap } from "../api";
 import { useLive } from "./live";
 
-/** Centre frequency of each band, in Hz. */
+/** Centre frequency of each band, in Hz (the shelves' midpoints). */
 export const FREQUENCIES = [60, 170, 310, 600, 1_000, 3_000, 6_000, 12_000, 14_000, 16_000];
 export const MAX_GAIN_DB = 12;
-const Q = Math.SQRT2;
+/** Filter gains solved from the sliders stay within this. */
+const MAX_FILTER_GAIN_DB = 24;
+const SHELF_Q = Math.SQRT1_2;
+const SOLVE_ROUNDS = 4;
 const SAMPLE_RATE = 48_000;
+const BANDS = FREQUENCIES.length;
+
+type Shape = "low_shelf" | "peaking" | "high_shelf";
+
+function shape(band: number): Shape {
+  return band === 0 ? "low_shelf" : band === BANDS - 1 ? "high_shelf" : "peaking";
+}
+
+/** A peaking band is as wide as the distances to its neighbours. */
+export function bandQ(band: number): number {
+  if (shape(band) !== "peaking") {
+    return SHELF_Q;
+  }
+  const below = Math.log2(FREQUENCIES[band]! / FREQUENCIES[band - 1]!);
+  const above = Math.log2(FREQUENCIES[band + 1]! / FREQUENCIES[band]!);
+  const ratio = 2 ** ((below + above) / 2);
+  return Math.sqrt(ratio) / (ratio - 1);
+}
+
+/** Gain of one band's filter at `frequency`, in dB (the cookbook's designs). */
+function bandDb(band: number, gainDb: number, frequency: number): number {
+  const a = 10 ** (gainDb / 40);
+  const w0 = (2 * Math.PI * FREQUENCIES[band]!) / SAMPLE_RATE;
+  const alpha = Math.sin(w0) / (2 * bandQ(band));
+  const cos = Math.cos(w0);
+  let b: [number, number, number];
+  let d: [number, number, number];
+  const kind = shape(band);
+  if (kind === "peaking") {
+    b = [1 + alpha * a, -2 * cos, 1 - alpha * a];
+    d = [1 + alpha / a, -2 * cos, 1 - alpha / a];
+  } else {
+    const root = 2 * Math.sqrt(a) * alpha;
+    const s = kind === "high_shelf" ? -1 : 1;
+    b = [
+      a * (a + 1 - s * (a - 1) * cos + root),
+      s * 2 * a * (a - 1 - s * (a + 1) * cos),
+      a * (a + 1 - s * (a - 1) * cos - root),
+    ];
+    d = [a + 1 + s * (a - 1) * cos + root, -s * 2 * (a - 1 + s * (a + 1) * cos), a + 1 + s * (a - 1) * cos - root];
+  }
+  const w = (2 * Math.PI * frequency) / SAMPLE_RATE;
+  const magnitude = ([c0, c1, c2]: [number, number, number]) => {
+    const re = c0 + c1 * Math.cos(w) + c2 * Math.cos(2 * w);
+    const im = -(c1 * Math.sin(w) + c2 * Math.sin(2 * w));
+    return re * re + im * im;
+  };
+  return 10 * Math.log10(magnitude(b) / magnitude(d));
+}
+
+/** Gain at `frequency` of the filters at these gains, in dB. */
+export function filtersResponseDb(filterGains: number[], frequency: number): number {
+  return filterGains.reduce((sum, gain, band) => sum + bandDb(band, gain, frequency), 0);
+}
+
+/**
+ * The filter gains whose summed response meets each slider at its band's
+ * centre, as the engine solves them (heron_dsp::eq::filter_gains).
+ */
+export function filterGains(sliders: number[]): number[] {
+  const target = sliders.map((gain) => Math.max(-MAX_GAIN_DB, Math.min(MAX_GAIN_DB, gain)));
+  let gains = [...target];
+  for (let round = 0; round < SOLVE_ROUNDS; round++) {
+    const matrix = FREQUENCIES.map(() => new Array<number>(BANDS).fill(0));
+    gains.forEach((gain, band) => {
+      const probe = Math.abs(gain) > 0.5 ? gain : 1;
+      FREQUENCIES.forEach((centre, row) => {
+        matrix[row]![band] = bandDb(band, probe, centre) / probe;
+      });
+    });
+    const error = FREQUENCIES.map((centre, band) => target[band]! - filtersResponseDb(gains, centre));
+    const step = solve(matrix, error);
+    if (!step) {
+      break;
+    }
+    gains = gains.map((gain, band) =>
+      Math.max(-MAX_FILTER_GAIN_DB, Math.min(MAX_FILTER_GAIN_DB, gain + step[band]!)),
+    );
+  }
+  return gains;
+}
+
+/** Solves `matrix · x = vector` (Gauss–Jordan with partial pivoting). */
+function solve(matrix: number[][], vector: number[]): number[] | null {
+  const m = matrix.map((row) => [...row]);
+  const v = [...vector];
+  for (let column = 0; column < BANDS; column++) {
+    let pivot = column;
+    for (let row = column + 1; row < BANDS; row++) {
+      if (Math.abs(m[row]![column]!) > Math.abs(m[pivot]![column]!)) {
+        pivot = row;
+      }
+    }
+    if (Math.abs(m[pivot]![column]!) < 1e-12) {
+      return null;
+    }
+    [m[column], m[pivot]] = [m[pivot]!, m[column]!];
+    [v[column], v[pivot]] = [v[pivot]!, v[column]!];
+    for (let row = 0; row < BANDS; row++) {
+      if (row !== column) {
+        const factor = m[row]![column]! / m[column]![column]!;
+        m[row] = m[row]!.map((value, i) => value - factor * m[column]![i]!);
+        v[row] = v[row]! - factor * v[column]!;
+      }
+    }
+  }
+  return v.map((value, row) => value / m[row]![row]!);
+}
+
+/** Gain of the EQ at `frequency` for these sliders, in dB. */
+export function responseDb(sliders: number[], frequency: number): number {
+  return filtersResponseDb(filterGains(sliders), frequency);
+}
 
 export const EQ_KEY = ["settings", "eq"] as const;
 
@@ -36,36 +153,14 @@ export function bandLabel(frequency: number): string {
   return frequency >= 1_000 ? `${frequency / 1_000}k` : String(frequency);
 }
 
-/** Gain of one peaking band at `frequency`, in dB. */
-function bandDb(centre: number, gainDb: number, frequency: number): number {
-  const a = 10 ** (gainDb / 40);
-  const w0 = (2 * Math.PI * centre) / SAMPLE_RATE;
-  const alpha = Math.sin(w0) / (2 * Q);
-  const cos = Math.cos(w0);
-  const [b0, b1, b2] = [1 + alpha * a, -2 * cos, 1 - alpha * a];
-  const [a0, a1, a2] = [1 + alpha / a, -2 * cos, 1 - alpha / a];
-  const w = (2 * Math.PI * frequency) / SAMPLE_RATE;
-  const magnitude = (c0: number, c1: number, c2: number) => {
-    const re = c0 + c1 * Math.cos(w) + c2 * Math.cos(2 * w);
-    const im = -(c1 * Math.sin(w) + c2 * Math.sin(2 * w));
-    return re * re + im * im;
-  };
-  return 10 * Math.log10(magnitude(b0, b1, b2) / magnitude(a0, a1, a2));
-}
-
-/** Gain of the whole EQ at `frequency`, in dB. */
-export function responseDb(gains: number[], frequency: number): number {
-  return FREQUENCIES.reduce((sum, centre, band) => sum + bandDb(centre, gains[band] ?? 0, frequency), 0);
-}
-
 /** The EQ changes the sound: on, with a band away from 0 dB. */
 export function isShaping(eq: DeckEq | undefined | null): boolean {
   return !!eq?.enabled && eq.gains_db.some((gain) => gain !== 0);
 }
 
-/** A gain within ±12 dB, to the nearest 0.5 dB. */
+/** A gain within ±12 dB, to the nearest tenth of a decibel. */
 export function roundGain(gain: number): number {
-  return Math.max(-MAX_GAIN_DB, Math.min(MAX_GAIN_DB, Math.round(gain * 2) / 2));
+  return Math.max(-MAX_GAIN_DB, Math.min(MAX_GAIN_DB, Math.round(gain * 10) / 10));
 }
 
 /**

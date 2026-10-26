@@ -1,32 +1,60 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { FREQUENCIES, bandLabel, isShaping, latestSender, responseDb, roundGain } from "./eq";
+import {
+  FREQUENCIES,
+  bandLabel,
+  bandQ,
+  filterGains,
+  filtersResponseDb,
+  isShaping,
+  latestSender,
+  responseDb,
+  roundGain,
+} from "./eq";
+
+import fixture from "./eq.fixture.json";
 
 const flat = () => FREQUENCIES.map(() => 0);
 
 describe("the response curve", () => {
+  it("is the engine's: the filter gains and curves of the shared fixture", () => {
+    for (const { sliders_db, filter_gains_db, response_db } of fixture.cases) {
+      const gains = filterGains(sliders_db);
+      gains.forEach((gain, band) => expect(gain).toBeCloseTo(filter_gains_db[band] ?? NaN, 4));
+      for (const [frequency, db] of response_db) {
+        expect(filtersResponseDb(gains, frequency ?? 0)).toBeCloseTo(db ?? NaN, 4);
+      }
+    }
+  });
+
   it("is flat for a flat EQ", () => {
+    expect(filterGains(flat())).toEqual(flat());
     for (const frequency of [20, 100, 1_000, 10_000, 20_000]) {
       expect(responseDb(flat(), frequency)).toBeCloseTo(0, 9);
     }
   });
 
-  it("peaks at a band's gain on its centre", () => {
+  it("meets each slider at its band", () => {
+    const sliders = [0, 7, -8, 5, 7.5, 7, 6, 0, 0, 0];
+    const gains = filterGains(sliders);
     FREQUENCIES.forEach((centre, band) => {
-      const gains = flat();
-      gains[band] = 12;
-      // Its neighbours are at 0 dB: they add nothing.
-      expect(responseDb(gains, centre)).toBeCloseTo(12, 6);
+      expect(Math.abs(filtersResponseDb(gains, centre) - (sliders[band] ?? 0))).toBeLessThan(0.2);
     });
   });
 
-  it("adds overlapping bands up", () => {
-    const gains = flat();
-    gains[7] = 12;
-    gains[8] = 12;
-    // Between 12k and 14k, both boost.
-    expect(responseDb(gains, 13_000)).toBeGreaterThan(12);
+  it("does not pile up between close bands", () => {
+    const sliders = flat();
+    sliders[7] = 12;
+    sliders[8] = 12;
+    // Between 12k and 14k, both at +12: about 12 dB, not 20.
+    expect(responseDb(sliders, 13_000)).toBeLessThan(13);
+  });
+
+  it("widens the bands with the distance to their neighbours", () => {
+    expect(bandQ(5)).toBeCloseTo(1.08, 2);
+    expect(bandQ(8)).toBeCloseTo(6.95, 2);
+    expect(bandQ(0)).toBeCloseTo(Math.SQRT1_2, 9);
   });
 });
 
@@ -35,9 +63,9 @@ describe("bands", () => {
     expect(FREQUENCIES.map(bandLabel)).toEqual(["60", "170", "310", "600", "1k", "3k", "6k", "12k", "14k", "16k"]);
   });
 
-  it("round to half a decibel within ±12", () => {
-    expect(roundGain(3.26)).toBe(3.5);
-    expect(roundGain(-0.2)).toBe(-0);
+  it("round to a tenth of a decibel within ±12", () => {
+    expect(roundGain(3.26)).toBe(3.3);
+    expect(roundGain(-0.04)).toBe(-0);
     expect(roundGain(15)).toBe(12);
     expect(roundGain(-40)).toBe(-12);
   });

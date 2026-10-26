@@ -211,6 +211,7 @@ export function NumberInput({
   step,
   disabled,
   suffix,
+  label,
 }: {
   value: number;
   onChange: (value: number) => void;
@@ -219,6 +220,8 @@ export function NumberInput({
   step?: number;
   disabled?: boolean;
   suffix?: string;
+  /** Its accessible name, when no visible label names it. */
+  label?: string;
 }) {
   const [text, setText] = useState(String(value));
   useEffect(() => {
@@ -240,6 +243,7 @@ export function NumberInput({
       max={max}
       step={step ?? "any"}
       disabled={disabled}
+      aria-label={label}
       aria-invalid={!valid}
       onChange={(event) => {
         setText(event.target.value);

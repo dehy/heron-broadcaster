@@ -1620,7 +1620,23 @@ ul.steps .bar {
   accent-color: var(--muted);
 }
 
-.eq-gain,
+.eq-band .input.num {
+  width: 100%;
+  max-width: 4.25rem;
+  padding: 0.2rem 0.25rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  text-align: center;
+  /* No spinner: the slider is there. */
+  appearance: textfield;
+}
+
+.eq-band .input.num::-webkit-inner-spin-button,
+.eq-band .input.num::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
 .eq-frequency {
   font-family: var(--mono);
   font-size: 0.75rem;
@@ -1666,8 +1682,9 @@ ul.steps .bar {
     height: 7.5rem;
   }
 
-  .eq-gain {
-    font-size: 0.65rem;
+  .eq-band .input.num {
+    font-size: 0.7rem;
+    padding: 0.15rem 0;
   }
 
   .eq-presets li {
