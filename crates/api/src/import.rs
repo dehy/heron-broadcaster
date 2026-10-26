@@ -55,7 +55,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 /// set". Unknown fields are ignored.
 #[derive(Clone, Debug, Default, Deserialize, ToSchema)]
 #[serde(default)]
-pub struct SourceRow {
+pub struct ImportSourceRow {
     /// The file's name; a folder in front of it is ignored.
     pub filename: String,
     pub title: Option<String>,
@@ -109,9 +109,9 @@ pub struct ImportValues {
     pub hook_out_ms: Option<u32>,
     pub next_soft_ms: Option<u32>,
     pub next_hard_ms: Option<u32>,
-    /// The export's category (see `CategoryChoice`).
+    /// The export's category (see `ImportCategoryChoice`).
     pub category: Option<u64>,
-    /// The export's problem (see `ProblemChoice`).
+    /// The export's problem (see `ImportProblemChoice`).
     pub problem: Option<u64>,
     /// When the track was added: `2022-03-11 09:35:38`, station time.
     pub added_at: Option<String>,
@@ -220,7 +220,7 @@ fn added_at(value: Option<&str>) -> Option<String> {
 }
 
 /// What a row of the export proposes, and what was left out of it.
-fn proposed(row: &SourceRow) -> (ImportValues, Vec<String>) {
+fn proposed(row: &ImportSourceRow) -> (ImportValues, Vec<String>) {
     let mut warnings = Vec::new();
     let positive = |value: Option<f64>| value.filter(|seconds| *seconds > 0.0);
     let length_ms = positive(row.final_duration).map(|seconds| (seconds * 1000.0).round() as i64);
@@ -347,14 +347,14 @@ pub async fn markers(
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct PreviewRequest {
+pub struct ImportPreviewRequest {
     /// The export's rows, in order.
-    pub rows: Vec<SourceRow>,
+    pub rows: Vec<ImportSourceRow>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum RowStatus {
+pub enum ImportRowStatus {
     /// One library track has this file name.
     Matched,
     /// No library track has this file name.
@@ -368,11 +368,11 @@ pub enum RowStatus {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct PreviewRow {
+pub struct ImportRow {
     /// 1 for the first row of the export.
     pub line: u32,
     pub filename: String,
-    pub status: RowStatus,
+    pub status: ImportRowStatus,
     pub track_id: Option<u64>,
     /// The library file it matched.
     pub path: Option<String>,
@@ -393,7 +393,7 @@ pub struct PreviewRow {
 
 /// A category of the export.
 #[derive(Debug, Serialize, ToSchema)]
-pub struct SourceCategory {
+pub struct ImportCategory {
     pub id: u64,
     pub name: String,
     pub parent_id: Option<u64>,
@@ -408,29 +408,29 @@ pub struct SourceCategory {
 
 /// A problem of the export.
 #[derive(Debug, Serialize, ToSchema)]
-pub struct SourceProblem {
+pub struct ImportProblem {
     pub id: u64,
     pub name: String,
     pub rows: u64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct Preview {
-    pub rows: Vec<PreviewRow>,
-    pub categories: Vec<SourceCategory>,
-    pub problems: Vec<SourceProblem>,
+pub struct ImportPreview {
+    pub rows: Vec<ImportRow>,
+    pub categories: Vec<ImportCategory>,
+    pub problems: Vec<ImportProblem>,
 }
 
 /// Matches an export's rows to library tracks and says what an import would
 /// change. Writes nothing. Admins only.
 #[utoipa::path(post, path = "/library/import/preview", tag = "library",
-    request_body = PreviewRequest,
-    responses((status = 200, body = Preview), (status = "4XX", body = ErrorBody)))]
+    request_body = ImportPreviewRequest,
+    responses((status = 200, body = ImportPreview), (status = "4XX", body = ErrorBody)))]
 async fn preview(
     user: CurrentUser,
     State(state): State<AppState>,
-    Json(request): Json<PreviewRequest>,
-) -> ApiResult<Json<Preview>> {
+    Json(request): Json<ImportPreviewRequest>,
+) -> ApiResult<Json<ImportPreview>> {
     user.require(Role::Admin)?;
     if request.rows.len() > MAX_ROWS {
         return Err(ApiError::Invalid(format!("at most {MAX_ROWS} rows")));
@@ -458,14 +458,14 @@ async fn preview(
 
     let mut connection = state.pool.acquire().await?;
     let mut rows = Vec::with_capacity(request.rows.len());
-    let mut categories: BTreeMap<u64, SourceCategory> = BTreeMap::new();
-    let mut problems: BTreeMap<u64, SourceProblem> = BTreeMap::new();
+    let mut categories: BTreeMap<u64, ImportCategory> = BTreeMap::new();
+    let mut problems: BTreeMap<u64, ImportProblem> = BTreeMap::new();
     for (index, row) in request.rows.iter().enumerate() {
         let filename = base_name(&row.filename).to_owned();
         let key = filename.to_lowercase();
         let (values, warnings) = proposed(row);
         if let Some(id) = values.category {
-            let category = categories.entry(id).or_insert_with(|| SourceCategory {
+            let category = categories.entry(id).or_insert_with(|| ImportCategory {
                 id,
                 name: row
                     .category_name
@@ -481,7 +481,7 @@ async fn preview(
             category.rows += 1;
         }
         if let Some(id) = values.problem {
-            let problem = problems.entry(id).or_insert_with(|| SourceProblem {
+            let problem = problems.entry(id).or_insert_with(|| ImportProblem {
                 id,
                 name: row
                     .problem_name
@@ -495,21 +495,21 @@ async fn preview(
 
         let found = by_name.get(&key).map(Vec::as_slice).unwrap_or_default();
         let status = if filename.trim().is_empty() {
-            RowStatus::Invalid
+            ImportRowStatus::Invalid
         } else if in_export.get(&key).copied().unwrap_or(0) > 1 {
-            RowStatus::DuplicateInExport
+            ImportRowStatus::DuplicateInExport
         } else {
             match found.len() {
-                0 => RowStatus::NotFound,
-                1 => RowStatus::Matched,
-                _ => RowStatus::DuplicateInLibrary,
+                0 => ImportRowStatus::NotFound,
+                1 => ImportRowStatus::Matched,
+                _ => ImportRowStatus::DuplicateInLibrary,
             }
         };
         let source_length_ms = row
             .final_duration
             .filter(|seconds| *seconds > 0.0)
             .map(|seconds| (seconds * 1000.0).round() as u32);
-        let mut preview = PreviewRow {
+        let mut preview = ImportRow {
             line: u32::try_from(index + 1).unwrap_or(u32::MAX),
             filename,
             status,
@@ -523,7 +523,7 @@ async fn preview(
             conflicts: Vec::new(),
             warnings,
         };
-        if status == RowStatus::Matched {
+        if status == ImportRowStatus::Matched {
             let (track_id, path, length_ms) = found[0].clone();
             preview.track_id = Some(track_id);
             preview.path = Some(path);
@@ -553,7 +553,7 @@ async fn preview(
             .find(|(_, name)| name.to_lowercase() == category.name.to_lowercase())
             .map(|(id, _)| *id);
     }
-    Ok(Json(Preview {
+    Ok(Json(ImportPreview {
         rows,
         categories: categories.into_values().collect(),
         problems: problems.into_values().collect(),
@@ -565,7 +565,7 @@ async fn preview(
 /// What an export's category becomes in Heron.
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CategoryChoice {
+pub struct ImportCategoryChoice {
     /// The export's category.
     pub id: u64,
     /// The Heron category its tracks go in, created if missing; none leaves
@@ -581,7 +581,7 @@ pub struct CategoryChoice {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ProblemAction {
+pub enum ImportProblemAction {
     /// Nothing is done.
     Ignore,
     /// The tracks get a label.
@@ -593,29 +593,29 @@ pub enum ProblemAction {
 /// What an export's problem becomes in Heron.
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ProblemChoice {
+pub struct ImportProblemChoice {
     pub id: u64,
-    pub action: ProblemAction,
+    pub action: ImportProblemAction,
     /// The label's name, created if missing.
     pub label: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ApplyRow {
+pub struct ImportApplyRow {
     pub track_id: u64,
     pub values: ImportValues,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ApplyRequest {
+pub struct ImportApplyRequest {
     #[serde(default)]
-    pub categories: Vec<CategoryChoice>,
+    pub categories: Vec<ImportCategoryChoice>,
     #[serde(default)]
-    pub problems: Vec<ProblemChoice>,
+    pub problems: Vec<ImportProblemChoice>,
     /// The values to set on each track, conflicts settled.
-    pub rows: Vec<ApplyRow>,
+    pub rows: Vec<ImportApplyRow>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, ToSchema)]
@@ -657,12 +657,12 @@ struct Previous {
 /// labels them, disables them, as one transaction that can be undone.
 /// Admins only.
 #[utoipa::path(post, path = "/library/import/apply", tag = "library",
-    request_body = ApplyRequest,
+    request_body = ImportApplyRequest,
     responses((status = 200, body = TrackImport), (status = "4XX", body = ErrorBody)))]
 async fn apply(
     user: CurrentUser,
     State(state): State<AppState>,
-    Json(request): Json<ApplyRequest>,
+    Json(request): Json<ImportApplyRequest>,
 ) -> ApiResult<Json<TrackImport>> {
     user.require(Role::Admin)?;
     if request.rows.is_empty() {
@@ -681,12 +681,12 @@ async fn apply(
         }
         check(&row.values)?;
     }
-    let categories: HashMap<u64, CategoryChoice> = request
+    let categories: HashMap<u64, ImportCategoryChoice> = request
         .categories
         .iter()
         .map(|choice| (choice.id, choice.clone()))
         .collect();
-    let problems: HashMap<u64, ProblemChoice> = request
+    let problems: HashMap<u64, ImportProblemChoice> = request
         .problems
         .iter()
         .map(|choice| (choice.id, choice.clone()))
@@ -822,7 +822,7 @@ async fn apply(
 
         // Problem.
         if let Some(choice) = values.problem.and_then(|id| problems.get(&id))
-            && choice.action != ProblemAction::Ignore
+            && choice.action != ImportProblemAction::Ignore
         {
             if let Some(name) = choice
                 .label
@@ -850,7 +850,7 @@ async fn apply(
                     previous.labels_added.push(label);
                 }
             }
-            disable |= choice.action == ProblemAction::LabelAndDisable;
+            disable |= choice.action == ImportProblemAction::LabelAndDisable;
         }
 
         if disable {
@@ -1266,7 +1266,7 @@ mod tests {
 
     #[test]
     fn rows_are_moved_onto_the_cut_file() {
-        let row = SourceRow {
+        let row = ImportSourceRow {
             filename: "6-final-mp3/AC-DC - Back in Black.mp3".into(),
             title: Some(r"Back in Black".into()),
             artist: Some(r"AC\'DC".into()),
@@ -1284,7 +1284,7 @@ mod tests {
             hook_out: Some(108.473),
             // Before the cue-in: outside the cut file.
             start_next_soft: Some(3.0),
-            ..SourceRow::default()
+            ..ImportSourceRow::default()
         };
         let (values, warnings) = proposed(&row);
         assert_eq!(values.intro_ms, Some(20_906));
@@ -1304,19 +1304,19 @@ mod tests {
 
     #[test]
     fn odd_values_are_left_out() {
-        let row = SourceRow {
+        let row = ImportSourceRow {
             year: Some(serde_json::json!(1975)),
             created_at: Some("0000-00-00 00:00:00".into()),
             fade_out: Some(90.0),
-            ..SourceRow::default()
+            ..ImportSourceRow::default()
         };
         let (values, _) = proposed(&row);
         assert_eq!(values.year.as_deref(), Some("1975"));
         assert_eq!(values.added_at, None);
         assert_eq!(values.fade_out_ms, None);
-        let row = SourceRow {
+        let row = ImportSourceRow {
             year: Some(serde_json::json!("soon")),
-            ..SourceRow::default()
+            ..ImportSourceRow::default()
         };
         assert_eq!(proposed(&row).0.year, None);
     }

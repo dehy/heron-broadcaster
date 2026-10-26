@@ -502,6 +502,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/import/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Applies an import: sets each track's values, puts tracks in categories,
+         *     labels them, disables them, as one transaction that can be undone.
+         *     Admins only.
+         */
+        post: operations["apply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/import/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Matches an export's rows to library tracks and says what an import would
+         *     change. Writes nothing. Admins only.
+         */
+        post: operations["preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The last imports, newest first. Admins only. */
+        get: operations["list_imports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/imports/{id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undoes an import: every track gets back what it had before it, as one
+         *     transaction. Categories and labels it created stay. Admins only.
+         */
+        post: operations["undo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/musicbrainz-details": {
         parameters: {
             query?: never;
@@ -2792,6 +2870,309 @@ export interface components {
              */
             peak: number;
         };
+        ImportApplyRequest: {
+            categories?: components["schemas"]["ImportCategoryChoice"][];
+            problems?: components["schemas"]["ImportProblemChoice"][];
+            /** @description The values to set on each track, conflicts settled. */
+            rows: components["schemas"]["ImportApplyRow"][];
+        };
+        ImportApplyRow: {
+            /** Format: int64 */
+            track_id: number;
+            values: components["schemas"]["ImportValues"];
+        };
+        /** @description A category of the export. */
+        ImportCategory: {
+            /** @description The other software never schedules it. */
+            can_schedule: boolean;
+            /**
+             * Format: int64
+             * @description The Heron category of the same name, if there is one.
+             */
+            heron_category_id?: number | null;
+            /** Format: int64 */
+            id: number;
+            is_jingle: boolean;
+            name: string;
+            /** Format: int64 */
+            parent_id?: number | null;
+            /**
+             * Format: int64
+             * @description Rows in it.
+             */
+            rows: number;
+        };
+        /** @description What an export's category becomes in Heron. */
+        ImportCategoryChoice: {
+            /** @description Its tracks are disabled: rotation never picks them. */
+            disable_tracks?: boolean;
+            /** @description Offered by the FX player (set when the category is created). */
+            fx_player?: boolean;
+            /**
+             * Format: int64
+             * @description The export's category.
+             */
+            id: number;
+            /**
+             * @description The Heron category its tracks go in, created if missing; none leaves
+             *     them out of any category.
+             */
+            name?: string | null;
+        };
+        /**
+         * @description A value Heron may already have, set in Heron: a conflict when the
+         *     import's differs.
+         * @enum {string}
+         */
+        ImportField: "title" | "artist" | "year" | "fade_in" | "fade_out" | "intro" | "intro2" | "hook_in" | "hook_out" | "next_soft" | "next_hard";
+        ImportPreview: {
+            categories: components["schemas"]["ImportCategory"][];
+            problems: components["schemas"]["ImportProblem"][];
+            rows: components["schemas"]["ImportRow"][];
+        };
+        ImportPreviewRequest: {
+            /** @description The export's rows, in order. */
+            rows: components["schemas"]["ImportSourceRow"][];
+        };
+        /** @description A problem of the export. */
+        ImportProblem: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** Format: int64 */
+            rows: number;
+        };
+        /** @enum {string} */
+        ImportProblemAction: "ignore" | "label" | "label_and_disable";
+        /** @description What an export's problem becomes in Heron. */
+        ImportProblemChoice: {
+            action: components["schemas"]["ImportProblemAction"];
+            /** Format: int64 */
+            id: number;
+            /** @description The label's name, created if missing. */
+            label?: string | null;
+        };
+        ImportRow: {
+            /** @description Fields set in Heron that the import would change. */
+            conflicts: components["schemas"]["ImportField"][];
+            /** @description What Heron has set itself, for the same fields. */
+            current: components["schemas"]["ImportValues"];
+            filename: string;
+            /** @description The lengths differ by more than 2 s: probably another edit. */
+            length_mismatch: boolean;
+            /** Format: int32 */
+            length_ms?: number | null;
+            /**
+             * Format: int32
+             * @description 1 for the first row of the export.
+             */
+            line: number;
+            /** @description The library file it matched. */
+            path?: string | null;
+            /**
+             * Format: int32
+             * @description The export's length of the file.
+             */
+            source_length_ms?: number | null;
+            status: components["schemas"]["ImportRowStatus"];
+            /** Format: int64 */
+            track_id?: number | null;
+            /** @description What the import would set. */
+            values: components["schemas"]["ImportValues"];
+            /** @description Values of the export left out, and why. */
+            warnings: string[];
+        };
+        /** @enum {string} */
+        ImportRowStatus: "matched" | "not_found" | "duplicate_in_export" | "duplicate_in_library" | "invalid";
+        /**
+         * @description One audio file of the other software's export. Times are in seconds, on
+         *     the timeline of the file the software measured them on; 0 means "not
+         *     set". Unknown fields are ignored.
+         */
+        ImportSourceRow: {
+            /** @default null */
+            artist: string | null;
+            /**
+             * Format: int32
+             * @description 0: the software never schedules this category.
+             * @default null
+             */
+            category_can_schedule: number | null;
+            /**
+             * Format: int64
+             * @default null
+             */
+            category_id: number | null;
+            /**
+             * Format: int32
+             * @description 1: a category of jingles.
+             * @default null
+             */
+            category_is_jingle: number | null;
+            /** @default null */
+            category_name: string | null;
+            /**
+             * Format: int64
+             * @default null
+             */
+            category_parent_id: number | null;
+            /**
+             * @description When the track was added: `2022-03-11 09:35:38`.
+             * @default null
+             */
+            created_at: string | null;
+            /**
+             * Format: double
+             * @description Where the file was cut; the other times are shifted by it.
+             * @default null
+             */
+            cue_in: number | null;
+            /**
+             * Format: double
+             * @description Length of the fade-in.
+             * @default null
+             */
+            fade_in: number | null;
+            /**
+             * Format: double
+             * @description Length of the fade-out.
+             * @default null
+             */
+            fade_out: number | null;
+            /**
+             * @description The file's name; a folder in front of it is ignored.
+             * @default
+             */
+            filename: string;
+            /**
+             * Format: double
+             * @description Length of the file the export describes, to check it is the same.
+             * @default null
+             */
+            final_duration: number | null;
+            /**
+             * Format: double
+             * @default null
+             */
+            hook_in: number | null;
+            /**
+             * Format: double
+             * @default null
+             */
+            hook_out: number | null;
+            /**
+             * Format: double
+             * @default null
+             */
+            intro: number | null;
+            /**
+             * Format: double
+             * @default null
+             */
+            intro2: number | null;
+            /**
+             * Format: int64
+             * @description 0: no problem.
+             * @default null
+             */
+            problem_id: number | null;
+            /** @default null */
+            problem_name: string | null;
+            /**
+             * Format: double
+             * @default null
+             */
+            start_next_hard: number | null;
+            /**
+             * Format: double
+             * @default null
+             */
+            start_next_soft: number | null;
+            /** @default null */
+            title: string | null;
+            /**
+             * @description `1997`, as text or as a number.
+             * @default null
+             */
+            year: string | null;
+        };
+        ImportSummary: {
+            categories_created: string[];
+            /** Format: int64 */
+            disabled: number;
+            labels_created: string[];
+            /** Format: int64 */
+            tracks: number;
+        };
+        /**
+         * @description Values an import sets on a track; a missing value leaves Heron's alone.
+         *     Times in ms on the track's file.
+         */
+        ImportValues: {
+            /**
+             * @description When the track was added: `2022-03-11 09:35:38`, station time.
+             * @default null
+             */
+            added_at: string | null;
+            /** @default null */
+            artist: string | null;
+            /**
+             * Format: int64
+             * @description The export's category (see `ImportCategoryChoice`).
+             * @default null
+             */
+            category: number | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            fade_in_ms: number | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            fade_out_ms: number | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            hook_in_ms: number | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            hook_out_ms: number | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            intro2_ms: number | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            intro_ms: number | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            next_hard_ms: number | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            next_soft_ms: number | null;
+            /**
+             * Format: int64
+             * @description The export's problem (see `ImportProblemChoice`).
+             * @default null
+             */
+            problem: number | null;
+            /** @default null */
+            title: string | null;
+            /** @default null */
+            year: string | null;
+        };
         Label: {
             /** @description `#rrggbb`. */
             color?: string | null;
@@ -4245,6 +4626,7 @@ export interface components {
             deleted_at_unix_ms?: number | null;
             file: components["schemas"]["TrackFile"];
             identification?: components["schemas"]["TrackIdentification"] | null;
+            markers?: components["schemas"]["TrackMarkers"] | null;
             musicbrainz?: components["schemas"]["TrackMusicBrainz"] | null;
             overrides: components["schemas"]["TrackOverrides"];
             playout: components["schemas"]["EffectivePlayout"];
@@ -4308,6 +4690,16 @@ export interface components {
             /** @description `identified` or `needs_review`. */
             status: string;
         };
+        TrackImport: {
+            /** Format: int64 */
+            created_at_unix_ms: number;
+            created_by?: string | null;
+            /** Format: int64 */
+            id: number;
+            summary: components["schemas"]["ImportSummary"];
+            /** Format: int64 */
+            undone_at_unix_ms?: number | null;
+        };
         TrackLabel: {
             artist?: string | null;
             /** Format: int64 */
@@ -4346,6 +4738,21 @@ export interface components {
             title?: string | null;
             /** Format: int64 */
             track_id: number;
+        };
+        /** @description Intro, hook and next-track points of a track (`track_markers`). */
+        TrackMarkers: {
+            /** Format: int32 */
+            hook_in_ms?: number | null;
+            /** Format: int32 */
+            hook_out_ms?: number | null;
+            /** Format: int32 */
+            intro2_ms?: number | null;
+            /** Format: int32 */
+            intro_ms?: number | null;
+            /** Format: int32 */
+            next_hard_ms?: number | null;
+            /** Format: int32 */
+            next_soft_ms?: number | null;
         };
         /** @description What MusicBrainz says about the track. */
         TrackMusicBrainz: {
@@ -5925,6 +6332,124 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    apply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportApplyRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackImport"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportPreviewRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportPreview"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_imports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackImport"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    undo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackImport"];
                 };
             };
             "4XX": {
