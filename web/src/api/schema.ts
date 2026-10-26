@@ -1710,6 +1710,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracks/tag-overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edits the tags of the selected tracks in Heron's database only, when
+         *     the library setting `write_tags` is off: the files are not changed.
+         *     The values are shown instead of the files' tags, and survive a rescan,
+         *     until they are cleared. Operators and admins.
+         */
+        post: operations["override_tags"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracks/tag-overrides/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Drops the tags kept in Heron's database for the selected tracks (at most
+         *     10,000): they show their files' tags again. Works whatever `write_tags`
+         *     says. Operators and admins.
+         */
+        post: operations["clear_tag_overrides"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracks/tags": {
         parameters: {
             query?: never;
@@ -2815,6 +2858,11 @@ export interface components {
              * @description 1 to 3650.
              */
             trash_days?: number | null;
+            /**
+             * @description Write tags edited from the browser into the files (true), or keep
+             *     them in Heron's database (false).
+             */
+            write_tags?: boolean | null;
         };
         /** @description Library settings as shown: the AcoustID key is never sent back. */
         LibrarySettingsView: {
@@ -2841,6 +2889,11 @@ export interface components {
              * @description Days deleted tracks stay in the trash.
              */
             trash_days: number;
+            /**
+             * @description Tags edited from the browser are written into the files; off, they
+             *     are kept in Heron's database and the files are left alone.
+             */
+            write_tags: boolean;
         };
         /** @description Library and analysis progress, served by `/api/v1/library/status`. */
         LibraryStatus: {
@@ -4056,6 +4109,22 @@ export interface components {
          * @enum {string}
          */
         TagField: "title" | "artist" | "album" | "album_artist" | "year" | "genre" | "track" | "disc" | "isrc" | "record_label" | "bpm" | "mood";
+        TagOverrides: {
+            selection: components["schemas"]["TrackSelection"];
+            /**
+             * @description Fields set to the same value on every track; `null` removes the
+             *     field. Fields left out keep each track's value. Title, artist,
+             *     album, album artist, year, genre, track and disc only.
+             */
+            set: {
+                [key: string]: string | null;
+            };
+        };
+        TagOverridesClear: {
+            /** @description The fields to give back to the files; every field when empty. */
+            fields?: components["schemas"]["TagField"][];
+            selection: components["schemas"]["TrackSelection"];
+        };
         Target: {
             id: components["schemas"]["u64"];
             /** @enum {string} */
@@ -4177,6 +4246,12 @@ export interface components {
             musicbrainz?: components["schemas"]["TrackMusicBrainz"] | null;
             overrides: components["schemas"]["TrackOverrides"];
             playout: components["schemas"]["EffectivePlayout"];
+            /**
+             * @description Tags kept in Heron's database (library setting `write_tags` off),
+             *     shown instead of the file's: `POST /tracks/tag-overrides/clear`
+             *     gives them back to the file.
+             */
+            tag_overrides: components["schemas"]["TagField"][];
         };
         /** @description A track change reported by the engine. */
         TrackEvent: {
@@ -8362,6 +8437,68 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ProgrammingChange"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectionResult"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    override_tags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagOverrides"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectionResult"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    clear_tag_overrides: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagOverridesClear"];
             };
         };
         responses: {

@@ -119,6 +119,29 @@ impl TagField {
         )
     }
 
+    /// The name used in the API and in `track_tag_overrides.field`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Title => "title",
+            Self::Artist => "artist",
+            Self::Album => "album",
+            Self::AlbumArtist => "album_artist",
+            Self::Year => "year",
+            Self::Genre => "genre",
+            Self::Track => "track",
+            Self::Disc => "disc",
+            Self::Isrc => "isrc",
+            Self::RecordLabel => "record_label",
+            Self::Bpm => "bpm",
+            Self::Mood => "mood",
+        }
+    }
+
+    /// The field named `name` (see [`TagField::as_str`]).
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|field| field.as_str() == name)
+    }
+
     /// Checks a value for this field and puts it in the form written into
     /// the files: trimmed text, `1997`, `3`, `120.5`, `USRC17607839`.
     pub fn normalize(self, value: &str) -> Result<String, String> {
@@ -369,6 +392,16 @@ mod tests {
         assert!(TagField::Isrc.normalize("USRC1760783").is_err());
         assert!(TagField::Title.normalize("  ").is_err());
         assert_eq!(TagField::Genre.normalize(" Jazz ").unwrap(), "Jazz");
+    }
+
+    #[test]
+    fn field_names_are_the_api_names() {
+        for field in TagField::ALL {
+            let json = serde_json::to_string(&field).unwrap();
+            assert_eq!(json, format!("\"{}\"", field.as_str()));
+            assert_eq!(TagField::from_name(field.as_str()), Some(field));
+        }
+        assert_eq!(TagField::from_name("composer"), None);
     }
 
     #[test]

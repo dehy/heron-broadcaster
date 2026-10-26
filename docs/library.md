@@ -111,6 +111,16 @@ Title, artist, album, album artist, year, genre, track and disc numbers can be e
 
 The librarian writes them as an `edit` batch, in place: the file is not moved (organizing files it by its new tags, after its dry run) and is not analyzed again. A file changed since the last scan is skipped until the scanner has read it.
 
+### Keeping tags in Heron instead of the files
+
+With the library setting `write_tags` off (*Settings › Library*, admins), the tag editor saves its fields in Heron's database (`track_tag_overrides`) and leaves the files as they are: for a library shared with other tools, synchronized, backed up by hash, or kept as masters. Only the tags of the `tracks` table are kept this way (title, artist, album, album artist, year, genre, track and disc numbers); the programming details are in Heron already.
+
+- The values show at once everywhere Heron uses a track's tags: the library, rotation and its separation rules, history, now-playing, webhooks and the stream's metadata.
+- The scanner, and the librarian when it writes a file, apply them on top of the tags they read, so they survive a rescan or a file changed on disk. Organizing the library files tracks by them too.
+- A track's page lists its overridden fields, with **Back to the file's tags** (`POST /tracks/tag-overrides/clear`), which drops them and reads the file again.
+- Turned back on, `write_tags` writes edits into the files again; a field written drops its override, the file has the value now. Edits queued before the setting was turned off fail without touching the files.
+- Imports from the buffer zone and the review screen still write tags into the files they file: `write_tags` is about tags edited on tracks of the library.
+
 ### Undoing byte for byte
 
 Every tag write (imports, reviews, edits, undos) also records how to rebuild the file as it was from the file it wrote, in `track_tag_changes.restore`: the original's bytes as ranges of the new file (the audio, which a tag change does not touch, even shifted) and the bytes that differ (the old tags), found like rsync does. Undoing the change rebuilds the original from it, checked against the original's hash, so the file gets back the same bytes, not just the same tags.
@@ -203,6 +213,7 @@ docker compose exec heron-librarian heron-librarian settings --set '{"acoustid_k
 | `max_upload_mb` | 2048: largest file accepted by upload |
 | `min_free_mb` | 5120: uploads that would leave less free space on the buffer zone's disk are refused |
 | `trash_days` | 30: days deleted tracks stay in the trash |
+| `write_tags` | true: tags edited from the browser are written into the files; false keeps them in Heron's database ([above](#keeping-tags-in-heron-instead-of-the-files)) |
 
 ## Work asked through the API
 

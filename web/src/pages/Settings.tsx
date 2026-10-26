@@ -582,6 +582,7 @@ function LibraryCard() {
           min_score: current.min_score,
           save_cover: current.save_cover,
           embed_cover: current.embed_cover,
+          write_tags: current.write_tags,
           max_upload_mb: current.max_upload_mb,
           min_free_mb: current.min_free_mb,
           trash_days: current.trash_days,
@@ -629,6 +630,14 @@ function LibraryCard() {
                 />
                 {t("settings.embedCover")}
               </label>
+              <Field label={t("settings.writeTags")} hint={t("settings.writeTagsHint")}>
+                <input
+                  type="checkbox"
+                  checked={draft.write_tags}
+                  disabled={!isAdmin}
+                  onChange={(e) => set({ write_tags: e.target.checked })}
+                />
+              </Field>
             </div>
             <div className="form-grid">
               <Field label={t("settings.maxUpload")} hint={t("settings.maxUploadHint")}>

@@ -12,6 +12,7 @@ use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use base64::Engine as _;
+use heron_core::library::TagField;
 use heron_core::playout::CrossfadeOverrides;
 use heron_core::{LibraryPath, PlayoutSettings, TrackOverrides, plan_transition};
 use serde::{Deserialize, Serialize};
@@ -671,6 +672,10 @@ pub struct TrackDetail {
     pub deleted_at_unix_ms: Option<i64>,
     pub analysis: Option<TrackAnalysis>,
     pub overrides: TrackOverrides,
+    /// Tags kept in Heron's database (library setting `write_tags` off),
+    /// shown instead of the file's: `POST /tracks/tag-overrides/clear`
+    /// gives them back to the file.
+    pub tag_overrides: Vec<TagField>,
     pub playout: EffectivePlayout,
     pub categories: Vec<TrackCategory>,
     pub identification: Option<TrackIdentification>,
@@ -739,6 +744,10 @@ async fn get_track(
     .fetch_optional(&state.pool)
     .await?;
     let overrides = load_overrides(&state, id).await?;
+    let tag_overrides = heron_library::details::overrides(&state.pool, id)
+        .await?
+        .into_keys()
+        .collect();
     let playout = state.queue.playout(id).await?;
     let settings: PlayoutSettings =
         settings::load(&state.pool, PlayoutSettings::SETTINGS_NAME).await?;
@@ -750,6 +759,7 @@ async fn get_track(
         deleted_at_unix_ms,
         analysis,
         overrides,
+        tag_overrides,
         playout: EffectivePlayout {
             cue_in_ms: playout.cue_in_ms,
             cue_out_ms: playout.cue_out_ms,

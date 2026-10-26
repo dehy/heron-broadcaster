@@ -469,7 +469,7 @@ export function ProgrammingDialog({ open, onClose, selection, files, tracks }: T
   );
 }
 
-const TAG_FIELDS: { field: TagField; label: PlainKey; number?: boolean }[] = [
+export const TAG_FIELDS: { field: TagField; label: PlainKey; number?: boolean }[] = [
   { field: "title", label: "library.sort.title" },
   { field: "artist", label: "library.sort.artist" },
   { field: "album", label: "library.sort.album" },
@@ -515,18 +515,35 @@ export function TagsDialog({
     refetchInterval: (query) =>
       query.state.data?.status === "done" || query.state.data?.status === "failed" ? false : 1000,
   });
-  const apply = useAction(
-    () => {
-      const set: Record<string, string | null> = {};
-      for (const [field, change] of Object.entries(changes)) {
-        const value = change ? changeValue(change) : undefined;
-        if (value !== undefined) {
-          set[field] = value;
-        }
+  const library = useQuery({
+    queryKey: ["settings", "library"],
+    queryFn: () => unwrap(api.GET("/api/v1/settings/library")),
+    enabled: open,
+  });
+  // With write_tags off, the tags are kept in Heron: the files are left alone.
+  const keep = library.data?.write_tags === false;
+  const fieldValues = () => {
+    const set: Record<string, string | null> = {};
+    for (const [field, change] of Object.entries(changes)) {
+      const value = change ? changeValue(change) : undefined;
+      if (value !== undefined) {
+        set[field] = value;
       }
-      return unwrap(api.POST("/api/v1/tracks/tags", { body: { selection, set, from_details: details } }));
-    },
+    }
+    return set;
+  };
+  const apply = useAction(
+    () =>
+      unwrap(api.POST("/api/v1/tracks/tags", { body: { selection, set: fieldValues(), from_details: details } })),
     { onSuccess: (result) => setTask(result.id), invalidate: [["library-tasks"]] },
+  );
+  const save = useAction(
+    () => unwrap(api.POST("/api/v1/tracks/tag-overrides", { body: { selection, set: fieldValues() } })),
+    {
+      success: (result) => t("selection.kept", { count: result.tracks }),
+      invalidate: TRACKS,
+      onSuccess: () => onClose(),
+    },
   );
   const finished = status.data?.status === "done" || status.data?.status === "failed";
   const client = useQueryClient();
@@ -556,14 +573,27 @@ export function TagsDialog({
             <button type="button" className="btn" onClick={onClose}>
               {t("common.cancel")}
             </button>
-            <button
-              type="button"
-              className="btn primary"
-              disabled={(edited.length === 0 && details.length === 0) || invalid || apply.isPending}
-              onClick={() => apply.mutate(undefined)}
-            >
-              {t("selection.writeTags")}
-            </button>
+            {keep ? (
+              <button
+                type="button"
+                className="btn primary"
+                disabled={edited.length === 0 || invalid || save.isPending}
+                onClick={() => save.mutate(undefined)}
+              >
+                {t("selection.keepTags")}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn primary"
+                disabled={
+                  (edited.length === 0 && details.length === 0) || invalid || apply.isPending || library.isPending
+                }
+                onClick={() => apply.mutate(undefined)}
+              >
+                {t("selection.writeTags")}
+              </button>
+            )}
           </>
         ) : (
           <button type="button" className="btn primary" onClick={onClose}>
@@ -576,7 +606,9 @@ export function TagsDialog({
         <div className="stack">
           <p className="muted small" style={{ margin: 0 }}>
             {tracks > 1 ? t("selection.tagsHelpMany") : t("selection.tagsHelpOne")}{" "}
-            {rich("selection.tagsUndo", { link: <Link to="/review">{t("nav.review")}</Link> })}
+            {keep
+              ? t("selection.keptHelp")
+              : rich("selection.tagsUndo", { link: <Link to="/review">{t("nav.review")}</Link> })}
           </p>
           <div className="form-grid">
             {TAG_FIELDS.map(({ field, label, number: numeric }) => {
@@ -614,6 +646,7 @@ export function TagsDialog({
               ))}
             </datalist>
           )}
+          {!keep && (
           <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
             <legend className="small">{t("selection.alsoDetails")}</legend>
             <div className="row">
@@ -632,6 +665,7 @@ export function TagsDialog({
             </div>
             <span className="muted small">{t("selection.detailsHelp")}</span>
           </fieldset>
+          )}
         </div>
       ) : (
         <div className="stack">

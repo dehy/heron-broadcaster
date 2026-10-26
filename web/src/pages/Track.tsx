@@ -21,6 +21,7 @@ import {
   LabelChip,
   LabelsDialog,
   ProgrammingDialog,
+  TAG_FIELDS,
   TagsDialog,
   type TagValues,
 } from "../components/SelectionActions";
@@ -116,6 +117,13 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   const [playing, setPlaying] = useState(false);
   const [playhead, setPlayhead] = useState<number | null>(null);
   const [editingTags, setEditingTags] = useState(false);
+  const fileTags = useAction(
+    () =>
+      unwrap(
+        api.POST("/api/v1/tracks/tag-overrides/clear", { body: { selection: { track_ids: [track.id] } } }),
+      ),
+    { success: t("track.fileTagsDone"), invalidate: [["tracks"], ["track"]] },
+  );
 
   useEffect(() => {
     setDraft(normalize(track.overrides));
@@ -351,6 +359,28 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
       )}
       {track.silent && <Banner kind="bad">{t("track.silent")}</Banner>}
       {!track.enabled && <Banner kind="warn">{t("track.disabled")}</Banner>}
+      {track.tag_overrides.length > 0 && (
+        <Banner kind="warn">
+          {t("track.tagOverrides", {
+            fields: track.tag_overrides
+              .map((field) => {
+                const known = TAG_FIELDS.find((tag) => tag.field === field);
+                return known ? t(known.label) : field;
+              })
+              .join(", "),
+          })}{" "}
+          {canEdit && (
+            <button
+              type="button"
+              className="btn small"
+              disabled={fileTags.isPending}
+              onClick={() => fileTags.mutate(undefined)}
+            >
+              {t("track.fileTags")}
+            </button>
+          )}
+        </Banner>
+      )}
       {track.identification?.status === "needs_review" && (
         <Banner kind="warn">
           {rich("track.needsReview", {

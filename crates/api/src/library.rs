@@ -449,7 +449,7 @@ impl Library {
         .execute(&mut *tx)
         .await?
         .last_insert_id();
-        details::save(&mut *tx, id, &info.tags).await?;
+        details::save(&mut tx, id, &info.tags).await?;
         tx.commit().await
     }
 
@@ -472,7 +472,7 @@ impl Library {
         .bind(id)
         .execute(&mut *tx)
         .await?;
-        details::save(&mut *tx, id, &info.tags).await?;
+        details::save(&mut tx, id, &info.tags).await?;
         // The file changed: its cue points may be wrong, analyze it again.
         if file_changed {
             sqlx::query("DELETE FROM track_analysis WHERE track_id = ?")
@@ -491,7 +491,8 @@ impl Library {
             tokio::task::spawn_blocking(move || heron_library::tags::read(&absolute)).await?;
         match read {
             Ok(read) => {
-                details::save(&self.pool, id, &read).await?;
+                let mut connection = self.pool.acquire().await?;
+                details::save(&mut connection, id, &read).await?;
                 Ok(true)
             }
             Err(error) => {

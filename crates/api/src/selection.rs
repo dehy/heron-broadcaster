@@ -2,11 +2,13 @@
 
 //! Actions on a selection of tracks, given by IDs or by the filters of the
 //! track list (every matching track, on every page): labels, categories,
-//! mood, sound code and tempo, and the files' tags (written by
-//! `heron-librarian`, as a library task).
+//! mood, sound code and tempo, and the files' tags: written by
+//! `heron-librarian`, as a library task, or kept in Heron's database when
+//! the library setting `write_tags` is off.
 
 use axum::Json;
 use axum::extract::State;
+use heron_core::LibrarySettings;
 use heron_core::library::{FieldValues, TagField, TaskRequest};
 use serde::{Deserialize, Serialize};
 use sqlx::QueryBuilder;
@@ -27,6 +29,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(apply_categories))
         .routes(routes!(apply_programming))
         .routes(routes!(edit_tags))
+        .routes(routes!(override_tags))
+        .routes(routes!(clear_tag_overrides))
 }
 
 /// Tracks in one selection, at most.
@@ -418,18 +422,16 @@ async fn edit_tags(
     Json(edit): Json<TagEdit>,
 ) -> ApiResult<(axum::http::StatusCode, Json<LibraryTask>)> {
     user.require(Role::Operator)?;
-    let mut set = FieldValues::new();
-    for (field, value) in &edit.set {
-        let value = match value {
-            None => None,
-            Some(value) => Some(
-                field
-                    .normalize(value)
-                    .map_err(|error| ApiError::Invalid(format!("{field:?}: {error}")))?,
-            ),
-        };
-        set.insert(*field, value);
+    let library: LibrarySettings =
+        settings::load(&state.pool, LibrarySettings::SETTINGS_NAME).await?;
+    if !library.write_tags {
+        return Err(ApiError::Conflict(
+            "tags are kept in Heron's database (the library setting write_tags is off): \
+             POST /tracks/tag-overrides"
+                .to_owned(),
+        ));
     }
+    let set = normalize_set(&edit.set)?;
     if let Some(field) = edit.from_details.iter().find(|field| !field.is_detail()) {
         return Err(ApiError::Invalid(format!(
             "{field:?} is not a programming detail"
@@ -458,4 +460,222 @@ async fn edit_tags(
     };
     let task = librarian::ask(&state, &user, request).await?;
     Ok((axum::http::StatusCode::ACCEPTED, Json(task)))
+}
+
+/// Checks the values of `set` and puts them in the form they are kept in.
+fn normalize_set(set: &FieldValues) -> ApiResult<FieldValues> {
+    let mut normalized = FieldValues::new();
+    for (field, value) in set {
+        let value = match value {
+            None => None,
+            Some(value) => Some(
+                field
+                    .normalize(value)
+                    .map_err(|error| ApiError::Invalid(format!("{field:?}: {error}")))?,
+            ),
+        };
+        normalized.insert(*field, value);
+    }
+    Ok(normalized)
+}
+
+/// The `tracks` column of a tag field; `None` for programming details.
+fn column(field: TagField) -> Option<&'static str> {
+    Some(match field {
+        TagField::Title => "title",
+        TagField::Artist => "artist",
+        TagField::Album => "album",
+        TagField::AlbumArtist => "album_artist",
+        TagField::Genre => "genre",
+        TagField::Year => "year",
+        TagField::Track => "track_number",
+        TagField::Disc => "disc_number",
+        TagField::Isrc | TagField::RecordLabel | TagField::Bpm | TagField::Mood => return None,
+    })
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TagOverrides {
+    pub selection: TrackSelection,
+    /// Fields set to the same value on every track; `null` removes the
+    /// field. Fields left out keep each track's value. Title, artist,
+    /// album, album artist, year, genre, track and disc only.
+    #[schema(value_type = std::collections::HashMap<String, Option<String>>)]
+    pub set: FieldValues,
+}
+
+/// Edits the tags of the selected tracks in Heron's database only, when
+/// the library setting `write_tags` is off: the files are not changed.
+/// The values are shown instead of the files' tags, and survive a rescan,
+/// until they are cleared. Operators and admins.
+#[utoipa::path(post, path = "/tracks/tag-overrides", tag = "library",
+    request_body = TagOverrides,
+    responses((status = 200, body = SelectionResult), (status = "4XX", body = ErrorBody)))]
+async fn override_tags(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(edit): Json<TagOverrides>,
+) -> ApiResult<Json<SelectionResult>> {
+    user.require(Role::Operator)?;
+    let library: LibrarySettings =
+        settings::load(&state.pool, LibrarySettings::SETTINGS_NAME).await?;
+    if library.write_tags {
+        return Err(ApiError::Conflict(
+            "tags are written into the files (the library setting write_tags is on): \
+             POST /tracks/tags"
+                .to_owned(),
+        ));
+    }
+    let set = normalize_set(&edit.set)?;
+    if let Some(field) = set.keys().find(|field| column(**field).is_none()) {
+        return Err(ApiError::Invalid(format!(
+            "{field:?} is a programming detail, kept in Heron already"
+        )));
+    }
+    if set.is_empty() {
+        return Err(ApiError::Invalid("no field to set".to_owned()));
+    }
+    let ids = edit.selection.resolve(&state, MAX_SELECTION).await?;
+    let mut tx = state.pool.begin().await?;
+    let mut changed = 0;
+    for chunk in ids.chunks(CHUNK) {
+        for (field, value) in &set {
+            let mut query = QueryBuilder::new(
+                "INSERT INTO track_tag_overrides (track_id, field, value, updated_by) ",
+            );
+            query.push_values(chunk, |mut row, id| {
+                row.push_bind(*id)
+                    .push_bind(field.as_str())
+                    .push_bind(value.as_deref())
+                    .push_bind(user.id);
+            });
+            query.push(
+                " ON DUPLICATE KEY UPDATE updated_by = IF(value <=> VALUES(value), updated_by, \
+                 VALUES(updated_by)), value = VALUES(value)",
+            );
+            // 1 a row added, 2 a row changed, 0 unchanged.
+            let result = query.build().execute(&mut *tx).await?;
+            changed += result.rows_affected().min(chunk.len() as u64);
+
+            // What the library shows, until the scanner reads the file again
+            // (and applies the overrides on top).
+            let column = column(*field).unwrap_or_default();
+            let mut query = QueryBuilder::new(format!("UPDATE tracks SET {column} = "));
+            match field {
+                TagField::Year | TagField::Track | TagField::Disc => {
+                    query.push_bind(value.as_deref().and_then(|value| value.parse::<u16>().ok()))
+                }
+                _ => query.push_bind(value.as_deref()),
+            };
+            query.push(" WHERE id IN (");
+            let mut separated = query.separated(", ");
+            for id in chunk {
+                separated.push_bind(*id);
+            }
+            query.push(")");
+            query.build().execute(&mut *tx).await?;
+        }
+    }
+    tx.commit().await?;
+    tracing::info!(user = %user.username, tracks = ids.len(), changed, "tags kept in the database");
+    Ok(Json(SelectionResult {
+        tracks: ids.len() as u64,
+        changed,
+    }))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TagOverridesClear {
+    pub selection: TrackSelection,
+    /// The fields to give back to the files; every field when empty.
+    #[serde(default)]
+    pub fields: Vec<TagField>,
+}
+
+/// Drops the tags kept in Heron's database for the selected tracks (at most
+/// 10,000): they show their files' tags again. Works whatever `write_tags`
+/// says. Operators and admins.
+#[utoipa::path(post, path = "/tracks/tag-overrides/clear", tag = "library",
+    request_body = TagOverridesClear,
+    responses((status = 200, body = SelectionResult), (status = "4XX", body = ErrorBody)))]
+async fn clear_tag_overrides(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(clear): Json<TagOverridesClear>,
+) -> ApiResult<Json<SelectionResult>> {
+    user.require(Role::Operator)?;
+    let ids = clear.selection.resolve(&state, MAX_TAG_EDIT).await?;
+    let mut changed = 0;
+    for chunk in ids.chunks(CHUNK) {
+        let mut query = QueryBuilder::new(
+            "SELECT DISTINCT o.track_id, t.path FROM track_tag_overrides o \
+             JOIN tracks t ON t.id = o.track_id WHERE o.track_id IN (",
+        );
+        let mut separated = query.separated(", ");
+        for id in chunk {
+            separated.push_bind(*id);
+        }
+        query.push(")");
+        push_fields(&mut query, &clear.fields);
+        let tracks: Vec<(u64, String)> = query.build_query_as().fetch_all(&state.pool).await?;
+        if tracks.is_empty() {
+            continue;
+        }
+
+        let mut query = QueryBuilder::new("DELETE FROM track_tag_overrides WHERE track_id IN (");
+        let mut separated = query.separated(", ");
+        for (id, _) in &tracks {
+            separated.push_bind(*id);
+        }
+        query.push(")");
+        push_fields(&mut query, &clear.fields);
+        changed += query.build().execute(&state.pool).await?.rows_affected();
+
+        // The files' tags, with the overrides left on top.
+        let root = state.library.root().to_path_buf();
+        let read = tokio::task::spawn_blocking(move || {
+            tracks
+                .into_iter()
+                .map(|(id, path)| {
+                    let absolute = heron_core::LibraryPath::from_stored(path).resolve(&root);
+                    (id, heron_library::tags::read(&absolute))
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|error| ApiError::Internal(error.to_string()))?;
+        let mut connection = state.pool.acquire().await?;
+        for (id, read) in read {
+            match read {
+                Ok(read) => heron_library::details::save(&mut connection, id, &read).await?,
+                Err(error) => {
+                    tracing::warn!(track = id, %error, "cannot read tags, read at the next scan");
+                    sqlx::query("UPDATE tracks SET details_version = 0 WHERE id = ?")
+                        .bind(id)
+                        .execute(&mut *connection)
+                        .await?;
+                }
+            }
+        }
+    }
+    tracing::info!(user = %user.username, tracks = ids.len(), changed, "tag overrides cleared");
+    Ok(Json(SelectionResult {
+        tracks: ids.len() as u64,
+        changed,
+    }))
+}
+
+/// ` AND field IN (…)`, unless every field is meant.
+fn push_fields(query: &mut QueryBuilder<sqlx::MySql>, fields: &[TagField]) {
+    if fields.is_empty() {
+        return;
+    }
+    query.push(" AND field IN (");
+    let mut separated = query.separated(", ");
+    for field in fields {
+        separated.push_bind(field.as_str());
+    }
+    query.push(")");
 }

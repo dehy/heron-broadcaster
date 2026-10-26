@@ -46,7 +46,8 @@ pub type Plan = OrganizePlan;
 pub type Report = BatchReport;
 
 /// Lists the moves that would put every present track where `layout` says.
-/// Reads tags, touches nothing.
+/// Reads tags, with the tags kept in Heron's database on top, and touches
+/// nothing.
 pub async fn plan(pool: &MySqlPool, roots: &Roots, layout: &Layout) -> Result<Plan, Error> {
     let rows =
         sqlx::query("SELECT id, path, missing_since IS NULL AS present FROM tracks ORDER BY path")
@@ -63,13 +64,16 @@ pub async fn plan(pool: &MySqlPool, roots: &Roots, layout: &Layout) -> Result<Pl
         }
     }
 
+    // Tags kept in Heron's database file tracks like their files' tags.
+    let overrides = heron_library::details::all_overrides(pool).await?;
+
     let library = roots.library.clone();
     let layout = layout.clone();
     let plan = tokio::task::spawn_blocking(move || {
         let mut plan = Plan::default();
         for (track_id, current) in tracks {
             let absolute = current.resolve(&library);
-            let read = match tags::read(&absolute) {
+            let mut read = match tags::read(&absolute) {
                 Ok(read) => read,
                 Err(error) => {
                     tracing::warn!(path = %current, %error, "cannot read tags, not moving");
@@ -77,6 +81,9 @@ pub async fn plan(pool: &MySqlPool, roots: &Roots, layout: &Layout) -> Result<Pl
                     continue;
                 }
             };
+            if let Some(overrides) = overrides.get(&track_id) {
+                heron_library::details::apply_overrides(&mut read, overrides);
+            }
             let (stem, extension) = stem_and_extension(&absolute);
             let desired = layout.render(&FileFacts {
                 tags: &read.tags,

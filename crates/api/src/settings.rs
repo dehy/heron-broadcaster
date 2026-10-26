@@ -221,6 +221,9 @@ pub struct LibrarySettingsView {
     pub min_free_mb: u64,
     /// Days deleted tracks stay in the trash.
     pub trash_days: u32,
+    /// Tags edited from the browser are written into the files; off, they
+    /// are kept in Heron's database and the files are left alone.
+    pub write_tags: bool,
 }
 
 impl From<LibrarySettings> for LibrarySettingsView {
@@ -234,6 +237,7 @@ impl From<LibrarySettings> for LibrarySettingsView {
             max_upload_mb: settings.max_upload_mb,
             min_free_mb: settings.min_free_mb,
             trash_days: settings.trash_days,
+            write_tags: settings.write_tags,
         }
     }
 }
@@ -257,6 +261,9 @@ pub struct LibrarySettingsPatch {
     pub min_free_mb: Option<u64>,
     /// 1 to 3650.
     pub trash_days: Option<u32>,
+    /// Write tags edited from the browser into the files (true), or keep
+    /// them in Heron's database (false).
+    pub write_tags: Option<bool>,
 }
 
 /// Tells a field set to `null` (`Some(None)`) from a missing one (`None`).
@@ -492,6 +499,7 @@ async fn patch_library(
     }
     settings.save_cover = patch.save_cover.unwrap_or(settings.save_cover);
     settings.embed_cover = patch.embed_cover.unwrap_or(settings.embed_cover);
+    settings.write_tags = patch.write_tags.unwrap_or(settings.write_tags);
     save(&state.pool, LibrarySettings::SETTINGS_NAME, &settings).await?;
     tracing::info!(user = %user.username, ?settings, "library settings changed");
     Ok(Json(settings.into()))

@@ -190,6 +190,12 @@ impl TaskRunner {
             TaskRequest::ArtistRelations => {
                 json(relations::look_up(&self.pool, &self.musicbrainz()?).await)
             }
+            // Asked before `write_tags` was turned off: the files are left alone.
+            TaskRequest::EditTags { .. } if !settings.write_tags => Err(
+                "tags are kept in Heron's database (the library setting write_tags is off): \
+                 the files were not changed"
+                    .to_owned(),
+            ),
             TaskRequest::EditTags {
                 track_ids,
                 set,
