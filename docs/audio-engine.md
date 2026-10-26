@@ -16,7 +16,7 @@ How `heron-engine`, the real-time playout process, works. Functional requirement
 
 | Thread | Role | May allocate, lock, log |
 |---|---|---|
-| **Audio thread** | Renders the master bus 10 ms at a time against the clock: decks, fades, loudness gain, FX player | **No** |
+| **Audio thread** | Renders the master bus 10 ms at a time against the clock: decks, fades, loudness gain, [deck EQ](#deck-eq), FX player | **No** |
 | Decode threads | One per loaded track: decode, resample to 48 kHz, cut at the cue points, buffer 10 s ahead | Yes |
 | Preload threads | One per upcoming track: read its file into memory ahead of time | Yes |
 | Player (tokio task) | Owns the queue, loads tracks, plans transitions, handles the mixer's events every 10 ms, runs the silence watchdog, saves the queue | Yes |
@@ -40,7 +40,7 @@ Every hop between them is bounded and **drops rather than blocks**, so nothing d
 - The audio thread **never allocates, locks, does I/O or logs.** It talks to the rest of the engine through lock-free ring buffers (`rtrb`: commands in, events and finished tracks out) and atomics (positions, levels, counters). Finished tracks are handed back to the player, which drops them.
 - Decode ahead into buffers. The mixer only reads audio that is ready; a cued track starts only once 100 ms of it is decoded.
 - **The engine never touches the database** ([Locked decisions](decisions.md)). It receives tracks with their cue points over gRPC.
-- `tests/no_alloc.rs` drives the mixer through crossfades, skips, pauses, the FX player, underruns and queue changes under an allocator that counts every allocation and free made on the audio thread: there must be none.
+- `tests/no_alloc.rs` drives the mixer through crossfades, skips, pauses, the FX player, underruns, queue changes and EQ changes under an allocator that counts every allocation and free made on the audio thread: there must be none.
 
 ## Decoding
 
@@ -102,15 +102,42 @@ Stored under `playout` in the `settings` table (JSON, missing fields take the de
 
 The crossfade point itself (dB trigger, minimum and maximum fade time) is found at import, see [Import and analysis](analysis.md#crossfade-point).
 
+## Deck EQ
+
+Two 10-band graphic EQs, built in [M9](roadmap/m9-deck-eq.md): **music**, on Decks A and B, and **FX**, on the FX player. Decks A and B take turns, so they share one EQ, and a track sounds the same on either.
+
+```
+deck A: source ─► × gain (loudness, fades) ─► EQ (music settings, deck A's filters) ─► meter ─┐
+deck B: source ─► × gain (loudness, fades) ─► EQ (music settings, deck B's filters) ─► meter ─┼─► Σ ─► pause ─► clip ─► master meter
+FX:     source ─► × gain (loudness, fades) ─► EQ (FX settings,    FX filters)       ─► meter ─┘
+```
+
+During a crossfade both decks play through the music EQ, each with its own filters. A deck's filters start from rest when a track starts on it, so nothing of the previous track rings into the next.
+
+**Filters.** Ten peaking filters in series (biquads from the RBJ *Audio EQ Cookbook*), at 60, 170, 310, 600, 1k, 3k, 6k, 12k, 14k and 16k Hz, Q 1.41 (one octave), gain −12 to +12 dB. A band at 0 dB is an exact pass-through. Neighbouring bands overlap, so two neighbours at +12 dB add up to more than 12 dB between them, as on any graphic EQ; the Deck EQ page draws the real curve. Filters run in `f64` (transposed direct form II): `f32` filters are noisy at 60 Hz with a 48 kHz rate. `heron_dsp::eq` holds the design and the filters; the engine only feeds them.
+
+**Changes.** The player sends the mixer a `SetEq` command (EQ, enabled, ten gains: no allocation) when the settings change. The audio thread moves each band's gain towards its target with a one-pole smoother (time constant 15 ms: there in about 50 ms) and recomputes the coefficients every 32 frames (0.7 ms) along the way, so a slider dragged from −12 to +12 dB or a preset loaded glides instead of stepping. **Bypassing** glides every band to 0 dB, then stops computing the EQ: from there the deck's audio is untouched, bit for bit. **Enabling** starts from 0 dB and glides to the gains. A track starting on a deck takes the EQ's current gains, without a glide.
+
+**Headroom.** Boosts can take a track over full scale: the master bus clips there as it always has, until the limiter of [M10](roadmap/m10-agc-multiband.md). The loudness gain does not account for the EQ. Cut what is too much rather than boosting everything else.
+
+**Settings** (`eq`, see [API – Deck EQ](api.md#deck-eq)), kept apart from the playout settings so the sliders can move often without sending them:
+
+```json
+{"music": {"enabled": true, "gains_db": [3, 2, 0, 0, 0, 0, 0, 1, 1, 0]},
+ "fx":    {"enabled": false, "gains_db": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}}
+```
+
+Ten gains, from 60 Hz up, each from −12 to +12 dB. By default both EQs are flat and bypassed. The engine receives them over gRPC (`SetEqSettings`) and keeps them in `config.json` under `eq`: it restarts with them, and a new engine taking over ([Upgrades and handover](#upgrades-and-handover)) loads them before its first sample. Engines from before M9 ignore the key.
+
 ## Control interface
 
-gRPC service `heron.engine.v1.Engine` ([engine.proto](../crates/proto/proto/heron/engine/v1/engine.proto)), on `HERON_GRPC_ADDR` (port 50051, inside the Docker network only): queue (enqueue, remove, clear, move, replace), skip, pause, resume, FX player, state, levels, a stream of track changes, playout settings and outputs. Tracks carry everything needed to play them: library path, tags, cue points, crossfade point, loudness, overrides, and the reason they play (rotation, manual…), carried back in the track changes for the play history. Queue positions count the waiting tracks: 0 is before the cued track.
+gRPC service `heron.engine.v1.Engine` ([engine.proto](../crates/proto/proto/heron/engine/v1/engine.proto)), on `HERON_GRPC_ADDR` (port 50051, inside the Docker network only): queue (enqueue, remove, clear, move, replace), skip, pause, resume, FX player, state, levels, a stream of track changes, playout settings, outputs and the deck EQ. Tracks carry everything needed to play them: library path, tags, cue points, crossfade point, loudness, overrides, and the reason they play (rotation, manual…), carried back in the track changes for the play history. Queue positions count the waiting tracks: 0 is before the cued track.
 
 The engine keeps its state in `HERON_STATE_DIR`, so it restarts streaming even when the API and the database are down:
 
 | File | Contents | Written |
 |---|---|---|
-| `config.json` | Playout settings and outputs | When the API (or `ctl`) changes them |
+| `config.json` | Playout settings, outputs and the [deck EQ](#deck-eq) | When the API (or `ctl`) changes them |
 | `queue.json` | The track on air and its position, the cued track and the queue, pause, the next entry ID | When the queue changes, every 5 s while playing, and on shutdown |
 | `fallback.json` | Analyses of the fallback directory's files | After each analysis |
 | `handover.sock` | Unix socket of the active engine, for a new engine to take over ([Upgrades and handover](#upgrades-and-handover)) | Bound while the engine is active |
@@ -125,7 +152,7 @@ docker compose exec heron-engine heron-engine ctl watch
 docker compose exec heron-engine heron-engine ctl skip
 ```
 
-`ctl enqueue` and `ctl autofill` analyze files themselves to send their cue points (`ctl enqueue --no-analysis` plays a file whole, as the API does with tracks not analyzed yet). With the API running, outputs and settings set with `ctl set-outputs` and `ctl set-settings` are replaced by the API's within a minute.
+`ctl enqueue` and `ctl autofill` analyze files themselves to send their cue points (`ctl enqueue --no-analysis` plays a file whole, as the API does with tracks not analyzed yet). With the API running, outputs and settings set with `ctl set-outputs`, `ctl set-settings` and `ctl set-eq` are replaced by the API's within a minute.
 
 ## Upgrades and handover
 
@@ -166,7 +193,7 @@ The new engine keeps the entry IDs and the position of the track on air, and doe
 ## Signal quality
 
 - Gain changes are ramps (fades, skip, pause), never steps, to avoid clicks.
-- Parameter changes of later DSP (EQ, AGC) are **smoothed** too.
+- Parameter changes of later DSP are **smoothed** too: the [deck EQ](#deck-eq) glides to new settings in about 50 ms, and so will the AGC.
 
 ## Failure handling
 
