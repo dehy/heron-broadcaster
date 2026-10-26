@@ -3126,3 +3126,181 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     station.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn importing_from_another_software_and_undoing_it() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let pool = &station.db.pool;
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+    let [one, two, three, ..] = station.tracks[..] else {
+        panic!("five tracks");
+    };
+    // A title already fixed in Heron: the import's differs.
+    sqlx::query(
+        "INSERT INTO track_tag_overrides (track_id, field, value) VALUES (?, 'title', 'Fixed')",
+    )
+    .bind(two)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE tracks SET title = 'Fixed' WHERE id = ?")
+        .bind(two)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let row = |file: &str, title: &str, category: u64, problem: u64| {
+        json!({
+            "filename": format!("6-final-mp3/{file}"), "title": title, "artist": "Band\\'s",
+            "year": "1980", "created_at": "2021-02-07 20:36:51", "mbid": "ignored",
+            "category_id": category, "category_name": if category == 15 { "frigo" } else { "gold" },
+            "category_parent_id": 0, "category_can_schedule": if category == 15 { 0 } else { 1 },
+            "category_is_jingle": 0, "problem_id": problem, "problem_name": "a remplacer",
+            "final_duration": 2.9, "cue_in": 0.5, "intro": 1.5, "intro2": 0, "fade_in": 0,
+            "fade_out": 0.5, "hook_in": 0.2, "hook_out": 2.0, "start_next_soft": 0,
+            "start_next_hard": 0,
+        })
+    };
+    let rows = json!([
+        row("Track 1.wav", "One", 10, 0),
+        row("Track 2.wav", "Two", 15, 8),
+        row("Nowhere.wav", "Lost", 10, 0),
+        row("Track 3.wav", "Three", 10, 0),
+        row("TRACK 3.wav", "Three again", 10, 0),
+    ]);
+    let (status, _) = viewer
+        .send(
+            Method::POST,
+            "/library/import/preview",
+            json!({"rows": rows}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, preview) = admin
+        .send(
+            Method::POST,
+            "/library/import/preview",
+            json!({"rows": rows}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let statuses: Vec<&str> = preview["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            "matched",
+            "matched",
+            "not_found",
+            "duplicate_in_export",
+            "duplicate_in_export"
+        ]
+    );
+    let first = &preview["rows"][0];
+    assert_eq!(first["track_id"], one);
+    assert_eq!(first["values"]["artist"], "Band's");
+    assert_eq!(first["values"]["intro_ms"], 1000, "moved by the cue-in");
+    assert_eq!(
+        first["values"]["hook_in_ms"],
+        Value::Null,
+        "before the cue-in"
+    );
+    assert_eq!(first["values"]["fade_out_ms"], 500);
+    assert_eq!(first["length_mismatch"], false);
+    assert_eq!(first["warnings"].as_array().unwrap().len(), 1);
+    assert_eq!(first["conflicts"], json!([]));
+    let second = &preview["rows"][1];
+    assert_eq!(second["current"]["title"], "Fixed");
+    assert_eq!(second["conflicts"], json!(["title"]));
+    assert_eq!(preview["categories"].as_array().unwrap().len(), 2);
+    assert_eq!(preview["categories"][1]["can_schedule"], false);
+    assert_eq!(preview["problems"][0]["name"], "a remplacer");
+
+    // Track 2's conflict settled by keeping Heron's title.
+    let mut kept = second["values"].clone();
+    kept.as_object_mut().unwrap().remove("title");
+    let (status, import) = admin
+        .send(
+            Method::POST,
+            "/library/import/apply",
+            json!({
+                "categories": [
+                    {"id": 10, "name": "gold"},
+                    {"id": 15, "name": "frigo", "disable_tracks": true},
+                ],
+                "problems": [{"id": 8, "action": "label_and_disable", "label": "Problème : a remplacer"}],
+                "rows": [
+                    {"track_id": one, "values": first["values"]},
+                    {"track_id": two, "values": kept},
+                ],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{import}");
+    assert_eq!(import["summary"]["tracks"], 2);
+    assert_eq!(
+        import["summary"]["categories_created"],
+        json!(["gold", "frigo"])
+    );
+    assert_eq!(import["summary"]["disabled"], 1);
+
+    let detail = admin.get(&format!("/tracks/{one}")).await;
+    assert_eq!(detail["title"], "One");
+    assert_eq!(detail["artist"], "Band's");
+    assert_eq!(detail["year"], 1980);
+    assert_eq!(detail["markers"]["intro_ms"], 1000);
+    assert_eq!(detail["overrides"]["crossfade"]["fade_out"]["time_ms"], 500);
+    assert_eq!(detail["categories"][0]["name"], "gold");
+    assert_eq!(detail["enabled"], true);
+    let detail = admin.get(&format!("/tracks/{two}")).await;
+    assert_eq!(detail["title"], "Fixed", "Heron's title kept");
+    assert_eq!(detail["enabled"], false);
+    assert_eq!(detail["labels"][0]["name"], "Problème : a remplacer");
+    assert_eq!(
+        admin.get(&format!("/tracks/{three}")).await["markers"],
+        Value::Null
+    );
+    let added: i64 = sqlx::query_scalar("SELECT YEAR(created_at) FROM tracks WHERE id = ?")
+        .bind(one)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(added, 2021);
+
+    // Undone: every track as it was.
+    let list = admin.get("/library/imports").await;
+    assert_eq!(list[0]["id"], import["id"]);
+    let undo = format!("/library/imports/{}/undo", import["id"]);
+    let (status, undone) = admin.send(Method::POST, &undo, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{undone}");
+    assert!(undone["undone_at_unix_ms"].is_i64());
+    let detail = admin.get(&format!("/tracks/{one}")).await;
+    assert_eq!(detail["title"], "Track 1");
+    assert_eq!(detail["artist"], "Artist 1");
+    assert_eq!(detail["year"], Value::Null);
+    assert_eq!(detail["markers"], Value::Null);
+    assert_eq!(detail["overrides"]["crossfade"]["fade_out"], Value::Null);
+    assert_eq!(detail["categories"], json!([]));
+    assert_eq!(detail["tag_overrides"], json!([]));
+    let detail = admin.get(&format!("/tracks/{two}")).await;
+    assert_eq!(detail["title"], "Fixed");
+    assert_eq!(detail["tag_overrides"], json!(["title"]));
+    assert_eq!(detail["enabled"], true);
+    assert_eq!(detail["labels"], json!([]));
+    let added: i64 = sqlx::query_scalar("SELECT YEAR(created_at) FROM tracks WHERE id = ?")
+        .bind(one)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(added > 2021);
+    let (status, _) = admin.send(Method::POST, &undo, json!({})).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    station.stop().await;
+}

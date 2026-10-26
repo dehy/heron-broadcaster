@@ -676,6 +676,8 @@ pub struct TrackDetail {
     /// shown instead of the file's: `POST /tracks/tag-overrides/clear`
     /// gives them back to the file.
     pub tag_overrides: Vec<TagField>,
+    /// Intro, hook and next-track points, from an import.
+    pub markers: Option<crate::import::TrackMarkers>,
     pub playout: EffectivePlayout,
     pub categories: Vec<TrackCategory>,
     pub identification: Option<TrackIdentification>,
@@ -748,6 +750,7 @@ async fn get_track(
         .await?
         .into_keys()
         .collect();
+    let markers = crate::import::markers(&state.pool, id).await?;
     let playout = state.queue.playout(id).await?;
     let settings: PlayoutSettings =
         settings::load(&state.pool, PlayoutSettings::SETTINGS_NAME).await?;
@@ -760,6 +763,7 @@ async fn get_track(
         analysis,
         overrides,
         tag_overrides,
+        markers,
         playout: EffectivePlayout {
             cue_in_ms: playout.cue_in_ms,
             cue_out_ms: playout.cue_out_ms,
