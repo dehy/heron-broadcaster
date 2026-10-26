@@ -3,7 +3,7 @@
 //! The audio thread must never allocate or free memory: a global allocator
 //! counts every allocation made while a thread is marked as real-time, and
 //! the mixer is driven through everything it does (crossfades, skips, pauses,
-//! the FX player, underruns, queue changes) while marked.
+//! the FX player, underruns, queue changes, EQ changes) while marked.
 
 // A global allocator can only be written with `unsafe`.
 #![allow(unsafe_code)]
@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use heron_core::FadeCurve;
 use heron_engine::mixer::{
-    AudioSource, BLOCK_FRAMES, CHANNELS, Command, FrameRamp, FrameTransition, LoadedTrack, Mixer,
-    VecSource,
+    AudioSource, BLOCK_FRAMES, CHANNELS, Command, EqTarget, FrameRamp, FrameTransition,
+    LoadedTrack, Mixer, VecSource,
 };
 
 struct CountingAllocator;
@@ -124,8 +124,15 @@ fn the_mixer_does_not_allocate() {
         }),
     };
 
+    let eq = |eq, enabled, gain, glide| Command::SetEq {
+        eq,
+        enabled,
+        gains_db: [gain; 10],
+        glide,
+    };
     // Every command is prepared (and allocated) outside the audio thread.
     let mut script: Vec<(usize, Command)> = vec![
+        (0, eq(EqTarget::Music, true, 3.0, false)),
         (
             0,
             Command::Cue {
@@ -133,6 +140,7 @@ fn the_mixer_does_not_allocate() {
                 transition: crossfade,
             },
         ),
+        (5, eq(EqTarget::Fx, true, -6.0, true)),
         (
             10,
             Command::Cue {
@@ -151,6 +159,9 @@ fn the_mixer_does_not_allocate() {
         (40, Command::PlayFx(track(4, 9_600))),
         (45, Command::PlayFx(track(5, 9_600))),
         (50, Command::StopFx),
+        // Moved during the crossfade (it starts at frame 30,000, block 62).
+        (64, eq(EqTarget::Music, true, -9.0, true)),
+        (66, eq(EqTarget::Music, true, 12.0, true)),
         (
             110,
             Command::Cue {
@@ -165,7 +176,9 @@ fn the_mixer_does_not_allocate() {
                 curve: FadeCurve::Logarithmic,
             },
         ),
+        (125, eq(EqTarget::Music, false, 12.0, true)),
         (130, Command::Pause),
+        (140, eq(EqTarget::Music, true, 6.0, true)),
         (150, Command::Resume),
         (
             160,

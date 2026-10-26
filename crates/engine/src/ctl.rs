@@ -77,7 +77,7 @@ enum CtlCommand {
         file: PathBuf,
     },
     StopFx,
-    /// Print the configuration (playout settings and outputs) as JSON.
+    /// Print the configuration (playout settings, outputs, deck EQ) as JSON.
     Config,
     /// Replace the encoder profiles and outputs (JSON file, `OutputsConfig`).
     SetOutputs {
@@ -85,6 +85,10 @@ enum CtlCommand {
     },
     /// Replace the playout settings (JSON file, `PlayoutSettings`).
     SetSettings {
+        file: PathBuf,
+    },
+    /// Replace the deck EQ settings (JSON file, `EqSettings`).
+    SetEq {
         file: PathBuf,
     },
     /// Print track changes as they happen.
@@ -186,11 +190,13 @@ async fn execute(args: Args, library_dir: &Path) -> anyhow::Result<()> {
                 .into_inner();
             let playout: serde_json::Value = serde_json::from_str(&config.playout_settings_json)?;
             let outputs: serde_json::Value = serde_json::from_str(&config.outputs_json)?;
+            let eq: serde_json::Value = serde_json::from_str(&config.eq_settings_json)?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&serde_json::json!({
                     "playout": playout,
                     "outputs": outputs,
+                    "eq": eq,
                 }))?
             );
         }
@@ -209,6 +215,14 @@ async fn execute(args: Args, library_dir: &Path) -> anyhow::Result<()> {
                 .set_playout_settings(pb::SetPlayoutSettingsRequest { settings_json })
                 .await?;
             println!("settings applied");
+        }
+        CtlCommand::SetEq { file } => {
+            let settings_json = std::fs::read_to_string(&file)
+                .with_context(|| format!("cannot read {}", file.display()))?;
+            client
+                .set_eq_settings(pb::SetEqSettingsRequest { settings_json })
+                .await?;
+            println!("EQ applied");
         }
         CtlCommand::Watch => {
             let mut events = client

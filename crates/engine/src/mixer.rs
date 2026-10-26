@@ -7,6 +7,9 @@
 //! (commands in, events and finished tracks out) and atomics (status, levels).
 //! Tracks are dropped by the control thread, never here.
 //!
+//! Each deck slot has its EQ ([`GraphicEq`]): Decks A and B the music EQ's
+//! settings, the FX player its own.
+//!
 //! Transitions are decided here, sample-accurately, from a plan computed in
 //! advance ([`FrameTransition`]). The same code renders to a buffer offline,
 //! which is how crossfades are tested.
@@ -14,8 +17,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
-use heron_core::FadeCurve;
 use heron_core::playout::{Ramp, TrackPlayout, Transition};
+use heron_core::{EQ_BANDS, FadeCurve};
+use heron_dsp::GraphicEq;
 
 /// Internal sample rate.
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -200,6 +204,32 @@ pub enum Command {
     /// Plays a jingle on the FX player, on top of the decks. Replaces the one playing.
     PlayFx(Box<LoadedTrack>),
     StopFx,
+    /// New settings for a deck EQ. They glide in, or with `glide: false`
+    /// apply at once with the filters at rest: only while nothing plays.
+    SetEq {
+        eq: EqTarget,
+        enabled: bool,
+        gains_db: [f32; EQ_BANDS],
+        glide: bool,
+    },
+}
+
+/// Which deck EQ.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EqTarget {
+    /// Decks A and B.
+    Music,
+    Fx,
+}
+
+impl EqTarget {
+    /// The deck slots it applies to.
+    fn slots(self) -> &'static [usize] {
+        match self {
+            Self::Music => &[0, 1],
+            Self::Fx => &[2],
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -426,6 +456,8 @@ pub struct Mixer {
     /// Slot whose fade-out was set by `HaltAt`, removed on `Resume`.
     halt_fade: Option<usize>,
     scratch: Vec<f32>,
+    /// The EQ of each deck slot.
+    eqs: [GraphicEq; 3],
     meters: [BlockMeter; 3],
     commands: rtrb::Consumer<Command>,
     events: rtrb::Producer<Event>,
@@ -453,6 +485,7 @@ impl Mixer {
             halt_at: None,
             halt_fade: None,
             scratch: vec![0.0; max_block_frames * CHANNELS],
+            eqs: std::array::from_fn(|_| GraphicEq::new(SAMPLE_RATE)),
             meters: [BlockMeter::default(); 3],
             commands: command_rx,
             events: event_tx,
@@ -602,6 +635,20 @@ impl Mixer {
                         );
                     }
                 }
+                Command::SetEq {
+                    eq,
+                    enabled,
+                    gains_db,
+                    glide,
+                } => {
+                    for &slot in eq.slots() {
+                        if glide {
+                            self.eqs[slot].set(enabled, gains_db);
+                        } else {
+                            self.eqs[slot].restart(enabled, gains_db);
+                        }
+                    }
+                }
             }
         }
     }
@@ -728,6 +775,8 @@ impl Mixer {
             at_frame: self.frame,
         });
         self.voices[slot] = Some(Voice::new(track));
+        // Nothing of the previous track rings into this one.
+        self.eqs[slot].restart_track();
     }
 
     fn main_voice(&self) -> Option<&Voice> {
@@ -773,20 +822,23 @@ impl Mixer {
         }
         let scratch = &mut self.scratch[..wanted * CHANNELS];
         let read = voice.track.source.read(scratch);
+        let played = &mut scratch[..read * CHANNELS];
+        for (index, frame) in played.as_chunks_mut::<CHANNELS>().0.iter_mut().enumerate() {
+            let gain = voice.track.gain * voice.gain_at(voice.position + index as u64);
+            frame[0] *= gain;
+            frame[1] *= gain;
+        }
+        self.eqs[slot].process(played);
         let meter = &mut self.meters[slot];
-        for (index, (input, output)) in scratch[..read * CHANNELS]
+        for (input, output) in played
             .as_chunks::<CHANNELS>()
             .0
             .iter()
             .zip(out.as_chunks_mut::<CHANNELS>().0)
-            .enumerate()
         {
-            let gain = voice.track.gain * voice.gain_at(voice.position + index as u64);
-            let left = input[0] * gain;
-            let right = input[1] * gain;
-            output[0] += left;
-            output[1] += right;
-            meter.add(left, right);
+            output[0] += input[0];
+            output[1] += input[1];
+            meter.add(input[0], input[1]);
         }
         voice.position += read as u64;
         if read < wanted {
