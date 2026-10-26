@@ -20,7 +20,7 @@ import {
 } from "../components/ui";
 import { number, t } from "../i18n";
 import { bytes, clockTime } from "../lib/format";
-import { useListenersNow } from "../lib/listeners";
+import { statisticsInput, useListenersNow } from "../lib/listeners";
 import { useLive } from "../lib/live";
 import { useAction, useCan } from "../lib/session";
 import { ListenLink, OutputState } from "./Dashboard";
@@ -51,7 +51,7 @@ const MP3_BITRATES = [32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 
 const SAMPLE_RATES = [22_050, 32_000, 44_100, 48_000];
 
 /** An output's listeners at the last minute, and whether sessions are counted too. */
-function ListenerCount({ now, sessions }: { now: Schemas["OutputListeners"] | undefined; sessions: boolean }) {
+function ListenerCount({ now, sessions }: Readonly<{ now: Schemas["OutputListeners"] | undefined; sessions: boolean }>) {
   if (!now) {
     return <span className="muted">–</span>;
   }
@@ -372,14 +372,7 @@ function OutputDialog({
         config: body as Record<string, never>,
         enabled,
         metadata_enabled: metadata,
-        statistics:
-          kind === "icecast"
-            ? {
-                admin_username: adminUser.trim() || null,
-                // Left out, the stored password is kept.
-                ...(removeAdmin ? { admin_password: null } : adminPassword ? { admin_password: adminPassword } : {}),
-              }
-            : null,
+        statistics: kind === "icecast" ? statisticsInput(adminUser, adminPassword, removeAdmin) : null,
       };
       return output
         ? unwrap(api.PUT("/api/v1/outputs/{id}", { params: { path: { id: output.id } }, body: input }))

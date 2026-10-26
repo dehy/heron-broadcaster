@@ -7,15 +7,28 @@
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { type Schemas, api, query, unwrap } from "../api";
-import { type Bar, BarChart, MinuteChart } from "../components/ListenerChart";
+import { type Bar, BarChart, MinuteChart, type Point } from "../components/ListenerChart";
 import { Card, Empty, ErrorView, Loading, PageHead, Segmented } from "../components/ui";
 import { type PlainKey, locale, number, t } from "../i18n";
 import { duration, shortTime } from "../lib/format";
-import { addDays, dayOf, dayStart, percent, useListenersNow } from "../lib/listeners";
+import {
+  type Grouping,
+  type Measure,
+  addDays,
+  barLabel,
+  csvUrl,
+  dayOf,
+  dayStart,
+  decimal,
+  hourLabel,
+  listeningHours,
+  measureText,
+  percent,
+  periodLabel,
+  useListenersNow,
+} from "../lib/listeners";
 import { Link } from "../lib/router";
 
-type Grouping = "day" | "week" | "month";
-type Measure = "listening_hours" | "peak" | "average" | "distinct_listeners";
 type PeriodTotals = Schemas["PeriodTotals"];
 
 const RANGES = [7, 30, 90, 365] as const;
@@ -27,45 +40,41 @@ const MEASURES: { value: Measure; label: PlainKey }[] = [
   { value: "distinct_listeners", label: "statistics.listeners" },
 ];
 
-function decimal(value: number | null | undefined, digits = 1): string {
-  return value === null || value === undefined ? "–" : number(value, { maximumFractionDigits: digits });
-}
-
-/** Listening hours: hundredths while they are few. */
-function hours(value: number | null | undefined): string {
-  return decimal(value, value !== null && value !== undefined && value < 10 ? 2 : 1);
-}
-
-/** A day (`YYYY-MM-DD`) written short, `Oct 19`. */
-function shortDay(day: string, options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" }): string {
-  const [y, m, d] = day.split("-").map(Number);
-  return new Intl.DateTimeFormat(locale(), { ...options, timeZone: "UTC" }).format(
-    new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1)),
+/** What the pointer shows on today's chart. */
+function minuteTooltip(point: Point): ReactNode {
+  return (
+    <>
+      <strong>{number(point.value)}</strong> · {shortTime(point.at)}
+    </>
   );
 }
 
-function periodLabel(day: string, grouping: Grouping): string {
-  switch (grouping) {
-    case "week":
-      return t("statistics.weekOf", { day: shortDay(day) });
-    case "month":
-      return shortDay(day, { month: "long", year: "numeric" });
-    default:
-      return shortDay(day, { weekday: "short", month: "short", day: "numeric" });
-  }
+function periodTooltip(row: PeriodTotals, measure: Measure, grouping: Grouping): ReactNode {
+  return (
+    <>
+      <strong>{measureText(row, measure)}</strong> · {periodLabel(row.day, grouping)}
+    </>
+  );
 }
 
-function csvUrl(path: string, params: Record<string, string | number | undefined>): string {
-  const search = new URLSearchParams({ format: "csv" });
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) {
-      search.set(key, String(value));
-    }
+function hourTooltip(hour: number, row: Schemas["HourOfDay"] | undefined): ReactNode {
+  if (!row) {
+    return (
+      <>
+        {hourLabel(hour)} · {t("statistics.notMeasured")}
+      </>
+    );
   }
-  return `/api/v1/listeners/${path}?${search.toString()}`;
+  return (
+    <>
+      <strong>{decimal(row.average)}</strong> {t("statistics.onAverage")} · {hourLabel(hour)}
+      <br />
+      {t("statistics.peak")} {number(row.peak)} · {t("statistics.listeningHours")} {listeningHours(row.listening_hours)}
+    </>
+  );
 }
 
-function Csv({ href }: { href: string }) {
+function Csv({ href }: Readonly<{ href: string }>) {
   return (
     <a className="btn small" href={href} download>
       {t("statistics.csv")}
@@ -118,7 +127,7 @@ export function Statistics() {
   );
 }
 
-function Tile({ label, value, hint }: { label: string; value: ReactNode; hint?: string | undefined }) {
+function Tile({ label, value, hint }: Readonly<{ label: string; value: ReactNode; hint?: string | undefined }>) {
   return (
     <div className="stat" title={hint}>
       <span className="value">{value}</span>
@@ -127,7 +136,7 @@ function Tile({ label, value, hint }: { label: string; value: ReactNode; hint?: 
   );
 }
 
-function Today({ zone, output }: { zone: string | undefined; output: number | undefined }) {
+function Today({ zone, output }: Readonly<{ zone: string | undefined; output: number | undefined }>) {
   const now = useListenersNow();
   const today = dayOf(Date.now(), zone);
   const from = dayStart(today, zone);
@@ -166,7 +175,7 @@ function Today({ zone, output }: { zone: string | undefined; output: number | un
         <div className="stats-tiles">
           <Tile label={t("statistics.now")} value={current === undefined || current === null ? "–" : number(current)} />
           <Tile label={t("statistics.peak")} value={day ? number(day.peak) : "–"} />
-          <Tile label={t("statistics.listeningHours")} value={hours(day?.listening_hours)} />
+          <Tile label={t("statistics.listeningHours")} value={listeningHours(day?.listening_hours)} />
           <Tile
             label={t("statistics.listeners")}
             value={decimal(day?.distinct_listeners, 0)}
@@ -187,12 +196,8 @@ function Today({ zone, output }: { zone: string | undefined; output: number | un
               points={samples.data.map((s) => ({ at: s.at_unix_ms, value: s.listeners }))}
               from={from}
               to={to}
-              tickLabel={(at) => shortTime(at)}
-              tooltip={(point) => (
-                <>
-                  <strong>{number(point.value)}</strong> · {shortTime(point.at)}
-                </>
-              )}
+              tickLabel={shortTime}
+              tooltip={minuteTooltip}
             />
           ))}
         {day && day.distinct_listeners == null && <p className="muted small">{t("statistics.noSessionsHelp")}</p>}
@@ -201,7 +206,7 @@ function Today({ zone, output }: { zone: string | undefined; output: number | un
   );
 }
 
-function RangeSelect({ value, onChange }: { value: number; onChange: (days: number) => void }) {
+function RangeSelect({ value, onChange }: Readonly<{ value: number; onChange: (days: number) => void }>) {
   return (
     <select className="input" style={{ width: "auto" }} aria-label={t("statistics.range")} value={value} onChange={(e) => onChange(Number(e.target.value))}>
       {RANGES.map((days) => (
@@ -213,20 +218,8 @@ function RangeSelect({ value, onChange }: { value: number; onChange: (days: numb
   );
 }
 
-function measureText(row: PeriodTotals, measure: Measure): string {
-  switch (measure) {
-    case "peak":
-      return number(row.peak);
-    case "average":
-      return decimal(row.average);
-    case "distinct_listeners":
-      return decimal(row.distinct_listeners);
-    default:
-      return hours(row.listening_hours);
-  }
-}
 
-function OverTime({ zone, output }: { zone: string | undefined; output: number | undefined }) {
+function OverTime({ zone, output }: Readonly<{ zone: string | undefined; output: number | undefined }>) {
   const [grouping, setGrouping] = useState<Grouping>("day");
   const [range, setRange] = useState(30);
   const [measure, setMeasure] = useState<Measure>("listening_hours");
@@ -244,13 +237,9 @@ function OverTime({ zone, output }: { zone: string | undefined; output: number |
   const rows = totals.data ?? [];
   const bars: Bar[] = rows.map((row) => ({
     key: row.day,
-    label: grouping === "month" ? shortDay(row.day, { month: "short" }) : shortDay(row.day),
+    label: barLabel(row.day, grouping),
     value: row[measure] ?? 0,
-    tooltip: (
-      <>
-        <strong>{measureText(row, measure)}</strong> · {periodLabel(row.day, grouping)}
-      </>
-    ),
+    tooltip: periodTooltip(row, measure, grouping),
   }));
   const measureLabel = t(MEASURES.find((m) => m.value === measure)?.label ?? "statistics.listeningHours");
 
@@ -310,7 +299,7 @@ function OverTime({ zone, output }: { zone: string | undefined; output: number |
                       <td className="num">{decimal(row.distinct_listeners, grouping === "day" ? 0 : 1)}</td>
                       <td className="num">{number(row.peak)}</td>
                       <td className="num hide-narrow">{decimal(row.average)}</td>
-                      <td className="num">{hours(row.listening_hours)}</td>
+                      <td className="num">{listeningHours(row.listening_hours)}</td>
                       <td className="num hide-narrow">{row.sessions == null ? "–" : number(row.sessions)}</td>
                       <td className="num hide-narrow">
                         {row.average_session_s == null ? "–" : duration(row.average_session_s * 1000)}
@@ -327,7 +316,7 @@ function OverTime({ zone, output }: { zone: string | undefined; output: number |
   );
 }
 
-function HoursOfDay({ zone, output }: { zone: string | undefined; output: number | undefined }) {
+function HoursOfDay({ zone, output }: Readonly<{ zone: string | undefined; output: number | undefined }>) {
   const [range, setRange] = useState(30);
   const to = dayOf(Date.now(), zone);
   const from = addDays(to, 1 - range);
@@ -336,24 +325,13 @@ function HoursOfDay({ zone, output }: { zone: string | undefined; output: number
     queryFn: () =>
       unwrap(api.GET("/api/v1/listeners/hours-of-day", { params: { query: { from, to, ...query({ output_id: output }) } } })),
   });
-  const label = (hour: number) => `${String(hour).padStart(2, "0")}h`;
   const bars: Bar[] = Array.from({ length: 24 }, (_, hour) => {
     const row = byHour.data?.find((h) => h.hour === hour);
     return {
       key: String(hour),
-      label: hour % 3 === 0 ? label(hour) : "",
+      label: hour % 3 === 0 ? hourLabel(hour) : "",
       value: row?.average ?? 0,
-      tooltip: row ? (
-        <>
-          <strong>{decimal(row.average)}</strong> {t("statistics.onAverage")} · {label(hour)}
-          <br />
-          {t("statistics.peak")} {number(row.peak)} · {t("statistics.listeningHours")} {hours(row.listening_hours)}
-        </>
-      ) : (
-        <>
-          {label(hour)} · {t("statistics.notMeasured")}
-        </>
-      ),
+      tooltip: hourTooltip(hour, row),
     };
   });
   return (
@@ -383,7 +361,7 @@ function HoursOfDay({ zone, output }: { zone: string | undefined; output: number
   );
 }
 
-function Departures({ zone }: { zone: string | undefined }) {
+function Departures({ zone }: Readonly<{ zone: string | undefined }>) {
   const [range, setRange] = useState(30);
   const to = dayOf(Date.now(), zone);
   const from = addDays(to, 1 - range);
@@ -407,8 +385,8 @@ function Departures({ zone }: { zone: string | undefined }) {
       </p>
       {tracks.isPending && <Loading />}
       {tracks.isError && <ErrorView error={tracks.error} />}
-      {tracks.data && tracks.data.length === 0 && <Empty>{t("statistics.noTracks")}</Empty>}
-      {tracks.data && tracks.data.length > 0 && (
+      {tracks.data?.length === 0 && <Empty>{t("statistics.noTracks")}</Empty>}
+      {!!tracks.data?.length && (
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -444,7 +422,7 @@ function Departures({ zone }: { zone: string | undefined }) {
   );
 }
 
-function Players({ zone, output }: { zone: string | undefined; output: number | undefined }) {
+function Players({ zone, output }: Readonly<{ zone: string | undefined; output: number | undefined }>) {
   const [range, setRange] = useState(30);
   const to = dayOf(Date.now(), zone);
   const from = addDays(to, 1 - range);
@@ -457,8 +435,8 @@ function Players({ zone, output }: { zone: string | undefined; output: number | 
     <Card title={t("statistics.players")} actions={<RangeSelect value={range} onChange={setRange} />} flush>
       {players.isPending && <Loading />}
       {players.isError && <ErrorView error={players.error} />}
-      {players.data && players.data.length === 0 && <Empty>{t("statistics.noSessions")}</Empty>}
-      {players.data && players.data.length > 0 && (
+      {players.data?.length === 0 && <Empty>{t("statistics.noSessions")}</Empty>}
+      {!!players.data?.length && (
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -475,7 +453,7 @@ function Players({ zone, output }: { zone: string | undefined; output: number | 
                     {player.user_agent || <span className="muted">{t("statistics.unknownPlayer")}</span>}
                   </td>
                   <td className="num">{number(player.sessions)}</td>
-                  <td className="num">{hours(player.listening_hours)}</td>
+                  <td className="num">{listeningHours(player.listening_hours)}</td>
                 </tr>
               ))}
             </tbody>

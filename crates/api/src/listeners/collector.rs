@@ -43,7 +43,7 @@ pub struct StoredStatistics {
 }
 
 impl StoredStatistics {
-    pub const DEFAULT_ADMIN: &'static str = "admin";
+    pub const DEFAULT_ADMIN: &str = "admin";
 
     pub fn parse(json: Option<&str>) -> Self {
         json.and_then(|json| serde_json::from_str(json).ok())
@@ -138,24 +138,35 @@ impl Collector {
             let now = now_ms();
             let wait = MINUTE_MS - (now - POLL_OFFSET_MS).rem_euclid(MINUTE_MS);
             tokio::select! {
-                () = tokio::time::sleep(Duration::from_millis(wait.unsigned_abs())) => {}
-                () = self.recompute.notified() => {
-                    if let Err(error) = self.recompute_kept(now_ms()).await {
-                        tracing::warn!(%error, "cannot recompute the listener totals");
-                    }
-                    continue;
+                () = tokio::time::sleep(Duration::from_millis(wait.unsigned_abs())) => {
+                    next_purge = self.minute(now_ms(), next_purge).await;
                 }
+                () = self.recompute.notified() => self.recompute_now(now_ms()).await,
             }
-            let now = now_ms();
-            if let Err(error) = self.poll(now).await {
-                tracing::warn!(%error, "cannot record listener statistics");
+        }
+    }
+
+    /// A minute's work: the reading, and the purge when it is due. Returns
+    /// when the next purge is due.
+    pub async fn minute(&self, now_ms: i64, next_purge: i64) -> i64 {
+        if let Err(error) = self.poll(now_ms).await {
+            tracing::warn!(%error, "cannot record listener statistics");
+        }
+        if now_ms < next_purge {
+            return next_purge;
+        }
+        match self.purge(now_ms).await {
+            Ok(()) => now_ms + PURGE_INTERVAL_MS,
+            Err(error) => {
+                tracing::warn!(%error, "cannot purge listener statistics");
+                next_purge
             }
-            if now >= next_purge {
-                match self.purge(now).await {
-                    Ok(()) => next_purge = now + PURGE_INTERVAL_MS,
-                    Err(error) => tracing::warn!(%error, "cannot purge listener statistics"),
-                }
-            }
+        }
+    }
+
+    pub(super) async fn recompute_now(&self, now_ms: i64) {
+        if let Err(error) = self.recompute_kept(now_ms).await {
+            tracing::warn!(%error, "cannot recompute the listener totals");
         }
     }
 

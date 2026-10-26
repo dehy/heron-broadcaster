@@ -17,7 +17,7 @@ use jiff::tz::TimeZone;
 
 use super::collector::Collector;
 use super::totals;
-use crate::settings::{self, StationSettings};
+use crate::settings::{self, StationSettings, StatisticsSettings};
 
 const MIN: i64 = 60_000;
 /// `admin:pw`.
@@ -113,10 +113,11 @@ async fn add_output(
     name: &str,
     port: u16,
     mount: &str,
-    admin: bool,
+    admin_password: Option<&str>,
 ) -> u64 {
     let config = serde_json::json!({"host": "127.0.0.1", "port": port, "mount": mount, "password": "hackme"});
-    let statistics = admin.then_some(r#"{"admin_password": "pw"}"#);
+    let statistics =
+        admin_password.map(|password| format!(r#"{{"admin_password": "{password}"}}"#));
     sqlx::query(
         "INSERT INTO outputs (name, kind, encoder_profile_id, config, statistics, enabled)
          SELECT ?, 'icecast', MIN(id), ?, ?, TRUE FROM encoder_profiles",
@@ -197,8 +198,21 @@ async fn simulated_listeners_are_counted() {
     .unwrap();
     let server: Shared = Arc::default();
     let port = fake_icecast(Arc::clone(&server)).await;
-    let live = add_output(&pool, "Live", port, "/live", true).await;
-    let other = add_output(&pool, "Other", port, "/other", false).await;
+    let live = add_output(&pool, "Live", port, "/live", Some("pw")).await;
+    let other = add_output(&pool, "Other", port, "/other", None).await;
+    // Wrong admin credentials: listener counts only, and the error said.
+    let refused = add_output(&pool, "Refused", port, "/none", Some("wrong")).await;
+    // Not read: HLS has no server to ask, a disabled output, settings the
+    // engine would refuse.
+    sqlx::query(
+        "INSERT INTO outputs (name, kind, encoder_profile_id, config, enabled)
+         SELECT 'HLS', 'hls', MIN(id), '{}', TRUE FROM encoder_profiles
+         UNION ALL SELECT 'Off', 'icecast', MIN(id), '{\"host\": \"127.0.0.1\", \"mount\": \"/live\", \"password\": \"x\"}', FALSE FROM encoder_profiles
+         UNION ALL SELECT 'Broken', 'icecast', MIN(id), '{\"host\": \"127.0.0.1\", \"mount\": \"live\", \"password\": \"x\"}', TRUE FROM encoder_profiles",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (day, _) = totals::day_bounds(date(2026, 10, 20), &TimeZone::UTC);
     let at = |hour: i64, minute: i64, second: i64| {
@@ -287,6 +301,7 @@ async fn simulated_listeners_are_counted() {
     let collector = Collector::new(pool.clone()).unwrap();
     let mut polls: Vec<i64> = (0..=70).map(|m| at(10, m, 1)).collect();
     polls.extend([at(23, 59, 1), at(24, 0, 1), at(24, 1, 1)]);
+    let mut next_purge = 0;
     for now in polls {
         {
             let mut fake = server.lock().unwrap();
@@ -294,9 +309,18 @@ async fn simulated_listeners_are_counted() {
             // Down from 10:50 to 10:52.
             fake.down = (at(10, 50, 0)..at(10, 53, 0)).contains(&now);
         }
-        collector.poll(now).await.unwrap();
+        next_purge = collector.minute(now, next_purge).await;
         if now == at(10, 20, 1) {
             let last = collector.last();
+            assert_eq!(last.len(), 3, "{last:?}");
+            assert_eq!(
+                (last[2].output_id, last[2].listeners, last[2].sessions),
+                (refused, Some(0), false)
+            );
+            assert_eq!(
+                last[2].error.as_deref(),
+                Some("listener list: wrong admin credentials")
+            );
             assert_eq!(last[0].listeners, Some(3));
             assert!(last[0].sessions);
             assert_eq!(last[1].listeners, Some(0));
@@ -466,6 +490,45 @@ async fn simulated_listeners_are_counted() {
             (second, 2.0, Some(1)),
             (first, 3.0, Some(1))
         ]
+    );
+
+    // A shorter minimum session counts the probe once totals are recomputed.
+    settings::save(
+        &pool,
+        StatisticsSettings::SETTINGS_NAME,
+        &StatisticsSettings {
+            min_session_s: 10,
+            retention_days: 90,
+        },
+    )
+    .await
+    .unwrap();
+    collector.recompute_now(at(24, 2, 0)).await;
+    let recomputed = total(&pool, "2026-10-20", Some(live), None).await;
+    assert_eq!(recomputed.sessions, Some(5));
+    assert_eq!(recomputed.distinct_listeners, Some(5));
+
+    // Past the retention, sessions and samples go and the totals stay, even
+    // when recomputed.
+    let later = at(24, 2, 0) + 91 * 86_400_000;
+    assert_eq!(collector.minute(later, next_purge).await, later + 3_600_000);
+    let (sessions, samples): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM listener_sessions), (SELECT COUNT(*) FROM listener_samples)",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // E's session of the 21st is still open; the minute just read stays.
+    assert_eq!((sessions, samples), (1, 3));
+    collector.recompute_now(later).await;
+    assert_eq!(
+        total(&pool, "2026-10-20", Some(live), None).await.sessions,
+        Some(5)
+    );
+    // Not due yet: no purge.
+    assert_eq!(
+        collector.minute(later + 60_000, later + 3_600_000).await,
+        later + 3_600_000
     );
     db.drop().await;
 }

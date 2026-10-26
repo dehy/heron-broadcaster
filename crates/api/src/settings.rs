@@ -107,7 +107,7 @@ pub struct StatisticsSettings {
 }
 
 impl StatisticsSettings {
-    pub const SETTINGS_NAME: &'static str = "statistics";
+    pub const SETTINGS_NAME: &str = "statistics";
 
     fn check(&self) -> Result<(), String> {
         if self.min_session_s > 3_600 {

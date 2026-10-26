@@ -889,10 +889,33 @@ async fn listener_statistics_through_the_api() {
         "/listeners/days?from=2026-10-25&to=2026-10-19",
         "/listeners/days?from=yesterday&to=2026-10-19",
         "/listeners/tracks?from=2026-10-19&to=2026-10-25&limit=0",
+        "/listeners/players?from=2026-10-19&to=2026-10-25&limit=101",
     ] {
         let (status, _) = viewer.request(Method::GET, bad, None).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
     }
+    for path in [
+        format!("/listeners/samples?from_unix_ms=0&to_unix_ms=60000&output_id={id}"),
+        format!("/listeners/players?from=2026-10-19&to=2026-10-25&output_id={id}&limit=5"),
+        "/listeners/tracks?from=2026-10-19&to=2026-10-25&min_plays=1&limit=5".to_owned(),
+    ] {
+        assert_eq!(viewer.get(&path).await, json!([]), "{path}");
+    }
+    let csv = |path: &str| {
+        let request = viewer
+            .http
+            .get(format!("{}{path}", viewer.base))
+            .header("cookie", viewer.cookie.as_deref().unwrap());
+        async move { request.send().await.unwrap().text().await.unwrap() }
+    };
+    assert_eq!(
+        csv("/listeners/hours-of-day?from=2026-10-19&to=2026-10-25&format=csv").await,
+        "hour,days,average,peak,listening_hours\n8,1,9.00,12,9.00\n"
+    );
+    assert_eq!(
+        csv("/listeners/tracks?from=2026-10-19&to=2026-10-25&format=csv").await,
+        "track_id,artist,title,plays,listeners_start,listeners_end,departures,departure_rate\n"
+    );
     station.stop().await;
 }
 
