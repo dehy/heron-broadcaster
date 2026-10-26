@@ -5140,6 +5140,84 @@
         }
       }
     },
+    "/api/v1/tracks/tag-overrides": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Edits the tags of the selected tracks in Heron's database only, when\nthe library setting `write_tags` is off: the files are not changed.\nThe values are shown instead of the files' tags, and survive a rescan,\nuntil they are cleared. Operators and admins.",
+        "operationId": "override_tags",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagOverrides"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks/tag-overrides/clear": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Drops the tags kept in Heron's database for the selected tracks (at most\n10,000): they show their files' tags again. Works whatever `write_tags`\nsays. Operators and admins.",
+        "operationId": "clear_tag_overrides",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagOverridesClear"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tracks/tags": {
       "post": {
         "tags": [
@@ -8010,6 +8088,13 @@
             "format": "int32",
             "description": "1 to 3650.",
             "minimum": 0
+          },
+          "write_tags": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Write tags edited from the browser into the files (true), or keep\nthem in Heron's database (false)."
           }
         },
         "additionalProperties": false
@@ -8025,7 +8110,8 @@
           "embed_cover",
           "max_upload_mb",
           "min_free_mb",
-          "trash_days"
+          "trash_days",
+          "write_tags"
         ],
         "properties": {
           "acoustid_key_set": {
@@ -8062,6 +8148,10 @@
             "format": "int32",
             "description": "Days deleted tracks stay in the trash.",
             "minimum": 0
+          },
+          "write_tags": {
+            "type": "boolean",
+            "description": "Tags edited from the browser are written into the files; off, they\nare kept in Heron's database and the files are left alone."
           }
         }
       },
@@ -11236,6 +11326,51 @@
           "mood"
         ]
       },
+      "TagOverrides": {
+        "type": "object",
+        "required": [
+          "selection",
+          "set"
+        ],
+        "properties": {
+          "selection": {
+            "$ref": "#/components/schemas/TrackSelection"
+          },
+          "set": {
+            "type": "object",
+            "description": "Fields set to the same value on every track; `null` removes the\nfield. Fields left out keep each track's value. Title, artist,\nalbum, album artist, year, genre, track and disc only.",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "TagOverridesClear": {
+        "type": "object",
+        "required": [
+          "selection"
+        ],
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TagField"
+            },
+            "description": "The fields to give back to the files; every field when empty."
+          },
+          "selection": {
+            "$ref": "#/components/schemas/TrackSelection"
+          }
+        },
+        "additionalProperties": false
+      },
       "Target": {
         "oneOf": [
           {
@@ -11654,6 +11789,7 @@
             "required": [
               "file",
               "overrides",
+              "tag_overrides",
               "playout",
               "categories"
             ],
@@ -11718,6 +11854,13 @@
               },
               "playout": {
                 "$ref": "#/components/schemas/EffectivePlayout"
+              },
+              "tag_overrides": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TagField"
+                },
+                "description": "Tags kept in Heron's database (library setting `write_tags` off),\nshown instead of the file's: `POST /tracks/tag-overrides/clear`\ngives them back to the file."
               }
             }
           }

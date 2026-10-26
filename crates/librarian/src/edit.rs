@@ -141,6 +141,7 @@ async fn edit_one(
     // A file changed since the last scan is left alone: the scanner reads it first.
     let size: Option<u64> = row.try_get("file_size")?;
     let mtime_us: Option<i64> = row.try_get("file_mtime_us")?;
+    let written = fields_written(&applied);
     let operation = Operation {
         batch_id,
         subject: Subject::Existing(track_id),
@@ -155,7 +156,6 @@ async fn edit_one(
             .zip(mtime_us)
             .map(|(size, mtime_us)| FileStamp { size, mtime_us }),
     };
-    let written = fields_written(&applied);
     let outcome = journal::execute(pool, roots, operation).await;
     if outcome.is_ok() {
         drop_overrides(pool, roots, track_id, &path, &written).await?;

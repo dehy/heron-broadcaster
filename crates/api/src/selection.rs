@@ -668,7 +668,7 @@ async fn clear_tag_overrides(
 }
 
 /// ` AND field IN (…)`, unless every field is meant.
-fn push_fields(query: &mut QueryBuilder<'_, sqlx::MySql>, fields: &[TagField]) {
+fn push_fields(query: &mut QueryBuilder<sqlx::MySql>, fields: &[TagField]) {
     if fields.is_empty() {
         return;
     }

@@ -695,7 +695,7 @@ async fn finish(
         .execute(&mut *tx)
         .await?;
     if let Some(details) = &details {
-        heron_library::details::save(&mut *tx, track_id, details).await?;
+        heron_library::details::save(&mut tx, track_id, details).await?;
     }
     sqlx::query("UPDATE library_moves SET status = ?, error = NULL WHERE id = ?")
         .bind(status)
