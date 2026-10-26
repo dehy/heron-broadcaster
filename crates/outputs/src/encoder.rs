@@ -29,6 +29,12 @@ pub enum EncodeError {
     Mp3(String),
     #[error(transparent)]
     Resample(#[from] heron_dsp::resample::Error),
+    /// The external FFmpeg encoder failed; it starts again after a delay.
+    #[error("{0}")]
+    External(String),
+    /// The external FFmpeg encoder waits before starting again.
+    #[error("waiting before starting ffmpeg again")]
+    Waiting,
 }
 
 pub trait Encoder: Send {
@@ -44,9 +50,14 @@ pub trait Encoder: Send {
 pub fn build(profile: &EncoderProfile) -> Result<Box<dyn Encoder>, ConfigError> {
     match profile.encoder {
         EncoderKind::Mp3 => Ok(Box::new(Mp3Encoder::new(profile)?)),
+        EncoderKind::ExternalFfmpeg => {
+            Ok(Box::new(crate::external::ExternalEncoder::new(profile)?))
+        }
         kind => Err(ConfigError::Profile {
             profile: profile.name.clone(),
-            reason: format!("the {kind:?} encoder arrives in M11; only MP3 is available"),
+            reason: format!(
+                "the {kind:?} encoder arrives in M11; MP3 and the external FFmpeg encoder are available"
+            ),
         }),
     }
 }

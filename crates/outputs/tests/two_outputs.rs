@@ -257,3 +257,71 @@ async fn changing_one_output_leaves_the_others_streaming() {
     stop.store(true, Ordering::Relaxed);
     feeder.join().unwrap();
 }
+
+fn external(id: u64, codec: &str) -> EncoderProfile {
+    EncoderProfile {
+        id,
+        name: format!("FFmpeg {codec}"),
+        encoder: EncoderKind::ExternalFfmpeg,
+        bitrate_kbps: Some(96),
+        sample_rate: 44_100,
+        channels: 2,
+        options: serde_json::json!({ "codec": codec }),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_external_ffmpeg_output_streams_and_a_broken_one_reports_why() {
+    let has_ffmpeg = std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+        .is_ok_and(|output| output.status.success());
+    if !has_ffmpeg {
+        eprintln!("ffmpeg not installed, skipping");
+        return;
+    }
+    let (mp3, aac, broken) = (
+        FakeIcecast::start(0).await,
+        FakeIcecast::start(0).await,
+        FakeIcecast::start(0).await,
+    );
+    let (master_tx, master_rx) = rtrb::RingBuffer::new(48_000 * 2 * 2);
+    let stop = Arc::new(AtomicBool::new(false));
+    let feeder = feed(master_tx, Arc::clone(&stop));
+    let (_metadata_tx, metadata_rx) = watch::channel(NowPlaying::default());
+    let mut outputs =
+        Outputs::new(master_rx, metadata_rx, tokio::runtime::Handle::current()).unwrap();
+    outputs
+        .apply(&OutputsConfig {
+            encoder_profiles: vec![
+                profile(1, 128, 44_100),
+                external(2, "aac"),
+                external(3, "no_such_codec"),
+            ],
+            outputs: vec![
+                output(1, 1, mp3.port),
+                output(2, 2, aac.port),
+                output(3, 3, broken.port),
+            ],
+        })
+        .unwrap();
+
+    wait_until("the MP3 and AAC outputs to stream", || {
+        mp3.received() > 16_000 && aac.received() > 12_000
+    })
+    .await;
+    wait_until("the broken encoder's error", || {
+        outputs.snapshot()[2]
+            .encoder_error
+            .as_deref()
+            .is_some_and(|error| error.contains("no_such_codec"))
+    })
+    .await;
+    let snapshot = outputs.snapshot();
+    assert_eq!(snapshot[0].encoder_error, None);
+    assert_eq!(snapshot[1].encoder_error, None);
+    assert_eq!(broken.received(), 0);
+
+    stop.store(true, Ordering::Relaxed);
+    feeder.join().unwrap();
+}

@@ -560,6 +560,37 @@ async fn settings_and_outputs_reach_the_engine() {
     )
     .await;
 
+    // The external FFmpeg encoder: options checked, never a command line.
+    let (status, body) = admin
+        .send(
+            Method::POST,
+            "/encoder-profiles",
+            json!({"name": "AAC+", "encoder": "external_ffmpeg", "bitrate_kbps": 48,
+                   "sample_rate": 44100, "channels": 2,
+                   "options": {"codec": "libfdk_aac -y /tmp/x", "profile": "aac_he_v2"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, aac) = admin
+        .send(
+            Method::POST,
+            "/encoder-profiles",
+            json!({"name": "AAC+", "encoder": "external_ffmpeg", "bitrate_kbps": 48,
+                   "sample_rate": 44100, "channels": 2,
+                   "options": {"codec": "libfdk_aac", "profile": "aac_he_v2"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{aac}");
+    assert_eq!(aac["options"]["codec"], "libfdk_aac");
+    let (status, _) = admin
+        .request(
+            Method::DELETE,
+            &format!("/encoder-profiles/{}", aac["id"]),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
     // An output: validated, stored without showing its password, pushed.
     let profiles = admin.get("/encoder-profiles").await;
     let profile = profiles[0]["id"].as_u64().unwrap();

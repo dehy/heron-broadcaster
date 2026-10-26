@@ -160,6 +160,9 @@ services:
       # Connections to stream servers go through heron-relay, so an upgrade
       # hands them over to the new engine (docs/handover.md).
       HERON_RELAY_SOCKET: /run/heron/relay/relay.sock
+      # The external FFmpeg encoder's binary (docs/outputs.md), mounted with a
+      # docker-compose.override.yml; ffmpeg on the PATH when empty.
+      HERON_FFMPEG: ${HERON_FFMPEG:-}
     volumes:
       - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
       - ${HERON_FALLBACK_DIR:-./data/fallback}:/var/lib/heron/fallback:ro
