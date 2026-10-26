@@ -84,6 +84,10 @@ pub struct LibrarySettings {
     pub min_free_mb: u64,
     /// Days deleted tracks stay in the trash before it is purged.
     pub trash_days: u32,
+    /// Tags edited from the browser are written into the files. Off, they
+    /// are kept in Heron's database (`track_tag_overrides`) and the files
+    /// are left as they are.
+    pub write_tags: bool,
 }
 
 impl LibrarySettings {
@@ -104,6 +108,7 @@ impl Default for LibrarySettings {
             max_upload_mb: 2048,
             min_free_mb: 5120,
             trash_days: 30,
+            write_tags: true,
         }
     }
 }
@@ -120,6 +125,7 @@ impl std::fmt::Debug for LibrarySettings {
             .field("max_upload_mb", &self.max_upload_mb)
             .field("min_free_mb", &self.min_free_mb)
             .field("trash_days", &self.trash_days)
+            .field("write_tags", &self.write_tags)
             .finish()
     }
 }
@@ -156,5 +162,14 @@ mod tests {
         assert_eq!(settings.acoustid_key.as_deref(), Some("s3cret"));
         assert_eq!(settings.layout, LibrarySettings::DEFAULT_LAYOUT);
         assert!(!format!("{settings:?}").contains("s3cret"));
+    }
+
+    #[test]
+    fn tags_are_written_into_the_files_unless_turned_off() {
+        // Settings saved before `write_tags` existed keep writing the files.
+        let saved: LibrarySettings = serde_json::from_str(r#"{"trash_days": 7}"#).unwrap();
+        assert!(saved.write_tags);
+        let off: LibrarySettings = serde_json::from_str(r#"{"write_tags": false}"#).unwrap();
+        assert!(!off.write_tags);
     }
 }

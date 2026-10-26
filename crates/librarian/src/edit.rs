@@ -4,6 +4,10 @@
 //! place, as one batch that can be undone byte for byte. Files are not
 //! moved (organizing the library files them by their new tags) and keep
 //! their track: ID, analysis, categories and history.
+//!
+//! Tags kept in Heron's database (`track_tag_overrides`, while the library
+//! setting `write_tags` was off) for the fields written are dropped: the
+//! file has the values now.
 
 use heron_core::library::{BatchReport, FieldValues, SkippedFile, TagField};
 use heron_core::{FileStamp, LibraryPath};
@@ -130,6 +134,7 @@ async fn edit_one(
         }
     };
     if previous == applied {
+        drop_overrides(pool, roots, track_id, &path, &fields_written(&applied)).await?;
         report.unchanged += 1;
         return Ok(());
     }
@@ -150,9 +155,47 @@ async fn edit_one(
             .zip(mtime_us)
             .map(|(size, mtime_us)| FileStamp { size, mtime_us }),
     };
-    organize::record_outcome(
-        report,
-        path.as_str(),
-        journal::execute(pool, roots, operation).await,
-    )
+    let written = fields_written(&applied);
+    let outcome = journal::execute(pool, roots, operation).await;
+    if outcome.is_ok() {
+        drop_overrides(pool, roots, track_id, &path, &written).await?;
+    }
+    organize::record_outcome(report, path.as_str(), outcome)
+}
+
+fn fields_written(applied: &FieldValues) -> Vec<TagField> {
+    applied.keys().copied().collect()
+}
+
+/// Drops the track's overrides of `fields`, which the file has now, and
+/// reads the file's tags back into the track if there were any.
+async fn drop_overrides(
+    pool: &MySqlPool,
+    roots: &Roots,
+    track_id: u64,
+    path: &LibraryPath,
+    fields: &[TagField],
+) -> Result<(), Error> {
+    let mut dropped = 0;
+    for field in fields {
+        dropped += sqlx::query("DELETE FROM track_tag_overrides WHERE track_id = ? AND field = ?")
+            .bind(track_id)
+            .bind(field.as_str())
+            .execute(pool)
+            .await?
+            .rows_affected();
+    }
+    if dropped == 0 {
+        return Ok(());
+    }
+    let absolute = path.resolve(&roots.library);
+    match tokio::task::spawn_blocking(move || tags::read(&absolute)).await? {
+        Ok(read) => {
+            let mut connection = pool.acquire().await?;
+            heron_library::details::save(&mut connection, track_id, &read).await?;
+        }
+        // The scanner reads it again when the file changes.
+        Err(error) => tracing::warn!(%path, %error, "cannot read the tags back"),
+    }
+    Ok(())
 }

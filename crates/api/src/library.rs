@@ -491,7 +491,8 @@ impl Library {
             tokio::task::spawn_blocking(move || heron_library::tags::read(&absolute)).await?;
         match read {
             Ok(read) => {
-                details::save(&self.pool, id, &read).await?;
+                let mut connection = self.pool.acquire().await?;
+                details::save(&mut connection, id, &read).await?;
                 Ok(true)
             }
             Err(error) => {

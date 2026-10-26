@@ -2101,6 +2101,145 @@ async fn track_details_labels_programming_and_tags() {
         admin.get(&format!("/tracks/{track}")).await["genre"],
         Value::Null
     );
+
+    // With write_tags off, edits are kept in Heron's database: the file is
+    // left alone, and a task asked before the switch writes nothing.
+    let (status, queued) = admin
+        .send(
+            Method::POST,
+            "/tracks/tags",
+            json!({"selection": {"track_ids": [track]}, "set": {"genre": "Soul"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
+    let (status, settings) = admin
+        .send(
+            Method::PATCH,
+            "/settings/library",
+            json!({"write_tags": false}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    assert_eq!(settings["write_tags"], false);
+    assert!(librarian.run_next().await.unwrap());
+    let queued = admin.get(&format!("/library/tasks/{}", queued["id"])).await;
+    assert_eq!(queued["status"], "failed", "{queued}");
+    assert_eq!(std::fs::read(&file).unwrap(), original);
+
+    let (status, refused) = admin
+        .send(
+            Method::POST,
+            "/tracks/tags",
+            json!({"selection": {"track_ids": [track]}, "set": {"genre": "Soul"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    let (status, refused) = viewer
+        .send(
+            Method::POST,
+            "/tracks/tag-overrides",
+            json!({"selection": {"track_ids": [track]}, "set": {"title": "x"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    let (status, refused) = admin
+        .send(
+            Method::POST,
+            "/tracks/tag-overrides",
+            json!({"selection": {"track_ids": [track]}, "set": {"isrc": "USRC17607839"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    let (status, result) = admin
+        .send(
+            Method::POST,
+            "/tracks/tag-overrides",
+            json!({"selection": {"track_ids": [track]},
+                   "set": {"title": " Corrected ", "year": "1977", "album": "Live", "disc": null}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["changed"], 4);
+    assert_eq!(std::fs::read(&file).unwrap(), original, "file untouched");
+    let detail = admin.get(&format!("/tracks/{track}")).await;
+    assert_eq!(detail["title"], "Corrected");
+    assert_eq!(detail["year"], 1977);
+    assert_eq!(detail["album"], "Live");
+    assert_eq!(
+        detail["tag_overrides"],
+        json!(["title", "album", "year", "disc"])
+    );
+
+    // The scanner reading the file again keeps them.
+    let read = heron_library::tags::read(&file).unwrap();
+    let mut connection = pool.acquire().await.unwrap();
+    heron_library::details::save(&mut connection, track, &read)
+        .await
+        .unwrap();
+    drop(connection);
+    assert_eq!(
+        admin.get(&format!("/tracks/{track}")).await["title"],
+        "Corrected"
+    );
+
+    // Cleared, a field shows the file's tag again (this file has none).
+    let (status, result) = admin
+        .send(
+            Method::POST,
+            "/tracks/tag-overrides/clear",
+            json!({"selection": {"track_ids": [track]}, "fields": ["title"]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["changed"], 1);
+    let detail = admin.get(&format!("/tracks/{track}")).await;
+    assert_eq!(detail["title"], Value::Null);
+    assert_eq!(detail["year"], 1977);
+    assert_eq!(detail["tag_overrides"], json!(["album", "year", "disc"]));
+
+    // Back to writing the files: a field written is dropped from the
+    // overrides, the others stay.
+    admin
+        .send(
+            Method::PATCH,
+            "/settings/library",
+            json!({"write_tags": true}),
+        )
+        .await;
+    let (status, refused) = admin
+        .send(
+            Method::POST,
+            "/tracks/tag-overrides",
+            json!({"selection": {"track_ids": [track]}, "set": {"title": "x"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    let (status, task) = admin
+        .send(
+            Method::POST,
+            "/tracks/tags",
+            json!({"selection": {"track_ids": [track]}, "set": {"year": "2001"}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{task}");
+    assert!(librarian.run_next().await.unwrap());
+    let detail = admin.get(&format!("/tracks/{track}")).await;
+    assert_eq!(detail["year"], 2001);
+    assert_eq!(detail["album"], "Live");
+    assert_eq!(detail["tag_overrides"], json!(["album", "disc"]));
+    let (status, result) = admin
+        .send(
+            Method::POST,
+            "/tracks/tag-overrides/clear",
+            json!({"selection": {"track_ids": [track]}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["changed"], 2);
+    let detail = admin.get(&format!("/tracks/{track}")).await;
+    assert_eq!(detail["album"], Value::Null);
+    assert_eq!(detail["year"], 2001);
+    assert_eq!(detail["tag_overrides"], json!([]));
     station.stop().await;
 }
 

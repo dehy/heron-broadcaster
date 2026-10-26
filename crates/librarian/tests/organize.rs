@@ -223,3 +223,56 @@ async fn undo_never_overwrites() {
     common::assert_tracks_match_files(pool, library).await;
     db.drop().await;
 }
+
+#[tokio::test]
+async fn tags_kept_in_heron_file_tracks_without_touching_tags() {
+    let Some(db) = ScratchDatabase::create().await else {
+        return;
+    };
+    let pool = &db.pool;
+    let (_dir, roots) = temp_roots();
+    let library = &roots.library;
+    write_tagged(
+        &library.join("old/a.wav"),
+        1,
+        &tags("Band", "Albm", 1, "One"),
+    );
+    let track = insert_track(pool, library, "old/a.wav").await;
+    // The album fixed in Heron (write_tags off), not in the file.
+    sqlx::query(
+        "INSERT INTO track_tag_overrides (track_id, field, value) VALUES (?, 'album', 'Album')",
+    )
+    .bind(track)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE tracks SET album = 'Album' WHERE id = ?")
+        .bind(track)
+        .execute(pool)
+        .await
+        .unwrap();
+    let before = heron_library::tags::read(&library.join("old/a.wav"))
+        .unwrap()
+        .tags;
+
+    let layout = Layout::parse(LibrarySettings::DEFAULT_LAYOUT).unwrap();
+    let plan = organize::plan(pool, &roots, &layout).await.unwrap();
+    assert_eq!(plan.moves.len(), 1, "{plan:?}");
+    assert_eq!(plan.moves[0].to, "Band/Album/01 One.wav");
+    let report = organize::apply(pool, &roots, &plan).await.unwrap();
+    assert_eq!(report.done, 1, "{report:?}");
+
+    let moved = library.join("Band/Album/01 One.wav");
+    assert_eq!(heron_library::tags::read(&moved).unwrap().tags, before);
+    let album: Option<String> = sqlx::query_scalar("SELECT album FROM tracks WHERE id = ?")
+        .bind(track)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        album.as_deref(),
+        Some("Album"),
+        "the override stays applied"
+    );
+    db.drop().await;
+}

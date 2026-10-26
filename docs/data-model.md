@@ -37,6 +37,7 @@ See [Library management](library.md).
 |---|---|
 | `library_batches` | id, kind (import, organize, undo, review: a release picked on the review screen, edit: tags edited from the browser, delete, purge), undoes (the batch an undo reverts), created_at, finished_at |
 | `library_moves` | id, batch_id, track_id, from_root (incoming, library, staging), from_path, to_path, method (rename, copy), temp_path, content_hash (copies), status (pending, moved, done, abandoned, undone), error — the journal, written before a file is touched |
+| `track_tag_overrides` | track_id, field (a tag: title, artist, album, album_artist, year, genre, track, disc), value (NULL removes the field), updated_by, updated_at. Tags kept in Heron instead of the files while `write_tags` is off; applied on top of the file's tags whenever the track's columns are read from its file |
 | `track_tag_changes` | id, track_id, move_id, kind (tags: identification's, fields: edited from the browser), previous and applied tags (JSON), cover_embedded, restore (rebuilds the previous file byte for byte from the one written), created_at, undone_at |
 | `library_tasks` | id, kind (organize_plan, organize_apply, undo, review_apply, artist_relations, edit_tags, musicbrainz_details, staging_import, delete, empty_trash), params (JSON, the request), status (pending, running, done, failed), result (JSON: the dry run's moves or the batch report), error, requested_by, created_at, started_at, finished_at — work the API asks of `heron-librarian` |
 
