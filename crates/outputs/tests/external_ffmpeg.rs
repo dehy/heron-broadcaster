@@ -182,3 +182,32 @@ fn a_killed_ffmpeg_is_started_again() {
         "a fresh ADTS stream"
     );
 }
+
+/// HE-AAC v2 (AAC+) with an `ffmpeg` built with `libfdk_aac`
+/// (`docker/build-ffmpeg-fdk.sh`), named by `HERON_TEST_FFMPEG_FDK`.
+#[test]
+fn encodes_he_aac_v2_with_libfdk_aac() {
+    let Some(program) = std::env::var_os("HERON_TEST_FFMPEG_FDK").map(PathBuf::from) else {
+        eprintln!("HERON_TEST_FFMPEG_FDK not set, skipping");
+        return;
+    };
+    let mut profile = profile("libfdk_aac");
+    profile.bitrate_kbps = Some(48);
+    profile.options = json!({"codec": "libfdk_aac", "profile": "aac_he_v2"});
+    let mut encoder = ExternalEncoder::with_program(&profile, program).unwrap();
+    let mut aac = Vec::new();
+    let errors = feed(&mut encoder, 3, &mut aac);
+    assert!(errors.is_empty(), "{errors:?}");
+    encoder.flush(&mut aac).unwrap();
+    // HE-AAC codes the low band at half the rate: 3 s at 22.05 kHz is 65
+    // frames of 1,024 samples; 48 kbps is about 18 kB.
+    let frames = adts_frames(&aac);
+    assert!((58..=72).contains(&frames), "{frames} frames");
+    assert!(
+        (12_000..=26_000).contains(&aac.len()),
+        "{} bytes",
+        aac.len()
+    );
+    // The ADTS header's sampling frequency index: 7 is 22,050 Hz.
+    assert_eq!((aac[2] >> 2) & 0x0F, 7, "the core rate of HE-AAC");
+}
