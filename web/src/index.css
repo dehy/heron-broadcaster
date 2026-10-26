@@ -806,6 +806,14 @@ table.table {
 }
 
 /* A label on a track. */
+a.badge-link {
+  text-decoration: none;
+}
+
+a.badge-link:hover {
+  text-decoration: underline;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;

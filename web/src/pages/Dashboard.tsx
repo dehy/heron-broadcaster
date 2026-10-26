@@ -313,7 +313,7 @@ function Deck({
           </div>
           <div className="row" style={{ flexWrap: "nowrap" }}>
             {shaping && (
-              <Link to="/eq" className="badge accent" title={t("dashboard.eqOn")}>
+              <Link to="/eq" className="badge accent badge-link" title={t("dashboard.eqOn")}>
                 {t("dashboard.eq")}
               </Link>
             )}

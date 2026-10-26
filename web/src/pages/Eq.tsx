@@ -203,10 +203,11 @@ function sameGains(a: number[], b: number[]): boolean {
   return a.length === b.length && a.every((gain, i) => gain === b[i]);
 }
 
-// The curve: 20 Hz to 20 kHz on a log scale, ±18 dB.
+// The curve: 20 Hz to 20 kHz on a log scale, ±15 dB: a band's ±12 and
+// some of what neighbours add up to.
 const WIDTH = 600;
 const HEIGHT = 140;
-const RANGE_DB = 18;
+const RANGE_DB = 15;
 const x = (frequency: number) => (Math.log10(frequency / 20) / 3) * WIDTH;
 const y = (db: number) => HEIGHT / 2 - (Math.max(-RANGE_DB, Math.min(RANGE_DB, db)) / RANGE_DB) * (HEIGHT / 2);
 
