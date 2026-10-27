@@ -24,6 +24,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | M9 | [Deck EQ](m9-deck-eq.md) | M2 | Not started |
 | M10 | [AGC & multiband processing](m10-agc-multiband.md) | M9 | Not started |
 | M11 | [More encoders, sinks & live DJ](m11-sinks-live-dj.md) | M3 | Not started |
+| M12 | [Configuration backups](m12-config-backups.md) | M4 | Not started |
 
 ## Dependency graph
 
@@ -36,6 +37,7 @@ M0 ─► M1 ─┬─► M1b
                   │       │       └─► M5d
                   │       ├─► M6
                   │       ├─► M7
-                  │       └─► M7b
+                  │       ├─► M7b
+                  │       └─► M12
                   └─► M9 ─► M10
 ```
