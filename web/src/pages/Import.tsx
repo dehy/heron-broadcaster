@@ -14,6 +14,7 @@ import { number, t } from "../i18n";
 import { dateTime, duration } from "../lib/format";
 import { Link } from "../lib/router";
 import { useAction } from "../lib/session";
+import { useCategoryTypes } from "./CategoryTypes";
 
 type SourceRow = Schemas["ImportSourceRow"];
 type Preview = Schemas["ImportPreview"];
@@ -25,7 +26,8 @@ type ProblemAction = Schemas["ImportProblemAction"];
 /** How a row's conflicts are settled. */
 type Resolution = { kind: "import" } | { kind: "heron" } | { kind: "edit"; values: Partial<Record<Field, string>> };
 
-type CategoryChoice = { name: string; fx_player: boolean; disable_tracks: boolean };
+/** `type_id` undefined: the type guessed from the export (Jingle, else Song). */
+type CategoryChoice = { name: string; fx_player: boolean; disable_tracks: boolean; type_id?: number | null };
 type ProblemChoice = { action: ProblemAction; label: string };
 
 type Filter = "matched" | "conflicts" | "length" | "warnings" | "skipped";
@@ -114,6 +116,12 @@ export function Import() {
   const [resolutions, setResolutions] = useState<Record<number, Resolution>>({});
   const [filter, setFilter] = useState<Filter>("matched");
   const [result, setResult] = useState<Schemas["TrackImport"] | null>(null);
+
+  const types = useCategoryTypes();
+  const typeNamed = (name: string) =>
+    types.data?.find((categoryType) => categoryType.name.toLowerCase() === name)?.id ?? null;
+  const typeOf = (choice: CategoryChoice, isJingle: boolean) =>
+    choice.type_id !== undefined ? choice.type_id : typeNamed(isJingle ? "jingle" : "song");
 
   const history = useQuery({
     queryKey: ["imports"],
@@ -208,6 +216,7 @@ export function Import() {
             categories: Object.entries(categories).map(([id, choice]) => ({
               id: Number(id),
               name: choice.name.trim() || null,
+              type_id: typeOf(choice, preview?.categories.find((c) => c.id === Number(id))?.is_jingle ?? false),
               fx_player: choice.fx_player,
               disable_tracks: choice.disable_tracks,
             })),
@@ -298,6 +307,7 @@ export function Import() {
                         <th>{t("import.exportCategory")}</th>
                         <th className="num">{t("import.rows")}</th>
                         <th>{t("import.heronCategory")}</th>
+                        <th>{t("categories.type")}</th>
                         <th>{t("import.fxPlayer")}</th>
                         <th>{t("import.disableTracks")}</th>
                       </tr>
@@ -329,6 +339,23 @@ export function Import() {
                                   choice.name === category.name && (
                                     <div className="muted small">{t("import.existing")}</div>
                                   )}
+                              </td>
+                              <td>
+                                <select
+                                  className="input"
+                                  value={String(typeOf(choice, category.is_jingle) ?? "")}
+                                  aria-label={t("import.typeFor", { name: category.name })}
+                                  onChange={(event) =>
+                                    set({ type_id: event.target.value ? Number(event.target.value) : null })
+                                  }
+                                >
+                                  {types.data?.map((categoryType) => (
+                                    <option key={categoryType.id} value={categoryType.id}>
+                                      {categoryType.name}
+                                    </option>
+                                  ))}
+                                  <option value="">{t("categories.noType")}</option>
+                                </select>
                               </td>
                               <td>
                                 <input

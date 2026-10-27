@@ -574,6 +574,9 @@ pub struct ImportCategoryChoice {
     /// Offered by the FX player (set when the category is created).
     #[serde(default)]
     pub fx_player: bool,
+    /// Its type (`GET /category-types`), set when the category is created.
+    #[serde(default)]
+    pub type_id: Option<u64>,
     /// Its tracks are disabled: rotation never picks them.
     #[serde(default)]
     pub disable_tracks: bool,
@@ -800,7 +803,7 @@ async fn apply(
                 let category = match category_ids.get(name) {
                     Some(id) => *id,
                     None => {
-                        let id = category(&mut tx, name, choice.fx_player, &mut summary).await?;
+                        let id = category(&mut tx, name, choice, &mut summary).await?;
                         category_ids.insert(name.to_owned(), id);
                         id
                     }
@@ -1012,7 +1015,7 @@ async fn set_tag(
 async fn category(
     tx: &mut Transaction<'_, MySql>,
     name: &str,
-    fx_player: bool,
+    choice: &ImportCategoryChoice,
     summary: &mut ImportSummary,
 ) -> ApiResult<u64> {
     let existing: Option<u64> = sqlx::query_scalar("SELECT id FROM categories WHERE name = ?")
@@ -1022,11 +1025,19 @@ async fn category(
     if let Some(id) = existing {
         return Ok(id);
     }
-    let id = sqlx::query("INSERT INTO categories (name, fx_player) VALUES (?, ?)")
+    let id = sqlx::query("INSERT INTO categories (name, type_id, fx_player) VALUES (?, ?, ?)")
         .bind(name)
-        .bind(fx_player)
+        .bind(choice.type_id)
+        .bind(choice.fx_player)
         .execute(&mut **tx)
-        .await?
+        .await
+        .map_err(|error| {
+            if crate::error::is_still_used(&error) {
+                ApiError::Invalid(format!("category {name:?}: no such category type"))
+            } else {
+                error.into()
+            }
+        })?
         .last_insert_id();
     summary.categories_created.push(name.to_owned());
     Ok(id)

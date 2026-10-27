@@ -733,7 +733,7 @@
         "tags": [
           "categories"
         ],
-        "summary": "Renames, recolors a category, changes its separation or whether the FX\nplayer offers it. Operators and admins.",
+        "summary": "Renames, recolors a category, changes its type, its separation or\nwhether the FX player offers it. Operators and admins.",
         "operationId": "update_category",
         "parameters": [
           {
@@ -784,6 +784,157 @@
         ],
         "summary": "Deletes a category and its restrictions; its tracks stay in the\nlibrary. Refused while a clock uses it. Operators and admins.",
         "operationId": "delete_category",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/category-types": {
+      "get": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Every category type, in the order they were created.",
+        "operationId": "list_types",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CategoryType"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Operators and admins.",
+        "operationId": "create_type",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryTypeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryType"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/category-types/{id}": {
+      "put": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Renames a type. Operators and admins.",
+        "operationId": "update_type",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryTypeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryType"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Deletes a type no category uses. Operators and admins.",
+        "operationId": "delete_type",
         "parameters": [
           {
             "name": "id",
@@ -6847,6 +6998,21 @@
           "tracks": {
             "type": "integer",
             "format": "int64"
+          },
+          "type_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "What it holds (`GET /category-types`); none when unset.",
+            "minimum": 0
+          },
+          "type_name": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -6892,6 +7058,15 @@
           "separation": {
             "$ref": "#/components/schemas/SeparationOverrides",
             "description": "None overridden by default."
+          },
+          "type_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "A category type; none by default.",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -6911,6 +7086,41 @@
             "type": "number",
             "format": "double",
             "description": "Relative chance of being picked within the category, 1 by default."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CategoryType": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "categories"
+        ],
+        "properties": {
+          "categories": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Categories of this type."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "CategoryTypeInput": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -8160,6 +8370,15 @@
               "null"
             ],
             "description": "The Heron category its tracks go in, created if missing; none leaves\nthem out of any category."
+          },
+          "type_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Its type (`GET /category-types`), set when the category is created.",
+            "minimum": 0
           }
         },
         "additionalProperties": false

@@ -63,7 +63,8 @@ Library batches gain the kinds `delete` and `purge`, moves the origin `staging` 
 
 | Table | Columns |
 |---|---|
-| `categories` | id, name, color, fx_player (the FX player's picker opens on it), separation (JSON: the windows it overrides, `NULL` for none) |
+| `category_types` | id, name (unique): Song, Jingle, Ad from the start, and the station's own |
+| `categories` | id, name, color, type_id (none: no type), fx_player (the FX player's picker opens on it), separation (JSON: the windows it overrides, `NULL` for none) |
 | `track_categories` | track_id, category_id, weight |
 
 ## Artists

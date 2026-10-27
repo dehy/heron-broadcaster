@@ -17,7 +17,7 @@
 | **Clocks** | Each clock's slots, reordered by dragging (or with the keyboard), with their category, selection method, enforce-rules flag and separation overrides; whether the clock loops across hours; the hour (or the loop) drawn as it will sound, categories running short, an hour simulated | operator |
 | **Schedule** | The week, hour by hour: pick a clock and click or drag over the hours, in station time | operator |
 | **Labels** | Create, rename, recolor, merge and delete labels, with their tracks | operator |
-| **Categories** | Create, rename, recolor and delete categories; the separation windows they override; whether the FX player offers them (liners, power intros, voice tracks); fill a category from a label | operator |
+| **Categories** | Create, rename, recolor and delete categories; their type (Song, Jingle, Ad, or the station's own, managed on the same page); the separation windows they override; whether the FX player offers them (liners, power intros, voice tracks); fill a category from a label | operator |
 | **Restrictions** | Dayparting, date ranges and sequences on tracks, artists and categories; turn them on and off | operator |
 | **Selection log** | Each track rotation picked: clock and slot, rules held or relaxed, and the details (windows, tracks held back, candidates); a simulation of the next day or week, checked rule by rule | operator (simulations) |
 | **Import** | Import another software's export: categories and problems named in Heron, conflicts settled, applied as one import; past imports, with undo ([Importing from another software](import.md)) | admin |

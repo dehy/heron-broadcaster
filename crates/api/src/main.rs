@@ -10,6 +10,7 @@ mod app;
 mod artists;
 mod auth;
 mod categories;
+mod category_types;
 mod clocks;
 #[cfg(test)]
 mod e2e;

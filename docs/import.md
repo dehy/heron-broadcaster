@@ -31,7 +31,7 @@ For the station this was written for, the export comes from its MariaDB database
 | In the export | In Heron |
 |---|---|
 | title, artist, year | Tags kept in Heron's database (`track_tag_overrides`, see [Library management](library.md#keeping-tags-in-heron-instead-of-the-files)): the files are left alone, whatever `write_tags` says |
-| category | The Heron category named in the dry run, created if missing; its tracks can be disabled, and a created category can be offered by the FX player |
+| category | The Heron category named in the dry run, created if missing with the type chosen there (Jingle for the export's jingle categories, Song otherwise); its tracks can be disabled, and a created category can be offered by the FX player |
 | problem | Nothing, a label, or a label and the track disabled, as chosen in the dry run |
 | fade-in, fade-out | The track's crossfade overrides: the station's fade, with the export's length |
 | intro, second intro, hook, next track | The track's markers (`track_markers`), shown on its page |
