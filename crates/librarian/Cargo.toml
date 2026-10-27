@@ -17,6 +17,8 @@ name = "heron-librarian"
 path = "src/main.rs"
 
 [dependencies]
+heron-dsp.workspace = true
+hound.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 blake3.workspace = true

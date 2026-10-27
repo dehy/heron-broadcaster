@@ -2792,6 +2792,338 @@
         }
       }
     },
+    "/api/v1/medleys": {
+      "get": {
+        "tags": [
+          "medleys"
+        ],
+        "summary": "Every medley, by name.",
+        "operationId": "list_medleys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Medley"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "medleys"
+        ],
+        "summary": "Operators and admins.",
+        "operationId": "create_medley",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MedleyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Medley"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/medleys/{id}": {
+      "get": {
+        "tags": [
+          "medleys"
+        ],
+        "operationId": "get_medley",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Medley"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "medleys"
+        ],
+        "summary": "Renames a medley or changes its recipe (applied on its next render).\nOperators and admins.",
+        "operationId": "update_medley",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MedleyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Medley"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "medleys"
+        ],
+        "summary": "Deletes the recipe; the rendered track stays in the library. Operators\nand admins.",
+        "operationId": "delete_medley",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/medleys/{id}/pick": {
+      "post": {
+        "tags": [
+          "medleys"
+        ],
+        "summary": "Another hook or liner, none of `exclude`, to replace one in a plan.\nOperators and admins.",
+        "operationId": "pick_part",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/medleys/{id}/plan": {
+      "post": {
+        "tags": [
+          "medleys"
+        ],
+        "summary": "Picks the parts from the recipe, without saving them. Operators and admins.",
+        "operationId": "plan_medley",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MedleyPlan"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/medleys/{id}/render": {
+      "post": {
+        "tags": [
+          "medleys"
+        ],
+        "summary": "Saves the parts as the medley's version and asks heron-librarian to\nmix them into its file. Operators and admins.",
+        "operationId": "render_medley",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/outputs": {
       "get": {
         "tags": [
@@ -8372,6 +8704,15 @@
         },
         "additionalProperties": false
       },
+      "HookOrder": {
+        "type": "string",
+        "description": "The order of the hooks.",
+        "enum": [
+          "picked",
+          "year",
+          "bpm"
+        ]
+      },
       "HourOfDay": {
         "type": "object",
         "description": "An hour of the day, over the days of a period.",
@@ -9554,6 +9895,13 @@
           }
         }
       },
+      "LinerMode": {
+        "type": "string",
+        "enum": [
+          "between",
+          "over"
+        ]
+      },
       "ListenersNow": {
         "type": "object",
         "required": [
@@ -9714,6 +10062,140 @@
           }
         },
         "additionalProperties": false
+      },
+      "Medley": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "recipe",
+          "parts"
+        ],
+        "properties": {
+          "category_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Where the rendered medley goes.",
+            "minimum": 0
+          },
+          "category_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PartView"
+            },
+            "description": "Its current version, in order (empty until rendered once)."
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The rendered file, relative to the library root."
+          },
+          "recipe": {
+            "$ref": "#/components/schemas/Recipe"
+          },
+          "rendered_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "task_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "task_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The last render asked: its library task.",
+            "minimum": 0
+          },
+          "task_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`pending`, `running`, `done` or `failed`."
+          },
+          "track_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The rendered file's track, once the scanner found it.",
+            "minimum": 0
+          }
+        }
+      },
+      "MedleyInput": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "category_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "recipe": {
+            "$ref": "#/components/schemas/Recipe"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MedleyPlan": {
+        "type": "object",
+        "description": "Parts picked from the recipe, not saved.",
+        "required": [
+          "parts",
+          "qualified"
+        ],
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PartView"
+            }
+          },
+          "qualified": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Songs that can give a hook: fewer than the recipe's hooks means a\nshorter medley.",
+            "minimum": 0
+          }
+        }
       },
       "MergeRequest": {
         "type": "object",
@@ -10204,6 +10686,91 @@
           }
         }
       },
+      "Part": {
+        "type": "object",
+        "description": "A span of a track's file in the medley.",
+        "required": [
+          "kind",
+          "track_id",
+          "from_ms",
+          "to_ms"
+        ],
+        "properties": {
+          "from_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "On the file's timeline.",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PartKind"
+          },
+          "to_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "track_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "PartKind": {
+        "type": "string",
+        "enum": [
+          "hook",
+          "liner"
+        ]
+      },
+      "PartView": {
+        "type": "object",
+        "description": "A part, with what its track is.",
+        "required": [
+          "kind",
+          "track_id",
+          "from_ms",
+          "to_ms",
+          "path"
+        ],
+        "properties": {
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "from_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "On the file's timeline.",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PartKind"
+          },
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "to_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "track_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "PasswordChange": {
         "type": "object",
         "required": [
@@ -10306,6 +10873,27 @@
             "minimum": 0
           }
         }
+      },
+      "PickRequest": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "exclude": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Tracks not to pick (those already in the plan)."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PartKind"
+          }
+        },
+        "additionalProperties": false
       },
       "PlannedMove": {
         "type": "object",
@@ -11074,6 +11662,100 @@
           }
         }
       },
+      "Recipe": {
+        "type": "object",
+        "description": "How a medley is built.",
+        "properties": {
+          "category_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "Categories the songs come from.",
+            "default": []
+          },
+          "crossfade_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Overlap between two parts.",
+            "default": 500,
+            "minimum": 0
+          },
+          "duck_db": {
+            "type": "number",
+            "format": "double",
+            "description": "How much the music goes down under a liner played over it.",
+            "default": -10.0
+          },
+          "hook_max_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Hooks longer than this are cut to it.",
+            "default": 8000,
+            "minimum": 0
+          },
+          "hook_min_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Hooks shorter than this are left out.",
+            "default": 4000,
+            "minimum": 0
+          },
+          "hooks": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many hooks.",
+            "default": 6,
+            "minimum": 0
+          },
+          "label_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Only the songs with this label, when set.",
+            "default": null,
+            "minimum": 0
+          },
+          "liner_at_end": {
+            "type": "boolean",
+            "default": false
+          },
+          "liner_at_start": {
+            "type": "boolean",
+            "default": false
+          },
+          "liner_category_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Where the liners come from; none for no liners.",
+            "default": null,
+            "minimum": 0
+          },
+          "liner_every": {
+            "type": "integer",
+            "format": "int32",
+            "description": "A liner after every this many hooks.",
+            "default": 1,
+            "minimum": 0
+          },
+          "liner_mode": {
+            "$ref": "#/components/schemas/LinerMode",
+            "default": "between"
+          },
+          "order": {
+            "$ref": "#/components/schemas/HookOrder",
+            "default": "picked"
+          }
+        },
+        "additionalProperties": false
+      },
       "RelationsReport": {
         "type": "object",
         "description": "What a MusicBrainz relationships lookup found.",
@@ -11115,6 +11797,21 @@
           },
           "release_id": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RenderRequest": {
+        "type": "object",
+        "required": [
+          "parts"
+        ],
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Part"
+            }
           }
         },
         "additionalProperties": false
@@ -12972,6 +13669,27 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "Mixes a medley's parts into its file (`docs/medleys.md`).",
+            "required": [
+              "medley_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "render_medley"
+                ]
+              },
+              "medley_id": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
           }
         ],
         "description": "A task, as stored in `library_tasks.params`. The tag is also its `kind`."
@@ -14704,6 +15422,10 @@
     {
       "name": "labels",
       "description": "Keywords on tracks, to sort the library"
+    },
+    {
+      "name": "medleys",
+      "description": "Medleys built from song hooks and liners"
     },
     {
       "name": "artists",

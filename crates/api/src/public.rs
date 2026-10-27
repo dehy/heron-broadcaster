@@ -72,10 +72,11 @@ pub fn router() -> OpenApiRouter<AppState> {
 }
 
 /// Tracks of these categories send no metadata (jingles, ads).
-const NO_METADATA: &str = "EXISTS (SELECT 1 FROM track_categories tc
+const NO_METADATA: &str = "(EXISTS (SELECT 1 FROM track_categories tc
         JOIN categories c ON c.id = tc.category_id
         JOIN category_types ct ON ct.id = c.type_id
-        WHERE tc.track_id = h.track_id AND NOT ct.sends_metadata)";
+        WHERE tc.track_id = h.track_id AND NOT ct.sends_metadata)
+    OR EXISTS (SELECT 1 FROM medleys md WHERE md.track_id = h.track_id))";
 
 /// The track on air; while a track that sends no metadata (a jingle) is on
 /// air, the last one that does. No sign-in needed; any website may read it.
