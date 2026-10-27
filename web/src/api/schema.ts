@@ -1047,6 +1047,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/medleys/{id}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A new medley with the same recipe, category and parts, not rendered.
+         *     Operators and admins.
+         */
+        post: operations["duplicate_medley"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/medleys/{id}/pick": {
         parameters: {
             query?: never;
@@ -3035,6 +3055,10 @@ export interface components {
              * @description Files removed from the buffer zone.
              */
             discarded: number;
+        };
+        DuplicateRequest: {
+            /** @description The new medley's name ("Name (copy)", in the user's language). */
+            name: string;
         };
         /** @description How the engine will play the track: analysis and overrides combined. */
         EffectivePlayout: {
@@ -8082,6 +8106,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PartView"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    duplicate_medley: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DuplicateRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Medley"];
                 };
             };
             "4XX": {

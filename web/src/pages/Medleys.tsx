@@ -12,7 +12,7 @@ import { TaskState, useTask } from "../components/Task";
 import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, PageHead } from "../components/ui";
 import { number, t } from "../i18n";
 import { ago, duration, trackName } from "../lib/format";
-import { plannedLength } from "../lib/medley";
+import { copyName, plannedLength } from "../lib/medley";
 import { usePreview } from "../lib/preview";
 import { Link, navigate } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
@@ -168,6 +168,21 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
     () => done(api.DELETE("/api/v1/medleys/{id}", { params: { path: { id: medley?.id ?? 0 } } })),
     { success: t("medleys.deleted"), invalidate: [["medleys"]], onSuccess: () => navigate("/medleys") },
   );
+  const medleys = useMedleys();
+  const duplicate = useAction(
+    () =>
+      unwrap(
+        api.POST("/api/v1/medleys/{id}/duplicate", {
+          params: { path: { id: medley?.id ?? 0 } },
+          body: { name: copyName(medley?.name ?? "", (medleys.data ?? []).map((m) => m.name)) },
+        }),
+      ),
+    {
+      success: t("medleys.duplicated"),
+      invalidate: [["medleys"]],
+      onSuccess: (copy) => navigate(`/medleys/${copy.id}`),
+    },
+  );
   const disabled = !canEdit;
   const seconds = (ms: number) => String(ms / 1000);
   const fromSeconds = (text: string) => Math.round(Number(text.replace(",", ".")) * 1000);
@@ -181,14 +196,25 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
       actions={
         canEdit &&
         medley && (
-          <ConfirmButton
-            className="btn small danger"
-            question={t("medleys.deleteQuestion", { name: medley.name })}
-            confirm={t("medleys.delete")}
-            onConfirm={() => remove.mutate(undefined)}
-          >
-            <Icon name="trash" size={14} /> {t("medleys.delete")}
-          </ConfirmButton>
+          <>
+            <button
+              type="button"
+              className="btn small"
+              title={t("medleys.duplicateHelp")}
+              disabled={duplicate.isPending}
+              onClick={() => duplicate.mutate(undefined)}
+            >
+              <Icon name="plus" size={14} /> {t("medleys.duplicate")}
+            </button>
+            <ConfirmButton
+              className="btn small danger"
+              question={t("medleys.deleteQuestion", { name: medley.name })}
+              confirm={t("medleys.delete")}
+              onConfirm={() => remove.mutate(undefined)}
+            >
+              <Icon name="trash" size={14} /> {t("medleys.delete")}
+            </ConfirmButton>
+          </>
         )
       }
     >
@@ -581,9 +607,12 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
                 <Icon name="edit" size={14} /> {t("medleys.edit")}
               </button>
             )}
-            <button type="button" className="btn small" disabled={build.isPending} onClick={() => build.mutate(undefined)}>
-              {plan ? t("medleys.buildAgain") : t("medleys.build")}
-            </button>
+            {/* Rendered: edited, never picked anew (duplicate it for a new one). */}
+            {medley.rendered_at_unix_ms == null && (
+              <button type="button" className="btn small" disabled={build.isPending} onClick={() => build.mutate(undefined)}>
+                {plan ? t("medleys.buildAgain") : t("medleys.build")}
+              </button>
+            )}
             {plan && (
               <button
                 type="button"
