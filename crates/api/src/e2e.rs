@@ -3792,7 +3792,7 @@ async fn medleys_are_planned_rendered_and_linked() {
     }
 
     let recipe = json!({
-        "category_ids": [songs], "hooks": 3, "hook_min_ms": 1_000, "hook_max_ms": 1_500,
+        "category_ids": [songs], "hooks": 3, "hook_min_ms": 1_000, "hook_max_ms": 2_500,
         "crossfade_ms": 200, "liner_category_id": liners, "liner_every": 1
     });
     let medley = json!({"name": "Hits medley", "category_id": target, "recipe": recipe});
@@ -3833,7 +3833,7 @@ async fn medleys_are_planned_rendered_and_linked() {
         parts
             .iter()
             .filter(|p| p["kind"] == "hook")
-            .all(|p| p["from_ms"] == 500 && p["to_ms"] == 2_000)
+            .all(|p| p["from_ms"] == 500 && p["to_ms"] == 2_500)
     );
     // The fourth song, to replace one.
     let (status, other) = admin
@@ -3857,7 +3857,7 @@ async fn medleys_are_planned_rendered_and_linked() {
         .map(|p| p["track_id"].as_u64().unwrap())
         .collect();
     assert_eq!(listed, tracks[..4]);
-    assert_eq!(candidates[0]["to_ms"], 2_000);
+    assert_eq!(candidates[0]["to_ms"], 2_500);
     let liners_listed = admin
         .get(&format!("/medleys/{id}/candidates?kind=liner"))
         .await;
@@ -3910,7 +3910,7 @@ async fn medleys_are_planned_rendered_and_linked() {
     assert_eq!(&wav[..4], b"RIFF");
     // 0.1 s shorter than the render below.
     let frames = (wav.len() - 44) / 4;
-    assert_eq!(frames, (3 * 1_500 + 2 * 3_000 - 4 * 200 - 100) * 48);
+    assert_eq!(frames, (3 * 2_000 + 2 * 3_000 - 4 * 200 - 100) * 48);
     assert!(
         !station
             .library
@@ -3963,8 +3963,8 @@ async fn medleys_are_planned_rendered_and_linked() {
     assert_eq!(rendered["parts"].as_array().unwrap().len(), 5);
     let reader = hound::WavReader::open(station.library.path().join(&path)).unwrap();
     let frames = u64::from(reader.duration());
-    // Three hooks of 1.5 s and two liners of 3 s, four crossfades of 0.2 s.
-    assert_eq!(frames, (3 * 1_500 + 2 * 3_000 - 4 * 200) * 48);
+    // Three hooks of 2 s (whole, not cut) and two liners of 3 s, four crossfades of 0.2 s.
+    assert_eq!(frames, (3 * 2_000 + 2 * 3_000 - 4 * 200) * 48);
 
     // The scanner finds the file: the medley gets its track, named after
     // it, in its category, and it sends no metadata.
