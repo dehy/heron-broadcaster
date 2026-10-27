@@ -217,7 +217,7 @@ docker compose exec heron-librarian heron-librarian settings --set '{"acoustid_k
 
 ## Work asked through the API
 
-The web UI's review, organize, undo, tag edits, MusicBrainz lookups, imports from the buffer zone, deletions and emptying the trash go through the API, which cannot write to the library: it queues **library tasks** (`library_tasks`) that the librarian runs one at a time, in order, next to the buffer zone's identification (both take the library lock for each group of file operations). Results (the dry run's moves, the batch report) are stored with the task for the web UI to show. A task running when the librarian stops is marked failed: ask again (an undo resumes where it stopped; an organization is applied once more for the rest; files of an interrupted import are ready again, or imported if they made it). See [API – Library management](api.md#library-management).
+The web UI's review, organize, undo, tag edits, MusicBrainz lookups, imports from the buffer zone, deletions, emptying the trash and the rendering of [medleys](medleys.md) go through the API, which cannot write to the library: it queues **library tasks** (`library_tasks`) that the librarian runs one at a time, in order, next to the buffer zone's identification (both take the library lock for each group of file operations). Results (the dry run's moves, the batch report) are stored with the task for the web UI to show. A task running when the librarian stops is marked failed: ask again (an undo resumes where it stopped; an organization is applied once more for the rest; files of an interrupted import are ready again, or imported if they made it). See [API – Library management](api.md#library-management).
 
 ## Coordination with the scanner
 
