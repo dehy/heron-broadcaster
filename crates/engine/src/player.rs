@@ -154,6 +154,8 @@ pub struct PlayerSnapshot {
     /// The jingle played over the cued track's intro: before it in the
     /// play order.
     pub cued_jingle: Option<QueueEntry>,
+    /// The jingle waiting to start over the intro of the track on air.
+    pub pending_jingle: Option<QueueEntry>,
     pub queue: Vec<QueueEntry>,
     pub rendered_ms: u64,
     pub underruns: u64,
@@ -1345,6 +1347,10 @@ impl Player {
             cued_jingle: self
                 .cued_jingle
                 .and_then(|jingle| self.loaded.get(&jingle).cloned()),
+            pending_jingle: self
+                .loaded
+                .get(&status.overlay.load(Ordering::Relaxed))
+                .cloned(),
             queue: self.queue.iter().cloned().collect(),
             rendered_ms: frames_to_ms(status.frame.load(Ordering::Relaxed)),
             underruns: status.underruns.load(Ordering::Relaxed),

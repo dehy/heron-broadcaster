@@ -121,6 +121,9 @@ pub struct PlayerState {
     /// The jingle played on the FX player over the cued track's intro:
     /// before it in the play order.
     pub cued_jingle: Option<Box<QueueEntry>>,
+    /// The jingle waiting to start on the FX player over the intro of the
+    /// track on air (no longer waiting, not yet playing).
+    pub pending_jingle: Option<Box<QueueEntry>>,
     /// After the cued track.
     pub queue: Vec<QueueEntry>,
     pub outputs: Vec<OutputStatus>,
@@ -577,6 +580,7 @@ pub fn player_state(state: pb::EngineState) -> PlayerState {
             .collect(),
         cued: state.cued.map(entry),
         cued_jingle: state.cued_jingle.map(|jingle| Box::new(entry(jingle))),
+        pending_jingle: state.pending_jingle.map(|jingle| Box::new(entry(jingle))),
         queue: state.queue.into_iter().map(entry).collect(),
         outputs: state
             .outputs

@@ -28,6 +28,7 @@ import { sourceLabel } from "../lib/labels";
 import { positionNow, useLive } from "../lib/live";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
+import { jingleStart } from "../lib/intro";
 import { Empty, Icon } from "./ui";
 
 /**
@@ -145,6 +146,11 @@ export function QueueList({ limit }: { limit?: number }) {
               start={starts[index] ?? null}
               cued={player.cued?.entry_id === entry.entry_id}
               overIntro={player.cued_jingle?.entry_id === entry.entry_id}
+              jingleAt={
+                player.cued_jingle?.entry_id === entry.entry_id && player.cued
+                  ? jingleStart(player.cued.track, entry.track)
+                  : null
+              }
               canEdit={canEdit}
               onNext={() => {
                 setOrder(arrayMove(entries, index, 0));
@@ -174,6 +180,7 @@ function Item({
   start,
   cued,
   overIntro,
+  jingleAt,
   canEdit,
   onNext,
   onRemove,
@@ -183,6 +190,8 @@ function Item({
   start: number | null;
   cued: boolean;
   overIntro: boolean;
+  /** Where the jingle starts in the track it plays over. */
+  jingleAt?: number | null;
   canEdit: boolean;
   onNext: () => void;
   onRemove: () => void;
@@ -219,7 +228,9 @@ function Item({
           {cued && <span className="badge accent">{t("queue.cued")}</span>}
           {overIntro && (
             <span className="badge accent" title={t("queue.overIntroHint")}>
-              {t("queue.overIntro")}
+              {jingleAt !== null && jingleAt !== undefined
+                ? t("queue.overIntroAt", { time: duration(jingleAt, true) })
+                : t("queue.overIntro")}
             </span>
           )}
           <span className="badge">

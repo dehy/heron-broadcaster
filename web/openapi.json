@@ -10385,6 +10385,17 @@
           "paused": {
             "type": "boolean"
           },
+          "pending_jingle": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QueueEntry",
+                "description": "The jingle waiting to start on the FX player over the intro of the\ntrack on air (no longer waiting, not yet playing)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "queue": {
             "type": "array",
             "items": {

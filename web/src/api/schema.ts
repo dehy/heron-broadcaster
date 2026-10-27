@@ -3761,6 +3761,7 @@ export interface components {
             engine_started_at_unix_ms: number;
             outputs: components["schemas"]["OutputStatus"][];
             paused: boolean;
+            pending_jingle?: components["schemas"]["QueueEntry"] | null;
             /** @description After the cued track. */
             queue: components["schemas"]["QueueEntry"][];
             /**

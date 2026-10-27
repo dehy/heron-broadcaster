@@ -174,6 +174,7 @@ impl EngineRpc for EngineService {
                 .collect(),
             cued: snapshot.cued.map(entry_to_proto),
             cued_jingle: snapshot.cued_jingle.map(entry_to_proto),
+            pending_jingle: snapshot.pending_jingle.map(entry_to_proto),
             queue: snapshot.queue.into_iter().map(entry_to_proto).collect(),
             outputs,
             rendered_ms: snapshot.rendered_ms,
