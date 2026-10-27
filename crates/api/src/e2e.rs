@@ -3977,10 +3977,40 @@ async fn medleys_are_planned_rendered_and_linked() {
     )
     .await;
 
-    // Built again: the song left out last time comes first.
-    let (_, plan) = admin
+    // Rendered: never built anew, but duplicated with its parts, not
+    // rendered; the copy can be built, and the song left out comes first.
+    let (status, _) = admin
         .request(Method::POST, &format!("/medleys/{id}/plan"), None)
         .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, copy) = admin
+        .send(
+            Method::POST,
+            &format!("/medleys/{id}/duplicate"),
+            json!({"name": "Hits medley (copy)"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{copy}");
+    assert_eq!(copy["recipe"], rendered["recipe"]);
+    assert_eq!(copy["category_id"], target);
+    assert_eq!(
+        copy["parts"],
+        admin.get(&format!("/medleys/{id}")).await["parts"]
+    );
+    assert!(copy["path"].is_null() && copy["track_id"].is_null());
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            &format!("/medleys/{id}/duplicate"),
+            json!({"name": "Hits medley (copy)"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "names are unique");
+    let copy_id = copy["id"].as_u64().unwrap();
+    let (status, plan) = admin
+        .request(Method::POST, &format!("/medleys/{copy_id}/plan"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{plan}");
     let again: Vec<u64> = plan["parts"]
         .as_array()
         .unwrap()

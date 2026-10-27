@@ -3033,6 +3033,57 @@
         }
       }
     },
+    "/api/v1/medleys/{id}/duplicate": {
+      "post": {
+        "tags": [
+          "medleys"
+        ],
+        "summary": "A new medley with the same recipe, category and parts, not rendered.\nOperators and admins.",
+        "operationId": "duplicate_medley",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DuplicateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Medley"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/medleys/{id}/pick": {
       "post": {
         "tags": [
@@ -8377,6 +8428,19 @@
             "minimum": 0
           }
         }
+      },
+      "DuplicateRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The new medley's name (\"Name (copy)\", in the user's language)."
+          }
+        },
+        "additionalProperties": false
       },
       "EffectivePlayout": {
         "type": "object",

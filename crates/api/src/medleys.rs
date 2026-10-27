@@ -37,6 +37,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_medleys, create_medley))
         .routes(routes!(get_medley, update_medley, delete_medley))
         .routes(routes!(plan_medley))
+        .routes(routes!(duplicate_medley))
         .routes(routes!(pick_part))
         .routes(routes!(list_candidates))
         .routes(routes!(preview_medley, get_preview))
@@ -460,6 +461,53 @@ async fn delete_medley(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DuplicateRequest {
+    /// The new medley's name ("Name (copy)", in the user's language).
+    pub name: String,
+}
+
+/// A new medley with the same recipe, category and parts, not rendered.
+/// Operators and admins.
+#[utoipa::path(post, path = "/medleys/{id}/duplicate", tag = "medleys", params(("id" = u64, Path)),
+    request_body = DuplicateRequest,
+    responses((status = 201, body = Medley), (status = "4XX", body = ErrorBody)))]
+async fn duplicate_medley(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(request): Json<DuplicateRequest>,
+) -> ApiResult<(StatusCode, Json<Medley>)> {
+    user.require(Role::Operator)?;
+    let original = find(&state.pool, id).await?;
+    let name = MedleyInput {
+        name: request.name,
+        category_id: original.category_id,
+        recipe: original.recipe.clone(),
+    }
+    .check()?;
+    let mut tx = state.pool.begin().await?;
+    let copy = sqlx::query("INSERT INTO medleys (name, category_id, recipe) VALUES (?, ?, ?)")
+        .bind(name)
+        .bind(original.category_id)
+        .bind(recipe_json(&original.recipe)?)
+        .execute(&mut *tx)
+        .await
+        .map_err(conflict)?
+        .last_insert_id();
+    sqlx::query(
+        "INSERT INTO medley_parts (medley_id, position, kind, track_id, from_ms, to_ms)
+         SELECT ?, position, kind, track_id, from_ms, to_ms FROM medley_parts WHERE medley_id = ?",
+    )
+    .bind(copy)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok((StatusCode::CREATED, Json(find(&state.pool, copy).await?)))
+}
+
 /// Picks the parts from the recipe, without saving them. Operators and admins.
 #[utoipa::path(post, path = "/medleys/{id}/plan", tag = "medleys", params(("id" = u64, Path)),
     responses((status = 200, body = MedleyPlan), (status = "4XX", body = ErrorBody)))]
@@ -470,6 +518,11 @@ async fn plan_medley(
 ) -> ApiResult<Json<MedleyPlan>> {
     user.require(Role::Operator)?;
     let medley = find(&state.pool, id).await?;
+    if medley.rendered_at_unix_ms.is_some() {
+        return Err(ApiError::Conflict(
+            "a rendered medley is edited, not built anew: duplicate it for a new one".to_owned(),
+        ));
+    }
     let recipe = &medley.recipe;
     let songs = songs(&state.pool, recipe).await?;
     let liners = liners(&state.pool, recipe).await?;

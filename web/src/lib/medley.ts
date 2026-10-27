@@ -2,6 +2,18 @@
 
 // Medleys (docs/medleys.md): what the web shows before a render.
 
+import { t } from "../i18n";
+
+/** "Name (copy)", or "Name (copy 2)"… when that name is taken. */
+export function copyName(name: string, taken: readonly string[]): string {
+  const names = new Set(taken);
+  let candidate = t("medleys.copyName", { name });
+  for (let n = 2; names.has(candidate); n += 1) {
+    candidate = t("medleys.copyNameN", { name, n: String(n) });
+  }
+  return candidate;
+}
+
 interface Span {
   kind: string;
   from_ms: number;
