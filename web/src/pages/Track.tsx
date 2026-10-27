@@ -430,6 +430,13 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
                 >
                   <Icon name={playing ? "pause" : "play"} size={14} /> {playing ? t("dashboard.pause") : t("track.listen")}
                 </button>
+                <span
+                  className="num small playhead-time"
+                  title={t("track.playheadHelp", { fromCueIn: duration((playhead ?? cueIn) - cueIn, true) })}
+                >
+                  <span className="visually-hidden">{t("track.playhead")} </span>
+                  {duration(playhead ?? 0, true)} / {duration(length)}
+                </span>
                 <button type="button" className="btn small" onClick={() => playFrom(cueIn)}>
                   {t("track.fromCueIn")}
                 </button>
@@ -510,7 +517,13 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
             preload="none"
             src={`/api/v1/tracks/${track.id}/audio`}
             onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
+            onPause={() => {
+              setPlaying(false);
+              // Where it stopped, to the frame.
+              if (audio.current) {
+                setPlayhead(audio.current.currentTime * 1000);
+              }
+            }}
             onEnded={() => setPlaying(false)}
           />
         </div>

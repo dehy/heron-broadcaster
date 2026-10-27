@@ -429,6 +429,8 @@ const en = {
   "track.intro": "Intro",
   "track.outro": "Outro",
   "track.listen": "Listen",
+  "track.playhead": "Playhead:",
+  "track.playheadHelp": "Where the playhead is in the file, and the file's length. From the cue-in: {fromCueIn}",
   "track.fromCueIn": "From the cue-in",
   "track.ending": "The ending",
   "track.nextTrackStarts": "Next track starts",

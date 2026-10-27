@@ -432,6 +432,8 @@ const fr = {
   "track.intro": "Intro",
   "track.outro": "Fin",
   "track.listen": "Écouter",
+  "track.playhead": "Tête de lecture :",
+  "track.playheadHelp": "Position de la tête de lecture dans le fichier, et durée du fichier. Depuis le cue-in : {fromCueIn}",
   "track.fromCueIn": "Depuis le point d'entrée",
   "track.ending": "La fin",
   "track.nextTrackStarts": "Départ de la suivante",
