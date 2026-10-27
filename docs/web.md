@@ -42,7 +42,7 @@ The waveform comes with the analysis ([Import and analysis](analysis.md)): one p
 
 While listening on a track's page, the playhead's time shows next to *Listen*, in the file's own timeline with tenths of a second (`0:20.9 / 4:04`, the file's length after it; its tooltip gives the time from the cue-in). It stays shown, frozen, when paused. Hovering the waveform shows the time under the pointer, so a point can be found before clicking (a click plays from there).
 
-Points dragged on the waveform become the track's overrides once saved. Dragging *Next starts* sets a fixed crossfade for the track (that long before its cue-out). The *Intro ends* flag (where the vocals start, for [jingles over the intro](audio-engine.md#jingles-over-the-intro)) is dragged the same way, or typed in the *Playout* card, and saved with it; emptying the field removes it. Queued entries of the track follow within seconds.
+Points dragged on the waveform become the track's overrides once saved. Dragging *Next starts* sets a fixed crossfade for the track (that long before its cue-out). The *Intro ends* flag (where the vocals start, for [jingles over the intro](audio-engine.md#jingles-over-the-intro)) is dragged the same way, or typed in the *Playout* card, and saved with it; emptying the field removes it. The **hook** (the song's most recognizable part, used for medleys) is set the same way: *Hook in* and *Hook out* flags, or the card's *Hook* fields, both empty for none. **Loop the hook** plays from hook in to hook out over and over, with the points being edited, until **Stop**. Queued entries of the track follow within seconds.
 
 ## Times
 
