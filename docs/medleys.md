@@ -19,7 +19,7 @@ A song qualifies when it is enabled, its file is there, it is analyzed and audib
 
 ## Building
 
-1. **Build** picks the parts and shows them in order: each hook with its song and times, each liner. Nothing is written yet.
+1. **Build** picks the parts and shows them in order: each hook with its song and times, each liner. Nothing is written yet. A medley is built until its first render only: a rendered medley is a track the station plays, changed with **Edit** (below), never picked anew by accident.
    - The same song is never twice in a medley. Songs that are not in the medley's current version come first, so building again gives new songs while there are enough.
    - The same liner is never used twice in a row.
    - The page says how many songs qualified, when fewer than asked.
@@ -34,11 +34,15 @@ A song qualifies when it is enabled, its file is there, it is analyzed and audib
    - each part is brought to the station's loudness target (the [playout settings](audio-engine.md#loudness)) before mixing, so the medley sounds even;
    - parts start and end with short fades, and overlap by the crossfade;
    - the result is scaled down if it would clip.
-4. The library scanner finds the file: the medley becomes a track, named after the medley, in the recipe's category. Rendering again (with new picks or after changing the recipe) replaces the file in place: the track keeps its ID, categories and history, and is analyzed again. A track on air at that moment plays on from the previous file.
+4. The library scanner finds the file: the medley becomes a track, named after the medley, in the recipe's category. Rendering again (after editing) replaces the file in place: the track keeps its ID, categories and history, and is analyzed again. A track on air at that moment plays on from the previous file.
 
 ## On air
 
 A medley track **sends no metadata**: while it plays, the stream servers, the public now-playing and the public history keep the last song (as jingles do, see [Outputs – Metadata](outputs.md#metadata)). It is played like any other track otherwise.
+
+## Duplicating
+
+**Duplicate** makes a new medley named after the first with "(copy)" ("(copy 2)"… when taken), with the same recipe, category and parts. It is not rendered: no file and no track until it is, so it can be edited, or built anew, then rendered. That is how to make a variant of a medley, or a new one from the same recipe.
 
 ## Deleting
 
@@ -50,7 +54,8 @@ Deleting a medley removes its recipe; its rendered track stays in the library (d
 |---|---|
 | `GET /medleys`, `POST /medleys` | The medleys, with their recipe, parts, track and last render; a new medley |
 | `GET`, `PUT`, `DELETE /medleys/{id}` | One medley; its recipe |
-| `POST /medleys/{id}/plan` | Picks the parts (writes nothing): `{"parts": [{"kind": "hook" or "liner", "track_id", "from_ms", "to_ms", …}], "qualified"}` |
+| `POST /medleys/{id}/plan` | Picks the parts (writes nothing): `{"parts": [{"kind": "hook" or "liner", "track_id", "from_ms", "to_ms", …}], "qualified"}`; `409` once the medley is rendered |
+| `POST /medleys/{id}/duplicate` | `{"name"}`: a new medley with the same recipe, category and parts, not rendered |
 | `POST /medleys/{id}/pick` | One more part of a kind, other than the tracks given (`{"kind", "exclude": [track IDs]}`), to replace one |
 | `GET /medleys/{id}/candidates?kind=hook` | Every track that can be a part of that kind (`hook` or `liner`), with the span it would take, by artist and title |
 | `POST /medleys/{id}/preview` | `{"parts": […]}`: mixes them into the medley's preview (a library task, `preview_medley`); nothing is saved |
