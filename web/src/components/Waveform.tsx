@@ -119,6 +119,8 @@ export function WaveformView({
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [width, setWidth] = useState(0);
+  // The time under the pointer.
+  const [hover, setHover] = useState<number | null>(null);
   const theme = useThemeVersion();
   const [from, to] = view ?? [0, durationMs];
   const span = Math.max(1, to - from);
@@ -200,6 +202,8 @@ export function WaveformView({
       <canvas
         ref={canvas}
         onClick={(event) => onSeek?.(msAt(event.clientX))}
+        onPointerMove={(event) => setHover(msAt(event.clientX))}
+        onPointerLeave={() => setHover(null)}
         style={{ cursor: onSeek ? "pointer" : "default" }}
         aria-hidden="true"
       />
@@ -213,6 +217,11 @@ export function WaveformView({
       ))}
       {playheadMs !== null && playheadMs !== undefined && visible(playheadMs) && (
         <div className="playhead" style={{ left: left(playheadMs) }} />
+      )}
+      {hover !== null && (
+        <div className={hover - from > span * 0.85 ? "hover flip" : "hover"} style={{ left: left(hover) }}>
+          <span className="num">{duration(hover, true)}</span>
+        </div>
       )}
       <div className="axis num">
         <span>{duration(from)}</span>

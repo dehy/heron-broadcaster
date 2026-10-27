@@ -1141,6 +1141,38 @@ table.table {
   pointer-events: none;
 }
 
+/* The time under the pointer. */
+.waveform .hover {
+  position: absolute;
+  top: 0;
+  bottom: 1.4rem;
+  width: 0;
+  border-left: 1px dashed var(--muted);
+  pointer-events: none;
+}
+
+.waveform .hover span {
+  position: absolute;
+  bottom: 0.2rem;
+  left: 0.25rem;
+  padding: 0 0.3rem;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  color: var(--fg);
+  background: var(--surface);
+  border-radius: 3px;
+}
+
+.waveform .hover.flip span {
+  left: auto;
+  right: 0.25rem;
+}
+
+/* Where the playhead is, next to the Listen button. */
+.playhead-time {
+  white-space: nowrap;
+}
+
 .waveform .axis {
   display: flex;
   justify-content: space-between;
