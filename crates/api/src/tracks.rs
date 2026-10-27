@@ -31,6 +31,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_tracks))
         .routes(routes!(get_track, patch_track))
         .routes(routes!(put_overrides, delete_overrides))
+        .routes(routes!(put_intro))
         .routes(routes!(put_categories))
         .routes(routes!(preview_transition))
         .routes(routes!(get_waveform))
@@ -925,6 +926,54 @@ async fn delete_overrides(
         .await?;
     state.queue.wake();
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct IntroInput {
+    /// Where the vocals start, in ms on the file's timeline; `null` removes it.
+    pub intro_ms: Option<u32>,
+}
+
+/// Sets where the track's intro ends (the vocals start): jingles of a type
+/// playing over the intro end there. Operators and admins.
+#[utoipa::path(put, path = "/tracks/{id}/intro", tag = "library",
+    params(("id" = u64, Path)), request_body = IntroInput,
+    responses((status = 200, body = crate::import::TrackMarkers), (status = "4XX", body = ErrorBody)))]
+async fn put_intro(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(input): Json<IntroInput>,
+) -> ApiResult<Json<crate::import::TrackMarkers>> {
+    user.require(Role::Operator)?;
+    let length: Option<Option<u32>> =
+        sqlx::query_scalar("SELECT duration_ms FROM tracks WHERE id = ? AND deleted_at IS NULL")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
+    let Some(length) = length else {
+        return Err(ApiError::not_found("track"));
+    };
+    if let Some(intro_ms) = input.intro_ms
+        && (intro_ms == 0 || length.is_some_and(|length| intro_ms > length))
+    {
+        return Err(ApiError::Invalid(
+            "intro_ms is within the file, after its start".to_owned(),
+        ));
+    }
+    sqlx::query(
+        "INSERT INTO track_markers (track_id, intro_ms) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE intro_ms = VALUES(intro_ms)",
+    )
+    .bind(id)
+    .bind(input.intro_ms)
+    .execute(&state.pool)
+    .await?;
+    // Queued entries of the track follow.
+    state.queue.wake();
+    let markers = crate::import::markers(&state.pool, id).await?;
+    Ok(Json(markers.unwrap_or_default()))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

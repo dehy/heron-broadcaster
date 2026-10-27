@@ -1099,6 +1099,41 @@ async fn library_tracks_overrides_and_categories() {
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
+    // The intro point, set by hand: within the file, removed with null.
+    let intro = format!("/tracks/{id}/intro");
+    let (status, markers) = admin
+        .send(Method::PUT, &intro, json!({"intro_ms": 1500}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{markers}");
+    assert_eq!(markers["intro_ms"], 1500);
+    assert_eq!(
+        admin.get(&format!("/tracks/{id}")).await["markers"]["intro_ms"],
+        1500
+    );
+    for wrong in [0, 3_600_000] {
+        let (status, _) = admin
+            .send(Method::PUT, &intro, json!({"intro_ms": wrong}))
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{wrong}");
+    }
+    let (status, _) = viewer
+        .send(Method::PUT, &intro, json!({"intro_ms": 1000}))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, markers) = admin
+        .send(Method::PUT, &intro, json!({"intro_ms": null}))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(markers["intro_ms"], Value::Null);
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/tracks/999999/intro",
+            json!({"intro_ms": 1000}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
     let (status, preview) = admin
         .send(
             Method::POST,
