@@ -257,6 +257,9 @@ async fn print_state(client: &mut EngineClient<Channel>) -> anyhow::Result<()> {
             describe(deck.entry.as_ref())
         );
     }
+    if state.cued_jingle.is_some() {
+        println!("over the intro: {}", describe(state.cued_jingle.as_ref()));
+    }
     println!("cued: {}", describe(state.cued.as_ref()));
     for entry in &state.queue {
         println!("  queued: {}", describe(Some(entry)));
@@ -369,6 +372,9 @@ fn prepare(library_dir: &Path, file: &Path) -> anyhow::Result<pb::Track> {
         true_peak_db: analysis.true_peak_db,
         crossfade_overrides_json: String::new(),
         source: pb::PlaySource::Manual.into(),
+        no_metadata: false,
+        over_intro: false,
+        intro_ms: None,
     })
 }
 
@@ -427,7 +433,9 @@ async fn autofill(
         | 1;
     loop {
         let state = client.get_state(pb::GetStateRequest {}).await?.into_inner();
-        let waiting = state.queue.len() + usize::from(state.cued.is_some());
+        let waiting = state.queue.len()
+            + usize::from(state.cued.is_some())
+            + usize::from(state.cued_jingle.is_some());
         if waiting < min {
             // xorshift: no need for a random number crate.
             seed ^= seed << 13;

@@ -26,6 +26,16 @@ pub fn router() -> OpenApiRouter<AppState> {
 pub struct CategoryType {
     pub id: u64,
     pub name: String,
+    /// Never two tracks of this type in a row: rotation passes a slot
+    /// calling it over right after one.
+    pub no_two_in_a_row: bool,
+    /// Its tracks send metadata to the stream servers. Off (jingles, ads):
+    /// the stream and the public now-playing keep the last song's, and
+    /// webhooks send them only when they include the FX player.
+    pub sends_metadata: bool,
+    /// Its tracks play on the FX player over the next track's intro, ending
+    /// where the vocals start, when that intro is long enough.
+    pub plays_over_intro: bool,
     /// Categories of this type.
     pub categories: i64,
 }
@@ -34,6 +44,15 @@ pub struct CategoryType {
 #[serde(deny_unknown_fields)]
 pub struct CategoryTypeInput {
     pub name: String,
+    /// Kept as it is when missing (off for a new type).
+    #[serde(default)]
+    pub no_two_in_a_row: Option<bool>,
+    /// Kept as it is when missing (on for a new type).
+    #[serde(default)]
+    pub sends_metadata: Option<bool>,
+    /// Kept as it is when missing (off for a new type).
+    #[serde(default)]
+    pub plays_over_intro: Option<bool>,
 }
 
 impl CategoryTypeInput {
@@ -46,7 +65,7 @@ impl CategoryTypeInput {
     }
 }
 
-const SELECT: &str = "SELECT t.id, t.name,
+const SELECT: &str = "SELECT t.id, t.name, t.no_two_in_a_row, t.sends_metadata, t.plays_over_intro,
            (SELECT COUNT(*) FROM categories c WHERE c.type_id = t.id) AS categories
     FROM category_types t";
 
@@ -89,16 +108,22 @@ async fn create_type(
     Json(input): Json<CategoryTypeInput>,
 ) -> ApiResult<(StatusCode, Json<CategoryType>)> {
     user.require(Role::Operator)?;
-    let id = sqlx::query("INSERT INTO category_types (name) VALUES (?)")
-        .bind(input.name()?)
-        .execute(&state.pool)
-        .await
-        .map_err(conflict)?
-        .last_insert_id();
+    let id = sqlx::query(
+        "INSERT INTO category_types (name, no_two_in_a_row, sends_metadata, plays_over_intro)
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind(input.name()?)
+    .bind(input.no_two_in_a_row.unwrap_or(false))
+    .bind(input.sends_metadata.unwrap_or(true))
+    .bind(input.plays_over_intro.unwrap_or(false))
+    .execute(&state.pool)
+    .await
+    .map_err(conflict)?
+    .last_insert_id();
     Ok((StatusCode::CREATED, Json(find(&state, id).await?)))
 }
 
-/// Renames a type. Operators and admins.
+/// Renames a type, or changes its rules. Operators and admins.
 #[utoipa::path(put, path = "/category-types/{id}", tag = "categories",
     params(("id" = u64, Path)), request_body = CategoryTypeInput,
     responses((status = 200, body = CategoryType), (status = "4XX", body = ErrorBody)))]
@@ -111,12 +136,20 @@ async fn update_type(
     user.require(Role::Operator)?;
     let name = input.name()?;
     find(&state, id).await?;
-    sqlx::query("UPDATE category_types SET name = ? WHERE id = ?")
-        .bind(name)
-        .bind(id)
-        .execute(&state.pool)
-        .await
-        .map_err(conflict)?;
+    sqlx::query(
+        "UPDATE category_types SET name = ?, no_two_in_a_row = COALESCE(?, no_two_in_a_row),
+             sends_metadata = COALESCE(?, sends_metadata),
+             plays_over_intro = COALESCE(?, plays_over_intro)
+         WHERE id = ?",
+    )
+    .bind(name)
+    .bind(input.no_two_in_a_row)
+    .bind(input.sends_metadata)
+    .bind(input.plays_over_intro)
+    .bind(id)
+    .execute(&state.pool)
+    .await
+    .map_err(conflict)?;
     Ok(Json(find(&state, id).await?))
 }
 

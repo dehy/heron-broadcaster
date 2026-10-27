@@ -448,10 +448,16 @@ impl Webhooks {
 
     async fn queue_event(&self, event: &TrackEvent) -> ApiResult<()> {
         let payload = Payload::of(event);
-        let fx = payload
-            .track
-            .as_ref()
-            .is_some_and(|track| track.deck == DeckName::Fx);
+        // FX player tracks, and tracks that send no metadata (jingles), go
+        // only to webhooks that ask for them.
+        let entry = match event {
+            TrackEvent::Started { entry, .. } | TrackEvent::Ended { entry, .. } => entry,
+        };
+        let fx = entry.track.no_metadata
+            || payload
+                .track
+                .as_ref()
+                .is_some_and(|track| track.deck == DeckName::Fx);
         let webhooks: Vec<(u64, String, bool)> = sqlx::query_as(
             "SELECT id, CAST(events AS CHAR), include_fx FROM webhooks WHERE enabled ORDER BY id",
         )
@@ -1210,6 +1216,9 @@ mod tests {
                 cue_in_ms: 0,
                 cue_out_ms: 180_000,
                 source: PlaySource::Rotation,
+                no_metadata: false,
+                over_intro: false,
+                intro_ms: None,
             },
         }
     }
@@ -1457,6 +1466,9 @@ mod delivery_tests {
                     cue_in_ms: 0,
                     cue_out_ms: 1_000,
                     source: PlaySource::Rotation,
+                    no_metadata: false,
+                    over_intro: false,
+                    intro_ms: None,
                 },
             },
             at_unix_ms: unix_ms(SystemTime::now()),

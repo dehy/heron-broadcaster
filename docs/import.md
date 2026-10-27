@@ -37,7 +37,7 @@ For the station this was written for, the export comes from its MariaDB database
 | intro, second intro, hook, next track | The track's markers (`track_markers`), shown on its page |
 | created_at | The track's date added |
 
-The markers are shown on the track's waveform and in its legend. Heron keeps them but does not play by them yet: transitions are still planned by Heron's own rules (tracks shorter than `min_track_ms`, jingles for instance, are never crossfaded).
+The markers are shown on the track's waveform and in its legend. The intro point places the jingles played over a song's intro ([Audio engine](audio-engine.md#jingles-over-the-intro)); the other markers are kept but not played by yet: transitions are still planned by Heron's own rules (tracks shorter than `min_track_ms`, jingles for instance, are never crossfaded).
 
 ## Dry run, conflicts and apply
 

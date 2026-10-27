@@ -221,6 +221,9 @@ fn track_request(path: &str, file: &FallbackFile) -> TrackRequest {
         album: file.album.clone(),
         playout,
         source: PlaySource::Fallback,
+        no_metadata: false,
+        over_intro: false,
+        intro_ms: None,
     }
 }
 

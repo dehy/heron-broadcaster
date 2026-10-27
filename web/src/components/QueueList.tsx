@@ -30,23 +30,35 @@ import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 import { Empty, Icon } from "./ui";
 
-/** The waiting tracks in play order: the cued one, then the queue. */
+/**
+ * The waiting tracks in play order: the jingle over the cued track's intro,
+ * the cued one, then the queue.
+ */
 export function useWaiting(): QueueEntry[] | undefined {
   const player = useLive((live) => live.player);
   return useMemo(() => {
     if (!player) {
       return undefined;
     }
-    return player.cued ? [player.cued, ...player.queue] : player.queue;
+    return [player.cued_jingle, player.cued, ...player.queue].filter(
+      (entry): entry is QueueEntry => !!entry,
+    );
   }, [player]);
 }
 
-/** When each waiting track should start (Unix ms), without crossfades. */
-function startTimes(entries: QueueEntry[], firstStart: number | null): (number | null)[] {
+/**
+ * When each waiting track should start (Unix ms), without crossfades. A
+ * jingle over an intro takes no time of its own.
+ */
+function startTimes(
+  entries: QueueEntry[],
+  firstStart: number | null,
+  overIntro: number | null,
+): (number | null)[] {
   let at = firstStart;
   return entries.map((entry) => {
     const start = at;
-    if (at !== null) {
+    if (at !== null && entry.entry_id !== overIntro) {
       at += Math.max(0, entry.track.cue_out_ms - entry.track.cue_in_ms);
     }
     return start;
@@ -101,7 +113,7 @@ export function QueueList({ limit }: { limit?: number }) {
     onAir?.entry && position
       ? Date.now() + Math.max(0, onAir.entry.track.cue_out_ms - position.position_ms)
       : null;
-  const starts = startTimes(entries, firstStart);
+  const starts = startTimes(entries, firstStart, player.cued_jingle?.entry_id ?? null);
   const shown = limit ? entries.slice(0, limit) : entries;
 
   const onDragEnd = (event: DragEndEvent) => {
@@ -131,7 +143,8 @@ export function QueueList({ limit }: { limit?: number }) {
               entry={entry}
               index={index}
               start={starts[index] ?? null}
-              cued={index === 0 && player.cued?.entry_id === entry.entry_id}
+              cued={player.cued?.entry_id === entry.entry_id}
+              overIntro={player.cued_jingle?.entry_id === entry.entry_id}
               canEdit={canEdit}
               onNext={() => {
                 setOrder(arrayMove(entries, index, 0));
@@ -160,6 +173,7 @@ function Item({
   index,
   start,
   cued,
+  overIntro,
   canEdit,
   onNext,
   onRemove,
@@ -168,6 +182,7 @@ function Item({
   index: number;
   start: number | null;
   cued: boolean;
+  overIntro: boolean;
   canEdit: boolean;
   onNext: () => void;
   onRemove: () => void;
@@ -202,6 +217,11 @@ function Item({
         </div>
         <div className="row small muted" style={{ gap: "0.4rem" }}>
           {cued && <span className="badge accent">{t("queue.cued")}</span>}
+          {overIntro && (
+            <span className="badge accent" title={t("queue.overIntroHint")}>
+              {t("queue.overIntro")}
+            </span>
+          )}
           <span className="badge">
             {sourceLabel(track.source)}
           </span>
