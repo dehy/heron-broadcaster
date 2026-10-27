@@ -152,7 +152,8 @@ impl EngineRpc for EngineService {
                     name: output.name,
                     enabled: output.enabled,
                     state: state.to_owned(),
-                    error,
+                    // A connection's error first, else the encoder's.
+                    error: error.or(output.encoder_error),
                     bytes_sent: output.bytes_sent,
                     connected_since_unix: connected_since,
                     dropped_chunks: output.dropped_chunks,

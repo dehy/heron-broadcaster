@@ -134,6 +134,8 @@ impl Drop for Fanout {
 struct EncoderPipeline {
     profile: EncoderProfile,
     info: encoder::StreamInfo,
+    /// Why the encoder fails, while it does.
+    error: Arc<Mutex<Option<String>>>,
     audio: broadcast::Sender<Bytes>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -146,8 +148,10 @@ impl EncoderPipeline {
         let (audio, _) = broadcast::channel(OUTPUT_QUEUE);
         let (sender, receiver) = std::sync::mpsc::sync_channel(ENCODER_QUEUE);
         let stop = Arc::new(AtomicBool::new(false));
+        let error = Arc::new(Mutex::new(None));
         let thread_audio = audio.clone();
         let thread_stop = Arc::clone(&stop);
+        let thread_error = Arc::clone(&error);
         let name = profile.name.clone();
         let thread = std::thread::Builder::new()
             .name("heron-encoder".to_owned())
@@ -158,6 +162,7 @@ impl EncoderPipeline {
                     &receiver,
                     &thread_audio,
                     &thread_stop,
+                    &thread_error,
                 )
             })
             .map_err(|error| ConfigError::Profile {
@@ -168,6 +173,7 @@ impl EncoderPipeline {
         Ok(Self {
             profile: profile.clone(),
             info,
+            error,
             audio,
             stop,
             thread: Some(thread),
@@ -197,15 +203,28 @@ fn encode(
     receiver: &Receiver<Arc<[f32]>>,
     audio: &broadcast::Sender<Bytes>,
     stop: &AtomicBool,
+    status: &Mutex<Option<String>>,
 ) {
     let mut encoded = Vec::new();
     let mut failing = false;
     let mut publish = |result: Result<(), encoder::EncodeError>, encoded: &[u8]| {
         match result {
-            Ok(()) => failing = false,
+            Ok(()) => {
+                if (failing || !encoded.is_empty())
+                    && let Ok(mut status) = status.lock()
+                {
+                    *status = None;
+                }
+                failing = false;
+            }
+            // Between two attempts of an external encoder: still failing.
+            Err(encoder::EncodeError::Waiting) => return,
             Err(error) => {
                 if !failing {
                     tracing::error!(profile = name, %error, "encoding failed");
+                }
+                if let Ok(mut status) = status.lock() {
+                    *status = Some(error.to_string());
                 }
                 failing = true;
                 return;
@@ -252,6 +271,9 @@ pub struct OutputSnapshot {
     pub state: Option<OutputState>,
     pub bytes_sent: u64,
     pub dropped_chunks: u64,
+    /// Why its encoder fails, while it does (an external FFmpeg that
+    /// cannot start, for instance).
+    pub encoder_error: Option<String>,
 }
 
 /// Every encoder and output of the station.
@@ -497,6 +519,9 @@ impl Outputs {
                     dropped_chunks: running.map_or(0, |running| {
                         running.status.dropped_chunks.load(Ordering::Relaxed)
                     }),
+                    encoder_error: running
+                        .and_then(|_| self.encoders.get(&output.encoder_profile_id))
+                        .and_then(|pipeline| pipeline.error.lock().ok()?.clone()),
                 }
             })
             .collect()
