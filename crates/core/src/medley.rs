@@ -18,6 +18,14 @@ pub const DUCK_RAMP_MS: u32 = 150;
 /// The mix is scaled down when its peak would go over this.
 pub const PEAK_LIMIT: f32 = 0.98;
 
+/// Folder of the previews, in the buffer zone (hidden: never imported).
+pub const PREVIEW_FOLDER: &str = ".medley-previews";
+
+/// Where a medley's preview goes, relative to the buffer zone.
+pub fn preview_path(medley_id: u64) -> String {
+    format!("{PREVIEW_FOLDER}/medley-{medley_id}.wav")
+}
+
 /// How a medley is built.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use heron_analysis::Decoder;
-use heron_core::medley::{self, CHANNELS, PartAudio, PartKind, Recipe, SAMPLE_RATE};
+use heron_core::medley::{self, CHANNELS, Part, PartAudio, PartKind, Recipe, SAMPLE_RATE};
 use heron_core::playout::db_to_gain;
 use heron_core::{LibraryPath, PlayoutSettings, TrackPlayout};
 use heron_dsp::StreamResampler;
@@ -46,31 +46,24 @@ pub fn medley_path(medley_id: u64) -> String {
     format!("{FOLDER}/medley-{medley_id}.wav")
 }
 
-pub async fn render(
-    pool: &MySqlPool,
-    roots: &Roots,
-    medley_id: u64,
-) -> Result<RenderReport, String> {
+async fn recipe(pool: &MySqlPool, medley_id: u64) -> Result<Recipe, String> {
     let recipe: Option<String> =
         sqlx::query_scalar("SELECT CAST(recipe AS CHAR) FROM medleys WHERE id = ?")
             .bind(medley_id)
             .fetch_optional(pool)
             .await
             .map_err(|error| error.to_string())?;
-    let recipe: Recipe = serde_json::from_str(&recipe.ok_or("the medley was deleted")?)
-        .map_err(|error| format!("invalid recipe: {error}"))?;
-    let rows: Vec<PartRow> = sqlx::query_as(
-        "SELECT CAST(p.kind AS CHAR) AS kind, t.path, p.from_ms, p.to_ms,
-                a.integrated_lufs, a.true_peak_db
-         FROM medley_parts p
-         JOIN tracks t ON t.id = p.track_id
-         LEFT JOIN track_analysis a ON a.track_id = t.id
-         WHERE p.medley_id = ? ORDER BY p.position",
-    )
-    .bind(medley_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|error| error.to_string())?;
+    serde_json::from_str(&recipe.ok_or("the medley was deleted")?)
+        .map_err(|error| format!("invalid recipe: {error}"))
+}
+
+/// Decodes the parts and mixes them, off the async runtime.
+async fn mix_rows(
+    pool: &MySqlPool,
+    roots: &Roots,
+    recipe: Recipe,
+    rows: Vec<PartRow>,
+) -> Result<Vec<f32>, String> {
     if rows.is_empty() {
         return Err("the medley has no parts: build it first".to_owned());
     }
@@ -84,14 +77,8 @@ pub async fn render(
         json.and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default()
     };
-
     let library = roots.library.clone();
-    let path = medley_path(medley_id);
-    let target = LibraryPath::from_stored(path.clone()).resolve(&library);
-    let count = rows.len();
-    // Decoding and mixing take seconds: off the async runtime, and before
-    // taking the library lock.
-    let audio = tokio::task::spawn_blocking(move || -> Result<Vec<f32>, String> {
+    tokio::task::spawn_blocking(move || -> Result<Vec<f32>, String> {
         let mut parts = Vec::with_capacity(rows.len());
         for row in &rows {
             let file = LibraryPath::from_stored(row.path.clone()).resolve(&library);
@@ -113,9 +100,38 @@ pub async fn render(
         Ok(medley::mix(&recipe, &parts))
     })
     .await
-    .map_err(|error| error.to_string())??;
-    let duration_ms = (audio.len() / CHANNELS) as u64 * 1_000 / u64::from(SAMPLE_RATE);
+    .map_err(|error| error.to_string())?
+}
 
+fn duration_ms(audio: &[f32]) -> u64 {
+    (audio.len() / CHANNELS) as u64 * 1_000 / u64::from(SAMPLE_RATE)
+}
+
+/// Renders the medley's saved parts into its library file.
+pub async fn render(
+    pool: &MySqlPool,
+    roots: &Roots,
+    medley_id: u64,
+) -> Result<RenderReport, String> {
+    let recipe = recipe(pool, medley_id).await?;
+    let rows: Vec<PartRow> = sqlx::query_as(
+        "SELECT CAST(p.kind AS CHAR) AS kind, t.path, p.from_ms, p.to_ms,
+                a.integrated_lufs, a.true_peak_db
+         FROM medley_parts p
+         JOIN tracks t ON t.id = p.track_id
+         LEFT JOIN track_analysis a ON a.track_id = t.id
+         WHERE p.medley_id = ? ORDER BY p.position",
+    )
+    .bind(medley_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    let count = rows.len();
+    let audio = mix_rows(pool, roots, recipe, rows).await?;
+    let duration_ms = duration_ms(&audio);
+
+    let path = medley_path(medley_id);
+    let target = LibraryPath::from_stored(path.clone()).resolve(&roots.library);
     // The scanner must not read the file while it is replaced.
     let lock = LibraryLock::acquire(pool, "librarian")
         .await
@@ -141,6 +157,64 @@ pub async fn render(
         path,
         duration_ms,
         parts: count,
+    })
+}
+
+/// Mixes `parts` as a render would, into the medley's preview, outside
+/// the library: nothing is saved.
+pub async fn preview(
+    pool: &MySqlPool,
+    roots: &Roots,
+    medley_id: u64,
+    parts: &[Part],
+) -> Result<RenderReport, String> {
+    let recipe = recipe(pool, medley_id).await?;
+    let mut rows = Vec::with_capacity(parts.len());
+    for part in parts {
+        let track: Option<(String, Option<f64>, Option<f64>)> = sqlx::query_as(
+            "SELECT t.path, a.integrated_lufs, a.true_peak_db FROM tracks t
+             LEFT JOIN track_analysis a ON a.track_id = t.id WHERE t.id = ?",
+        )
+        .bind(part.track_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        let (path, integrated_lufs, true_peak_db) =
+            track.ok_or_else(|| format!("track {} no longer exists", part.track_id))?;
+        rows.push(PartRow {
+            kind: match part.kind {
+                PartKind::Hook => "hook",
+                PartKind::Liner => "liner",
+            }
+            .to_owned(),
+            path,
+            from_ms: part.from_ms,
+            to_ms: part.to_ms,
+            integrated_lufs,
+            true_peak_db,
+        });
+    }
+    let audio = mix_rows(pool, roots, recipe, rows).await?;
+    let duration_ms = duration_ms(&audio);
+    let path = medley::preview_path(medley_id);
+    let target = roots.staging.join(&path);
+    tokio::task::spawn_blocking(move || {
+        write_wav(&target, &audio)
+            .map_err(|error| format!("cannot write {}: {error}", target.display()))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    tracing::info!(
+        medley_id,
+        duration_ms,
+        parts = parts.len(),
+        "medley preview mixed"
+    );
+    Ok(RenderReport {
+        medley_id,
+        path,
+        duration_ms,
+        parts: parts.len(),
     })
 }
 

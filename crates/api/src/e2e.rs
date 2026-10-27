@@ -3842,6 +3842,57 @@ async fn medleys_are_planned_rendered_and_linked() {
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
+    // Previewed first, a hook nudged by 0.1 s: mixed outside the library.
+    let preview = format!("/medleys/{id}/preview");
+    let mut nudged = parts.clone();
+    nudged[0]["to_ms"] = json!(nudged[0]["to_ms"].as_u64().unwrap() - 100);
+    let mut past_the_end = parts.clone();
+    past_the_end[0]["to_ms"] = json!(3_100);
+    let (status, _) = admin
+        .send(Method::POST, &preview, json!({"parts": past_the_end}))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "past the file");
+    let (status, task) = admin
+        .send(Method::POST, &preview, json!({"parts": nudged}))
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{task}");
+    assert_eq!(task["request"]["kind"], "preview_medley");
+    let previewer = heron_librarian::tasks::TaskRunner::new(
+        pool.clone(),
+        heron_librarian::journal::Roots {
+            library: station.library.path().to_path_buf(),
+            incoming: station.library.path().join(".incoming"),
+            staging: station.staging.path().to_path_buf(),
+        },
+        heron_librarian::identify::Endpoints::default(),
+    );
+    assert!(previewer.run_next().await.unwrap());
+    let done = admin.get(&format!("/library/tasks/{}", task["id"])).await;
+    assert_eq!(done["status"], "done", "{done}");
+    let audio = viewer
+        .http
+        .get(format!("{}{preview}", viewer.base))
+        .header("cookie", viewer.cookie.as_deref().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(audio.status(), StatusCode::OK);
+    let wav = audio.bytes().await.unwrap();
+    assert_eq!(&wav[..4], b"RIFF");
+    // 0.1 s shorter than the render below.
+    let frames = (wav.len() - 44) / 4;
+    assert_eq!(frames, (3 * 1_500 + 2 * 3_000 - 4 * 200 - 100) * 48);
+    assert!(
+        !station.library.path().join("medleys").exists(),
+        "nothing in the library"
+    );
+    assert!(
+        admin.get(&format!("/medleys/{id}")).await["parts"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
     // Rendered by heron-librarian into the library.
     let render = format!("/medleys/{id}/render");
     let (status, _) = admin

@@ -3125,6 +3125,92 @@
         }
       }
     },
+    "/api/v1/medleys/{id}/preview": {
+      "get": {
+        "tags": [
+          "medleys"
+        ],
+        "summary": "The last preview's audio (WAV), with range requests.",
+        "operationId": "get_preview",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "audio/wav": {}
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "medleys"
+        ],
+        "summary": "Mixes the parts into the medley's preview, outside the library: nothing\nis saved. Operators and admins.",
+        "operationId": "preview_medley",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/medleys/{id}/render": {
       "post": {
         "tags": [
@@ -10793,6 +10879,15 @@
               "null"
             ]
           },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The file's length, to keep the part within it.",
+            "minimum": 0
+          },
           "from_ms": {
             "type": "integer",
             "format": "int32",
@@ -13740,6 +13835,34 @@
                 "type": "integer",
                 "format": "int64",
                 "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Mixes `parts` as a render would, into the medley's preview, outside\nthe library (`docs/medleys.md`).",
+            "required": [
+              "medley_id",
+              "parts",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "preview_medley"
+                ]
+              },
+              "medley_id": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "parts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Part"
+                }
               }
             }
           }

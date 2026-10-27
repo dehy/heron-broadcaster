@@ -1042,6 +1042,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/medleys/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The last preview's audio (WAV), with range requests. */
+        get: operations["get_preview"];
+        put?: never;
+        /**
+         * Mixes the parts into the medley's preview, outside the library: nothing
+         *     is saved. Operators and admins.
+         */
+        post: operations["preview_medley"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/medleys/{id}/render": {
         parameters: {
             query?: never;
@@ -3889,6 +3910,11 @@ export interface components {
             artist?: string | null;
             /**
              * Format: int32
+             * @description The file's length, to keep the part within it.
+             */
+            duration_ms?: number | null;
+            /**
+             * Format: int32
              * @description On the file's timeline.
              */
             from_ms: number;
@@ -5025,6 +5051,12 @@ export interface components {
             kind: "render_medley";
             /** Format: int64 */
             medley_id: number;
+        } | {
+            /** @enum {string} */
+            kind: "preview_medley";
+            /** Format: int64 */
+            medley_id: number;
+            parts: components["schemas"]["Part"][];
         };
         /** @enum {string} */
         TaskStatus: "pending" | "running" | "done" | "failed";
@@ -7803,6 +7835,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MedleyPlan"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/wav": unknown;
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    preview_medley: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenderRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
                 };
             };
             "4XX": {

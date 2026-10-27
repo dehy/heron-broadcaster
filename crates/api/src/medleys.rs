@@ -9,8 +9,10 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::body::Body;
+use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
+use axum::response::Response;
 use heron_core::library::TaskRequest;
 use heron_core::medley::{self, Candidate, Part, PartKind, Recipe};
 use serde::{Deserialize, Serialize};
@@ -37,6 +39,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(plan_medley))
         .routes(routes!(pick_part))
         .routes(routes!(list_candidates))
+        .routes(routes!(preview_medley, get_preview))
         .routes(routes!(render_medley))
 }
 
@@ -51,6 +54,8 @@ pub struct PartView {
     pub title: Option<String>,
     pub artist: Option<String>,
     pub path: String,
+    /// The file's length, to keep the part within it.
+    pub duration_ms: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -233,18 +238,20 @@ async fn views(pool: &MySqlPool, parts: &[Part]) -> ApiResult<Vec<PartView>> {
     if parts.is_empty() {
         return Ok(Vec::new());
     }
-    let mut query = QueryBuilder::new("SELECT id, title, artist, path FROM tracks WHERE id IN (");
+    let mut query =
+        QueryBuilder::new("SELECT id, title, artist, path, duration_ms FROM tracks WHERE id IN (");
     let mut separated = query.separated(", ");
     for part in parts {
         separated.push_bind(part.track_id);
     }
     query.push(")");
-    let tracks: Vec<(u64, Option<String>, Option<String>, String)> =
-        query.build_query_as().fetch_all(pool).await?;
+    type Row = (u64, Option<String>, Option<String>, String, Option<u32>);
+    let tracks: Vec<Row> = query.build_query_as().fetch_all(pool).await?;
     Ok(parts
         .iter()
         .filter_map(|part| {
-            let (_, title, artist, path) = tracks.iter().find(|track| track.0 == part.track_id)?;
+            let (_, title, artist, path, duration_ms) =
+                tracks.iter().find(|track| track.0 == part.track_id)?;
             Some(PartView {
                 kind: part.kind,
                 track_id: part.track_id,
@@ -253,6 +260,7 @@ async fn views(pool: &MySqlPool, parts: &[Part]) -> ApiResult<Vec<PartView>> {
                 title: title.clone(),
                 artist: artist.clone(),
                 path: path.clone(),
+                duration_ms: *duration_ms,
             })
         })
         .collect())
@@ -553,31 +561,7 @@ async fn render_medley(
     user.require(Role::Operator)?;
     find(&state.pool, id).await?;
     let parts = request.parts;
-    if parts.is_empty() || parts.len() > MAX_PARTS {
-        return Err(ApiError::Invalid(format!(
-            "a medley has 1 to {MAX_PARTS} parts"
-        )));
-    }
-    if !parts.iter().any(|part| part.kind == PartKind::Hook) {
-        return Err(ApiError::Invalid(
-            "a medley has at least one hook".to_owned(),
-        ));
-    }
-    if parts
-        .iter()
-        .any(|part| part.from_ms >= part.to_ms || part.length_ms() > MAX_PART_MS)
-    {
-        return Err(ApiError::Invalid(format!(
-            "each part starts before it ends and lasts at most {} s",
-            MAX_PART_MS / 1_000
-        )));
-    }
-    let known = views(&state.pool, &parts).await?.len();
-    if known != parts.len() {
-        return Err(ApiError::Invalid(
-            "a part's track does not exist".to_owned(),
-        ));
-    }
+    check_parts(&state.pool, &parts).await?;
     let mut tx = state.pool.begin().await?;
     sqlx::query("DELETE FROM medley_parts WHERE medley_id = ?")
         .bind(id)
@@ -606,6 +590,90 @@ async fn render_medley(
         .execute(&state.pool)
         .await?;
     Ok((StatusCode::ACCEPTED, Json(task)))
+}
+
+/// Why these parts cannot make a medley, if they cannot.
+async fn check_parts(pool: &MySqlPool, parts: &[Part]) -> ApiResult<()> {
+    if parts.is_empty() || parts.len() > MAX_PARTS {
+        return Err(ApiError::Invalid(format!(
+            "a medley has 1 to {MAX_PARTS} parts"
+        )));
+    }
+    if !parts.iter().any(|part| part.kind == PartKind::Hook) {
+        return Err(ApiError::Invalid(
+            "a medley has at least one hook".to_owned(),
+        ));
+    }
+    if parts
+        .iter()
+        .any(|part| part.from_ms >= part.to_ms || part.length_ms() > MAX_PART_MS)
+    {
+        return Err(ApiError::Invalid(format!(
+            "each part starts before it ends and lasts at most {} s",
+            MAX_PART_MS / 1_000
+        )));
+    }
+    let tracks = views(pool, parts).await?;
+    if tracks.len() != parts.len() {
+        return Err(ApiError::Invalid(
+            "a part's track does not exist".to_owned(),
+        ));
+    }
+    if tracks
+        .iter()
+        .any(|part| part.duration_ms.is_some_and(|length| part.to_ms > length))
+    {
+        return Err(ApiError::Invalid("a part ends after its file".to_owned()));
+    }
+    Ok(())
+}
+
+/// Mixes the parts into the medley's preview, outside the library: nothing
+/// is saved. Operators and admins.
+#[utoipa::path(post, path = "/medleys/{id}/preview", tag = "medleys", params(("id" = u64, Path)),
+    request_body = RenderRequest,
+    responses((status = 202, body = LibraryTask), (status = "4XX", body = ErrorBody)))]
+async fn preview_medley(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(request): Json<RenderRequest>,
+) -> ApiResult<(StatusCode, Json<LibraryTask>)> {
+    user.require(Role::Operator)?;
+    find(&state.pool, id).await?;
+    check_parts(&state.pool, &request.parts).await?;
+    let task = librarian::ask(
+        &state,
+        &user,
+        TaskRequest::PreviewMedley {
+            medley_id: id,
+            parts: request.parts,
+        },
+    )
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(task)))
+}
+
+/// The last preview's audio (WAV), with range requests.
+#[utoipa::path(get, path = "/medleys/{id}/preview", tag = "medleys", params(("id" = u64, Path)),
+    responses((status = 200, content_type = "audio/wav"), (status = "4XX", body = ErrorBody)))]
+async fn get_preview(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    request: Request,
+) -> ApiResult<Response> {
+    let file = state.staging.join(heron_core::medley::preview_path(id));
+    let service = tower_http::services::ServeFile::new(file);
+    let (parts, _) = request.into_parts();
+    let request = Request::from_parts(parts, Body::empty());
+    let response = tower::ServiceExt::oneshot(service, request)
+        .await
+        .map_err(|error| ApiError::Internal(error.to_string()))?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err(ApiError::not_found("preview"));
+    }
+    Ok(response.map(Body::new))
 }
 
 /// Shows the medley's name as its track's title, kept in Heron's database
