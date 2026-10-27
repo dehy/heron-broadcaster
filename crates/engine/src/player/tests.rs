@@ -791,8 +791,19 @@ fn a_jingle_plays_over_the_next_intro() {
     // next.wav starts at 1 s; the jingle at 1 s + 1.5 s and ends on its intro.
     station.play(2.0);
     assert_eq!(station.fx(), None);
+    // Waiting for the intro: shown as such.
+    let snapshot = station.player.snapshot();
+    assert!(snapshot.cued_jingle.is_none());
+    assert_eq!(
+        snapshot
+            .pending_jingle
+            .map(|entry| entry.track.path)
+            .as_deref(),
+        Some("jingle.wav")
+    );
     station.play(0.5);
     assert_eq!(station.fx().as_deref(), Some("jingle.wav"));
+    assert!(station.player.snapshot().pending_jingle.is_none());
     assert_eq!(
         station.now_playing.borrow().title.as_deref(),
         Some("next.wav")

@@ -193,6 +193,9 @@ message EngineState {
   // The jingle played on the FX player over the cued track's intro: it
   // comes before the cued track in the play order.
   optional QueueEntry cued_jingle = 9;
+  // The jingle waiting to start on the FX player over the intro of the
+  // track on air.
+  optional QueueEntry pending_jingle = 10;
 }
 
 message GetLevelsRequest {}

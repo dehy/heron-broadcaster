@@ -389,6 +389,7 @@ mod tests {
             decks,
             cued: None,
             cued_jingle: None,
+            pending_jingle: None,
             queue: Vec::new(),
             outputs: Vec::new(),
             rendered_ms: 0,

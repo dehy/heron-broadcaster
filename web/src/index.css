@@ -981,6 +981,31 @@ table.table {
   border-radius: 999px;
 }
 
+/* Points on a deck's progress bar: where the vocals start, where a jingle starts over the intro. */
+.progress .progress-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--fg);
+}
+
+.progress .progress-mark.jingle {
+  background: var(--fx);
+}
+
+/* Countdown to the vocals, or to a jingle over the intro. */
+.intro-countdown {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  align-self: center;
+}
+
+.intro-countdown.soon {
+  color: var(--warn);
+}
+
 .on-air-pill {
   display: inline-flex;
   align-items: center;

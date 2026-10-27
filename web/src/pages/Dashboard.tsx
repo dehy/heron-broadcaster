@@ -17,6 +17,7 @@ import { useListenersNow } from "../lib/listeners";
 import { positionNow, useLive } from "../lib/live";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
+import { introFromCueIn, jingleStart } from "../lib/intro";
 
 /** Re-renders `fps` times a second while mounted. */
 export function useTicker(fps = 10): number {
@@ -62,6 +63,7 @@ export function Dashboard() {
   const decks = player?.decks.filter((deck) => deck.deck !== "fx") ?? [];
   const fx = player?.decks.find((deck) => deck.deck === "fx");
   const fxPlaying = Boolean(fx?.entry);
+  const onAirDeck = decks.find((deck) => deck.on_air && deck.entry);
 
   return (
     <>
@@ -118,6 +120,7 @@ export function Dashboard() {
                 deck={deck}
                 paused={player?.paused ?? false}
                 cued={!deck.entry && !deck.on_air ? (player?.cued ?? null) : null}
+                pendingJingle={deck.on_air ? (player?.pending_jingle ?? null) : null}
               />
             ))}
           </div>
@@ -170,6 +173,8 @@ export function Dashboard() {
           >
             {fx?.entry ? (
               <FxState deck={fx} />
+            ) : player?.pending_jingle && onAirDeck ? (
+              <FxCountdown jingle={player.pending_jingle} deck={onAirDeck} paused={player.paused} />
             ) : (
               <p className="muted small" style={{ margin: 0 }}>
                 {t("dashboard.fxHelp")}
@@ -275,11 +280,14 @@ function Deck({
   deck,
   paused,
   cued,
+  pendingJingle,
 }: {
   deck: DeckState;
   paused: boolean;
   /** The next track, shown on the idle deck. */
   cued: QueueEntry | null;
+  /** The jingle waiting to start over this deck's intro. */
+  pendingJingle: QueueEntry | null;
 }) {
   const positions = useLive((live) => live.positions);
   const now = useTicker(deck.on_air ? 10 : 2);
@@ -289,6 +297,9 @@ function Deck({
   const cueOut = track?.cue_out_ms ?? deck.length_ms;
   const remaining = Math.max(0, cueOut - position);
   const progress = cueOut > 0 ? Math.min(1, position / cueOut) : 0;
+  const intro = track ? introFromCueIn(track) : null;
+  const jingleAt = track && pendingJingle ? jingleStart(track, pendingJingle.track) : null;
+  const at = (ms: number) => `${Math.min(100, (ms / Math.max(1, cueOut)) * 100)}%`;
 
   return (
     <section
@@ -342,9 +353,20 @@ function Deck({
                   aria-valuenow={Math.round(position / 1000)}
                 >
                   <div style={{ width: `${progress * 100}%` }} />
+                  {jingleAt !== null && (
+                    <span className="progress-mark jingle" style={{ left: at(jingleAt) }} title={t("dashboard.jingleStartsHere")} />
+                  )}
+                  {intro !== null && (
+                    <span className="progress-mark intro" style={{ left: at(intro) }} title={t("dashboard.vocalsStartHere")} />
+                  )}
                 </div>
                 <div className="deck-times">
                   <span className="muted">{duration(position)}</span>
+                  {intro !== null && position < intro && (
+                    <span className={intro - position <= 5_000 ? "intro-countdown soon" : "intro-countdown"}>
+                      {t("dashboard.vocalsIn", { time: duration(intro - position, true) })}
+                    </span>
+                  )}
                   <span className="remaining">-{duration(remaining)}</span>
                 </div>
               </>
@@ -357,6 +379,28 @@ function Deck({
         )}
       </div>
     </section>
+  );
+}
+
+/** The jingle waiting for the intro of the track on air, and when it starts. */
+function FxCountdown({ jingle, deck, paused }: { jingle: QueueEntry; deck: DeckState; paused: boolean }) {
+  const positions = useLive((live) => live.positions);
+  const now = useTicker(10);
+  const song = deck.entry?.track;
+  const start = song ? jingleStart(song, jingle.track) : null;
+  const position = positionNow(positions, deck.deck, paused, now)?.position_ms ?? deck.position_ms;
+  const left = start !== null ? Math.max(0, start - position) : null;
+  return (
+    <div className="row between">
+      <span className="ellipsis">
+        <span className="badge accent">{t("dashboard.fxNext")}</span> {trackName(jingle.track)}
+      </span>
+      {left !== null && (
+        <span className={left <= 5_000 ? "intro-countdown soon" : "intro-countdown"}>
+          {t("dashboard.fxIn", { time: duration(left, true) })}
+        </span>
+      )}
+    </div>
   );
 }
 

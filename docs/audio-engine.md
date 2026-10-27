@@ -80,6 +80,9 @@ A track whose category type plays **over the intro** (on for *Jingle*, set on th
 - The jingle is in the play history (on the FX deck) and counts for rotation like any pick. It sends no metadata if its type sends none.
 - There is no ducking: the jingle is mixed over the intro at its own level (loudness-normalized like any track).
 - A handover waits until the jingle has played.
+- *On air* shows it coming: the FX player card says *Next* with a countdown to the jingle's start (in the warning color for its last 5 s), and the song's progress bar marks where the jingle starts. The engine's state gives the waiting jingle as `pending_jingle`; in the queue, before the song starts, its badge says where in the song it starts.
+
+Every deck playing a track with an intro point also counts down to the vocals (*Vocals in 0:08.0*) until they start, and marks the end of the intro on its progress bar.
 
 Fade curves (shape of a fade-in; a fade-out is its mirror):
 
