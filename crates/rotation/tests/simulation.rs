@@ -293,6 +293,7 @@ fn station() -> Station {
                 fallback_category_id: Some(GOLD),
                 ..RotationSettings::default()
             },
+            no_two_in_a_row: Vec::new(),
         },
         artists,
     }

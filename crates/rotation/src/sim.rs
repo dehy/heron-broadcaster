@@ -49,6 +49,8 @@ pub enum Violation {
         pick: u32,
         expected: Option<CategoryId>,
     },
+    /// Right after a track of a type that never plays twice in a row.
+    InARow { pick: u32, type_id: crate::TypeId },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -244,6 +246,12 @@ pub fn audit(library: &Library, before: &[Play], picks: &[SimulatedPick]) -> Vec
                 restriction_id: restriction.id,
             });
         }
+        if let Some(type_id) = library.repeated_type(previous, &track.categories) {
+            violations.push(Violation::InARow {
+                pick: index,
+                type_id,
+            });
+        }
         timeline.push(Play::of(track, at));
     }
     violations
@@ -251,6 +259,8 @@ pub fn audit(library: &Library, before: &[Play], picks: &[SimulatedPick]) -> Vec
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use jiff::tz::TimeZone;
 
     use super::*;
@@ -438,5 +448,23 @@ mod tests {
                 expected: Some(1)
             }]
         );
+    }
+
+    #[test]
+    fn catches_a_type_twice_in_a_row() {
+        let mut library = library();
+        // The slot's category is of a type that never plays twice in a row.
+        library.no_two_in_a_row = HashMap::from([(1, 2)]);
+        let picks = [pick(&library, 1, 0, 0), pick(&library, 3, 300 * MIN, 0)];
+        assert_eq!(
+            audit(&library, &[], &picks),
+            [Violation::InARow {
+                pick: 1,
+                type_id: 2
+            }]
+        );
+        // Not after a track of another type.
+        let before = [Play::of(&library.tracks[&4], -MIN)];
+        assert!(audit(&library, &before, &picks[..1]).is_empty());
     }
 }

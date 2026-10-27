@@ -78,6 +78,22 @@ pub struct Blocked {
 pub struct SkippedSlot {
     pub slot: u32,
     pub category_id: CategoryId,
+    /// Missing in picks logged before reasons were (nothing allowed).
+    #[serde(default)]
+    pub reason: SkipReason,
+}
+
+/// Why a slot was passed over.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum SkipReason {
+    /// Nothing could be picked, even relaxed.
+    #[default]
+    NothingAllowed,
+    /// The track before is of the slot category's type, which never plays
+    /// twice in a row (two jingles, for instance).
+    SameTypeInARow,
 }
 
 /// A separation rule.
@@ -231,7 +247,8 @@ impl<'l> Call<'l> {
                     artists: &track.artists,
                     categories: &track.categories,
                 };
-                let forbidden = forbidding(&library.restrictions, &subject, at, previous).is_some();
+                let forbidden = forbidding(&library.restrictions, &subject, at, previous).is_some()
+                    || library.repeated_type(previous, &track.categories).is_some();
                 restricted += u32::from(forbidden);
                 !forbidden
             })
@@ -423,8 +440,23 @@ pub fn next(
         _ => 0,
     };
     let mut skipped = Vec::new();
+    let previous = history
+        .previous(at_ms)
+        .map(|play| play.categories.as_slice());
     for index in (0..count).map(|k| (first + k) % count) {
         let slot = &clock.slots[index];
+        // A jingle slot after a jingle: passed over, never relaxed.
+        if library
+            .repeated_type(previous, std::slice::from_ref(&slot.category))
+            .is_some()
+        {
+            skipped.push(SkippedSlot {
+                slot: u32::try_from(index).unwrap_or(u32::MAX),
+                category_id: slot.category,
+                reason: SkipReason::SameTypeInARow,
+            });
+            continue;
+        }
         let call = SlotCall {
             call: Call::new(library, Some(slot.category), Some(&slot.separation)),
             method: slot.method,
@@ -450,6 +482,7 @@ pub fn next(
             None => skipped.push(SkippedSlot {
                 slot: index,
                 category_id: slot.category,
+                reason: SkipReason::NothingAllowed,
             }),
         }
     }
@@ -766,7 +799,8 @@ mod tests {
             second.explanation.skipped_slots,
             [SkippedSlot {
                 slot: 1,
-                category_id: 2
+                category_id: 2,
+                reason: SkipReason::NothingAllowed,
             }]
         );
         // With every category banned, nothing is picked.
@@ -778,5 +812,75 @@ mod tests {
         let mut history = History::default();
         history.push(Play::of(&library.tracks[&1], -MIN));
         assert!(next(&library, &history, 0, None, &mut rng).is_none());
+    }
+
+    #[test]
+    fn a_type_never_plays_twice_in_a_row() {
+        // Categories 1 and 2 are jingles (type 7), category 3 songs.
+        let mut library = library(vec![
+            slot(1, Method::Random),
+            slot(2, Method::Random),
+            slot(3, Method::Random),
+        ]);
+        library.no_two_in_a_row = HashMap::from([(1, 7), (2, 7)]);
+        let mut rng = Rng::new(3);
+        let mut history = History::default();
+        let first = next(&library, &history, 0, None, &mut rng).unwrap();
+        assert_eq!(first.position.unwrap().slot, 0);
+        history.push(Play::of(&library.tracks[&first.track], 0));
+
+        // Slot 1, another jingle category, is passed over for the song slot.
+        let second = next(
+            &library,
+            &history,
+            4 * MIN,
+            first.position.as_ref(),
+            &mut rng,
+        )
+        .unwrap();
+        assert_eq!(second.position.unwrap().slot, 2);
+        assert_eq!(
+            second.explanation.skipped_slots,
+            [SkippedSlot {
+                slot: 1,
+                category_id: 2,
+                reason: SkipReason::SameTypeInARow,
+            }]
+        );
+        assert!(library.tracks[&second.track].categories.contains(&3));
+
+        // After a song, a jingle may play.
+        history.push(Play::of(&library.tracks[&second.track], 4 * MIN));
+        let third = next(
+            &library,
+            &history,
+            8 * MIN,
+            second.position.as_ref(),
+            &mut rng,
+        )
+        .unwrap();
+        assert_eq!(third.position.unwrap().slot, 0);
+
+        // Without a clock (02:00), the whole library rotates: no jingle
+        // right after a jingle there either.
+        let mut history = History::default();
+        history.push(Play::of(&library.tracks[&1], 2 * HOUR));
+        for minute in 0..20 {
+            let pick = next(
+                &library,
+                &history,
+                2 * HOUR + (minute + 1) * MIN,
+                None,
+                &mut rng,
+            )
+            .unwrap();
+            assert!(
+                !library.tracks[&pick.track]
+                    .categories
+                    .iter()
+                    .any(|c| *c == 1 || *c == 2)
+            );
+            assert!(pick.explanation.restricted >= 10, "{:?}", pick.explanation);
+        }
     }
 }

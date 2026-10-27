@@ -24,13 +24,15 @@ mod sim;
 pub use restrict::{Mode, Restriction, Rule, Target};
 pub use rng::Rng;
 pub use rules::{SeparationOverrides, Windows};
-pub use select::{Blocked, Explanation, Pick, SeparationRule, SkippedSlot, next};
+pub use select::{Blocked, Explanation, Pick, SeparationRule, SkipReason, SkippedSlot, next};
 pub use sim::{SimulatedPick, Simulation, Violation, audit, simulate};
 
 pub type TrackId = u64;
 pub type ArtistId = u64;
 pub type CategoryId = u64;
 pub type ClockId = u64;
+/// A category type (`category_types`): Song, Jingle, Ad…
+pub type TypeId = u64;
 
 /// How a clock slot picks among the tracks its category allows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,6 +182,9 @@ pub struct Library {
     pub schedule: Schedule,
     pub settings: RotationSettings,
     pub time_zone: TimeZone,
+    /// Categories whose type never plays twice in a row, and their type
+    /// (`docs/rotation.md#never-two-in-a-row`).
+    pub no_two_in_a_row: HashMap<CategoryId, TypeId>,
 }
 
 /// Library pieces, before [`Library::new`] ties them together.
@@ -193,6 +198,8 @@ pub struct LibraryParts {
     pub clocks: Vec<Clock>,
     pub schedule: Schedule,
     pub settings: RotationSettings,
+    /// Categories whose type never plays twice in a row, and their type.
+    pub no_two_in_a_row: Vec<(CategoryId, TypeId)>,
 }
 
 impl Library {
@@ -240,7 +247,28 @@ impl Library {
             schedule: parts.schedule,
             settings: parts.settings,
             time_zone,
+            no_two_in_a_row: parts.no_two_in_a_row.into_iter().collect(),
         }
+    }
+
+    /// The type that would play twice in a row: one that never does, of a
+    /// category of `categories` and of a category of the track before
+    /// (`previous`, `None` when unknown).
+    pub fn repeated_type(
+        &self,
+        previous: Option<&[CategoryId]>,
+        categories: &[CategoryId],
+    ) -> Option<TypeId> {
+        let previous = previous?;
+        categories
+            .iter()
+            .filter_map(|category| self.no_two_in_a_row.get(category))
+            .find(|kind| {
+                previous
+                    .iter()
+                    .any(|category| self.no_two_in_a_row.get(category) == Some(*kind))
+            })
+            .copied()
     }
 
     /// Whether separation counts `a` and `b` as the same artist.

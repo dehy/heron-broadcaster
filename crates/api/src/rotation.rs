@@ -177,6 +177,12 @@ pub async fn load_library(pool: &MySqlPool) -> ApiResult<Library> {
         sqlx::query_as("SELECT artist_id, similar_id FROM artist_similar")
             .fetch_all(pool)
             .await?;
+    let no_two_in_a_row: Vec<(u64, u64)> = sqlx::query_as(
+        "SELECT c.id, t.id FROM categories c JOIN category_types t ON t.id = c.type_id
+         WHERE t.no_two_in_a_row",
+    )
+    .fetch_all(pool)
+    .await?;
     let settings: RotationSettings = settings::load(pool, RotationSettings::SETTINGS_NAME).await?;
     let station: StationSettings = settings::load(pool, StationSettings::SETTINGS_NAME).await?;
     Ok(Library::new(
@@ -188,6 +194,7 @@ pub async fn load_library(pool: &MySqlPool) -> ApiResult<Library> {
             clocks,
             schedule,
             settings,
+            no_two_in_a_row,
         },
         station.time_zone(),
     ))
