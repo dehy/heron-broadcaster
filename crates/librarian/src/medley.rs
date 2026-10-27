@@ -197,7 +197,7 @@ pub async fn preview(
     let audio = mix_rows(pool, roots, recipe, rows).await?;
     let duration_ms = duration_ms(&audio);
     let path = medley::preview_path(medley_id);
-    let target = roots.staging.join(&path);
+    let target = roots.library.join(&path);
     tokio::task::spawn_blocking(move || {
         write_wav(&target, &audio)
             .map_err(|error| format!("cannot write {}: {error}", target.display()))

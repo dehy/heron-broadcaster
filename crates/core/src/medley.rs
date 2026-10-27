@@ -18,10 +18,12 @@ pub const DUCK_RAMP_MS: u32 = 150;
 /// The mix is scaled down when its peak would go over this.
 pub const PEAK_LIMIT: f32 = 0.98;
 
-/// Folder of the previews, in the buffer zone (hidden: never imported).
-pub const PREVIEW_FOLDER: &str = ".medley-previews";
+/// Folder of the previews, at the library root, next to the trash: hidden,
+/// so the scanner never sees them. The librarian can always write there
+/// (it renders the medleys themselves into the library).
+pub const PREVIEW_FOLDER: &str = ".heron-medley-previews";
 
-/// Where a medley's preview goes, relative to the buffer zone.
+/// Where a medley's preview goes, relative to the library root.
 pub fn preview_path(medley_id: u64) -> String {
     format!("{PREVIEW_FOLDER}/medley-{medley_id}.wav")
 }

@@ -3889,6 +3889,14 @@ async fn medleys_are_planned_rendered_and_linked() {
         !station.library.path().join("medleys").exists(),
         "nothing in the library"
     );
+    // Hidden at the library root: the scanner never sees it.
+    assert!(
+        station
+            .library
+            .path()
+            .join(format!(".heron-medley-previews/medley-{id}.wav"))
+            .exists()
+    );
     assert!(
         admin.get(&format!("/medleys/{id}")).await["parts"]
             .as_array()
