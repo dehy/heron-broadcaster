@@ -10,12 +10,14 @@ import { useQuery } from "@tanstack/react-query";
 import { type DeckEq, type EqSettings, api, unwrap } from "../api";
 import { useLive } from "./live";
 
-/** Centre frequency of each band, in Hz (the shelves' midpoints). */
+/** Frequency of each band, in Hz: where the curve meets its slider. */
 export const FREQUENCIES = [60, 170, 310, 600, 1_000, 3_000, 6_000, 12_000, 14_000, 16_000];
 export const MAX_GAIN_DB = 12;
 /** Filter gains solved from the sliders stay within this. */
 const MAX_FILTER_GAIN_DB = 24;
 const SHELF_Q = Math.SQRT1_2;
+/** The shelves' midpoints, an octave inside their bands: on their plateau at 60 Hz and 16 kHz. */
+const SHELF_MIDPOINTS = { low_shelf: 120, high_shelf: 8_000 };
 const SOLVE_ROUNDS = 4;
 const SAMPLE_RATE = 48_000;
 const BANDS = FREQUENCIES.length;
@@ -43,12 +45,13 @@ export function bandQ(band: number): number {
 /** Gain of one band's filter at `frequency`, in dB (the cookbook's designs). */
 function bandDb(band: number, gainDb: number, frequency: number): number {
   const a = 10 ** (gainDb / 40);
-  const w0 = (2 * Math.PI * FREQUENCIES[band]!) / SAMPLE_RATE;
+  const kind = shape(band);
+  const designed = kind === "peaking" ? FREQUENCIES[band]! : SHELF_MIDPOINTS[kind];
+  const w0 = (2 * Math.PI * designed) / SAMPLE_RATE;
   const alpha = Math.sin(w0) / (2 * bandQ(band));
   const cos = Math.cos(w0);
   let b: [number, number, number];
   let d: [number, number, number];
-  const kind = shape(band);
   if (kind === "peaking") {
     b = [1 + alpha * a, -2 * cos, 1 - alpha * a];
     d = [1 + alpha / a, -2 * cos, 1 - alpha / a];

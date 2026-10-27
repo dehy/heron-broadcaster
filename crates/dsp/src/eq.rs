@@ -18,7 +18,7 @@ use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
 /// Number of bands.
 pub const BANDS: usize = 10;
-/// Centre frequency of each band, in Hz (the shelves' midpoints).
+/// Frequency of each band, in Hz: where the curve meets its slider.
 pub const FREQUENCIES: [f64; BANDS] = [
     60.0, 170.0, 310.0, 600.0, 1_000.0, 3_000.0, 6_000.0, 12_000.0, 14_000.0, 16_000.0,
 ];
@@ -29,6 +29,12 @@ pub const MAX_GAIN_DB: f32 = 12.0;
 pub const MAX_FILTER_GAIN_DB: f64 = 24.0;
 /// Quality factor of the shelves: a slope of 1, no overshoot.
 const SHELF_Q: f64 = FRAC_1_SQRT_2;
+/// Midpoints of the low and high shelves, an octave inside their bands'
+/// frequencies: at 60 Hz and 16 kHz the shelves are on their plateau, so
+/// the curve holds the slider's gain out to 20 Hz and 20 kHz. With the
+/// midpoints at the bands, meeting a slider there takes twice its gain,
+/// which the curve then reaches beyond.
+const SHELF_MIDPOINTS: (f64, f64) = (120.0, 8_000.0);
 /// Rounds of [`filter_gains`]: the response is not linear in the gain.
 const SOLVE_ROUNDS: usize = 4;
 /// Interleaved stereo.
@@ -65,6 +71,16 @@ pub const SHAPES: [Shape; BANDS] = [
     Shape::Peaking,
     Shape::HighShelf,
 ];
+
+/// The frequency a band's filter is designed at: the shelves' midpoints,
+/// or the peaking bands' centres.
+pub fn design_frequency(band: usize) -> f64 {
+    match SHAPES[band] {
+        Shape::LowShelf => SHELF_MIDPOINTS.0,
+        Shape::HighShelf => SHELF_MIDPOINTS.1,
+        Shape::Peaking => FREQUENCIES[band],
+    }
+}
 
 /// Quality factor of a band. A peaking band is as wide as the distances to
 /// its neighbours, on average: the bands are not evenly spaced.
@@ -127,7 +143,7 @@ impl Coefficients {
 
     /// The design of a band of the EQ at `gain_db`.
     pub fn band(sample_rate: f64, band: usize, gain_db: f64) -> Self {
-        let (frequency, q) = (FREQUENCIES[band], band_q(band));
+        let (frequency, q) = (design_frequency(band), band_q(band));
         match SHAPES[band] {
             Shape::Peaking => Self::peaking(sample_rate, frequency, q, gain_db),
             Shape::LowShelf => Self::shelf(sample_rate, frequency, q, gain_db, false),
@@ -171,6 +187,19 @@ pub fn filters_response_db(
             Coefficients::band(sample_rate, band, gain).response_db(sample_rate, frequency)
         })
         .sum()
+}
+
+/// The highest point of the curve of the filters at `filter_gains_db`,
+/// from 20 Hz to 20 kHz, in dB; 0 when they only cut. How much headroom
+/// the EQ takes. Does not allocate.
+pub fn max_boost_db(sample_rate: f64, filter_gains_db: &[f64; BANDS]) -> f64 {
+    const POINTS: u32 = 200;
+    (0..=POINTS)
+        .map(|point| {
+            let frequency = 20.0 * 1_000f64.powf(f64::from(point) / f64::from(POINTS));
+            filters_response_db(sample_rate, filter_gains_db, frequency)
+        })
+        .fold(0.0, f64::max)
 }
 
 /// Gain of the EQ at `frequency` for these sliders, in dB: what its curve
@@ -357,7 +386,8 @@ impl GraphicEq {
     /// A bypassed, flat EQ.
     pub fn new(sample_rate: u32) -> Self {
         let rate = f64::from(sample_rate);
-        let warped = FREQUENCIES.map(|frequency| (PI * frequency / rate).tan());
+        let warped: [f64; BANDS] =
+            std::array::from_fn(|band| (PI * design_frequency(band) / rate).tan());
         let update_s = UPDATE_FRAMES as f64 / rate;
         let mut eq = Self {
             warped,

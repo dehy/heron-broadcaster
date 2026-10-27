@@ -77,15 +77,26 @@ fn each_band_has_its_shape() {
                 }
                 // Half the gain at the shelf's frequency, all of it on its
                 // side, nothing on the other.
+                // Half the gain at the shelf's midpoint, most of it at the
+                // band's frequency, an octave out, nothing on the other side.
                 Shape::LowShelf => {
-                    assert!((at(centre) - gain / 2.0).abs() < 1e-6);
+                    assert!((at(design_frequency(band)) - gain / 2.0).abs() < 1e-6);
+                    assert!(
+                        (at(centre) - gain).abs() < gain.abs() * 0.25,
+                        "{}",
+                        at(centre)
+                    );
                     assert!((at(10.0) - gain).abs() < 0.3);
                     assert!(at(2_000.0).abs() < 0.1);
                 }
                 Shape::HighShelf => {
-                    assert!((at(centre) - gain / 2.0).abs() < 1e-6);
-                    assert!((at(23_000.0) - gain).abs() < 1.0);
-                    assert!(at(2_000.0).abs() < 0.1);
+                    assert!((at(design_frequency(band)) - gain / 2.0).abs() < 1e-6);
+                    assert!(
+                        (at(centre) - gain).abs() < gain.abs() * 0.25,
+                        "{}",
+                        at(centre)
+                    );
+                    assert!(at(500.0).abs() < 0.1);
                 }
             }
         }
@@ -130,7 +141,7 @@ fn the_curve_meets_every_slider_at_its_band() {
         // filter gains past the limit: their curve is less exact.
         let at_limit = gains.iter().any(|gain| gain.abs() >= MAX_FILTER_GAIN_DB);
         limited += usize::from(at_limit);
-        let tolerance = if at_limit { 4.0 } else { 0.2 };
+        let tolerance = if at_limit { 3.5 } else { 0.2 };
         for (band, &centre) in FREQUENCIES.iter().enumerate() {
             let at = filters_response_db(FS, &gains, centre);
             let wanted = f64::from(sliders[band]);
@@ -140,9 +151,9 @@ fn the_curve_meets_every_slider_at_its_band() {
             );
         }
     }
-    // About one random setting in six.
+    // About one random setting in fifty.
     assert!(
-        limited * 4 < settings.len(),
+        limited * 20 < settings.len(),
         "{limited} settings reached the limit"
     );
 }
@@ -151,16 +162,41 @@ fn the_curve_meets_every_slider_at_its_band() {
 fn equal_sliders_give_a_nearly_flat_curve() {
     for gain in [-12.0, -6.0, 6.0, 12.0] {
         let gains = filter_gains(FS, &[gain; BANDS]);
-        for step in 0..=200 {
-            let frequency = 60.0 * (16_000f64 / 60.0).powf(f64::from(step) / 200.0);
+        for step in 0..=300 {
+            let frequency = 20.0 * 1_000f64.powf(f64::from(step) / 300.0);
             let at = filters_response_db(FS, &gains, frequency);
-            // Within half the sliders' gain, between bands.
+            // Within half the sliders' gain, between bands and out to the
+            // ends of the range.
             assert!(
                 (at - f64::from(gain)).abs() < f64::from(gain.abs()) / 2.0,
                 "all at {gain} dB: {at:.2} dB at {frequency:.0} Hz"
             );
         }
     }
+}
+
+#[test]
+fn the_curve_hardly_rises_above_the_highest_slider() {
+    // With the shelves' midpoints at their bands, a slider of +5 at 60 Hz
+    // took +9 at 20 Hz: the curve went well above every slider.
+    let mut seed = 33;
+    let mut overshoots: Vec<f64> = (0..300)
+        .map(|_| {
+            let sliders = random_gains(&mut seed);
+            let highest = sliders.iter().copied().fold(0.0, f32::max);
+            max_boost_db(FS, &filter_gains(FS, &sliders)) - f64::from(highest)
+        })
+        .collect();
+    overshoots.sort_by(f64::total_cmp);
+    let p90 = overshoots[overshoots.len() * 9 / 10];
+    assert!(
+        p90 < 2.0,
+        "90 % of random settings overshoot by up to {p90:.2} dB"
+    );
+    // A preset's curve tops out at its highest slider.
+    let rock = [5.0, 3.0, -1.5, -3.0, -1.5, 1.5, 3.5, 4.5, 4.5, 4.0];
+    let top = max_boost_db(FS, &filter_gains(FS, &rock));
+    assert!((top - 5.0).abs() < 0.5, "{top}");
 }
 
 #[test]
@@ -613,4 +649,20 @@ fn close(a: &serde_json::Value, b: &serde_json::Value) -> bool {
         }
         (a, b) => a == b,
     }
+}
+
+#[test]
+fn the_highest_boost_is_the_top_of_the_curve() {
+    assert_eq!(max_boost_db(FS, &[0.0; BANDS]), 0.0);
+    // Cuts only: no boost.
+    assert_eq!(max_boost_db(FS, &[-6.0; BANDS]), 0.0);
+    // One band: its gain, at its centre.
+    let mut gains = [0.0; BANDS];
+    gains[4] = 9.0;
+    assert!((max_boost_db(FS, &gains) - 9.0).abs() < 0.1);
+    // The sliders of a preset: about the highest slider, the curve meeting
+    // them at their bands.
+    let rock = filter_gains(FS, &[5.0, 3.0, -1.5, -3.0, -1.5, 1.5, 3.5, 4.5, 4.5, 4.0]);
+    let boost = max_boost_db(FS, &rock);
+    assert!((4.9..5.5).contains(&boost), "{boost}");
 }
