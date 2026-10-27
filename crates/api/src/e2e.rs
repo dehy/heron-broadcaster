@@ -1836,6 +1836,82 @@ async fn rotation_follows_clocks_restrictions_and_logs_its_picks() {
         .send(Method::POST, "/rotation/simulate", json!({"hours": 1}))
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Never two jingles in a row: A becomes a jingle category, and a clock
+    // calling it twice running passes the second slot over.
+    let jingle = admin.get("/category-types").await[1].clone();
+    assert_eq!(
+        (&jingle["name"], &jingle["no_two_in_a_row"]),
+        (&json!("Jingle"), &json!(true))
+    );
+    let (status, a) = admin
+        .send(
+            Method::PUT,
+            &format!("/categories/{}", categories[0]),
+            json!({"name": "A", "type_id": jingle["id"], "separation": {"track_min": 1}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{a}");
+    let (status, saved) = admin
+        .send(
+            Method::PUT,
+            &format!("/clocks/{clock_id}"),
+            json!({"name": "Hour", "slots": [
+                {"category_id": categories[0], "method": "random"},
+                {"category_id": categories[0], "method": "random"},
+                {"category_id": categories[1], "method": "random"},
+            ]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let simulate = || async {
+        let (status, report) = admin
+            .send(
+                Method::POST,
+                "/rotation/simulate",
+                json!({"hours": 1, "seed": 3}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{report}");
+        report["simulation"].clone()
+    };
+    let simulation = simulate().await;
+    assert!(
+        simulation["violations"].as_array().unwrap().is_empty(),
+        "{simulation}"
+    );
+    let picks = simulation["picks"].as_array().unwrap();
+    let from_a: Vec<bool> = picks
+        .iter()
+        .map(|p| p["explanation"]["slot_category_id"] == categories[0])
+        .collect();
+    assert!(from_a.iter().any(|a| *a), "jingles still play");
+    assert!(
+        !from_a.windows(2).any(|pair| pair[0] && pair[1]),
+        "two in a row"
+    );
+    assert!(picks.iter().any(|p| {
+        p["explanation"]["skipped_slots"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["reason"] == "same_type_in_a_row")
+    }));
+    // Turned off on the type, the clock plays both slots.
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/category-types/{}", jingle["id"]),
+            json!({"name": "Jingle", "no_two_in_a_row": false}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let simulation = simulate().await;
+    let picks = simulation["picks"].as_array().unwrap();
+    assert!(picks.windows(2).any(|pair| {
+        pair.iter()
+            .all(|p| p["explanation"]["slot_category_id"] == categories[0])
+    }));
     station.stop().await;
 }
 
@@ -2047,6 +2123,40 @@ async fn track_details_labels_programming_and_tags() {
         admin.get(&format!("/categories/{}", category["id"])).await["tracks"],
         1000
     );
+    // Its total time: never analyzed, the files' lengths (unknown: 0), cue
+    // overrides applied.
+    assert_eq!(
+        admin.get(&format!("/categories/{}", category["id"])).await["total_ms"],
+        0
+    );
+    sqlx::query("UPDATE tracks SET duration_ms = 200000 WHERE path LIKE 'bulk/%'")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO track_overrides (track_id, cue_in_ms, cue_out_ms) VALUES (?, 10000, 999999)",
+    )
+    .bind(a)
+    .execute(pool)
+    .await
+    .unwrap();
+    let categories = admin.get("/categories").await;
+    let holidays = categories
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == category["id"])
+        .unwrap();
+    assert_eq!(holidays["total_ms"], 1000 * 200_000 - 10_000, "{holidays}");
+    sqlx::query("UPDATE tracks SET duration_ms = NULL WHERE path LIKE 'bulk/%'")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM track_overrides WHERE track_id = ?")
+        .bind(a)
+        .execute(pool)
+        .await
+        .unwrap();
 
     let (status, removed) = admin
         .send(
@@ -3203,6 +3313,124 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
         .request(Method::DELETE, &format!("/webhooks/{webhook}"), None)
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Jingles send no metadata: tracks 1 and 2 go in a Jingle category; while
+    // one is on air, the public now-playing keeps the song before, and the
+    // public history and webhooks leave it out.
+    let jingle_type = admin.get("/category-types").await[1].clone();
+    assert_eq!(
+        (
+            &jingle_type["name"],
+            &jingle_type["sends_metadata"],
+            &jingle_type["plays_over_intro"]
+        ),
+        (&json!("Jingle"), &json!(false), &json!(true))
+    );
+    let (status, jingles) = admin
+        .send(
+            Method::POST,
+            "/categories",
+            json!({"name": "Jingles", "type_id": jingle_type["id"]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{jingles}");
+    for track in &station.tracks[..2] {
+        let (status, _) = admin
+            .send(
+                Method::PUT,
+                &format!("/tracks/{track}/categories"),
+                json!([{"category_id": jingles["id"]}]),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let jingle_titles = ["Track 1", "Track 2"];
+    // Queued again, with what the tracks are now.
+    let (status, _) = admin.request(Method::DELETE, "/queue", None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let mut texts = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let on_air = loop {
+        assert!(Instant::now() < deadline, "no jingle went on air");
+        while let Ok(Some((_, name, _, body))) =
+            tokio::time::timeout(Duration::from_millis(10), received.recv()).await
+        {
+            if name == "text" {
+                texts.push(body);
+            }
+        }
+        let player = admin.get("/player").await;
+        let jingle = player["decks"].as_array().unwrap().iter().find_map(|deck| {
+            let track = &deck["entry"]["track"];
+            // No intro marker on the next track: the jingle plays on its own.
+            (deck["on_air"] == true && track["no_metadata"] == true && track["over_intro"] == true)
+                .then(|| track["title"].clone())
+        });
+        if let Some(title) = jingle {
+            break title;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert!(
+        jingle_titles.contains(&on_air.as_str().unwrap()),
+        "{on_air}"
+    );
+    let now: Value = anyone
+        .get(format!("{base}/now-playing"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let shown = now["now"]["title"].as_str().unwrap_or_default();
+    assert!(
+        shown.starts_with("Track ") && !jingle_titles.contains(&shown),
+        "the jingle's title shown: {now}"
+    );
+    let history: Value = anyone
+        .get(format!("{base}/history?limit=50"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let in_history: Vec<&str> = history
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|play| play["title"].as_str().unwrap_or_default())
+        .collect();
+    assert!(!in_history.is_empty());
+    let played_jingle: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM play_history h JOIN track_categories tc ON tc.track_id = h.track_id
+         WHERE tc.category_id = ?",
+    )
+    .bind(jingles["id"].as_u64())
+    .fetch_one(&station.db.pool)
+    .await
+    .unwrap();
+    assert!(played_jingle > 0);
+    assert!(
+        !in_history.iter().any(|title| jingle_titles.contains(title)),
+        "{in_history:?}"
+    );
+    // Display (no FX player) is never told about the jingle.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    while let Ok(Some((_, name, _, body))) =
+        tokio::time::timeout(Duration::from_millis(10), received.recv()).await
+    {
+        if name == "text" {
+            texts.push(body);
+        }
+    }
+    assert!(
+        !texts
+            .iter()
+            .any(|text| jingle_titles.iter().any(|title| text.ends_with(title))),
+        "{texts:?}"
+    );
     station.stop().await;
 }
 

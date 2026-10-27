@@ -59,6 +59,13 @@ pub struct QueuedTrack {
     pub cue_in_ms: u32,
     pub cue_out_ms: u32,
     pub source: PlaySource,
+    /// Sends no metadata (a jingle): the stream keeps the last track's.
+    pub no_metadata: bool,
+    /// Plays on the FX player over the next track's intro, when it is long
+    /// enough (a jingle).
+    pub over_intro: bool,
+    /// Where the intro ends (the vocals start), on the file's timeline.
+    pub intro_ms: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, ToSchema)]
@@ -111,6 +118,9 @@ pub struct PlayerState {
     pub decks: Vec<DeckState>,
     /// Loaded and waiting for its transition.
     pub cued: Option<QueueEntry>,
+    /// The jingle played on the FX player over the cued track's intro:
+    /// before it in the play order.
+    pub cued_jingle: Option<Box<QueueEntry>>,
     /// After the cued track.
     pub queue: Vec<QueueEntry>,
     pub outputs: Vec<OutputStatus>,
@@ -121,9 +131,14 @@ pub struct PlayerState {
 }
 
 impl PlayerState {
-    /// The tracks waiting to play: the cued one, then the queue.
+    /// The tracks waiting to play, in play order: the jingle over the cued
+    /// track's intro, the cued one, then the queue.
     pub fn waiting(&self) -> impl Iterator<Item = &QueueEntry> {
-        self.cued.iter().chain(&self.queue)
+        self.cued_jingle
+            .as_deref()
+            .into_iter()
+            .chain(&self.cued)
+            .chain(&self.queue)
     }
 
     /// The same state without what changes all the time (positions,
@@ -539,6 +554,9 @@ fn entry(entry: pb::QueueEntry) -> QueueEntry {
             duration_ms: track.duration_ms,
             cue_in_ms: track.cue_in_ms,
             cue_out_ms: track.cue_out_ms,
+            no_metadata: track.no_metadata,
+            over_intro: track.over_intro,
+            intro_ms: track.intro_ms,
         },
     }
 }
@@ -558,6 +576,7 @@ pub fn player_state(state: pb::EngineState) -> PlayerState {
             })
             .collect(),
         cued: state.cued.map(entry),
+        cued_jingle: state.cued_jingle.map(|jingle| Box::new(entry(jingle))),
         queue: state.queue.into_iter().map(entry).collect(),
         outputs: state
             .outputs

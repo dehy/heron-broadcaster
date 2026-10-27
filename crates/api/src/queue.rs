@@ -61,6 +61,12 @@ struct TrackRow {
     override_cue_out_ms: Option<u32>,
     gap_killer_enabled: Option<bool>,
     crossfade: Option<String>,
+    /// In a category whose type sends no metadata (a jingle).
+    no_metadata: bool,
+    /// In a category whose type plays over the next track's intro.
+    over_intro: bool,
+    /// Where the intro ends, from the import (`track_markers`).
+    intro_ms: Option<u32>,
 }
 
 const TRACK_COLUMNS: &str = "
@@ -69,10 +75,20 @@ const TRACK_COLUMNS: &str = "
     a.track_id IS NOT NULL AS analyzed,
     a.cue_in_ms, a.cue_out_ms, a.fade_out_start_ms, a.integrated_lufs, a.true_peak_db,
     o.cue_in_ms AS override_cue_in_ms, o.cue_out_ms AS override_cue_out_ms,
-    o.gap_killer_enabled, CAST(o.crossfade AS CHAR) AS crossfade
+    o.gap_killer_enabled, CAST(o.crossfade AS CHAR) AS crossfade,
+    EXISTS (SELECT 1 FROM track_categories tc
+            JOIN categories c ON c.id = tc.category_id
+            JOIN category_types ct ON ct.id = c.type_id
+            WHERE tc.track_id = t.id AND NOT ct.sends_metadata) AS no_metadata,
+    EXISTS (SELECT 1 FROM track_categories tc
+            JOIN categories c ON c.id = tc.category_id
+            JOIN category_types ct ON ct.id = c.type_id
+            WHERE tc.track_id = t.id AND ct.plays_over_intro) AS over_intro,
+    m.intro_ms
     FROM tracks t
     LEFT JOIN track_analysis a ON a.track_id = t.id
-    LEFT JOIN track_overrides o ON o.track_id = t.id";
+    LEFT JOIN track_overrides o ON o.track_id = t.id
+    LEFT JOIN track_markers m ON m.track_id = t.id";
 
 impl TrackRow {
     /// Overrides as stored; invalid crossfade JSON counts as none.
@@ -154,6 +170,9 @@ impl TrackRow {
             true_peak_db: playout.true_peak_db,
             crossfade_overrides_json,
             source: source_to_proto(source).into(),
+            no_metadata: self.no_metadata,
+            over_intro: self.over_intro,
+            intro_ms: self.intro_ms,
         })
     }
 }
@@ -340,6 +359,8 @@ impl QueueManager {
                 // 0 and 0: the whole file, whose length the engine finds out.
                 let whole = playout.cue_in_ms == 0 && playout.cue_out_ms == 0;
                 row.path == entry.track.path
+                    && row.intro_ms == entry.track.intro_ms
+                    && row.over_intro == entry.track.over_intro
                     && (whole
                         || (playout.cue_in_ms == entry.track.cue_in_ms
                             && playout.cue_out_ms == entry.track.cue_out_ms))
@@ -353,7 +374,7 @@ impl QueueManager {
                             entry = entry.entry_id,
                             from = %entry.track.path,
                             to = %row.path,
-                            "queued track updated: moved, or its cue points changed"
+                            "queued track updated: moved, or its cue points or intro changed"
                         ),
                         // It started meanwhile, or was removed.
                         Err(ApiError::Invalid(_) | ApiError::NotFound(_)) => {}
@@ -398,6 +419,9 @@ mod tests {
             override_cue_out_ms: None,
             gap_killer_enabled: None,
             crossfade: None,
+            no_metadata: false,
+            over_intro: false,
+            intro_ms: None,
         }
     }
 

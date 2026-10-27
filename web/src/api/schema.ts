@@ -305,7 +305,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Renames a type. Operators and admins. */
+        /** Renames a type, or changes its rules. Operators and admins. */
         put: operations["update_type"];
         post?: never;
         /** Deletes a type no category uses. Operators and admins. */
@@ -1118,8 +1118,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * What was played, most recent first, the FX player left out. No sign-in
-         *     needed; any website may read it.
+         * What was played, most recent first, the FX player and tracks that send no
+         *     metadata (jingles) left out. No sign-in needed; any website may read it.
          */
         get: operations["public_history"];
         put?: never;
@@ -1137,7 +1137,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The track on air. No sign-in needed; any website may read it. */
+        /**
+         * The track on air; while a track that sends no metadata (a jingle) is on
+         *     air, the last one that does. No sign-in needed; any website may read it.
+         */
         get: operations["now_playing"];
         put?: never;
         post?: never;
@@ -2403,6 +2406,13 @@ export interface components {
              *     settings (clock slots can override them again).
              */
             separation: components["schemas"]["SeparationOverrides"];
+            /**
+             * Format: int64
+             * @description How long its tracks last together, in ms: what is played of each
+             *     (cue-in to cue-out, overrides applied), or the file's length for a
+             *     track not analyzed yet. Over the same tracks as `tracks`.
+             */
+            total_ms: number;
             /** Format: int64 */
             tracks: number;
             /**
@@ -2453,9 +2463,31 @@ export interface components {
             /** Format: int64 */
             id: number;
             name: string;
+            /**
+             * @description Never two tracks of this type in a row: rotation passes a slot
+             *     calling it over right after one.
+             */
+            no_two_in_a_row: boolean;
+            /**
+             * @description Its tracks play on the FX player over the next track's intro, ending
+             *     where the vocals start, when that intro is long enough.
+             */
+            plays_over_intro: boolean;
+            /**
+             * @description Its tracks send metadata to the stream servers. Off (jingles, ads):
+             *     the stream and the public now-playing keep the last song's, and
+             *     webhooks send them only when they include the FX player.
+             */
+            sends_metadata: boolean;
         };
         CategoryTypeInput: {
             name: string;
+            /** @description Kept as it is when missing (off for a new type). */
+            no_two_in_a_row?: boolean | null;
+            /** @description Kept as it is when missing (off for a new type). */
+            plays_over_intro?: boolean | null;
+            /** @description Kept as it is when missing (on for a new type). */
+            sends_metadata?: boolean | null;
         };
         /** @description dBFS, −120 for silence. */
         ChannelLevels: {
@@ -3723,6 +3755,7 @@ export interface components {
         /** @description Decks, queue and outputs of the engine. */
         PlayerState: {
             cued?: components["schemas"]["QueueEntry"] | null;
+            cued_jingle?: components["schemas"]["QueueEntry"] | null;
             decks: components["schemas"]["DeckState"][];
             /** Format: int64 */
             engine_started_at_unix_ms: number;
@@ -3957,6 +3990,18 @@ export interface components {
             cue_out_ms: number;
             /** Format: int32 */
             duration_ms: number;
+            /**
+             * Format: int32
+             * @description Where the intro ends (the vocals start), on the file's timeline.
+             */
+            intro_ms?: number | null;
+            /** @description Sends no metadata (a jingle): the stream keeps the last track's. */
+            no_metadata: boolean;
+            /**
+             * @description Plays on the FX player over the next track's intro, when it is long
+             *     enough (a jingle).
+             */
+            over_intro: boolean;
             /** @description Relative to the library root. */
             path: string;
             source: components["schemas"]["PlaySource"];
@@ -4304,12 +4349,19 @@ export interface components {
              */
             start_unix_ms?: number | null;
         };
+        /**
+         * @description Why a slot was passed over.
+         * @enum {string}
+         */
+        SkipReason: "nothing_allowed" | "same_type_in_a_row";
         SkippedFile: {
             path: string;
             reason: string;
         };
         SkippedSlot: {
             category_id: components["schemas"]["u64"];
+            /** @description Missing in picks logged before reasons were (nothing allowed). */
+            reason?: components["schemas"]["SkipReason"];
             /** Format: int32 */
             slot: number;
         };
@@ -5104,6 +5156,12 @@ export interface components {
             kind: "category";
             /** Format: int32 */
             pick: number;
+        } | {
+            /** @enum {string} */
+            kind: "in_a_row";
+            /** Format: int32 */
+            pick: number;
+            type_id: components["schemas"]["u64"];
         };
         Waveform: {
             /**

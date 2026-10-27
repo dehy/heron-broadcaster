@@ -483,3 +483,132 @@ fn tracks_without_audio_never_go_on_air() {
     assert_eq!(events(&mut handle), [Event::Uncued { entry_id: 1 }]);
     assert!(handle.trash.pop().is_ok());
 }
+
+fn cue_over(handle: &mut MixerHandle, track: Box<LoadedTrack>, jingle: Box<LoadedTrack>, at: u64) {
+    assert!(
+        handle
+            .commands
+            .push(Command::CueOver {
+                track,
+                transition: FrameTransition::back_to_back(),
+                overlay: Overlay { track: jingle, at },
+            })
+            .is_ok()
+    );
+}
+
+#[test]
+fn a_jingle_plays_over_the_intro_and_ends_on_it() {
+    let song = tone(20_011, 440.0, 0.4);
+    let jingle = tone(3_001, 880.0, 0.3);
+    let intro = 7_013_u64;
+    let at = intro - 3_001;
+    for block in [480, 333, 1] {
+        let (mut mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
+        cue_over(&mut handle, track(1, &song), track(2, &jingle), at);
+        let output = render(&mut mixer, 22_000, block);
+
+        let mut expected = song.clone();
+        expected.resize(output.len(), 0.0);
+        for (index, sample) in jingle.iter().enumerate() {
+            expected[at as usize * CHANNELS + index] += sample;
+        }
+        assert_matches(&output, &expected);
+
+        let events = events(&mut handle);
+        assert!(events.contains(&Event::Started {
+            deck: Deck::Fx,
+            entry_id: 2,
+            at_frame: at,
+        }));
+        assert!(events.contains(&Event::Ended {
+            deck: Deck::Fx,
+            entry_id: 2,
+            played_frames: 3_001,
+            at_frame: intro,
+            reason: EndReason::Finished,
+        }));
+    }
+}
+
+#[test]
+fn skipping_the_track_drops_or_fades_its_jingle() {
+    // Skipped before the jingle starts: the jingle never plays.
+    let (mut mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
+    cue_over(
+        &mut handle,
+        track(1, &tone(48_000, 440.0, 0.4)),
+        track(2, &tone(4_800, 880.0, 0.3)),
+        24_000,
+    );
+    render(&mut mixer, 4_800, BLOCK_FRAMES);
+    assert_eq!(mixer.status.overlay.load(Ordering::Relaxed), 2);
+    assert!(
+        handle
+            .commands
+            .push(Command::Skip {
+                fade_frames: 480,
+                curve: FadeCurve::Linear,
+            })
+            .is_ok()
+    );
+    render(&mut mixer, 48_000, BLOCK_FRAMES);
+    let dropped = events(&mut handle);
+    assert!(dropped.contains(&Event::Uncued { entry_id: 2 }));
+    assert!(
+        !dropped
+            .iter()
+            .any(|event| matches!(event, Event::Started { entry_id: 2, .. }))
+    );
+    assert_eq!(mixer.status.overlay.load(Ordering::Relaxed), 0);
+
+    // Skipped while it plays: it fades out with the track.
+    let (mut mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
+    cue_over(
+        &mut handle,
+        track(1, &tone(48_000, 440.0, 0.4)),
+        track(2, &tone(24_000, 880.0, 0.3)),
+        4_800,
+    );
+    render(&mut mixer, 9_600, BLOCK_FRAMES);
+    assert!(
+        handle
+            .commands
+            .push(Command::Skip {
+                fade_frames: 480,
+                curve: FadeCurve::Linear,
+            })
+            .is_ok()
+    );
+    render(&mut mixer, 4_800, BLOCK_FRAMES);
+    let events = events(&mut handle);
+    assert!(events.contains(&Event::Ended {
+        deck: Deck::Fx,
+        entry_id: 2,
+        played_frames: 4_800 + 480,
+        at_frame: 9_600 + 480,
+        reason: EndReason::Skipped,
+    }));
+}
+
+#[test]
+fn uncueing_drops_the_jingle_too() {
+    let (mut mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
+    cue(
+        &mut handle,
+        track(1, &tone(48_000, 440.0, 0.4)),
+        FrameTransition::back_to_back(),
+    );
+    render(&mut mixer, 480, BLOCK_FRAMES);
+    cue_over(
+        &mut handle,
+        track(2, &tone(48_000, 440.0, 0.4)),
+        track(3, &tone(4_800, 880.0, 0.3)),
+        9_600,
+    );
+    assert!(handle.commands.push(Command::Uncue).is_ok());
+    render(&mut mixer, 480, BLOCK_FRAMES);
+    let events = events(&mut handle);
+    assert!(events.contains(&Event::Uncued { entry_id: 2 }));
+    assert!(events.contains(&Event::Uncued { entry_id: 3 }));
+}

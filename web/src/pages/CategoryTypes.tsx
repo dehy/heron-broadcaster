@@ -44,6 +44,9 @@ export function TypesCard() {
             <thead>
               <tr>
                 <th>{t("categories.name")}</th>
+                <th title={t("categories.noTwoInARowHint")}>{t("categories.noTwoInARow")}</th>
+                <th title={t("categories.sendsMetadataHint")}>{t("categories.sendsMetadata")}</th>
+                <th title={t("categories.overIntroHint")}>{t("categories.overIntro")}</th>
                 <th className="num">{t("nav.categories")}</th>
                 <th>
                   <span className="visually-hidden">{t("library.actions")}</span>
@@ -89,6 +92,16 @@ function TypeRow({ categoryType, canEdit }: { categoryType: CategoryType; canEdi
       ),
     { invalidate: [["category-types"], ["categories"]], onSuccess: () => setRenaming(null) },
   );
+  const setRule = useAction(
+    (rules: { no_two_in_a_row?: boolean; sends_metadata?: boolean; plays_over_intro?: boolean }) =>
+      unwrap(
+        api.PUT("/api/v1/category-types/{id}", {
+          params: { path: { id: categoryType.id } },
+          body: { name: categoryType.name, ...rules },
+        }),
+      ),
+    { invalidate: [["category-types"]] },
+  );
   const remove = useAction(
     () => done(api.DELETE("/api/v1/category-types/{id}", { params: { path: { id: categoryType.id } } })),
     { success: t("categories.typeDeleted"), invalidate: [["category-types"]] },
@@ -121,6 +134,33 @@ function TypeRow({ categoryType, canEdit }: { categoryType: CategoryType; canEdi
             </button>
           </form>
         )}
+      </td>
+      <td>
+        <input
+          type="checkbox"
+          checked={categoryType.no_two_in_a_row}
+          disabled={!canEdit || setRule.isPending}
+          aria-label={t("categories.noTwoInARowFor", { name: categoryType.name })}
+          onChange={(event) => setRule.mutate({ no_two_in_a_row: event.target.checked })}
+        />
+      </td>
+      <td>
+        <input
+          type="checkbox"
+          checked={categoryType.sends_metadata}
+          disabled={!canEdit || setRule.isPending}
+          aria-label={t("categories.sendsMetadataFor", { name: categoryType.name })}
+          onChange={(event) => setRule.mutate({ sends_metadata: event.target.checked })}
+        />
+      </td>
+      <td>
+        <input
+          type="checkbox"
+          checked={categoryType.plays_over_intro}
+          disabled={!canEdit || setRule.isPending}
+          aria-label={t("categories.overIntroFor", { name: categoryType.name })}
+          onChange={(event) => setRule.mutate({ plays_over_intro: event.target.checked })}
+        />
       </td>
       <td className="num">{number(categoryType.categories)}</td>
       <td className="actions">

@@ -102,7 +102,13 @@ function Details({ explanation }: { explanation: Explanation }) {
           <dt>{t("history.skipped")}</dt>
           <dd>
             {t("rotationPage.skippedSlots", {
-              slots: explanation.skipped_slots.map((slot) => t("rotationPage.slot", { slot: slot.slot + 1 })).join(", "),
+              slots: explanation.skipped_slots
+                .map((slot) =>
+                  slot.reason === "same_type_in_a_row"
+                    ? t("rotationPage.slotInARow", { slot: slot.slot + 1 })
+                    : t("rotationPage.slot", { slot: slot.slot + 1 }),
+                )
+                .join(", "),
             })}
           </dd>
         </>
