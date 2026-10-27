@@ -12,6 +12,7 @@ import {
   fullDate,
   parseDuration,
   setTimeZone,
+  totalTime,
   trackName,
 } from "./format";
 
@@ -23,6 +24,13 @@ describe("duration", () => {
     expect(duration(-5_000)).toBe("-0:05");
     expect(duration(1_250, true)).toBe("0:01.2");
     expect(duration(null)).toBe("–");
+  });
+
+  it("formats long totals with hundredths and days", () => {
+    expect(totalTime(0)).toBe("00:00:00.00");
+    expect(totalTime(45_296_789)).toBe("12:34:56.78");
+    expect(totalTime(2 * 86_400_000 + 3 * 3_600_000 + 4 * 60_000 + 5_000)).toBe("2 d 03:04:05.00");
+    expect(totalTime(null)).toBe("–");
   });
 
   it("parses what it formats", () => {

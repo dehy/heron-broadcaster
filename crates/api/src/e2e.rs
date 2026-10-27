@@ -2112,6 +2112,40 @@ async fn track_details_labels_programming_and_tags() {
         admin.get(&format!("/categories/{}", category["id"])).await["tracks"],
         1000
     );
+    // Its total time: never analyzed, the files' lengths (unknown: 0), cue
+    // overrides applied.
+    assert_eq!(
+        admin.get(&format!("/categories/{}", category["id"])).await["total_ms"],
+        0
+    );
+    sqlx::query("UPDATE tracks SET duration_ms = 200000 WHERE path LIKE 'bulk/%'")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO track_overrides (track_id, cue_in_ms, cue_out_ms) VALUES (?, 10000, 999999)",
+    )
+    .bind(a)
+    .execute(pool)
+    .await
+    .unwrap();
+    let categories = admin.get("/categories").await;
+    let holidays = categories
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == category["id"])
+        .unwrap();
+    assert_eq!(holidays["total_ms"], 1000 * 200_000 - 10_000, "{holidays}");
+    sqlx::query("UPDATE tracks SET duration_ms = NULL WHERE path LIKE 'bulk/%'")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM track_overrides WHERE track_id = ?")
+        .bind(a)
+        .execute(pool)
+        .await
+        .unwrap();
 
     let (status, removed) = admin
         .send(
