@@ -20,7 +20,7 @@ use sqlx::MySqlPool;
 use crate::journal::Roots;
 
 /// Folder of the rendered medleys, in the library.
-pub const FOLDER: &str = "medleys";
+pub use heron_core::medley::{FOLDER, medley_path};
 
 #[derive(Debug, Serialize)]
 pub struct RenderReport {
@@ -39,11 +39,6 @@ struct PartRow {
     to_ms: u32,
     integrated_lufs: Option<f64>,
     true_peak_db: Option<f64>,
-}
-
-/// Where a medley's file goes.
-pub fn medley_path(medley_id: u64) -> String {
-    format!("{FOLDER}/medley-{medley_id}.wav")
 }
 
 async fn recipe(pool: &MySqlPool, medley_id: u64) -> Result<Recipe, String> {

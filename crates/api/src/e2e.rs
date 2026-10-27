@@ -3886,15 +3886,19 @@ async fn medleys_are_planned_rendered_and_linked() {
     let frames = (wav.len() - 44) / 4;
     assert_eq!(frames, (3 * 1_500 + 2 * 3_000 - 4 * 200 - 100) * 48);
     assert!(
-        !station.library.path().join("medleys").exists(),
-        "nothing in the library"
+        !station
+            .library
+            .path()
+            .join(format!("medleys/medley-{id}.wav"))
+            .exists(),
+        "no medley rendered"
     );
-    // Hidden at the library root: the scanner never sees it.
+    // Hidden next to the medleys: the scanner never sees it.
     assert!(
         station
             .library
             .path()
-            .join(format!(".heron-medley-previews/medley-{id}.wav"))
+            .join(format!("medleys/.previews/medley-{id}.wav"))
             .exists()
     );
     assert!(
