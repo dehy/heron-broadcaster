@@ -13743,6 +13743,23 @@
             ],
             "description": "`MP3`, `AAC`, `FLAC`, …"
           },
+          "cue_in_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Where it plays from and to in its file (cue points, overrides\napplied), for previews; none for the start or the end of the file.",
+            "minimum": 0
+          },
+          "cue_out_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
           "duration_ms": {
             "type": [
               "integer",

@@ -745,6 +745,21 @@ table.table {
 
 .table .title-cell {
   max-width: 28rem;
+  position: relative;
+}
+
+/* A track previewed in the browser from a list. */
+.table tr.previewing td {
+  background: var(--accent-soft);
+}
+
+.table .preview-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
+  pointer-events: none;
 }
 
 .list {
@@ -1581,4 +1596,9 @@ ul.steps .bar {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   gap: 1rem;
+}
+
+/* A preview the browser could not play. */
+.btn.warn {
+  color: var(--warn);
 }
