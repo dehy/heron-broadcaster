@@ -2792,13 +2792,29 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
         "{texts} templated deliveries for {starts} starts"
     );
 
-    // The delivery log, a test ping and a retry.
-    let log = admin.get(&format!("/webhooks/{webhook}/deliveries")).await;
+    // The delivery log, a test ping and a retry. The station plays on:
+    // deliveries of the latest track changes may still be on their way, and
+    // one the receiver got is recorded as delivered just after. Those it got
+    // were delivered on their first attempt; none failed.
+    let bodies: Vec<&str> = got.iter().map(|(_, _, _, body)| body.as_str()).collect();
+    let log = eventually(
+        "the deliveries recorded",
+        Duration::from_secs(10),
+        || async {
+            let log = admin.get(&format!("/webhooks/{webhook}/deliveries")).await;
+            let settled = log.as_array().unwrap().iter().all(|delivery| {
+                !bodies.contains(&delivery["body"].as_str().unwrap())
+                    || (delivery["status"] == "delivered" && delivery["attempts"] == 1)
+            });
+            settled.then_some(log)
+        },
+    )
+    .await;
     let log = log.as_array().unwrap();
     assert!(log.len() >= expected.len());
     assert!(
-        log.iter()
-            .all(|delivery| delivery["status"] == "delivered" && delivery["attempts"] == 1)
+        log.iter().all(|delivery| delivery["status"] != "failed"),
+        "{log:?}"
     );
     let (status, ping) = admin
         .request(Method::POST, &format!("/webhooks/{webhook}/test"), None)
@@ -2812,7 +2828,12 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
         }
     };
     assert_eq!(ping_got["delivery_id"], ping_id);
-    let delivered = log[0]["id"].as_u64().unwrap();
+    // A delivery the receiver got, not the latest, which may be on its way.
+    let delivered = log
+        .iter()
+        .find(|delivery| delivery["status"] == "delivered")
+        .and_then(|delivery| delivery["id"].as_u64())
+        .unwrap();
     let (status, retried) = admin
         .request(
             Method::POST,
