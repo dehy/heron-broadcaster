@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
-use heron_core::{OutputsConfig, PlayoutSettings};
+use heron_core::{EqSettings, OutputsConfig, PlayoutSettings};
 use heron_outputs::{ConfigError, NowPlaying, Outputs};
 use heron_service::HealthCheck;
 use tokio::sync::{broadcast, watch};
@@ -96,6 +96,8 @@ pub enum EngineError {
     ConfigFile(#[from] ConfigFileError),
     #[error("cannot start a thread: {0}")]
     Thread(#[from] std::io::Error),
+    #[error(transparent)]
+    Player(#[from] crate::player::PlayerError),
 }
 
 impl Engine {
@@ -159,6 +161,8 @@ impl Engine {
         if let Some(dir) = options.fallback_dir {
             player = player.with_fallback(Fallback::start(dir, &options.state_dir));
         }
+        // Before anything plays: the first sample has the EQ.
+        player.set_eq(config.eq, false)?;
         if options.standby {
             player.hold().map_err(std::io::Error::other)?;
         } else {
@@ -227,14 +231,25 @@ impl Engine {
     }
 
     pub fn config(&self) -> EngineConfig {
+        let (playout, eq) = {
+            let player = self.player();
+            (*player.settings(), *player.eq())
+        };
         EngineConfig {
-            playout: *self.player().settings(),
+            playout,
             outputs: self.outputs().config().clone(),
+            eq,
         }
     }
 
     pub fn set_playout_settings(&self, settings: PlayoutSettings) -> Result<(), EngineError> {
         self.player().set_settings(settings);
+        self.save()
+    }
+
+    /// New deck EQ settings, gliding in.
+    pub fn set_eq(&self, eq: EqSettings) -> Result<(), EngineError> {
+        self.player().set_eq(eq, true)?;
         self.save()
     }
 
@@ -283,6 +298,10 @@ impl Engine {
     pub fn prepare_takeover(&self, config: EngineConfig, queue: SavedQueue) {
         let mut player = self.player();
         player.set_settings(config.playout);
+        // Held, nothing plays: the EQ is there from the first sample.
+        if let Err(error) = player.set_eq(config.eq, false) {
+            tracing::warn!(%error, "cannot set the deck EQ handed over");
+        }
         if let Err(error) = player.reset() {
             tracing::warn!(%error, "cannot forget the queue prepared before");
         }
@@ -324,6 +343,10 @@ impl Engine {
         {
             let mut player = self.player();
             player.set_settings(config.playout);
+            // Held, nothing plays yet.
+            if let Err(error) = player.set_eq(config.eq, false) {
+                tracing::warn!(%error, "cannot set the saved deck EQ");
+            }
             if let Err(error) = player.reset() {
                 tracing::warn!(%error, "cannot forget the queue prepared before");
             }

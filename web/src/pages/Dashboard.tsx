@@ -13,6 +13,7 @@ import { Card, ConfirmButton, Empty, Icon, Modal, PageHead } from "../components
 import { type PlainKey, number, rich, t } from "../i18n";
 import { ago, bytes, clockTime, duration, trackName } from "../lib/format";
 import { sourceLabel } from "../lib/labels";
+import { isShaping, useEqSettings } from "../lib/eq";
 import { useListenersNow } from "../lib/listeners";
 import { positionNow, useLive } from "../lib/live";
 import { Link } from "../lib/router";
@@ -300,6 +301,8 @@ function Deck({
   const intro = track ? introFromCueIn(track) : null;
   const jingleAt = track && pendingJingle ? jingleStart(track, pendingJingle.track) : null;
   const at = (ms: number) => `${Math.min(100, (ms / Math.max(1, cueOut)) * 100)}%`;
+  const eq = useEqSettings().data;
+  const shaping = isShaping(deck.deck === "fx" ? eq?.fx : eq?.music);
 
   return (
     <section
@@ -319,9 +322,14 @@ function Deck({
               <span className="badge">{t("dashboard.empty")}</span>
             )}
           </div>
-          {track && (
-            <span className="badge">{sourceLabel(track.source)}</span>
-          )}
+          <div className="row" style={{ flexWrap: "nowrap" }}>
+            {shaping && (
+              <Link to="/eq" className="badge accent badge-link" title={t("dashboard.eqOn")}>
+                {t("dashboard.eq")}
+              </Link>
+            )}
+            {track && <span className="badge">{sourceLabel(track.source)}</span>}
+          </div>
         </div>
         {track ? (
           <>

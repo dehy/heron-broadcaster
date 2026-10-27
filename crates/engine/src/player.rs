@@ -19,7 +19,7 @@ use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 
 use heron_core::playout::{TrackPlayout, Transition, db_to_gain, plan_transition};
-use heron_core::{CrossfadeSettings, FadeCurve, PlaySource, PlayoutSettings};
+use heron_core::{CrossfadeSettings, DeckEq, EqSettings, FadeCurve, PlaySource, PlayoutSettings};
 use heron_outputs::NowPlaying;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, watch};
@@ -27,8 +27,8 @@ use tokio::sync::{broadcast, watch};
 use crate::decoder::{DecodedSource, SourceFile};
 use crate::fallback::Fallback;
 use crate::mixer::{
-    AudioSource, Command, Deck, EndReason, Event, FrameRamp, FrameTransition, LoadedTrack,
-    MixerHandle, MixerStatus, Overlay, frames_to_ms, ms_to_frames,
+    AudioSource, Command, Deck, EndReason, EqTarget, Event, FrameRamp, FrameTransition,
+    LoadedTrack, MixerHandle, MixerStatus, Overlay, SAMPLE_RATE, frames_to_ms, ms_to_frames,
 };
 use crate::preload::Preloader;
 
@@ -210,6 +210,7 @@ pub struct Halted {
 pub struct Player {
     library_dir: PathBuf,
     settings: PlayoutSettings,
+    eq: EqSettings,
     mixer: MixerHandle,
     queue: VecDeque<QueueEntry>,
     /// Entries handed to the mixer (cued, on air, fading out, FX).
@@ -263,6 +264,7 @@ impl Player {
         Self {
             library_dir,
             settings,
+            eq: EqSettings::default(),
             mixer,
             queue: VecDeque::new(),
             loaded: HashMap::new(),
@@ -618,6 +620,27 @@ impl Player {
     /// New settings apply to the next transitions planned.
     pub fn set_settings(&mut self, settings: PlayoutSettings) {
         self.settings = settings;
+    }
+
+    pub fn eq(&self) -> &EqSettings {
+        &self.eq
+    }
+
+    /// New deck EQ settings. The filter gains are solved from the sliders
+    /// here, not on the audio thread. They glide in, or with `glide: false`
+    /// apply at once: only while nothing plays (starting, taking over).
+    pub fn set_eq(&mut self, eq: EqSettings, glide: bool) -> Result<(), PlayerError> {
+        let commands = |target, deck: DeckEq| Command::SetEq {
+            eq: target,
+            enabled: deck.enabled,
+            filter_gains_db: heron_dsp::eq::filter_gains(f64::from(SAMPLE_RATE), &deck.gains_db)
+                .map(|gain| gain as f32),
+            glide,
+        };
+        self.send(commands(EqTarget::Music, eq.music))?;
+        self.send(commands(EqTarget::Fx, eq.fx))?;
+        self.eq = eq;
+        Ok(())
     }
 
     /// Handles what the mixer reported and keeps the next track cued. Call

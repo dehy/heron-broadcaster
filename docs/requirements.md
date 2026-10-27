@@ -63,7 +63,8 @@ Delivered in [M2 – Engine core](roadmap/m2-engine-core.md). The real-time rule
 
 ### Deck EQ
 
-- 10 bands per deck at 60, 170, 310, 600, 1k, 3k, 6k, 12k, 14k, 16k Hz.
+- 10 bands at 60, 170, 310, 600, 1k, 3k, 6k, 12k, 14k, 16k Hz.
+- One EQ for the music (Decks A and B, which take turns, share it) and one for the FX player.
 - ±12 dB per band.
 - Presets, enable/bypass.
 
