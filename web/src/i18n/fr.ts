@@ -68,6 +68,7 @@ const fr = {
 
   // Shared words
   "common.tracks": { one: "{count} piste", other: "{count} pistes" },
+  "format.days": { one: "{count} j", other: "{count} j" },
   "common.min": "min",
   "common.save": "Enregistrer",
   "common.cancel": "Annuler",
@@ -735,6 +736,8 @@ const fr = {
   "categories.otherColor": "Autre couleur",
   "categories.fxPlayer": "Lecteur FX",
   "categories.fxPlayerCheck": "Proposer sur le lecteur FX",
+  "categories.totalTime": "Durée totale",
+  "categories.totalTimeHint": "La durée de ses pistes mises bout à bout : ce qui est diffusé de chacune (du cue-in au cue-out, réglages appliqués), ou la durée du fichier pour les pistes pas encore analysées",
   "categories.type": "Type",
   "categories.typeHint": "Ce qu’elle contient. Des règles peuvent s’appliquer à toutes les catégories d’un type.",
   "categories.allTypes": "Tous les types",

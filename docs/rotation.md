@@ -45,6 +45,10 @@ A **ban** forbids the track while it matches. **Allow** rules restrict the track
 
 When a slot finds no candidate that respects the restrictions, it goes through the relaxation steps of the separation rules, and then to the fallback category, still respecting the restrictions. If even the fallback has nothing allowed, the slot is skipped for the next one in the clock; if no slot can play, nothing is queued and the engine's fallback directory takes over.
 
+### Total time
+
+*Categories* shows, next to each category's number of tracks, their **total time** (`hh:mm:ss.ss`, days in front when needed): how long the category plays before its titles come back, to check it can feed the slots calling it. Each track counts for what is played of it (cue-in to cue-out, overrides applied), or its file's length when not analyzed yet; every track of the category that is not in the trash counts, disabled and missing ones included, as in the number of tracks. The API gives it as `total_ms`. The columns sort by a click on their header.
+
 ### Category types
 
 Every category has a **type**: what it holds. **Song**, **Jingle** and **Ad** exist from the start; a station renames them, adds its own (Liner, Promo, Voice track…) and deletes those no category uses (*Categories*, at the bottom). A category can also have no type.
