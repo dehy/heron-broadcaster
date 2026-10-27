@@ -6,7 +6,8 @@
 //! The dispatcher turns each track change from the engine into a delivery
 //! per matching webhook: `track.started`, `track.skipped` for a skip and
 //! `track.ended` for any other end, FX player tracks only for webhooks that
-//! ask for them. The sender posts deliveries as soon as they are queued,
+//! ask for them. The queue watcher sends `queue.changed` with the upcoming
+//! tracks when the list a listener would see changes. The sender posts deliveries as soon as they are queued,
 //! signed with the webhook's secret (HMAC-SHA256), and retries those that
 //! fail with backoff. Deliveries are rows in the database: retries survive
 //! a restart, and the rows are the delivery log, kept for 30 days.
@@ -24,7 +25,7 @@ use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use sqlx::MySqlPool;
-use tokio::sync::{Notify, broadcast};
+use tokio::sync::{Notify, broadcast, watch};
 use tokio::task::JoinSet;
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
@@ -32,8 +33,9 @@ use utoipa_axum::routes;
 
 use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
-use crate::engine::{DeckName, EndReason, LinkEvent, TrackEvent, unix_ms};
+use crate::engine::{DeckName, EndReason, LinkEvent, PlayerState, TrackEvent, unix_ms};
 use crate::error::{ApiError, ApiResult, ErrorBody, is_duplicate};
+use crate::public::{UpcomingTrack, upcoming};
 
 /// Deliveries sent at the same time.
 const MAX_IN_FLIGHT: usize = 8;
@@ -51,6 +53,8 @@ const KEEP_DAYS: u32 = 30;
 const RESPONSE_CHARS: usize = 1_024;
 const ERROR_CHARS: usize = 500;
 const MAX_TEMPLATE_BYTES: usize = 65_536;
+/// `queue.changed` is sent this long after the last of a burst of changes.
+const QUEUE_SETTLE: Duration = Duration::from_secs(2);
 
 /// What a delivery reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -63,6 +67,9 @@ pub enum WebhookEvent {
     TrackEnded,
     #[serde(rename = "track.skipped")]
     TrackSkipped,
+    /// What comes next changed: the upcoming tracks, in airing order.
+    #[serde(rename = "queue.changed")]
+    QueueChanged,
     /// Sent by `POST /webhooks/{id}/test`.
     #[serde(rename = "ping")]
     Ping,
@@ -74,6 +81,7 @@ impl WebhookEvent {
             Self::TrackStarted => "track.started",
             Self::TrackEnded => "track.ended",
             Self::TrackSkipped => "track.skipped",
+            Self::QueueChanged => "queue.changed",
             Self::Ping => "ping",
         }
     }
@@ -144,6 +152,9 @@ pub struct Payload {
     pub played_ms: Option<u64>,
     /// Why it ended: `finished`, `skipped`, `stopped` or `replaced`.
     pub reason: Option<EndReason>,
+    /// `queue.changed` only: the upcoming tracks, in airing order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upcoming: Option<Vec<UpcomingTrack>>,
 }
 
 impl Payload {
@@ -178,6 +189,19 @@ impl Payload {
             }),
             played_ms,
             reason,
+            upcoming: None,
+        }
+    }
+
+    fn queue_changed(upcoming: Vec<UpcomingTrack>, at_unix_ms: u64) -> Self {
+        Self {
+            event: WebhookEvent::QueueChanged,
+            delivery_id: 0,
+            at_unix_ms,
+            track: None,
+            played_ms: None,
+            reason: None,
+            upcoming: Some(upcoming),
         }
     }
 
@@ -189,12 +213,15 @@ impl Payload {
             track: None,
             played_ms: None,
             reason: None,
+            upcoming: None,
         }
     }
 
     /// The value of a template placeholder; `None` for unknown names.
+    /// `upcoming_json` is JSON, inserted as it is ([`render`]).
     fn field(&self, name: &str) -> Option<String> {
         let track = self.track.as_ref();
+        let next = self.upcoming.as_ref().and_then(|upcoming| upcoming.first());
         let text = |value: Option<&String>| value.cloned().unwrap_or_default();
         let enum_text = |value: serde_json::Value| value.as_str().unwrap_or_default().to_owned();
         Some(match name {
@@ -226,13 +253,24 @@ impl Payload {
                 .reason
                 .map(|reason| reason.as_str().to_owned())
                 .unwrap_or_default(),
+            "upcoming_json" => self
+                .upcoming
+                .as_ref()
+                .and_then(|upcoming| serde_json::to_string(upcoming).ok())
+                .unwrap_or_else(|| "[]".to_owned()),
+            "next.artist" => text(next.and_then(|next| next.artist.as_ref())),
+            "next.title" => text(next.and_then(|next| next.title.as_ref())),
+            "next.album" => text(next.and_then(|next| next.album.as_ref())),
+            "next.planned_start_unix_ms" => next
+                .map(|next| next.planned_start_unix_ms.to_string())
+                .unwrap_or_default(),
             _ => return None,
         })
     }
 }
 
 /// The placeholders a body template can use.
-pub const PLACEHOLDERS: [&str; 12] = [
+pub const PLACEHOLDERS: [&str; 17] = [
     "event",
     "delivery_id",
     "at_unix_ms",
@@ -245,6 +283,11 @@ pub const PLACEHOLDERS: [&str; 12] = [
     "source",
     "played_ms",
     "reason",
+    "upcoming_json",
+    "next.artist",
+    "next.title",
+    "next.album",
+    "next.planned_start_unix_ms",
 ];
 
 /// Splits a template into text and `{{placeholder}}` names (spaces inside
@@ -303,7 +346,8 @@ pub fn render(template: &str, content_type: &str, payload: &Payload) -> String {
             Ok(text) => body.push_str(text),
             Err(name) => {
                 let value = payload.field(name).unwrap_or_default();
-                if json {
+                // Already JSON: as it is.
+                if json && name != "upcoming_json" {
                     let quoted = serde_json::Value::String(value).to_string();
                     body.push_str(&quoted[1..quoted.len() - 1]);
                 } else {
@@ -467,6 +511,90 @@ impl Webhooks {
         for (id, events, include_fx) in webhooks {
             let events: Vec<WebhookEvent> = serde_json::from_str(&events).unwrap_or_default();
             if events.contains(&payload.event) && (include_fx || !fx) {
+                self.queue(id, payload.clone()).await?;
+                queued = true;
+            }
+        }
+        if queued {
+            self.wake.notify_one();
+        }
+        Ok(())
+    }
+
+    /// Sends `queue.changed` when the upcoming tracks a listener would see
+    /// change: a burst of changes once, [`QUEUE_SETTLE`] after the last.
+    /// The first state read is the starting point, not a change.
+    pub async fn watch_queue(
+        self: Arc<Self>,
+        mut state: watch::Receiver<Option<Arc<PlayerState>>>,
+    ) {
+        let key = |state: &watch::Receiver<Option<Arc<PlayerState>>>| {
+            let now = unix_ms(SystemTime::now());
+            state.borrow().as_ref().map(|player| {
+                upcoming(player, now)
+                    .into_iter()
+                    .map(|(entry_id, track)| (entry_id, track.artist, track.title, track.album))
+                    .collect::<Vec<_>>()
+            })
+        };
+        let mut sent = key(&state);
+        loop {
+            if state.changed().await.is_err() {
+                return;
+            }
+            // The engine unreachable: nothing to tell.
+            let Some(changed) = key(&state) else {
+                continue;
+            };
+            if Some(&changed) == sent.as_ref() {
+                continue;
+            }
+            // Let a burst settle (autofill topping up several tracks).
+            tokio::time::sleep(QUEUE_SETTLE).await;
+            let now = unix_ms(SystemTime::now());
+            let Some(upcoming_now) = state
+                .borrow_and_update()
+                .as_ref()
+                .map(|player| upcoming(player, now))
+            else {
+                continue;
+            };
+            let current: Vec<_> = upcoming_now
+                .iter()
+                .map(|(entry_id, track)| {
+                    (
+                        *entry_id,
+                        track.artist.clone(),
+                        track.title.clone(),
+                        track.album.clone(),
+                    )
+                })
+                .collect();
+            if Some(&current) == sent.as_ref() {
+                continue;
+            }
+            sent = Some(current);
+            let payload = Payload::queue_changed(
+                upcoming_now.into_iter().map(|(_, track)| track).collect(),
+                now,
+            );
+            if let Err(error) = self.queue_for(payload).await {
+                tracing::error!(%error, "cannot queue webhook deliveries");
+            }
+        }
+    }
+
+    /// Queues `payload` for every enabled webhook that asks for its event.
+    async fn queue_for(&self, payload: Payload) -> ApiResult<()> {
+        let webhooks: Vec<(u64, String)> = sqlx::query_as(
+            "SELECT id, CAST(events AS CHAR) FROM webhooks WHERE enabled ORDER BY id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut queued = false;
+        for (id, events) in webhooks {
+            let events: Vec<WebhookEvent> = serde_json::from_str(&events).unwrap_or_default();
+            if events.contains(&payload.event) {
                 self.queue(id, payload.clone()).await?;
                 queued = true;
             }
@@ -842,7 +970,8 @@ fn check(input: WebhookInput) -> ApiResult<Checked> {
     events.dedup();
     if events.is_empty() || events.contains(&WebhookEvent::Ping) {
         return Err(ApiError::Invalid(
-            "events: at least one of track.started, track.ended and track.skipped".to_owned(),
+            "events: at least one of track.started, track.ended, track.skipped and queue.changed"
+                .to_owned(),
         ));
     }
     let content_type = input
@@ -1315,6 +1444,43 @@ mod tests {
         let mut ping = Payload::ping();
         ping.at_unix_ms = 7;
         assert_eq!(render(template, "text/plain", &ping), "ping||||||||||7|0");
+    }
+
+    #[test]
+    fn queue_templates_insert_the_upcoming_tracks() {
+        let upcoming = vec![crate::public::UpcomingTrack {
+            position: 0,
+            artist: Some("Jamiroquai".to_owned()),
+            title: Some("Space \"Cowboy\"".to_owned()),
+            album: None,
+            duration_ms: 212_000,
+            planned_start_unix_ms: 1_792_918_037_000,
+        }];
+        let payload = Payload::queue_changed(upcoming, 1_792_917_865_323);
+        let body = render(
+            r#"{"next": "{{next.title}}", "at": {{next.planned_start_unix_ms}}, "all": {{upcoming_json}}}"#,
+            "application/json",
+            &payload,
+        );
+        let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(value["next"], "Space \"Cowboy\"");
+        assert_eq!(value["at"], 1_792_918_037_000u64);
+        assert_eq!(value["all"][0]["artist"], "Jamiroquai");
+        assert_eq!(value["all"][0]["position"], 0);
+        // The default body carries the array; track events do not.
+        let default: serde_json::Value = serde_json::from_str(&body_default(&payload)).unwrap();
+        assert_eq!(default["event"], "queue.changed");
+        assert_eq!(default["upcoming"][0]["duration_ms"], 212_000);
+        assert!(
+            serde_json::to_value(Payload::ping())
+                .unwrap()
+                .get("upcoming")
+                .is_none()
+        );
+    }
+
+    fn body_default(payload: &Payload) -> String {
+        body(None, "application/json", payload)
     }
 
     #[test]

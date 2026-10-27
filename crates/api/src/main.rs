@@ -206,6 +206,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         history::HistoryRecorder::new(pool.clone()).run(history_events),
     ));
     tasks.push(tokio::spawn(Arc::clone(&webhooks).dispatch(webhook_events)));
+    tasks.push(tokio::spawn(
+        Arc::clone(&webhooks).watch_queue(engine.state()),
+    ));
     tasks.push(tokio::spawn(Arc::clone(&webhooks).send_loop()));
     tasks.push(tokio::spawn(Arc::clone(&listeners).run()));
     tasks.push(tokio::spawn(Arc::clone(&queue).run()));

@@ -9,6 +9,7 @@ export const EVENTS: { value: WebhookEvent; label: PlainKey }[] = [
   { value: "track.started", label: "webhooks.event.started" },
   { value: "track.ended", label: "webhooks.event.ended" },
   { value: "track.skipped", label: "webhooks.event.skipped" },
+  { value: "queue.changed", label: "webhooks.event.queueChanged" },
 ];
 
 /** What a body template may hold, as `{{name}}`. */
@@ -25,6 +26,11 @@ export const PLACEHOLDERS = [
   "track_id",
   "at_unix_ms",
   "delivery_id",
+  "upcoming_json",
+  "next.artist",
+  "next.title",
+  "next.album",
+  "next.planned_start_unix_ms",
 ];
 
 export const DEFAULT_TEMPLATE = '{"text": "Now playing: {{artist}} – {{title}}"}';

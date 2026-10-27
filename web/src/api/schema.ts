@@ -1290,6 +1290,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What comes next, in airing order: the music only (no FX player, no
+         *     tracks that send no metadata), at most 10. No sign-in needed; any
+         *     website may read it.
+         */
+        get: operations["public_queue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/queue": {
         parameters: {
             query?: never;
@@ -4206,6 +4227,12 @@ export interface components {
             started_at_unix_ms: number;
             title?: string | null;
         };
+        PublicQueue: {
+            /** Format: int64 */
+            server_time_unix_ms: number;
+            /** @description In airing order; empty while the engine is unreachable. */
+            upcoming: components["schemas"]["UpcomingTrack"][];
+        };
         /** @description What plays on air. */
         PublicTrack: {
             album?: string | null;
@@ -5469,6 +5496,27 @@ export interface components {
              */
             trash_days: number;
         };
+        /** @description A track waiting in the queue. */
+        UpcomingTrack: {
+            album?: string | null;
+            artist?: string | null;
+            /**
+             * Format: int64
+             * @description From the cue-in to the cue-out.
+             */
+            duration_ms: number;
+            /**
+             * Format: int64
+             * @description When it should start, without crossfades, as the Queue page shows it.
+             */
+            planned_start_unix_ms: number;
+            /**
+             * Format: int32
+             * @description 0 for the next one.
+             */
+            position: number;
+            title?: string | null;
+        };
         User: {
             /** Format: int64 */
             created_at_unix_ms: number;
@@ -5549,7 +5597,7 @@ export interface components {
          * @description What a delivery reports.
          * @enum {string}
          */
-        WebhookEvent: "track.started" | "track.ended" | "track.skipped" | "ping";
+        WebhookEvent: "track.started" | "track.ended" | "track.skipped" | "queue.changed" | "ping";
         WebhookInput: {
             /**
              * @description With `{{placeholders}}`: `event`, `delivery_id`, `at_unix_ms`,
@@ -8410,6 +8458,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NowPlaying"];
+                };
+            };
+        };
+    };
+    public_queue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicQueue"];
                 };
             };
         };

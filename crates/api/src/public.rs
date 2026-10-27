@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Public now-playing and history (`/api/v1/public/…`), for station
+//! Public now-playing, queue and history (`/api/v1/public/…`), for station
 //! websites, apps and displays: no sign-in, any origin (CORS), the music
 //! only (decks A and B, not the FX player, and not tracks whose category
 //! type sends no metadata, such as jingles), without IDs or paths.
@@ -17,7 +17,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::app::AppState;
-use crate::engine::{DeckName, unix_ms};
+use crate::engine::{DeckName, PlayerState, unix_ms};
 use crate::error::{ApiError, ApiResult, ErrorBody};
 
 /// What plays on air.
@@ -51,6 +51,59 @@ pub struct PublicPlay {
     pub ended_at_unix_ms: Option<i64>,
 }
 
+/// A track waiting in the queue.
+#[derive(Clone, Debug, PartialEq, Serialize, ToSchema)]
+pub struct UpcomingTrack {
+    /// 0 for the next one.
+    pub position: u32,
+    pub artist: Option<String>,
+    pub title: Option<String>,
+    pub album: Option<String>,
+    /// From the cue-in to the cue-out.
+    pub duration_ms: u64,
+    /// When it should start, without crossfades, as the Queue page shows it.
+    pub planned_start_unix_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, ToSchema)]
+pub struct PublicQueue {
+    /// In airing order; empty while the engine is unreachable.
+    pub upcoming: Vec<UpcomingTrack>,
+    pub server_time_unix_ms: u64,
+}
+
+/// The most upcoming tracks sent or shown.
+pub const MAX_UPCOMING: usize = 10;
+
+/// The tracks waiting, in airing order: the music only (no tracks that send
+/// no metadata), at most [`MAX_UPCOMING`], with their planned start. Each
+/// comes with its queue entry ID, to tell a change.
+pub fn upcoming(player: &PlayerState, now_ms: u64) -> Vec<(u64, UpcomingTrack)> {
+    let now = i64::try_from(now_ms).unwrap_or(i64::MAX);
+    let (planned, _) = crate::rotation::planned_starts(player, now);
+    planned
+        .into_iter()
+        .filter(|(entry, _)| !entry.track.no_metadata)
+        .take(MAX_UPCOMING)
+        .enumerate()
+        .map(|(position, (entry, at))| {
+            let track = &entry.track;
+            (
+                entry.entry_id,
+                UpcomingTrack {
+                    position: position as u32,
+                    artist: track.artist.clone(),
+                    title: track.title.clone(),
+                    album: track.album.clone(),
+                    duration_ms: u64::try_from(crate::rotation::planned_length_ms(entry))
+                        .unwrap_or(0),
+                    planned_start_unix_ms: u64::try_from(at).unwrap_or(0),
+                },
+            )
+        })
+        .collect()
+}
+
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct PublicHistoryQuery {
@@ -64,6 +117,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(now_playing))
         .routes(routes!(public_history))
+        .routes(routes!(public_queue))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
@@ -120,6 +174,36 @@ async fn now_playing(
         [(header::CACHE_CONTROL, "public, max-age=5")],
         Json(NowPlaying {
             now: track,
+            server_time_unix_ms: now,
+        }),
+    )
+}
+
+/// What comes next, in airing order: the music only (no FX player, no
+/// tracks that send no metadata), at most 10. No sign-in needed; any
+/// website may read it.
+#[utoipa::path(get, path = "/public/queue", tag = "public", security(()),
+    responses((status = 200, body = PublicQueue)))]
+async fn public_queue(
+    State(state): State<AppState>,
+) -> ([(header::HeaderName, &'static str); 1], Json<PublicQueue>) {
+    let now = unix_ms(SystemTime::now());
+    let upcoming = state
+        .engine
+        .state()
+        .borrow()
+        .as_ref()
+        .map(|player| {
+            upcoming(player, now)
+                .into_iter()
+                .map(|(_, track)| track)
+                .collect()
+        })
+        .unwrap_or_default();
+    (
+        [(header::CACHE_CONTROL, "public, max-age=5")],
+        Json(PublicQueue {
+            upcoming,
             server_time_unix_ms: now,
         }),
     )
@@ -191,4 +275,73 @@ async fn last_song(state: &AppState, now: u64) -> ApiResult<Option<PublicTrack>>
             position_ms: now.saturating_sub(started),
         }
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use heron_core::PlaySource;
+
+    use super::*;
+    use crate::engine::{DeckState, QueueEntry, QueuedTrack};
+
+    fn entry(entry_id: u64, title: &str, no_metadata: bool) -> QueueEntry {
+        QueueEntry {
+            entry_id,
+            track: QueuedTrack {
+                track_id: Some(entry_id),
+                path: format!("{title}.mp3"),
+                title: Some(title.to_owned()),
+                artist: Some("Artist".to_owned()),
+                album: None,
+                duration_ms: 200_000,
+                cue_in_ms: 1_000,
+                cue_out_ms: 181_000,
+                source: PlaySource::Rotation,
+                no_metadata,
+                over_intro: false,
+                intro_ms: None,
+            },
+        }
+    }
+
+    #[test]
+    fn the_upcoming_music_comes_in_airing_order_with_its_planned_start() {
+        let mut queue: Vec<QueueEntry> = (3..20)
+            .map(|id| entry(id, &format!("Song {id}"), false))
+            .collect();
+        queue.insert(0, entry(2, "Jingle", true));
+        let player = PlayerState {
+            paused: false,
+            decks: vec![DeckState {
+                deck: DeckName::A,
+                entry: Some(entry(1, "On air", false)),
+                position_ms: 100_000,
+                length_ms: 180_000,
+                on_air: true,
+            }],
+            cued: None,
+            cued_jingle: None,
+            pending_jingle: None,
+            queue,
+            outputs: Vec::new(),
+            rendered_ms: 0,
+            underruns: 0,
+            engine_started_at_unix_ms: 0,
+        };
+        let upcoming = upcoming(&player, 1_000_000);
+        assert_eq!(upcoming.len(), MAX_UPCOMING);
+        // The jingle is left out; positions count the music only.
+        let (id, first) = &upcoming[0];
+        assert_eq!(
+            (*id, first.position, first.title.as_deref()),
+            (3, 0, Some("Song 3"))
+        );
+        assert_eq!(first.duration_ms, 180_000);
+        // After what the deck still plays, and the jingle before it.
+        assert_eq!(first.planned_start_unix_ms, 1_000_000 + 80_000 + 180_000);
+        assert_eq!(
+            upcoming[1].1.planned_start_unix_ms,
+            first.planned_start_unix_ms + 180_000
+        );
+    }
 }

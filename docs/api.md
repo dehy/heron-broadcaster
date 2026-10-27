@@ -59,7 +59,7 @@ Then:
 | Outputs | `GET`, `POST /encoder-profiles`; `GET`, `PUT`, `DELETE /encoder-profiles/{id}`; `GET`, `POST /outputs`; `GET`, `PUT`, `DELETE /outputs/{id}` (with each output's live state, and its `statistics` settings: the stream server's admin credentials) |
 | Webhooks (admins) | `GET`, `POST /webhooks`; `GET`, `PUT`, `DELETE /webhooks/{id}`; `POST /webhooks/{id}/secret`; `POST /webhooks/{id}/test`; `GET /webhooks/{id}/deliveries` (`before`, `status`, `limit`); `POST /webhook-deliveries/{id}/retry` — see [below](#webhooks) |
 | Listener statistics | `GET /listeners/now`, `/listeners/samples`, `/listeners/days`, `/listeners/hours-of-day`, `/listeners/tracks`, `/listeners/players` (CSV with `format=csv` for days, hours and tracks); `GET`, `PUT /settings/statistics` (admins) — see [Listener statistics](statistics.md#api) |
-| Public | `GET /public/now-playing`, `GET /public/history` (`before`, `limit`) — no sign-in, see [below](#public-endpoints) |
+| Public | `GET /public/now-playing`, `GET /public/history` (`before`, `limit`), `GET /public/queue` — no sign-in, see [below](#public-endpoints) |
 | Live | `GET /live` (WebSocket) |
 
 Every engine action is there: queue (enqueue, remove, clear, move, and replace, which the queue manager uses), transport (skip, pause, resume), FX player, state, levels, track changes (WebSocket), playout settings and outputs. Tracks the engine plays from its fallback directory show with the source `fallback`; autofill does not count them as queued, and anything queued replaces a cued one.
@@ -82,6 +82,14 @@ The API polls the engine's state twice a second and its levels ten times a secon
 Webhooks tell other systems (a website, a chat bot, a studio display) about track changes as they happen. Admins manage them; their secrets are never sent back.
 
 - **Events:** `track.started`, `track.ended` and `track.skipped`, as the engine reports them: a skip is `track.skipped` (not also `track.ended`), any other end (played to its transition, an FX stopped or replaced) is `track.ended`. Tracks of the FX player, and tracks that send no metadata (a category type with `sends_metadata` off: jingles, ads), are only sent to webhooks with `include_fx`; tracks from the fallback directory are sent like any other.
+- **`queue.changed`:** what comes next changed: a track started (the queue moved on), autofill or an operator queued, removed, moved or replaced one, the queue was cleared. It carries the **upcoming tracks in airing order**, at most 10, the music only (as the public endpoints: no FX player, no tracks that send no metadata such as jingles, ads and medleys), each with its position and planned start (as the Queue page shows it, without crossfades). Changes in a burst are sent once, 2 seconds after the last; nothing is sent when the list a listener would see did not change (a planned time moving after a skip is not a change on its own, but comes with the next one).
+
+  ```json
+  {"event": "queue.changed", "delivery_id": 43, "at_unix_ms": 1792917865323,
+   "track": null, "played_ms": null, "reason": null,
+   "upcoming": [{"position": 0, "artist": "Artist", "title": "Title", "album": null,
+                 "duration_ms": 212000, "planned_start_unix_ms": 1792918037000}]}
+  ```
 - **Body:** by default the JSON `Payload` of the OpenAPI document:
 
   ```json
@@ -91,7 +99,7 @@ Webhooks tell other systems (a website, a chat bot, a studio display) about trac
    "played_ms": null, "reason": null}
   ```
 
-  Or a **body template** of your own, with its content type, for receivers that want a format of their own (Discord, Slack, a display). Placeholders: `{{event}}`, `{{delivery_id}}`, `{{at_unix_ms}}`, `{{track_id}}`, `{{artist}}`, `{{title}}`, `{{album}}`, `{{duration_ms}}`, `{{deck}}`, `{{source}}`, `{{played_ms}}`, `{{reason}}` (spaces inside the braces are allowed). When the content type is JSON, values are escaped to fit between quotes: `{"content": "Now playing: {{artist}} – {{title}}"}`. Missing values are empty; unknown placeholders are refused (`422`).
+  Or a **body template** of your own, with its content type, for receivers that want a format of their own (Discord, Slack, a display). Placeholders: `{{event}}`, `{{delivery_id}}`, `{{at_unix_ms}}`, `{{track_id}}`, `{{artist}}`, `{{title}}`, `{{album}}`, `{{duration_ms}}`, `{{deck}}`, `{{source}}`, `{{played_ms}}`, `{{reason}}`; for `queue.changed`, `{{upcoming_json}}` (the array, as JSON, inserted as it is: `{"next": {{upcoming_json}}}`), `{{next.artist}}`, `{{next.title}}`, `{{next.album}}` and `{{next.planned_start_unix_ms}}` for the first upcoming track (spaces inside the braces are allowed). When the content type is JSON, values are escaped to fit between quotes: `{"content": "Now playing: {{artist}} – {{title}}"}`. Missing values are empty; unknown placeholders are refused (`422`).
 - **Requests:** `POST` to the webhook's URL (`http` or `https`; it may be an address of your network: only admins can set it), with `X-Heron-Event`, `X-Heron-Delivery` (the delivery's ID), `X-Heron-Timestamp` (Unix seconds) and `X-Heron-Signature`. Redirects are not followed.
 - **Signature:** `X-Heron-Signature: sha256=<hex>`, the HMAC-SHA256 of `"{timestamp}.{body}"` with the webhook's secret (`whsec_…`, shown once when the webhook is created or given a new secret with `POST /webhooks/{id}/secret`). Receivers should compare it in constant time and refuse old timestamps. In Python:
 
@@ -108,6 +116,7 @@ Webhooks tell other systems (a website, a chat bot, a studio display) about trac
 For station websites, apps and displays: no sign-in, readable from any origin (`Access-Control-Allow-Origin: *`, `GET` only, no credentials), the music only (decks A and B, not the FX player, and not tracks that send no metadata: while a jingle is on air, now-playing shows the song before it), without IDs or paths.
 
 - `GET /api/v1/public/now-playing`: `now` (artist, title, album, `started_at_unix_ms`, `duration_ms`, `position_ms`), `null` while nothing plays or the engine is unreachable, and `server_time_unix_ms`. Cached 5 seconds (`Cache-Control: public, max-age=5`).
+- `GET /api/v1/public/queue`: `upcoming`, the tracks waiting in airing order, as `queue.changed` sends them (at most 10, the music only, with `position` and `planned_start_unix_ms`), and `server_time_unix_ms`; empty while the engine is unreachable. Cached 5 seconds.
 - `GET /api/v1/public/history`: the latest plays, most recent first (artist, title, album, `started_at_unix_ms`, `ended_at_unix_ms`); `limit` 1 to 50 (20), `before` for the next page. Cached 15 seconds.
 
 They answer through `heron-web` like the rest of the API (`http://<host>:8000/api/v1/public/now-playing`). Put a cache or rate limit in the reverse proxy in front of it if the station is busy.
