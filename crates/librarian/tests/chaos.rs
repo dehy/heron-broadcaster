@@ -499,23 +499,30 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
     assert_ne!(organized, before_organize, "files moved");
     assert!(roots.library.join("Band 2/Song 3 of 2.wav").exists());
 
-    // Undo every organize batch, latest first, crashing as it goes.
-    let batches: Vec<u64> = sqlx::query_scalar(
-        "SELECT b.id FROM library_batches b WHERE b.kind = 'organize'
+    // Undo every organize batch, latest first, crashing in the first one
+    // with two moves or more: how many moves each batch holds depends on
+    // how far the organize runs killed above got, so the latest may hold
+    // one, and never reach a crash at its second transfer.
+    let batches: Vec<(u64, i64)> = sqlx::query_as(
+        "SELECT b.id, (SELECT COUNT(*) FROM library_moves m WHERE m.batch_id = b.id AND m.status = 'done')
+         FROM library_batches b WHERE b.kind = 'organize'
            AND EXISTS (SELECT 1 FROM library_moves m WHERE m.batch_id = b.id AND m.status = 'done')
          ORDER BY b.id DESC",
     )
     .fetch_all(pool)
     .await
     .unwrap();
-    for (index, batch) in batches.iter().enumerate() {
+    let mut crashed = false;
+    for (batch, moves) in &batches {
         let batch = batch.to_string();
-        if index == 0 {
+        if !crashed && *moves >= 2 {
             setup.run(&["undo", &batch], Some("transferred:2"));
             assert_nothing_lost(&roots, &originals, &pre_existing, "undo, crashed");
+            crashed = true;
         }
         assert!(setup.run(&["undo", &batch], None), "undo {batch}");
     }
+    assert!(crashed, "no organize batch with two moves: {batches:?}");
     assert_settled(pool, &roots, &originals, "after undoing").await;
     assert_eq!(
         common::snapshot(&roots.library),
