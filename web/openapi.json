@@ -5747,6 +5747,57 @@
         }
       }
     },
+    "/api/v1/tracks/{id}/intro": {
+      "put": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Sets where the track's intro ends (the vocals start): jingles of a type\nplaying over the intro end there. Operators and admins.",
+        "operationId": "put_intro",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntroInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackMarkers"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tracks/{id}/overrides": {
       "put": {
         "tags": [
@@ -8983,6 +9034,21 @@
               "null"
             ],
             "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "IntroInput": {
+        "type": "object",
+        "properties": {
+          "intro_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Where the vocals start, in ms on the file's timeline; `null` removes it.",
+            "minimum": 0
           }
         },
         "additionalProperties": false

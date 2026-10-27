@@ -112,6 +112,9 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   const waveform = useWaveform(track.id);
   const saved = normalize(track.overrides);
   const [draft, setDraft] = useState<TrackOverrides>(saved);
+  // Where the vocals start, kept apart from the overrides (`track_markers`).
+  const savedIntro = track.markers?.intro_ms ?? null;
+  const [intro, setIntro] = useState<number | null>(savedIntro);
   const [zoom, setZoom] = useState<"whole" | "intro" | "outro">("whole");
   const audio = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -128,6 +131,9 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   useEffect(() => {
     setDraft(normalize(track.overrides));
   }, [track.overrides]);
+  useEffect(() => {
+    setIntro(savedIntro);
+  }, [savedIntro]);
 
   // Follow the audio while it plays.
   useEffect(() => {
@@ -145,10 +151,18 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
     return () => cancelAnimationFrame(frame);
   }, [playing]);
 
+  // The overrides and the intro point, each when it changed.
   const saveOverrides = useAction(
-    (overrides: TrackOverrides) =>
-      unwrap(api.PUT("/api/v1/tracks/{id}/overrides", { params: { path: { id: track.id } }, body: overrides })),
-    { success: t("track.saved"), invalidate: [["track", track.id]] },
+    async ({ overrides, introMs }: { overrides: TrackOverrides | null; introMs: number | null | undefined }) => {
+      const path = { params: { path: { id: track.id } } };
+      if (overrides) {
+        await unwrap(api.PUT("/api/v1/tracks/{id}/overrides", { ...path, body: overrides }));
+      }
+      if (introMs !== undefined) {
+        await unwrap(api.PUT("/api/v1/tracks/{id}/intro", { ...path, body: { intro_ms: introMs } }));
+      }
+    },
+    { success: t("track.saved"), invalidate: [["track", track.id], ["tracks"]] },
   );
   const clearOverrides = useAction(
     () => done(api.DELETE("/api/v1/tracks/{id}/overrides", { params: { path: { id: track.id } } })),
@@ -208,7 +222,9 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   const fadeOut: Fade | undefined = overrides.fade_out ?? crossfade?.fade_out;
   const fadeIn: Fade | undefined = overrides.fade_in ?? crossfade?.fade_in;
 
-  const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
+  const overridesDirty = JSON.stringify(draft) !== JSON.stringify(saved);
+  const introDirty = intro !== savedIntro;
+  const dirty = overridesDirty || introDirty;
   const hasOverrides = !isDefault(track.overrides);
 
   const markers: Marker[] = [
@@ -272,10 +288,18 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
     });
   }
 
-  // Points imported from another software: shown, not played by Heron.
+  // Points imported from another software (the intro, above, can be set
+  // here too): shown, not played by Heron.
   const imported = track.markers;
-  if (imported?.intro_ms != null) {
-    markers.push({ id: "intro", label: t("track.introEnds"), ms: imported.intro_ms, color: "var(--fx)", row: 2 });
+  if (intro !== null) {
+    markers.push({
+      id: "intro",
+      label: t("track.introEnds"),
+      ms: intro,
+      color: "var(--fx)",
+      row: 2,
+      ...(canEdit && { onDrag: (ms: number) => setIntro(Math.max(1, Math.min(ms, length))) }),
+    });
   }
   if (imported?.intro2_ms != null) {
     markers.push({ id: "intro2", label: t("track.intro2Ends"), ms: imported.intro2_ms, color: "var(--fx)", row: 2 });
@@ -482,11 +506,11 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
               </strong>
             </span>
             <span>{t("track.plays", { duration: duration(cueOut - cueIn) })}</span>
-            {imported?.intro_ms != null && (
+            {intro !== null && (
               <span>
                 <span className="swatch" style={{ background: "var(--fx)" }} /> {t("track.introEnds")}{" "}
-                <strong className="num">{duration(imported.intro_ms, true)}</strong>
-                {imported.intro2_ms != null && (
+                <strong className="num">{duration(intro, true)}</strong>
+                {imported?.intro2_ms != null && (
                   <>
                     {" · "}
                     {t("track.intro2Ends")} <strong className="num">{duration(imported.intro2_ms, true)}</strong>
@@ -539,8 +563,19 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
           dirty={dirty}
           hasOverrides={hasOverrides}
           shortTrack={shortTrack}
-          onSave={() => saveOverrides.mutate(draft)}
-          onRevert={() => setDraft(saved)}
+          intro={intro}
+          setIntro={setIntro}
+          playhead={playhead}
+          onSave={() =>
+            saveOverrides.mutate({
+              overrides: overridesDirty ? draft : null,
+              introMs: introDirty ? intro : undefined,
+            })
+          }
+          onRevert={() => {
+            setDraft(saved);
+            setIntro(savedIntro);
+          }}
           onClear={() => clearOverrides.mutate(undefined)}
           saving={saveOverrides.isPending}
         />
@@ -701,7 +736,8 @@ function CueInput({
   disabled,
 }: {
   value: number | null;
-  placeholder: number;
+  /** Shown when empty; nothing when missing. */
+  placeholder?: number;
   onChange: (ms: number | null) => void;
   disabled: boolean;
 }) {
@@ -714,7 +750,7 @@ function CueInput({
     <input
       className={valid ? "input num" : "input num invalid"}
       value={text}
-      placeholder={duration(placeholder, true)}
+      placeholder={placeholder === undefined ? undefined : duration(placeholder, true)}
       disabled={disabled}
       aria-invalid={!valid}
       onChange={(event) => setText(event.target.value)}
@@ -745,6 +781,9 @@ function OverridesCard({
   dirty,
   hasOverrides,
   shortTrack,
+  intro,
+  setIntro,
+  playhead,
   onSave,
   onRevert,
   onClear,
@@ -754,6 +793,11 @@ function OverridesCard({
   settings: PlayoutSettings | undefined;
   draft: TrackOverrides;
   setDraft: (update: (draft: TrackOverrides) => TrackOverrides) => void;
+  /** Where the vocals start, on the file's timeline. */
+  intro: number | null;
+  setIntro: (ms: number | null) => void;
+  /** Where the preview is, to set the intro there. */
+  playhead: number | null;
   canEdit: boolean;
   dirty: boolean;
   hasOverrides: boolean;
@@ -829,6 +873,22 @@ function OverridesCard({
               <option value="on">{t("track.on")}</option>
               <option value="off">{t("track.off")}</option>
             </select>
+          </Field>
+          <Field label={t("track.introField")} hint={t("track.introHelp")}>
+            <div className="row" style={{ flexWrap: "nowrap" }}>
+              <CueInput value={intro} disabled={disabled} onChange={(ms) => setIntro(ms === 0 ? null : ms)} />
+              {canEdit && (
+                <button
+                  type="button"
+                  className="btn small"
+                  disabled={playhead === null}
+                  title={t("track.introAtPlayheadHelp")}
+                  onClick={() => playhead !== null && setIntro(Math.max(1, Math.round(playhead / 100) * 100))}
+                >
+                  {t("track.introAtPlayhead")}
+                </button>
+              )}
+            </div>
           </Field>
         </div>
 

@@ -1949,6 +1949,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracks/{id}/intro": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Sets where the track's intro ends (the vocals start): jingles of a type
+         *     playing over the intro end there. Operators and admins.
+         */
+        put: operations["put_intro"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracks/{id}/overrides": {
         parameters: {
             query?: never;
@@ -3269,6 +3289,13 @@ export interface components {
             title: string | null;
             /** @default null */
             year: string | null;
+        };
+        IntroInput: {
+            /**
+             * Format: int32
+             * @description Where the vocals start, in ms on the file's timeline; `null` removes it.
+             */
+            intro_ms?: number | null;
         };
         Label: {
             /** @description `#rrggbb`. */
@@ -9453,6 +9480,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrackCategory"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_intro: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntroInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackMarkers"];
                 };
             };
             "4XX": {
