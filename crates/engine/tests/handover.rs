@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use heron_core::playout::TrackPlayout;
 use heron_core::{
-    EncoderKind, EncoderProfile, OutputConfig, OutputKind, OutputsConfig, PlaySource,
+    EncoderKind, EncoderProfile, EqSettings, OutputConfig, OutputKind, OutputsConfig, PlaySource,
 };
 use heron_engine::engine::{Engine, EngineOptions};
 use heron_engine::handover::{self, Followed, Probe};
@@ -204,6 +204,15 @@ fn on_air(engine: &Engine) -> Option<(u64, u64)> {
         .and_then(|deck| Some((deck.entry?.entry_id, deck.position_ms)))
 }
 
+/// The deck EQ of the station: kept through a handover or a restart.
+fn station_eq() -> EqSettings {
+    let mut eq = EqSettings::default();
+    eq.music.enabled = true;
+    eq.music.gains_db = [3.0, 2.0, 0.0, 0.0, -1.5, 0.0, 0.0, 1.0, 1.0, 0.0];
+    eq.fx.gains_db[0] = -6.0;
+    eq
+}
+
 /// An engine on air with two tracks queued, streaming to `server`, through
 /// a relay listening on `relay` when given.
 async fn station(
@@ -219,6 +228,7 @@ async fn station(
     let (port, server) = Server::start().await;
     let active = engine(library.path(), state.path(), relay, false);
     active.set_outputs(&outputs(port)).unwrap();
+    active.set_eq(station_eq()).unwrap();
     let tracks = vec![
         track(library.path(), "first.wav", 30.0),
         track(library.path(), "second.wav", 10.0),
@@ -299,6 +309,7 @@ async fn hand_over(relay: Option<&Path>) {
         "stopped at {stopped_ms} ms, resumed at {resumed_ms} ms, {elapsed_ms} ms later"
     );
     assert_eq!(standby.player().saved().waiting, waiting);
+    assert_eq!(standby.config().eq, station_eq());
     let before = server.bytes();
     tokio::time::sleep(Duration::from_secs(1)).await;
     // 128 kbps: about 16 kB a second.
@@ -423,6 +434,7 @@ async fn starts_from_the_saved_state_when_nothing_is_handed_over() {
     })
     .await;
     assert_eq!(standby.config().outputs.outputs.len(), 1);
+    assert_eq!(standby.config().eq, station_eq());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

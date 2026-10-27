@@ -162,7 +162,7 @@ heron-broadcaster/
 │   ├── proto/      heron-proto      gRPC definitions between api and engine
 │   ├── analysis/   heron-analysis   loudness, silence, cue and fade point detection, Chromaprint fingerprints
 │   ├── library/    heron-library    library files shared by scanner and librarian: tags, content hash, layout, lock
-│   ├── dsp/        heron-dsp        resampling; later EQ, compressor, expander, limiter, crossovers, AGC chain
+│   ├── dsp/        heron-dsp        resampling, deck EQ; later compressor, expander, limiter, crossovers, AGC chain
 │   ├── outputs/    heron-outputs    encoders, OutputSink trait + Icecast (later Shoutcast, HLS, file, pipe)
 │   ├── rotation/   heron-rotation   pure rotation: separation, restrictions, relaxation, clocks, selection, simulation
 │   ├── service/    heron-service    process plumbing: logging, Sentry, /healthz, /metrics, remote write, clock sync, shutdown, DB connect

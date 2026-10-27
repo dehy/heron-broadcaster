@@ -15,6 +15,7 @@ mod clocks;
 #[cfg(test)]
 mod e2e;
 mod engine;
+mod eq;
 mod error;
 mod history;
 mod import;
@@ -232,6 +233,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         staging: Arc::new(cli.staging_dir),
         webhooks,
         listeners,
+        eq_changes: tokio::sync::broadcast::channel(16).0,
     };
     let router = app::router(state).merge(heron_service::ops_router(SERVICE, metrics, health));
 

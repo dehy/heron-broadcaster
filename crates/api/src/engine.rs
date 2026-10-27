@@ -491,6 +491,13 @@ impl EngineLink {
         Ok(())
     }
 
+    pub async fn set_eq_settings(&self, settings_json: String) -> ApiResult<()> {
+        let mut client = self.client.clone();
+        self.call(client.set_eq_settings(pb::SetEqSettingsRequest { settings_json }))
+            .await?;
+        Ok(())
+    }
+
     pub async fn set_outputs(&self, outputs_json: String) -> ApiResult<()> {
         let mut client = self.client.clone();
         // Stopping encoders joins their threads: give it time.
