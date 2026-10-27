@@ -1046,6 +1046,17 @@ async fn library_tracks_overrides_and_categories() {
     assert_eq!(detail["overrides"]["crossfade"]["crossfade"], false);
     assert_eq!(detail["categories"][0]["name"], "Gold");
     assert_eq!(detail["analysis"]["cue_out_ms"], 3000);
+    // The list gives the cue points previews play between, overrides applied.
+    let listed = admin
+        .get(&format!("/tracks?category_id={}", category["id"]))
+        .await;
+    assert_eq!(
+        (
+            &listed["items"][0]["cue_in_ms"],
+            &listed["items"][0]["cue_out_ms"]
+        ),
+        (&json!(500), &detail["analysis"]["cue_out_ms"])
+    );
     // Loudness: −13 LUFS brought to −16.
     assert_eq!(detail["playout"]["gain_db"], -3.0);
     let (status, _) = admin

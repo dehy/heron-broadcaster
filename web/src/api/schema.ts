@@ -4960,6 +4960,14 @@ export interface components {
             bpm?: number | null;
             /** @description `MP3`, `AAC`, `FLAC`, … */
             codec?: string | null;
+            /**
+             * Format: int64
+             * @description Where it plays from and to in its file (cue points, overrides
+             *     applied), for previews; none for the start or the end of the file.
+             */
+            cue_in_ms?: number | null;
+            /** Format: int64 */
+            cue_out_ms?: number | null;
             /** Format: int32 */
             duration_ms?: number | null;
             /** @description Disabled tracks are never picked by autofill or rotation. */

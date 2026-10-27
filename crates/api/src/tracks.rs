@@ -148,6 +148,10 @@ pub struct TrackSummary {
     pub missing: bool,
     pub analyzed: bool,
     pub silent: bool,
+    /// Where it plays from and to in its file (cue points, overrides
+    /// applied), for previews; none for the start or the end of the file.
+    pub cue_in_ms: Option<u64>,
+    pub cue_out_ms: Option<u64>,
     /// When the scanner first found the file.
     pub added_at_unix_ms: i64,
     /// Plays that count (FX player aside, at least the programming
@@ -198,6 +202,10 @@ impl ListContext {
                     t.missing_since IS NOT NULL AS missing,
                     a.track_id IS NOT NULL AS analyzed,
                     COALESCE(a.cue_out_ms <= a.cue_in_ms, FALSE) AS silent,
+                    CAST(COALESCE(tov.cue_in_ms, IF(tov.gap_killer_enabled = FALSE, NULL, a.cue_in_ms))
+                         AS UNSIGNED) AS cue_in_ms,
+                    CAST(COALESCE(tov.cue_out_ms, IF(tov.gap_killer_enabled = FALSE, NULL, a.cue_out_ms))
+                         AS UNSIGNED) AS cue_out_ms,
                     CAST(UNIX_TIMESTAMP(t.created_at) * 1000 AS SIGNED) AS added_at_unix_ms,
                     CAST(UNIX_TIMESTAMP(h.last_played) * 1000 AS SIGNED) AS last_played_at_unix_ms,
                     CAST(COALESCE(h.plays, 0) AS UNSIGNED) AS play_count,
@@ -214,6 +222,7 @@ impl ListContext {
         query.push(
             " FROM tracks t
               LEFT JOIN track_analysis a ON a.track_id = t.id
+              LEFT JOIN track_overrides tov ON tov.track_id = t.id
               LEFT JOIN track_musicbrainz mb ON mb.track_id = t.id
               LEFT JOIN track_programming p ON p.track_id = t.id
               LEFT JOIN (SELECT track_id, COUNT(*) AS plays, MAX(started_at) AS last_played

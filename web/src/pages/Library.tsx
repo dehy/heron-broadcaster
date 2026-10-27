@@ -32,6 +32,7 @@ import { type PlainKey, number, rich, t } from "../i18n";
 import { ago, duration, trackName } from "../lib/format";
 import { Link, setSearch, useLocation } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
+import { type Preview, usePreview } from "../lib/preview";
 
 const PAGE = 50;
 /** Files in one tag edit, at most (the API's limit). */
@@ -170,6 +171,7 @@ type Dialog = "labels" | "category" | "programming" | "tags" | null;
 export function Library() {
   const { search } = useLocation();
   const canEdit = useCan("operator");
+  const preview = usePreview();
   const filter = (search.get("filter") ?? "") as TrackFilter | "";
   const sort = (search.get("sort") ?? "artist") as TrackSort;
   const desc = search.get("desc") === "true";
@@ -527,6 +529,7 @@ export function Library() {
                     onToggle={() => toggle(track.id)}
                     onQueue={(next) => enqueue.mutate({ ids: [track.id], next })}
                     onArtist={setText}
+                    preview={preview}
                   />
                 ))}
               </tbody>
@@ -778,6 +781,7 @@ function Row({
   onToggle,
   onQueue,
   onArtist,
+  preview,
 }: {
   track: TrackSummary;
   columns: Column[];
@@ -786,7 +790,10 @@ function Row({
   onToggle: () => void;
   onQueue: (next: boolean) => void;
   onArtist: (artist: string) => void;
+  preview: Preview;
 }) {
+  const previewing = preview.playing === track.id;
+  const unplayable = preview.failed.has(track.id);
   const playable = !track.missing && !track.silent;
   const file = track.path.split("/").pop() ?? track.path;
   const none = <span className="muted">–</span>;
@@ -812,7 +819,7 @@ function Row({
     ),
   };
   return (
-    <tr>
+    <tr className={previewing ? "previewing" : undefined}>
       <td>
         <input
           type="checkbox"
@@ -828,6 +835,9 @@ function Row({
           </Link>
           <TrackState track={track} />
         </div>
+        {previewing && (
+          <span className="preview-progress" aria-hidden="true" style={{ width: `${preview.progress * 100}%` }} />
+        )}
       </td>
       <td className="hide-narrow ellipsis" style={{ maxWidth: "14rem" }}>
         {track.artist ? (
@@ -874,6 +884,18 @@ function Row({
               <Icon name="plus" />
             </button>
           </>
+        )}
+        {!track.missing && (
+          <button
+            type="button"
+            className={unplayable ? "btn ghost small icon warn" : "btn ghost small icon"}
+            title={unplayable ? t("library.previewFailed") : previewing ? t("library.stopPreview") : t("library.preview")}
+            aria-label={t(previewing ? "library.stopPreviewNamed" : "library.previewNamed", { name: track.title ?? file })}
+            aria-pressed={previewing}
+            onClick={() => preview.toggle(track)}
+          >
+            <Icon name={unplayable ? "warn" : previewing ? "stop" : "play"} />
+          </button>
         )}
       </td>
     </tr>

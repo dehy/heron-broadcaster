@@ -40,6 +40,8 @@ The app keeps one WebSocket to `/api/v1/live` ([API – Live WebSocket](api.md#l
 
 The waveform comes with the analysis ([Import and analysis](analysis.md)): one point per 50 ms, on a dB scale so quiet intros and fade-outs show. Tracks analyzed before M5 are analyzed again once to get theirs. Previews play the file itself (`GET /api/v1/tracks/{id}/audio`) in the browser, at its own level, without the station's processing; formats the browser cannot play (some FLAC or ALAC files in Safari) stay silent. The transition preview of *Crossfade & loudness* mixes its two files in the browser the way the engine plans it: the incoming track starts at its planned time, each track has its loudness gain and its fade, and a limiter keeps the sum from clipping. It plays from a few seconds before the transition to a few seconds after, and stops when the tracks or the settings change. It is a preview: the engine's own processing (and its audio processing, from M9) may sound slightly different.
 
+Each row of *Tracks* has a **play** button that previews the track in the browser, for every role: from its cue-in to its cue-out (overrides applied), one track at a time (playing another row stops the first), with the row highlighted and a thin progress bar under its title. It stops when the page changes. Files the browser cannot play show a warning instead of staying silent. The same preview (`usePreview`, `web/src/lib/preview.ts`) can serve other lists.
+
 Points dragged on the waveform become the track's overrides once saved. Dragging *Next starts* sets a fixed crossfade for the track (that long before its cue-out). Queued entries of the track follow within seconds.
 
 ## Times
