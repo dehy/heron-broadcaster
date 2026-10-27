@@ -65,6 +65,7 @@ const en = {
 
   // Shared words
   "common.tracks": { one: "{count} track", other: "{count} tracks" },
+  "format.days": { one: "{count} d", other: "{count} d" },
   "common.min": "min",
   "common.save": "Save",
   "common.cancel": "Cancel",
@@ -735,6 +736,8 @@ const en = {
   "categories.otherColor": "Other color",
   "categories.fxPlayer": "FX player",
   "categories.fxPlayerCheck": "Offer on the FX player",
+  "categories.totalTime": "Total time",
+  "categories.totalTimeHint": "How long its tracks last together: what is played of each (cue-in to cue-out, overrides applied), or the file's length for tracks not analyzed yet",
   "categories.type": "Type",
   "categories.typeHint": "What it holds. Rules can apply to every category of a type.",
   "categories.allTypes": "Every type",

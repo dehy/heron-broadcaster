@@ -30,6 +30,23 @@ export function duration(ms: number | null | undefined, precise = false): string
 }
 
 /**
+ * A long total, `hh:mm:ss.ss` (`12:34:56.78`), with days in front when
+ * needed (`2 d 03:04:05.00`): how long a category's tracks last together.
+ */
+export function totalTime(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) {
+    return "–";
+  }
+  const hundredths = Math.floor(ms / 10);
+  const seconds = Math.floor(hundredths / 100);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const hms = [Math.floor(seconds / 3600) % 24, Math.floor(seconds / 60) % 60, seconds % 60].map(pad).join(":");
+  const time = `${hms}${decimal()}${pad(hundredths % 100)}`;
+  const days = Math.floor(seconds / 86_400);
+  return days > 0 ? `${t("format.days", { count: days })} ${time}` : time;
+}
+
+/**
  * Parses `m:ss.t`, `ss.t` or `h:mm:ss` into ms; `null` when invalid. A comma
  * works as the decimal separator too (`1:23,5`).
  */

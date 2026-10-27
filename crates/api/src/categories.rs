@@ -38,6 +38,10 @@ pub struct Category {
     /// these categories. Clocks still call them like any other.
     pub fx_player: bool,
     pub tracks: i64,
+    /// How long its tracks last together, in ms: what is played of each
+    /// (cue-in to cue-out, overrides applied), or the file's length for a
+    /// track not analyzed yet. Over the same tracks as `tracks`.
+    pub total_ms: i64,
     /// Windows this category overrides; the others follow the rotation
     /// settings (clock slots can override them again).
     pub separation: SeparationOverrides,
@@ -51,11 +55,12 @@ type CategoryRow = (
     Option<String>,
     bool,
     i64,
+    i64,
     Option<String>,
 );
 
 fn category(
-    (id, name, color, type_id, type_name, fx_player, tracks, separation): CategoryRow,
+    (id, name, color, type_id, type_name, fx_player, tracks, total_ms, separation): CategoryRow,
 ) -> Category {
     Category {
         id,
@@ -65,6 +70,7 @@ fn category(
         type_name,
         fx_player,
         tracks,
+        total_ms,
         separation: crate::rotation::overrides(separation.as_deref()),
     }
 }
@@ -125,9 +131,23 @@ pub fn check_color(color: Option<&str>) -> ApiResult<Option<String>> {
     }
 }
 
+/// `total_ms` follows `TrackPlayout::with_overrides`: the analyzed cue
+/// points (the whole file when not analyzed or the Gap Killer is off), then
+/// the cue overrides, the cue-out kept within the file.
 const SELECT: &str = "SELECT c.id, c.name, c.color, c.type_id, ct.name, c.fx_player,
            (SELECT COUNT(*) FROM track_categories tc JOIN tracks t ON t.id = tc.track_id
             WHERE tc.category_id = c.id AND t.deleted_at IS NULL) AS tracks,
+           (SELECT CAST(COALESCE(SUM(GREATEST(0,
+                   CAST(LEAST(COALESCE(o.cue_out_ms, IF(a.cue_in_ms IS NULL OR a.cue_out_ms IS NULL OR o.gap_killer_enabled = FALSE,
+                                                        GREATEST(COALESCE(t.duration_ms, 0), COALESCE(a.cue_out_ms, 0)),
+                                                        a.cue_out_ms)),
+                              GREATEST(COALESCE(t.duration_ms, 0), COALESCE(a.cue_out_ms, 0))) AS SIGNED)
+                   - CAST(COALESCE(o.cue_in_ms, IF(a.cue_in_ms IS NULL OR a.cue_out_ms IS NULL OR o.gap_killer_enabled = FALSE,
+                                                   0, a.cue_in_ms)) AS SIGNED))), 0) AS SIGNED)
+            FROM track_categories tc JOIN tracks t ON t.id = tc.track_id
+            LEFT JOIN track_analysis a ON a.track_id = t.id
+            LEFT JOIN track_overrides o ON o.track_id = t.id
+            WHERE tc.category_id = c.id AND t.deleted_at IS NULL) AS total_ms,
            CAST(c.separation AS CHAR)
     FROM categories c LEFT JOIN category_types ct ON ct.id = c.type_id";
 

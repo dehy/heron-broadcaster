@@ -11,10 +11,28 @@ import { useLabels } from "../components/SelectionActions";
 import { SeparationEditor } from "../components/Separation";
 import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, Modal, PageHead } from "../components/ui";
 import { number, rich, t } from "../i18n";
+import { totalTime } from "../lib/format";
 import { describeOverrides } from "../lib/rotation";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 import { TypesCard, useCategoryTypes } from "./CategoryTypes";
+
+type SortKey = "name" | "type" | "tracks" | "total";
+
+/** Categories sorted by a column; ties by name. */
+export function sortCategories(categories: Category[], by: SortKey, descending: boolean): Category[] {
+  const byName = (a: Category, b: Category) => a.name.localeCompare(b.name);
+  const compare: Record<SortKey, (a: Category, b: Category) => number> = {
+    name: byName,
+    type: (a, b) => (a.type_name ?? "").localeCompare(b.type_name ?? ""),
+    tracks: (a, b) => a.tracks - b.tracks,
+    total: (a, b) => a.total_ms - b.total_ms,
+  };
+  return [...categories].sort((a, b) => {
+    const order = compare[by](a, b);
+    return (descending ? -order : order) || byName(a, b);
+  });
+}
 
 export const COLORS = ["#2f6fd6", "#b4549a", "#1d7a3e", "#b07a00", "#c62828", "#0b6e66", "#6b4fbb", "#5f6268"];
 
@@ -27,9 +45,36 @@ export function Categories() {
   const [editing, setEditing] = useState<Category | "new" | null>(null);
   const [filling, setFilling] = useState<Category | null>(null);
   const [type, setType] = useState<number | "all" | "none">("all");
+  const [sort, setSort] = useState<{ by: SortKey; descending: boolean }>({ by: "name", descending: false });
   const types = useCategoryTypes();
-  const shown = (categories.data ?? []).filter((category) =>
-    type === "all" ? true : type === "none" ? category.type_id == null : category.type_id === type,
+  const shown = sortCategories(
+    (categories.data ?? []).filter((category) =>
+      type === "all" ? true : type === "none" ? category.type_id == null : category.type_id === type,
+    ),
+    sort.by,
+    sort.descending,
+  );
+  const header = (by: SortKey, label: string, className?: string, title?: string) => (
+    <th
+      className={className}
+      title={title}
+      aria-sort={sort.by === by ? (sort.descending ? "descending" : "ascending") : undefined}
+    >
+      <button
+        type="button"
+        className="sort"
+        onClick={() =>
+          setSort((current) => ({
+            by,
+            // Counts and times start with the largest.
+            descending: current.by === by ? !current.descending : by === "tracks" || by === "total",
+          }))
+        }
+      >
+        {label}
+        {sort.by === by && <span aria-hidden="true">{sort.descending ? " ▾" : " ▴"}</span>}
+      </button>
+    </th>
   );
   const remove = useAction(
     (id: number) => done(api.DELETE("/api/v1/categories/{id}", { params: { path: { id } } })),
@@ -83,9 +128,10 @@ export function Categories() {
           <table className="table">
             <thead>
               <tr>
-                <th>{t("categories.name")}</th>
-                <th>{t("categories.type")}</th>
-                <th>{t("nav.tracks")}</th>
+                {header("name", t("categories.name"))}
+                {header("type", t("categories.type"))}
+                {header("tracks", t("nav.tracks"), "num")}
+                {header("total", t("categories.totalTime"), "num", t("categories.totalTimeHint"))}
                 <th>{t("categories.separation")}</th>
                 <th>
                   <span className="visually-hidden">{t("library.actions")}</span>
@@ -110,6 +156,7 @@ export function Categories() {
                   <td className="num">
                     <Link to={`/library?category=${category.id}`}>{number(category.tracks)}</Link>
                   </td>
+                  <td className="num">{totalTime(category.total_ms)}</td>
                   <td className="small muted">{describeOverrides(category.separation) || t("categories.stationRules")}</td>
                   <td className="actions">
                     {canEdit && (

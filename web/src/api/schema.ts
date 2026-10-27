@@ -2406,6 +2406,13 @@ export interface components {
              *     settings (clock slots can override them again).
              */
             separation: components["schemas"]["SeparationOverrides"];
+            /**
+             * Format: int64
+             * @description How long its tracks last together, in ms: what is played of each
+             *     (cue-in to cue-out, overrides applied), or the file's length for a
+             *     track not analyzed yet. Over the same tracks as `tracks`.
+             */
+            total_ms: number;
             /** Format: int64 */
             tracks: number;
             /**

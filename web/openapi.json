@@ -6969,6 +6969,7 @@
           "name",
           "fx_player",
           "tracks",
+          "total_ms",
           "separation"
         ],
         "properties": {
@@ -6994,6 +6995,11 @@
           "separation": {
             "$ref": "#/components/schemas/SeparationOverrides",
             "description": "Windows this category overrides; the others follow the rotation\nsettings (clock slots can override them again)."
+          },
+          "total_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long its tracks last together, in ms: what is played of each\n(cue-in to cue-out, overrides applied), or the file's length for a\ntrack not analyzed yet. Over the same tracks as `tracks`."
           },
           "tracks": {
             "type": "integer",
