@@ -2462,6 +2462,11 @@ export interface components {
              */
             no_two_in_a_row: boolean;
             /**
+             * @description Its tracks play on the FX player over the next track's intro, ending
+             *     where the vocals start, when that intro is long enough.
+             */
+            plays_over_intro: boolean;
+            /**
              * @description Its tracks send metadata to the stream servers. Off (jingles, ads):
              *     the stream and the public now-playing keep the last song's, and
              *     webhooks send them only when they include the FX player.
@@ -2472,6 +2477,8 @@ export interface components {
             name: string;
             /** @description Kept as it is when missing (off for a new type). */
             no_two_in_a_row?: boolean | null;
+            /** @description Kept as it is when missing (off for a new type). */
+            plays_over_intro?: boolean | null;
             /** @description Kept as it is when missing (on for a new type). */
             sends_metadata?: boolean | null;
         };
@@ -3741,6 +3748,7 @@ export interface components {
         /** @description Decks, queue and outputs of the engine. */
         PlayerState: {
             cued?: components["schemas"]["QueueEntry"] | null;
+            cued_jingle?: components["schemas"]["QueueEntry"] | null;
             decks: components["schemas"]["DeckState"][];
             /** Format: int64 */
             engine_started_at_unix_ms: number;
@@ -3975,8 +3983,18 @@ export interface components {
             cue_out_ms: number;
             /** Format: int32 */
             duration_ms: number;
+            /**
+             * Format: int32
+             * @description Where the intro ends (the vocals start), on the file's timeline.
+             */
+            intro_ms?: number | null;
             /** @description Sends no metadata (a jingle): the stream keeps the last track's. */
             no_metadata: boolean;
+            /**
+             * @description Plays on the FX player over the next track's intro, when it is long
+             *     enough (a jingle).
+             */
+            over_intro: boolean;
             /** @description Relative to the library root. */
             path: string;
             source: components["schemas"]["PlaySource"];

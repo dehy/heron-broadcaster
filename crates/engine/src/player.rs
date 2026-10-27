@@ -28,7 +28,7 @@ use crate::decoder::{DecodedSource, SourceFile};
 use crate::fallback::Fallback;
 use crate::mixer::{
     AudioSource, Command, Deck, EndReason, Event, FrameRamp, FrameTransition, LoadedTrack,
-    MixerHandle, MixerStatus, frames_to_ms, ms_to_frames,
+    MixerHandle, MixerStatus, Overlay, frames_to_ms, ms_to_frames,
 };
 use crate::preload::Preloader;
 
@@ -77,6 +77,27 @@ pub struct TrackRequest {
     /// Sends no metadata (a jingle): the stream keeps the last track's.
     #[serde(default)]
     pub no_metadata: bool,
+    /// A jingle played on the FX player over the next track's intro, so it
+    /// ends where the vocals start, when that intro is long enough.
+    #[serde(default)]
+    pub over_intro: bool,
+    /// Where the intro ends (the vocals start), in ms on the file's timeline.
+    #[serde(default)]
+    pub intro_ms: Option<u32>,
+}
+
+impl TrackRequest {
+    /// Where a jingle of `jingle_ms` starts over this track's intro to end
+    /// on it, in ms from the cue-in; `None` when the intro is unknown or
+    /// too short for it.
+    pub fn intro_start_for(&self, jingle_ms: u32) -> Option<u32> {
+        let playout = &self.playout;
+        let intro = self.intro_ms?.checked_sub(playout.cue_in_ms)?;
+        if intro > playout.playable_ms() {
+            return None;
+        }
+        intro.checked_sub(jingle_ms)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -130,6 +151,9 @@ pub struct PlayerSnapshot {
     pub paused: bool,
     pub decks: Vec<DeckSnapshot>,
     pub cued: Option<QueueEntry>,
+    /// The jingle played over the cued track's intro: before it in the
+    /// play order.
+    pub cued_jingle: Option<QueueEntry>,
     pub queue: Vec<QueueEntry>,
     pub rendered_ms: u64,
     pub underruns: u64,
@@ -189,6 +213,8 @@ pub struct Player {
     /// Entries handed to the mixer (cued, on air, fading out, FX).
     loaded: HashMap<u64, QueueEntry>,
     cued: Option<u64>,
+    /// The jingle cued over the cued track's intro.
+    cued_jingle: Option<u64>,
     /// Entries the player uncued whose `Uncued` event has not arrived yet.
     /// They are not cued again before it does: the mixer may have started
     /// them instead.
@@ -239,6 +265,7 @@ impl Player {
             queue: VecDeque::new(),
             loaded: HashMap::new(),
             cued: None,
+            cued_jingle: None,
             uncueing: HashSet::new(),
             on_air: None,
             paused: false,
@@ -315,7 +342,7 @@ impl Player {
         let fallback_cued = self
             .cued
             .is_some_and(|id| self.fallback_entries.contains(&id));
-        if position == 0 || fallback_cued {
+        if position < self.cued_count().max(1) || fallback_cued {
             // The new tracks go before the one already cued; a fallback
             // track is dropped.
             self.uncue()?;
@@ -333,7 +360,7 @@ impl Player {
         if self.on_air == Some(entry_id) {
             return Err(PlayerError::OnAir(entry_id));
         }
-        if self.cued == Some(entry_id) {
+        if self.is_cued(entry_id) {
             self.uncue()?;
             if self.fallback_entries.contains(&entry_id) {
                 return Ok(());
@@ -354,10 +381,10 @@ impl Player {
         if self.on_air == Some(entry_id) || self.is_playing(entry_id) {
             return Err(PlayerError::OnAir(entry_id));
         }
-        if self.cued == Some(entry_id) && position == 0 {
+        if self.cued == Some(entry_id) && self.cued_jingle.is_none() && position == 0 {
             return Ok(());
         }
-        if self.cued.is_some() && (self.cued == Some(entry_id) || position == 0) {
+        if self.cued.is_some() && (self.is_cued(entry_id) || position < self.cued_count()) {
             // The cued track goes back to the front of the queue.
             self.uncue()?;
         }
@@ -381,7 +408,7 @@ impl Player {
         if self.on_air == Some(entry_id) || self.is_playing(entry_id) {
             return Err(PlayerError::OnAir(entry_id));
         }
-        if self.cued == Some(entry_id) {
+        if self.is_cued(entry_id) {
             self.uncue()?;
         }
         let Some(entry) = self.queue.iter_mut().find(|e| e.entry_id == entry_id) else {
@@ -396,13 +423,23 @@ impl Player {
     /// Where `position` in the waiting tracks (the cued one, then the queue)
     /// falls in the queue.
     fn queue_index(&self, position: usize) -> usize {
-        let cued = usize::from(self.cued.is_some());
-        position.saturating_sub(cued).min(self.queue.len())
+        position
+            .saturating_sub(self.cued_count())
+            .min(self.queue.len())
+    }
+
+    /// Waiting entries handed to the mixer: the cued one and its jingle.
+    fn cued_count(&self) -> usize {
+        usize::from(self.cued.is_some()) + usize::from(self.cued_jingle.is_some())
+    }
+
+    fn is_cued(&self, entry_id: u64) -> bool {
+        self.cued == Some(entry_id) || self.cued_jingle == Some(entry_id)
     }
 
     /// Whether the entry is on a deck (on air, fading out or on the FX player).
     fn is_playing(&self, entry_id: u64) -> bool {
-        self.cued != Some(entry_id)
+        !self.is_cued(entry_id)
             && self.loaded.contains_key(&entry_id)
             && !self.queue.iter().any(|e| e.entry_id == entry_id)
     }
@@ -500,6 +537,8 @@ impl Player {
             .entry_id
             .load(Ordering::Relaxed)
             != 0
+            // A jingle waits for the intro of the track on air.
+            || status.overlay.load(Ordering::Relaxed) != 0
         {
             return HandoverPoint::Wait;
         }
@@ -591,6 +630,7 @@ impl Player {
         }
         self.watch_silence();
         self.watch_stalled_cue();
+        self.pair_cued_jingle();
         self.ensure_cued();
         self.preload();
     }
@@ -700,6 +740,8 @@ impl Player {
                 self.queue.retain(|entry| entry.entry_id != entry_id);
                 if self.cued == Some(entry_id) {
                     self.cued = None;
+                    // Its jingle is the mixer's now: it starts on the intro.
+                    self.cued_jingle = None;
                 }
                 let Some(entry) = self.loaded.get(&entry_id).cloned() else {
                     return;
@@ -758,7 +800,7 @@ impl Player {
             Event::Uncued { entry_id } => {
                 if self.uncueing.remove(&entry_id) {
                     // Uncued by the player: back in the queue.
-                    if self.cued != Some(entry_id) {
+                    if !self.is_cued(entry_id) {
                         self.loaded.remove(&entry_id);
                         self.fallback_entries.remove(&entry_id);
                     }
@@ -770,6 +812,10 @@ impl Player {
                     tracing::warn!(entry_id, ?path, "skipping a track that cannot be decoded");
                     self.cued = None;
                     self.changed = true;
+                }
+                // A jingle whose track was skipped or ended before its intro.
+                if self.cued_jingle == Some(entry_id) {
+                    self.cued_jingle = None;
                 }
                 self.loaded.remove(&entry_id);
                 self.fallback_entries.remove(&entry_id);
@@ -810,6 +856,12 @@ impl Player {
                 self.update_dead_air();
                 return;
             };
+            if entry.track.over_intro && self.over_intro_partner(&entry).is_some() {
+                if !self.cue_over_intro(entry) {
+                    return;
+                }
+                continue;
+            }
             let transition = self.transition_into(&entry.track.playout);
             match self.load(&entry, transition.as_ref(), 0) {
                 Ok(track) => {
@@ -836,6 +888,92 @@ impl Player {
             }
         }
         self.update_dead_air();
+    }
+
+    /// Where `jingle` (an over-intro jingle) starts over the next queued
+    /// track's intro, in ms from that track's cue-in.
+    fn over_intro_partner(&self, jingle: &QueueEntry) -> Option<u32> {
+        let next = self
+            .queue
+            .front()
+            .filter(|next| !self.uncueing.contains(&next.entry_id) && !next.track.over_intro)?;
+        next.track
+            .intro_start_for(jingle.track.playout.playable_ms())
+    }
+
+    /// Cues the next queued track with `jingle` over its intro. Returns
+    /// false when the mixer is busy (both are back in the queue).
+    fn cue_over_intro(&mut self, jingle: QueueEntry) -> bool {
+        let Some(at_ms) = self.over_intro_partner(&jingle) else {
+            self.queue.push_front(jingle);
+            return true;
+        };
+        let Some(next) = self.queue.pop_front() else {
+            self.queue.push_front(jingle);
+            return true;
+        };
+        let jingle_track = match self.load(&jingle, None, 0) {
+            Ok(track) => track,
+            Err(error) => {
+                tracing::error!(entry_id = jingle.entry_id, path = %jingle.track.path, %error, "cannot load track");
+                self.changed = true;
+                self.queue.push_front(next);
+                return true;
+            }
+        };
+        let transition = self.transition_into(&next.track.playout);
+        let track = match self.load(&next, transition.as_ref(), 0) {
+            Ok(track) => track,
+            Err(error) => {
+                tracing::error!(entry_id = next.entry_id, path = %next.track.path, %error, "cannot load track");
+                self.changed = true;
+                // The jingle goes with the track after.
+                self.queue.push_front(jingle);
+                return true;
+            }
+        };
+        let command = Command::CueOver {
+            track,
+            transition: self.frame_transition(transition.as_ref()),
+            overlay: Overlay {
+                track: jingle_track,
+                at: ms_to_frames(at_ms),
+            },
+        };
+        if self.mixer.commands.push(command).is_err() {
+            // Try again on the next tick.
+            self.queue.push_front(next);
+            self.queue.push_front(jingle);
+            return false;
+        }
+        tracing::debug!(
+            jingle = jingle.entry_id,
+            entry_id = next.entry_id,
+            at_ms,
+            "jingle cued over the intro"
+        );
+        self.cued = Some(next.entry_id);
+        self.cued_jingle = Some(jingle.entry_id);
+        self.loaded.insert(next.entry_id, next);
+        self.loaded.insert(jingle.entry_id, jingle);
+        true
+    }
+
+    /// A jingle cued alone that could now play over the intro of the track
+    /// queued after it (queued since): cued again, with that track.
+    fn pair_cued_jingle(&mut self) {
+        if self.cued_jingle.is_some() || self.paused || self.held || self.on_air.is_none() {
+            return;
+        }
+        let Some(entry) = self.cued.and_then(|cued| self.loaded.get(&cued)) else {
+            return;
+        };
+        if entry.track.over_intro
+            && !self.fallback_entries.contains(&entry.entry_id)
+            && self.over_intro_partner(entry).is_some()
+        {
+            let _ = self.uncue();
+        }
     }
 
     /// Whether the queue running dry calls for a fallback track now: nothing
@@ -933,12 +1071,16 @@ impl Player {
             self.cued = Some(cued);
             return Err(error);
         }
-        self.uncueing.insert(cued);
-        if requeue
-            && !self.fallback_entries.contains(&cued)
-            && let Some(entry) = self.loaded.get(&cued).cloned()
-        {
-            self.queue.push_front(entry);
+        let jingle = self.cued_jingle.take();
+        // The jingle comes first in the play order.
+        for entry_id in [Some(cued), jingle].into_iter().flatten() {
+            self.uncueing.insert(entry_id);
+            if requeue
+                && !self.fallback_entries.contains(&entry_id)
+                && let Some(entry) = self.loaded.get(&entry_id).cloned()
+            {
+                self.queue.push_front(entry);
+            }
         }
         Ok(())
     }
@@ -1078,8 +1220,9 @@ impl Player {
             })
         });
         let waiting = snapshot
-            .cued
+            .cued_jingle
             .into_iter()
+            .chain(snapshot.cued)
             .chain(snapshot.queue)
             .filter(|entry| {
                 Some(entry.entry_id) != on_air_id
@@ -1199,6 +1342,9 @@ impl Player {
             paused: self.paused,
             decks,
             cued: self.cued.and_then(|cued| self.loaded.get(&cued).cloned()),
+            cued_jingle: self
+                .cued_jingle
+                .and_then(|jingle| self.loaded.get(&jingle).cloned()),
             queue: self.queue.iter().cloned().collect(),
             rendered_ms: frames_to_ms(status.frame.load(Ordering::Relaxed)),
             underruns: status.underruns.load(Ordering::Relaxed),

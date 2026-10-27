@@ -147,7 +147,8 @@ impl HistoryRecorder {
         .execute(&self.pool)
         .await?
         .last_insert_id();
-        if deck != DeckName::Fx {
+        // A jingle over an intro plays on the FX player, picked by rotation.
+        if deck != DeckName::Fx || track.over_intro {
             self.link_pick(id, entry.entry_id).await?;
             if let Some(track_id) = track_id {
                 self.reweigh(track_id, track.source).await?;
@@ -376,6 +377,8 @@ mod tests {
                 cue_out_ms: 300_000,
                 source: PlaySource::Rotation,
                 no_metadata: false,
+                over_intro: false,
+                intro_ms: None,
             },
         }
     }
@@ -385,6 +388,7 @@ mod tests {
             paused: false,
             decks,
             cued: None,
+            cued_jingle: None,
             queue: Vec::new(),
             outputs: Vec::new(),
             rendered_ms: 0,

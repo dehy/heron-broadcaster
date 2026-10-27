@@ -222,6 +222,8 @@ fn track_request(path: &str, file: &FallbackFile) -> TrackRequest {
         playout,
         source: PlaySource::Fallback,
         no_metadata: false,
+        over_intro: false,
+        intro_ms: None,
     }
 }
 

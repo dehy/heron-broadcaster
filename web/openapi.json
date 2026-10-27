@@ -7097,6 +7097,7 @@
           "name",
           "no_two_in_a_row",
           "sends_metadata",
+          "plays_over_intro",
           "categories"
         ],
         "properties": {
@@ -7117,6 +7118,10 @@
             "type": "boolean",
             "description": "Never two tracks of this type in a row: rotation passes a slot\ncalling it over right after one."
           },
+          "plays_over_intro": {
+            "type": "boolean",
+            "description": "Its tracks play on the FX player over the next track's intro, ending\nwhere the vocals start, when that intro is long enough."
+          },
           "sends_metadata": {
             "type": "boolean",
             "description": "Its tracks send metadata to the stream servers. Off (jingles, ads):\nthe stream and the public now-playing keep the last song's, and\nwebhooks send them only when they include the FX player."
@@ -7133,6 +7138,13 @@
             "type": "string"
           },
           "no_two_in_a_row": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Kept as it is when missing (off for a new type)."
+          },
+          "plays_over_intro": {
             "type": [
               "boolean",
               "null"
@@ -10336,6 +10348,17 @@
               }
             ]
           },
+          "cued_jingle": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QueueEntry",
+                "description": "The jingle played on the FX player over the cued track's intro:\nbefore it in the play order."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "decks": {
             "type": "array",
             "items": {
@@ -10791,7 +10814,8 @@
           "cue_in_ms",
           "cue_out_ms",
           "source",
-          "no_metadata"
+          "no_metadata",
+          "over_intro"
         ],
         "properties": {
           "album": {
@@ -10822,9 +10846,22 @@
             "format": "int32",
             "minimum": 0
           },
+          "intro_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Where the intro ends (the vocals start), on the file's timeline.",
+            "minimum": 0
+          },
           "no_metadata": {
             "type": "boolean",
             "description": "Sends no metadata (a jingle): the stream keeps the last track's."
+          },
+          "over_intro": {
+            "type": "boolean",
+            "description": "Plays on the FX player over the next track's intro, when it is long\nenough (a jingle)."
           },
           "path": {
             "type": "string",

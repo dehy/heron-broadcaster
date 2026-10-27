@@ -165,6 +165,14 @@ pub struct LoadedTrack {
     pub fade_in: Option<FrameRamp>,
 }
 
+/// A jingle played on the FX player over the intro of a track: it starts
+/// when that track reaches `at`, so it ends where the vocals start.
+pub struct Overlay {
+    pub track: Box<LoadedTrack>,
+    /// Frames from the cue-in of the track it plays over.
+    pub at: u64,
+}
+
 pub enum Command {
     /// Plays `track` next. It starts at `transition.next_start` on the track
     /// on air, when the track on air ends, or at once when nothing is on air.
@@ -173,13 +181,21 @@ pub enum Command {
         track: Box<LoadedTrack>,
         transition: FrameTransition,
     },
+    /// [`Command::Cue`], with a jingle on the FX player over the track's
+    /// intro. Skipping the track before the jingle starts drops the jingle,
+    /// skipping it while the jingle plays fades it out too.
+    CueOver {
+        track: Box<LoadedTrack>,
+        transition: FrameTransition,
+        overlay: Overlay,
+    },
     /// Replans the transition into the cued track, when the track on air
     /// is not the one it was planned against.
     Retarget {
         transition: FrameTransition,
         fade_in: Option<FrameRamp>,
     },
-    /// Removes the cued track if it has not started.
+    /// Removes the cued track (and its jingle) if it has not started.
     Uncue,
     /// Fades out the track on air and starts the cued track now.
     Skip {
@@ -308,6 +324,9 @@ pub struct MixerStatus {
     pub cued: AtomicU64,
     /// The cued track has enough audio decoded to start.
     pub cued_ready: AtomicBool,
+    /// Entry ID of a jingle waiting to start over the intro of the track on
+    /// air, 0 for none.
+    pub overlay: AtomicU64,
     pub decks: [DeckStatus; 3],
     pub master: MeterStatus,
     pub underruns: AtomicU64,
@@ -416,6 +435,12 @@ pub struct Mixer {
     /// Slot of the last track started on a deck: decks alternate.
     last_main: usize,
     cued: Option<(Box<LoadedTrack>, FrameTransition)>,
+    /// The jingle to play over the cued track's intro.
+    cued_overlay: Option<Overlay>,
+    /// A jingle waiting to start over the intro of the track in this slot.
+    overlay: Option<(usize, Overlay)>,
+    /// Slot of the track the jingle on the FX player plays over.
+    fx_over: Option<usize>,
     frame: u64,
     silent_frames: u64,
     pause_gain: f32,
@@ -445,6 +470,9 @@ impl Mixer {
             main: None,
             last_main: 1,
             cued: None,
+            cued_overlay: None,
+            overlay: None,
+            fx_over: None,
             frame: 0,
             silent_frames: 0,
             pause_gain: 1.0,
@@ -489,6 +517,7 @@ impl Mixer {
             while offset < frames {
                 self.retire_finished();
                 self.start_cued_if_due();
+                self.start_overlay_if_due();
                 let mut segment = self.next_segment(frames - offset);
                 // The track on air first: when its audio ends early, the
                 // segment ends there, so the next track starts on that frame.
@@ -520,6 +549,7 @@ impl Mixer {
             if !halted {
                 self.retire_finished();
                 self.start_cued_if_due();
+                self.start_overlay_if_due();
                 self.apply_pause(out);
             }
         } else {
@@ -545,13 +575,17 @@ impl Mixer {
         while let Ok(command) = self.commands.pop() {
             match command {
                 Command::Cue { track, transition } => {
-                    if let Some((previous, _)) = self.cued.take() {
-                        self.emit(Event::Uncued {
-                            entry_id: previous.entry_id,
-                        });
-                        self.discard(previous);
-                    }
+                    self.drop_cued();
                     self.cued = Some((track, transition));
+                }
+                Command::CueOver {
+                    track,
+                    transition,
+                    overlay,
+                } => {
+                    self.drop_cued();
+                    self.cued = Some((track, transition));
+                    self.cued_overlay = Some(overlay);
                 }
                 Command::Retarget {
                     transition,
@@ -562,14 +596,7 @@ impl Mixer {
                         track.fade_in = fade_in;
                     }
                 }
-                Command::Uncue => {
-                    if let Some((track, _)) = self.cued.take() {
-                        self.emit(Event::Uncued {
-                            entry_id: track.entry_id,
-                        });
-                        self.discard(track);
-                    }
-                }
+                Command::Uncue => self.drop_cued(),
                 Command::Skip { fade_frames, curve } => self.skip(fade_frames, curve),
                 Command::Pause => self.paused = true,
                 Command::Resume => {
@@ -603,6 +630,41 @@ impl Mixer {
                     }
                 }
             }
+        }
+    }
+
+    /// Removes the cued track and its jingle, if any.
+    fn drop_cued(&mut self) {
+        if let Some((track, _)) = self.cued.take() {
+            self.emit(Event::Uncued {
+                entry_id: track.entry_id,
+            });
+            self.discard(track);
+        }
+        if let Some(overlay) = self.cued_overlay.take() {
+            self.drop_overlay(overlay);
+        }
+    }
+
+    /// A jingle that will not play: reported as uncued.
+    fn drop_overlay(&mut self, overlay: Overlay) {
+        self.emit(Event::Uncued {
+            entry_id: overlay.track.entry_id,
+        });
+        self.discard(overlay.track);
+    }
+
+    /// Starts the jingle waiting for the intro of the track it plays over.
+    fn start_overlay_if_due(&mut self) {
+        let due = self.overlay.as_ref().is_some_and(|(slot, overlay)| {
+            self.voices[*slot]
+                .as_ref()
+                .is_some_and(|voice| voice.position >= overlay.at)
+        });
+        if due && let Some((slot, overlay)) = self.overlay.take() {
+            self.stop_slot(2, EndReason::Replaced);
+            self.start_voice(2, overlay.track);
+            self.fx_over = Some(slot);
         }
     }
 
@@ -662,6 +724,18 @@ impl Mixer {
             && let Some(voice) = &mut self.voices[main]
         {
             voice.fade_out_now(fade_frames, curve, EndReason::Skipped);
+            // Its jingle goes with it.
+            if let Some((slot, _)) = &self.overlay
+                && *slot == main
+                && let Some((_, overlay)) = self.overlay.take()
+            {
+                self.drop_overlay(overlay);
+            }
+            if self.fx_over == Some(main)
+                && let Some(fx) = &mut self.voices[2]
+            {
+                fx.fade_out_now(fade_frames, curve, EndReason::Skipped);
+            }
         }
         if let Some((track, _)) = self.cued.take() {
             self.start_main(track, None);
@@ -719,6 +793,12 @@ impl Mixer {
         self.start_voice(slot, track);
         self.main = Some(slot);
         self.last_main = slot;
+        if let Some(overlay) = self.cued_overlay.take() {
+            if let Some((_, previous)) = self.overlay.take() {
+                self.drop_overlay(previous);
+            }
+            self.overlay = Some((slot, overlay));
+        }
     }
 
     fn start_voice(&mut self, slot: usize, track: Box<LoadedTrack>) {
@@ -749,6 +829,11 @@ impl Mixer {
             && let Some(voice) = self.main_voice()
         {
             until = until.min(transition.next_start.saturating_sub(voice.position));
+        }
+        if let Some((slot, overlay)) = &self.overlay
+            && let Some(voice) = &self.voices[*slot]
+        {
+            until = until.min(overlay.at.saturating_sub(voice.position));
         }
         if let Some(position) = self.halt_at
             && let Some(voice) = self.main_voice()
@@ -827,6 +912,17 @@ impl Mixer {
         if self.main == Some(slot) {
             self.main = None;
         }
+        // The jingle over this track's intro, or the track under it.
+        if slot == 2 || self.fx_over == Some(slot) {
+            self.fx_over = None;
+        }
+        // The track a jingle waits for ended before its intro.
+        if let Some((waiting, _)) = &self.overlay
+            && *waiting == slot
+            && let Some((_, overlay)) = self.overlay.take()
+        {
+            self.drop_overlay(overlay);
+        }
         self.emit(Event::Ended {
             deck: Deck::from_slot(slot),
             entry_id: voice.track.entry_id,
@@ -896,6 +992,11 @@ impl Mixer {
             .as_ref()
             .is_some_and(|(track, _)| track.source.is_ready());
         status.cued_ready.store(cued_ready, Ordering::Relaxed);
+        let overlay = self
+            .overlay
+            .as_ref()
+            .map_or(0, |(_, overlay)| overlay.track.entry_id);
+        status.overlay.store(overlay, Ordering::Relaxed);
         for (slot, deck) in status.decks.iter().enumerate() {
             let (entry_id, position, length) =
                 self.voices[slot].as_ref().map_or((0, 0, 0), |voice| {
