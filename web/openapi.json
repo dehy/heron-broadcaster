@@ -2981,6 +2981,58 @@
         }
       }
     },
+    "/api/v1/medleys/{id}/candidates": {
+      "get": {
+        "tags": [
+          "medleys"
+        ],
+        "summary": "Every track that can be a part of `kind`, with the span it would take,\nby artist and title: to choose one. Operators and admins.",
+        "operationId": "list_candidates",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PartKind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PartView"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/medleys/{id}/pick": {
       "post": {
         "tags": [

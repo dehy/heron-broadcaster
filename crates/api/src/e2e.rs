@@ -3817,6 +3817,30 @@ async fn medleys_are_planned_rendered_and_linked() {
     assert_eq!(status, StatusCode::OK, "{other}");
     let fourth = other["track_id"].as_u64().unwrap();
     assert!(!hooks.contains(&fourth));
+    // Or one chosen from the list: every song with a hook, by artist.
+    let candidates = admin
+        .get(&format!("/medleys/{id}/candidates?kind=hook"))
+        .await;
+    let listed: Vec<u64> = candidates
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["track_id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(listed, tracks[..4]);
+    assert_eq!(candidates[0]["to_ms"], 2_000);
+    let liners_listed = admin
+        .get(&format!("/medleys/{id}/candidates?kind=liner"))
+        .await;
+    assert_eq!(liners_listed[0]["track_id"], tracks[4]);
+    let (status, _) = viewer
+        .request(
+            Method::GET,
+            &format!("/medleys/{id}/candidates?kind=hook"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 
     // Rendered by heron-librarian into the library.
     let render = format!("/medleys/{id}/render");

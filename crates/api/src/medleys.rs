@@ -9,13 +9,13 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use heron_core::library::TaskRequest;
 use heron_core::medley::{self, Candidate, Part, PartKind, Recipe};
 use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, QueryBuilder};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -36,6 +36,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_medley, update_medley, delete_medley))
         .routes(routes!(plan_medley))
         .routes(routes!(pick_part))
+        .routes(routes!(list_candidates))
         .routes(routes!(render_medley))
 }
 
@@ -112,6 +113,12 @@ pub struct PickRequest {
     /// Tracks not to pick (those already in the plan).
     #[serde(default)]
     pub exclude: Vec<u64>,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CandidatesQuery {
+    pub kind: PartKind,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -499,6 +506,37 @@ async fn pick_part(
         .pop()
         .map(Json)
         .ok_or_else(|| ApiError::not_found("track"))
+}
+
+/// Every track that can be a part of `kind`, with the span it would take,
+/// by artist and title: to choose one. Operators and admins.
+#[utoipa::path(get, path = "/medleys/{id}/candidates", tag = "medleys",
+    params(("id" = u64, Path), CandidatesQuery),
+    responses((status = 200, body = Vec<PartView>), (status = "4XX", body = ErrorBody)))]
+async fn list_candidates(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Query(query): Query<CandidatesQuery>,
+) -> ApiResult<Json<Vec<PartView>>> {
+    user.require(Role::Operator)?;
+    let medley = find(&state.pool, id).await?;
+    let candidates = match query.kind {
+        PartKind::Hook => songs(&state.pool, &medley.recipe).await?,
+        PartKind::Liner => liners(&state.pool, &medley.recipe).await?,
+    };
+    let parts = medley::choices(&medley.recipe, query.kind, &candidates);
+    let mut views = views(&state.pool, &parts).await?;
+    views.sort_by_cached_key(|view| {
+        (
+            view.artist.clone().unwrap_or_default().to_lowercase(),
+            view.title
+                .clone()
+                .unwrap_or_else(|| view.path.clone())
+                .to_lowercase(),
+        )
+    });
+    Ok(Json(views))
 }
 
 /// Saves the parts as the medley's version and asks heron-librarian to
