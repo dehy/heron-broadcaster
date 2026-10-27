@@ -29,7 +29,7 @@ A song qualifies when it is enabled, its file is there, it is analyzed and audib
 
    Each part's start and end can be moved by **0.1 s** (− / +), within its file, to place a hook by ear. This changes the medley only, not the track's hook.
 
-   **Preview** mixes the version being edited exactly as a render would, into a temporary file outside the library (the buffer zone's hidden `.medley-previews/` folder, replaced by the next preview), and plays it. The library does not change; the page says when the version changed since its preview.
+   **Preview** mixes the version being edited exactly as a render would, into a temporary file the library scan never sees (the hidden `.heron-medley-previews/` folder at the library root, next to the trash; replaced by the next preview), and plays it. The library does not change; the page says when the version changed since its preview.
 3. **Render** saves the parts and asks the librarian (the only service that writes to the library, see [Library management](library.md)) to mix them into `medleys/medley-<id>.wav`, 48 kHz, 16-bit stereo:
    - each part is brought to the station's loudness target (the [playout settings](audio-engine.md#loudness)) before mixing, so the medley sounds even;
    - parts start and end with short fades, and overlap by the crossfade;

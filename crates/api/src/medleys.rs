@@ -663,7 +663,10 @@ async fn get_preview(
     Path(id): Path<u64>,
     request: Request,
 ) -> ApiResult<Response> {
-    let file = state.staging.join(heron_core::medley::preview_path(id));
+    let file = state
+        .library
+        .root()
+        .join(heron_core::medley::preview_path(id));
     let service = tower_http::services::ServeFile::new(file);
     let (parts, _) = request.into_parts();
     let request = Request::from_parts(parts, Body::empty());
