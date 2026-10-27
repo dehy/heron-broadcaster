@@ -21,6 +21,7 @@
 - **Isolate a worktree's Compose stack.** `docker-compose.yml` sets `name: heron` and tags images `heron-*:${HERON_VERSION:-dev}`, so a stack started from a worktree would take over the main one. Before any build or up, set `COMPOSE_PROJECT_NAME=heron-<milestone>`, `HERON_VERSION=<milestone>` and other host ports in the worktree's `.env`.
 - **PR screenshots** go on the `pr-assets` branch, in a folder per change, and are linked from the PR body by commit SHA: `https://raw.githubusercontent.com/dehy/heron-broadcaster/<sha>/<folder>/<file>.png`.
 - **Delete with literal paths.** `rm` only full literal paths, never a variable that could be empty.
+- **Never share Claude sessions.** This repository is public: no Claude session link (`claude.ai/code/session_…`) and no `Claude-Session:` trailer in commits, pull requests, issues, comments or docs. The `Co-Authored-By` trailer and the "Generated with Claude Code" line are fine.
 
 ## Before pushing
 
