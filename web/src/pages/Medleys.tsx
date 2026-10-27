@@ -484,6 +484,19 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
       },
     },
   );
+  // The songs and liners to choose from, while a new version is edited.
+  const hookChoices = useCandidates(medley.id, "hook", canEdit && plan !== null);
+  const linerChoices = useCandidates(
+    medley.id,
+    "liner",
+    canEdit && plan !== null && medley.recipe.liner_category_id != null,
+  );
+  const choices = (kind: string) => (kind === "hook" ? hookChoices.data : linerChoices.data) ?? [];
+  const inPlan = new Set((plan ?? []).map((part) => part.track_id));
+  const setPart = (index: number, chosen: PartView) =>
+    setPlan((current) => (current ?? []).map((part, i) => (i === index ? chosen : part)));
+  const addPart = (chosen: PartView) => setPlan((current) => [...(current ?? []), chosen]);
+
   const status = task.data?.status;
   // The version and its track change once rendered, and again once scanned.
   const { refetch } = useMedleys();
@@ -514,6 +527,19 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
             {plan && (
               <button type="button" className="btn small" onClick={() => setPlan(null)}>
                 {t("track.revert")}
+              </button>
+            )}
+            {!plan && medley.parts.length > 0 && (
+              <button
+                type="button"
+                className="btn small"
+                title={t("medleys.editHelp")}
+                onClick={() => {
+                  setPlan(medley.parts);
+                  setQualified(null);
+                }}
+              >
+                <Icon name="edit" size={14} /> {t("medleys.edit")}
               </button>
             )}
             <button type="button" className="btn small" disabled={build.isPending} onClick={() => build.mutate(undefined)}>
@@ -599,6 +625,15 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
                   </button>
                   {canEdit && plan && (
                     <>
+                      <ChoiceSelect
+                        label={t("medleys.chooseFor", { name: trackName(part) })}
+                        placeholder={part.kind === "hook" ? t("medleys.chooseSong") : t("medleys.chooseLiner")}
+                        // A song once per medley; a liner anywhere but twice in a row.
+                        choices={choices(part.kind).filter((choice) =>
+                          part.kind === "hook" ? !inPlan.has(choice.track_id) : choice.track_id !== part.track_id,
+                        )}
+                        onChoose={(chosen) => setPart(index, chosen)}
+                      />
                       <button
                         type="button"
                         className="btn ghost small icon"
@@ -643,6 +678,69 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
           })}
         </ol>
       )}
+      {canEdit && plan && (
+        <div className="card-head row" style={{ justifyContent: "flex-start" }}>
+          <ChoiceSelect
+            label={t("medleys.addHook")}
+            placeholder={t("medleys.addHook")}
+            choices={hookChoices.data?.filter((choice) => !inPlan.has(choice.track_id)) ?? []}
+            onChoose={addPart}
+          />
+          {medley.recipe.liner_category_id != null && (
+            <ChoiceSelect
+              label={t("medleys.addLiner")}
+              placeholder={t("medleys.addLiner")}
+              choices={linerChoices.data ?? []}
+              onChoose={addPart}
+            />
+          )}
+        </div>
+      )}
     </Card>
+  );
+}
+
+function useCandidates(id: number, kind: "hook" | "liner", enabled: boolean) {
+  return useQuery({
+    queryKey: ["medley-candidates", id, kind],
+    enabled,
+    queryFn: () =>
+      unwrap(api.GET("/api/v1/medleys/{id}/candidates", { params: { path: { id }, query: { kind } } })),
+  });
+}
+
+/** A list of tracks to pick one from; it goes back to its placeholder once picked. */
+function ChoiceSelect({
+  label,
+  placeholder,
+  choices,
+  onChoose,
+}: {
+  label: string;
+  placeholder: string;
+  choices: PartView[];
+  onChoose: (chosen: PartView) => void;
+}) {
+  return (
+    <select
+      className="input"
+      style={{ maxWidth: "16rem" }}
+      aria-label={label}
+      value=""
+      disabled={choices.length === 0}
+      onChange={(event) => {
+        const chosen = choices.find((choice) => String(choice.track_id) === event.target.value);
+        if (chosen) {
+          onChoose(chosen);
+        }
+      }}
+    >
+      <option value="">{placeholder}</option>
+      {choices.map((choice) => (
+        <option key={choice.track_id} value={choice.track_id}>
+          {trackName(choice)}
+        </option>
+      ))}
+    </select>
   );
 }

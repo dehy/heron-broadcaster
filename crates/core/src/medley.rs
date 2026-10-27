@@ -292,6 +292,24 @@ pub fn plan(
     parts
 }
 
+/// Every part of `kind` the candidates can give, in their order: hooks cut
+/// to the recipe's maximum (those too short left out), liners whole.
+pub fn choices(recipe: &Recipe, kind: PartKind, candidates: &[Candidate]) -> Vec<Part> {
+    candidates
+        .iter()
+        .filter(|candidate| match kind {
+            PartKind::Hook => {
+                candidate.to_ms.saturating_sub(candidate.from_ms) >= recipe.hook_min_ms
+            }
+            PartKind::Liner => candidate.to_ms > candidate.from_ms,
+        })
+        .map(|candidate| match kind {
+            PartKind::Hook => hook(recipe, candidate),
+            PartKind::Liner => liner(candidate),
+        })
+        .collect()
+}
+
 /// Another part of `kind`, none of `exclude`: to replace one in a plan.
 pub fn pick_one(
     recipe: &Recipe,
@@ -586,6 +604,16 @@ mod tests {
                 "{liners:?}"
             );
         }
+    }
+
+    #[test]
+    fn choices_are_cut_like_picks() {
+        let songs = [song(1, 0, 20_000), song(2, 0, 3_000)];
+        let parts = choices(&recipe(), PartKind::Hook, &songs);
+        assert_eq!(parts.len(), 1, "the short hook is left out");
+        assert_eq!((parts[0].track_id, parts[0].to_ms), (1, 8_000));
+        let liners = choices(&recipe(), PartKind::Liner, &[song(3, 100, 2_000)]);
+        assert_eq!((liners[0].kind, liners[0].to_ms), (PartKind::Liner, 2_000));
     }
 
     #[test]
