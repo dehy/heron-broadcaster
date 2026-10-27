@@ -264,8 +264,8 @@ export interface paths {
         };
         get: operations["get_category"];
         /**
-         * Renames, recolors a category, changes its separation or whether the FX
-         *     player offers it. Operators and admins.
+         * Renames, recolors a category, changes its type, its separation or
+         *     whether the FX player offers it. Operators and admins.
          */
         put: operations["update_category"];
         post?: never;
@@ -274,6 +274,42 @@ export interface paths {
          *     library. Refused while a clock uses it. Operators and admins.
          */
         delete: operations["delete_category"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/category-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every category type, in the order they were created. */
+        get: operations["list_types"];
+        put?: never;
+        /** Operators and admins. */
+        post: operations["create_type"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/category-types/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Renames a type. Operators and admins. */
+        put: operations["update_type"];
+        post?: never;
+        /** Deletes a type no category uses. Operators and admins. */
+        delete: operations["delete_type"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2369,6 +2405,12 @@ export interface components {
             separation: components["schemas"]["SeparationOverrides"];
             /** Format: int64 */
             tracks: number;
+            /**
+             * Format: int64
+             * @description What it holds (`GET /category-types`); none when unset.
+             */
+            type_id?: number | null;
+            type_name?: string | null;
         };
         CategoryAssignment: {
             /** Format: int64 */
@@ -2387,6 +2429,11 @@ export interface components {
             name: string;
             /** @description None overridden by default. */
             separation?: components["schemas"]["SeparationOverrides"];
+            /**
+             * Format: int64
+             * @description A category type; none by default.
+             */
+            type_id?: number | null;
         };
         CategoryShare: {
             /** Format: int64 */
@@ -2396,6 +2443,19 @@ export interface components {
              * @description Relative chance of being picked within the category, 1 by default.
              */
             weight?: number;
+        };
+        CategoryType: {
+            /**
+             * Format: int64
+             * @description Categories of this type.
+             */
+            categories: number;
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        CategoryTypeInput: {
+            name: string;
         };
         /** @description dBFS, −120 for silence. */
         ChannelLevels: {
@@ -2918,6 +2978,11 @@ export interface components {
              *     them out of any category.
              */
             name?: string | null;
+            /**
+             * Format: int64
+             * @description Its type (`GET /category-types`), set when the category is created.
+             */
+            type_id?: number | null;
         };
         /**
          * @description A value Heron may already have, set in Heron: a conflict when the
@@ -5718,6 +5783,124 @@ export interface operations {
         };
     };
     delete_category: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_types: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryType"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_type: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryTypeInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryType"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_type: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryTypeInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryType"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_type: {
         parameters: {
             query?: never;
             header?: never;

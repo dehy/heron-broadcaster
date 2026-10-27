@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Categories: groups of tracks the clocks call, with the separation
-// windows they override, and those the FX player's picker opens on.
+// Categories: groups of tracks the clocks call, with their type (song,
+// jingle, ad…), the separation windows they override, and those the FX
+// player's picker opens on. The station's category types are managed here.
 
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
@@ -13,6 +14,7 @@ import { number, rich, t } from "../i18n";
 import { describeOverrides } from "../lib/rotation";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
+import { TypesCard, useCategoryTypes } from "./CategoryTypes";
 
 export const COLORS = ["#2f6fd6", "#b4549a", "#1d7a3e", "#b07a00", "#c62828", "#0b6e66", "#6b4fbb", "#5f6268"];
 
@@ -24,6 +26,11 @@ export function Categories() {
   });
   const [editing, setEditing] = useState<Category | "new" | null>(null);
   const [filling, setFilling] = useState<Category | null>(null);
+  const [type, setType] = useState<number | "all" | "none">("all");
+  const types = useCategoryTypes();
+  const shown = (categories.data ?? []).filter((category) =>
+    type === "all" ? true : type === "none" ? category.type_id == null : category.type_id === type,
+  );
   const remove = useAction(
     (id: number) => done(api.DELETE("/api/v1/categories/{id}", { params: { path: { id } } })),
     { success: t("categories.deleted"), invalidate: [["categories"]] },
@@ -43,6 +50,32 @@ export function Categories() {
         }
       />
       <Card flush>
+        {(types.data?.length ?? 0) > 0 && (categories.data?.length ?? 0) > 0 && (
+          <div className="card-head">
+            <label className="row small">
+              {t("categories.type")}
+              <select
+                className="input"
+                value={String(type)}
+                onChange={(event) =>
+                  setType(
+                    event.target.value === "all" || event.target.value === "none"
+                      ? event.target.value
+                      : Number(event.target.value),
+                  )
+                }
+              >
+                <option value="all">{t("categories.allTypes")}</option>
+                {types.data?.map((categoryType) => (
+                  <option key={categoryType.id} value={categoryType.id}>
+                    {categoryType.name}
+                  </option>
+                ))}
+                <option value="none">{t("categories.noType")}</option>
+              </select>
+            </label>
+          </div>
+        )}
         {categories.isPending && <Loading />}
         {categories.isError && <ErrorView error={categories.error} />}
         {categories.data?.length === 0 && <Empty>{t("categories.none")}</Empty>}
@@ -51,6 +84,7 @@ export function Categories() {
             <thead>
               <tr>
                 <th>{t("categories.name")}</th>
+                <th>{t("categories.type")}</th>
                 <th>{t("nav.tracks")}</th>
                 <th>{t("categories.separation")}</th>
                 <th>
@@ -59,7 +93,7 @@ export function Categories() {
               </tr>
             </thead>
             <tbody>
-              {categories.data.map((category) => (
+              {shown.map((category) => (
                 <tr key={category.id}>
                   <td>
                     <span className="row">
@@ -72,6 +106,7 @@ export function Categories() {
                       )}
                     </span>
                   </td>
+                  <td>{category.type_name ?? <span className="muted">–</span>}</td>
                   <td className="num">
                     <Link to={`/library?category=${category.id}`}>{number(category.tracks)}</Link>
                   </td>
@@ -120,6 +155,7 @@ export function Categories() {
           </table>
         )}
       </Card>
+      <TypesCard />
       {editing && <CategoryDialog category={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
       {filling && <FillDialog category={filling} onClose={() => setFilling(null)} />}
     </>
@@ -130,6 +166,10 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
   const [name, setName] = useState(category?.name ?? "");
   const [color, setColor] = useState(category?.color ?? COLORS[0] ?? "#2f6fd6");
   const [fxPlayer, setFxPlayer] = useState(category?.fx_player ?? false);
+  const types = useCategoryTypes();
+  // New categories are songs, the first type, unless chosen otherwise.
+  const [typeId, setTypeId] = useState<number | null | undefined>(category ? (category.type_id ?? null) : undefined);
+  const chosenType = typeId === undefined ? (types.data?.[0]?.id ?? null) : typeId;
   const [separation, setSeparation] = useState<SeparationOverrides>(category?.separation ?? {});
   const rotation = useQuery({
     queryKey: ["settings", "rotation"],
@@ -137,7 +177,7 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
   });
   const save = useAction(
     () => {
-      const body = { name, color, fx_player: fxPlayer, separation };
+      const body = { name, color, type_id: chosenType, fx_player: fxPlayer, separation };
       return category
         ? unwrap(api.PUT("/api/v1/categories/{id}", { params: { path: { id: category.id } }, body }))
         : unwrap(api.POST("/api/v1/categories", { body }));
@@ -167,6 +207,20 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
       <form id="category-form" className="stack" onSubmit={submit}>
         <Field label={t("categories.name")}>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={255} />
+        </Field>
+        <Field label={t("categories.type")} hint={t("categories.typeHint")}>
+          <select
+            className="input"
+            value={chosenType === null ? "" : String(chosenType)}
+            onChange={(event) => setTypeId(event.target.value ? Number(event.target.value) : null)}
+          >
+            {types.data?.map((categoryType) => (
+              <option key={categoryType.id} value={categoryType.id}>
+                {categoryType.name}
+              </option>
+            ))}
+            <option value="">{t("categories.noType")}</option>
+          </select>
         </Field>
         <Field label={t("categories.color")}>
           <div className="row">

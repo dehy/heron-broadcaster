@@ -29,8 +29,9 @@ use crate::queue::QueueManager;
 use crate::sync::ConfigSync;
 use crate::webhooks::Webhooks;
 use crate::{
-    artists, categories, clocks, history, import, labels, librarian, listeners, live, outputs,
-    player, public, restrictions, rotation, selection, settings, staging, tracks, users, webhooks,
+    artists, categories, category_types, clocks, history, import, labels, librarian, listeners,
+    live, outputs, player, public, restrictions, rotation, selection, settings, staging, tracks,
+    users, webhooks,
 };
 
 pub const SERVICE: &str = "heron-api";
@@ -115,6 +116,7 @@ fn api() -> OpenApiRouter<AppState> {
         .merge(import::router())
         .merge(staging::router())
         .merge(categories::router())
+        .merge(category_types::router())
         .merge(artists::router())
         .merge(clocks::router())
         .merge(restrictions::router())

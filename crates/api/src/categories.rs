@@ -31,6 +31,9 @@ pub struct Category {
     pub name: String,
     /// `#rrggbb`.
     pub color: Option<String>,
+    /// What it holds (`GET /category-types`); none when unset.
+    pub type_id: Option<u64>,
+    pub type_name: Option<String>,
     /// Liners, power intros, voice tracks: the FX player's picker opens on
     /// these categories. Clocks still call them like any other.
     pub fx_player: bool,
@@ -40,13 +43,26 @@ pub struct Category {
     pub separation: SeparationOverrides,
 }
 
-type CategoryRow = (u64, String, Option<String>, bool, i64, Option<String>);
+type CategoryRow = (
+    u64,
+    String,
+    Option<String>,
+    Option<u64>,
+    Option<String>,
+    bool,
+    i64,
+    Option<String>,
+);
 
-fn category((id, name, color, fx_player, tracks, separation): CategoryRow) -> Category {
+fn category(
+    (id, name, color, type_id, type_name, fx_player, tracks, separation): CategoryRow,
+) -> Category {
     Category {
         id,
         name,
         color,
+        type_id,
+        type_name,
         fx_player,
         tracks,
         separation: crate::rotation::overrides(separation.as_deref()),
@@ -59,6 +75,9 @@ pub struct CategoryInput {
     pub name: String,
     /// `#rrggbb`, or none.
     pub color: Option<String>,
+    /// A category type; none by default.
+    #[serde(default)]
+    pub type_id: Option<u64>,
     /// Not for the FX player by default.
     #[serde(default)]
     pub fx_player: bool,
@@ -106,15 +125,17 @@ pub fn check_color(color: Option<&str>) -> ApiResult<Option<String>> {
     }
 }
 
-const SELECT: &str = "SELECT c.id, c.name, c.color, c.fx_player,
+const SELECT: &str = "SELECT c.id, c.name, c.color, c.type_id, ct.name, c.fx_player,
            (SELECT COUNT(*) FROM track_categories tc JOIN tracks t ON t.id = tc.track_id
             WHERE tc.category_id = c.id AND t.deleted_at IS NULL) AS tracks,
            CAST(c.separation AS CHAR)
-    FROM categories c";
+    FROM categories c LEFT JOIN category_types ct ON ct.id = c.type_id";
 
 fn conflict(error: sqlx::Error) -> ApiError {
     if is_duplicate(&error) {
         ApiError::Conflict("another category has this name".to_owned())
+    } else if is_still_used(&error) {
+        ApiError::Invalid("no such category type".to_owned())
     } else {
         error.into()
     }
@@ -163,10 +184,11 @@ async fn create_category(
     let (name, color) = input.check()?;
     let separation = separation_json(&input.separation)?;
     let id = sqlx::query(
-        "INSERT INTO categories (name, color, fx_player, separation) VALUES (?, ?, ?, ?)",
+        "INSERT INTO categories (name, color, type_id, fx_player, separation) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(name)
     .bind(color)
+    .bind(input.type_id)
     .bind(input.fx_player)
     .bind(separation)
     .execute(&state.pool)
@@ -177,8 +199,8 @@ async fn create_category(
     Ok((StatusCode::CREATED, Json(category)))
 }
 
-/// Renames, recolors a category, changes its separation or whether the FX
-/// player offers it. Operators and admins.
+/// Renames, recolors a category, changes its type, its separation or
+/// whether the FX player offers it. Operators and admins.
 #[utoipa::path(put, path = "/categories/{id}", tag = "categories",
     params(("id" = u64, Path)), request_body = CategoryInput,
     responses((status = 200, body = Category), (status = "4XX", body = ErrorBody)))]
@@ -192,10 +214,12 @@ async fn update_category(
     let (name, color) = input.check()?;
     let separation = separation_json(&input.separation)?;
     sqlx::query(
-        "UPDATE categories SET name = ?, color = ?, fx_player = ?, separation = ? WHERE id = ?",
+        "UPDATE categories SET name = ?, color = ?, type_id = ?, fx_player = ?, separation = ?
+         WHERE id = ?",
     )
     .bind(name)
     .bind(color)
+    .bind(input.type_id)
     .bind(input.fx_player)
     .bind(separation)
     .bind(id)
@@ -248,6 +272,7 @@ mod tests {
         let input = |name: &str, color: Option<&str>| CategoryInput {
             name: name.to_owned(),
             color: color.map(str::to_owned),
+            type_id: None,
             fx_player: false,
             separation: SeparationOverrides::default(),
         };

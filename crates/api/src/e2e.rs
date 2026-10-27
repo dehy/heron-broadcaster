@@ -952,6 +952,74 @@ async fn library_tracks_overrides_and_categories() {
         .await;
     assert_eq!(status, StatusCode::CREATED, "{liners}");
     assert_eq!(liners["fx_player"], true);
+    assert_eq!(liners["type_id"], Value::Null);
+
+    // Category types: Song, Jingle and Ad, and the station's own.
+    let types = admin.get("/category-types").await;
+    let names: Vec<&str> = types
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["Song", "Jingle", "Ad"]);
+    let jingle = types[1]["id"].as_u64().unwrap();
+    let viewer = station.signed_in("viewer").await;
+    let (status, _) = viewer
+        .send(Method::POST, "/category-types", json!({"name": "Liner"}))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, liner) = admin
+        .send(Method::POST, "/category-types", json!({"name": " Liner "}))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{liner}");
+    assert_eq!(liner["name"], "Liner");
+    let (status, _) = admin
+        .send(Method::POST, "/category-types", json!({"name": "liner"}))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "names are unique ignoring case"
+    );
+    let (status, liners) = admin
+        .send(
+            Method::PUT,
+            &format!("/categories/{}", liners["id"]),
+            json!({"name": "Liner cap", "fx_player": true, "type_id": jingle}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{liners}");
+    assert_eq!(liners["type_name"], "Jingle");
+    let (status, body) = admin
+        .send(
+            Method::PUT,
+            &format!("/categories/{}", liners["id"]),
+            json!({"name": "Liner cap", "type_id": 999}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(admin.get("/category-types").await[1]["categories"], 1);
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/category-types/{jingle}"), None)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "still used");
+    let (status, renamed) = admin
+        .send(
+            Method::PUT,
+            &format!("/category-types/{}", liner["id"]),
+            json!({"name": "Liners"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    let (status, _) = admin
+        .request(
+            Method::DELETE,
+            &format!("/category-types/{}", liner["id"]),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
     let (status, assigned) = admin
         .send(
             Method::PUT,

@@ -45,6 +45,12 @@ A **ban** forbids the track while it matches. **Allow** rules restrict the track
 
 When a slot finds no candidate that respects the restrictions, it goes through the relaxation steps of the separation rules, and then to the fallback category, still respecting the restrictions. If even the fallback has nothing allowed, the slot is skipped for the next one in the clock; if no slot can play, nothing is queued and the engine's fallback directory takes over.
 
+### Category types
+
+Every category has a **type**: what it holds. **Song**, **Jingle** and **Ad** exist from the start; a station renames them, adds its own (Liner, Promo, Voice track…) and deletes those no category uses (*Categories*, at the bottom). A category can also have no type.
+
+Types let rules apply to every category of a kind at once, whatever their number: a station with nine jingle categories sets a rule once, on the Jingle type. Categories that existed before types were added got Jingle when the FX player offered them, Song otherwise: a guess to check. The [import from another software](import.md) gives Jingle to the categories it marks as jingles.
+
 ### Queue depth
 
 Keep N tracks queued ahead: `queue.min_queued` ([API – Queue manager](api.md#queue-manager)). The default stays 3 rather than the 20 first proposed: tracks are picked for their planned start, and a deep queue plans further ahead, so dayparting and the clock's slots drift with every skip or manual insert.
