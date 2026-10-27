@@ -1309,6 +1309,7 @@ dependencies = [
  "clap",
  "heron-analysis",
  "heron-core",
+ "heron-dsp",
  "heron-library",
  "heron-service",
  "hound",

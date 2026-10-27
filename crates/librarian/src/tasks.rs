@@ -21,7 +21,7 @@ use crate::identify::{Endpoints, Identifier};
 use crate::journal::Roots;
 use crate::layout::Layout;
 use crate::review::{self, Choice};
-use crate::{edit, import, musicbrainz, organize, relations, staging, trash};
+use crate::{edit, import, medley, musicbrainz, organize, relations, staging, trash};
 
 /// Wait between looks at the table when there is nothing to do.
 const POLL: Duration = Duration::from_secs(1);
@@ -218,6 +218,10 @@ impl TaskRunner {
                 json(trash::delete(&self.pool, &self.roots, track_ids).await)
             }
             TaskRequest::EmptyTrash => json(trash::purge(&self.pool, &self.roots, None).await),
+            TaskRequest::RenderMedley { medley_id } => {
+                let report = medley::render(&self.pool, &self.roots, *medley_id).await?;
+                serde_json::to_value(report).map_err(|error| error.to_string())
+            }
         }
     }
 

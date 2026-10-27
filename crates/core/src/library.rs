@@ -55,6 +55,8 @@ pub enum TaskRequest {
     Delete { track_ids: Vec<u64> },
     /// Purges the whole trash now.
     EmptyTrash,
+    /// Mixes a medley's parts into its file (`docs/medleys.md`).
+    RenderMedley { medley_id: u64 },
 }
 
 impl TaskRequest {
@@ -71,6 +73,7 @@ impl TaskRequest {
             Self::StagingImport { .. } => "staging_import",
             Self::Delete { .. } => "delete",
             Self::EmptyTrash => "empty_trash",
+            Self::RenderMedley { .. } => "render_medley",
         }
     }
 }

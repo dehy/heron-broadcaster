@@ -943,6 +943,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/medleys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every medley, by name. */
+        get: operations["list_medleys"];
+        put?: never;
+        /** Operators and admins. */
+        post: operations["create_medley"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/medleys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_medley"];
+        /**
+         * Renames a medley or changes its recipe (applied on its next render).
+         *     Operators and admins.
+         */
+        put: operations["update_medley"];
+        post?: never;
+        /**
+         * Deletes the recipe; the rendered track stays in the library. Operators
+         *     and admins.
+         */
+        delete: operations["delete_medley"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/medleys/{id}/pick": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Another hook or liner, none of `exclude`, to replace one in a plan.
+         *     Operators and admins.
+         */
+        post: operations["pick_part"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/medleys/{id}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Picks the parts from the recipe, without saving them. Operators and admins. */
+        post: operations["plan_medley"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/medleys/{id}/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Saves the parts as the medley's version and asks heron-librarian to
+         *     mix them into its file. Operators and admins.
+         */
+        post: operations["render_medley"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/outputs": {
         parameters: {
             query?: never;
@@ -2981,6 +3080,11 @@ export interface components {
             /** Format: int32 */
             hook_out_ms?: number | null;
         };
+        /**
+         * @description The order of the hooks.
+         * @enum {string}
+         */
+        HookOrder: "picked" | "year" | "bpm";
         /** @description An hour of the day, over the days of a period. */
         HourOfDay: {
             /**
@@ -3469,6 +3573,8 @@ export interface components {
             started_at_unix_ms?: number | null;
             status: components["schemas"]["TaskStatus"];
         };
+        /** @enum {string} */
+        LinerMode: "between" | "over";
         ListenersNow: {
             /** @description Each enabled output read at the last minute. */
             outputs: components["schemas"]["OutputListeners"][];
@@ -3525,6 +3631,53 @@ export interface components {
              * @default -16
              */
             target_lufs: number;
+        };
+        Medley: {
+            /**
+             * Format: int64
+             * @description Where the rendered medley goes.
+             */
+            category_id?: number | null;
+            category_name?: string | null;
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** @description Its current version, in order (empty until rendered once). */
+            parts: components["schemas"]["PartView"][];
+            /** @description The rendered file, relative to the library root. */
+            path?: string | null;
+            recipe: components["schemas"]["Recipe"];
+            /** Format: int64 */
+            rendered_at_unix_ms?: number | null;
+            task_error?: string | null;
+            /**
+             * Format: int64
+             * @description The last render asked: its library task.
+             */
+            task_id?: number | null;
+            /** @description `pending`, `running`, `done` or `failed`. */
+            task_status?: string | null;
+            /**
+             * Format: int64
+             * @description The rendered file's track, once the scanner found it.
+             */
+            track_id?: number | null;
+        };
+        MedleyInput: {
+            /** Format: int64 */
+            category_id?: number | null;
+            name: string;
+            recipe?: components["schemas"]["Recipe"];
+        };
+        /** @description Parts picked from the recipe, not saved. */
+        MedleyPlan: {
+            parts: components["schemas"]["PartView"][];
+            /**
+             * Format: int64
+             * @description Songs that can give a hook: fewer than the recipe's hooks means a
+             *     shorter medley.
+             */
+            qualified: number;
         };
         MergeRequest: {
             /**
@@ -3696,6 +3849,37 @@ export interface components {
             statistics: components["schemas"]["OutputStatisticsView"];
             status?: components["schemas"]["OutputStatus"] | null;
         };
+        /** @description A span of a track's file in the medley. */
+        Part: {
+            /**
+             * Format: int32
+             * @description On the file's timeline.
+             */
+            from_ms: number;
+            kind: components["schemas"]["PartKind"];
+            /** Format: int32 */
+            to_ms: number;
+            /** Format: int64 */
+            track_id: number;
+        };
+        /** @enum {string} */
+        PartKind: "hook" | "liner";
+        /** @description A part, with what its track is. */
+        PartView: {
+            artist?: string | null;
+            /**
+             * Format: int32
+             * @description On the file's timeline.
+             */
+            from_ms: number;
+            kind: components["schemas"]["PartKind"];
+            path: string;
+            title?: string | null;
+            /** Format: int32 */
+            to_ms: number;
+            /** Format: int64 */
+            track_id: number;
+        };
         PasswordChange: {
             current_password: string;
             new_password: string;
@@ -3749,6 +3933,11 @@ export interface components {
              *     without listener lists.
              */
             sessions?: number | null;
+        };
+        PickRequest: {
+            /** @description Tracks not to pick (those already in the plan). */
+            exclude?: number[];
+            kind: components["schemas"]["PartKind"];
         };
         PlannedMove: {
             /** @description Relative to the library root. */
@@ -4080,6 +4269,70 @@ export interface components {
             /** Format: int32 */
             start_ms: number;
         };
+        /** @description How a medley is built. */
+        Recipe: {
+            /**
+             * @description Categories the songs come from.
+             * @default []
+             */
+            category_ids: number[];
+            /**
+             * Format: int32
+             * @description Overlap between two parts.
+             * @default 500
+             */
+            crossfade_ms: number;
+            /**
+             * Format: double
+             * @description How much the music goes down under a liner played over it.
+             * @default -10
+             */
+            duck_db: number;
+            /**
+             * Format: int32
+             * @description Hooks longer than this are cut to it.
+             * @default 8000
+             */
+            hook_max_ms: number;
+            /**
+             * Format: int32
+             * @description Hooks shorter than this are left out.
+             * @default 4000
+             */
+            hook_min_ms: number;
+            /**
+             * Format: int32
+             * @description How many hooks.
+             * @default 6
+             */
+            hooks: number;
+            /**
+             * Format: int64
+             * @description Only the songs with this label, when set.
+             * @default null
+             */
+            label_id: number | null;
+            /** @default false */
+            liner_at_end: boolean;
+            /** @default false */
+            liner_at_start: boolean;
+            /**
+             * Format: int64
+             * @description Where the liners come from; none for no liners.
+             * @default null
+             */
+            liner_category_id: number | null;
+            /**
+             * Format: int32
+             * @description A liner after every this many hooks.
+             * @default 1
+             */
+            liner_every: number;
+            /** @default between */
+            liner_mode: components["schemas"]["LinerMode"];
+            /** @default picked */
+            order: components["schemas"]["HookOrder"];
+        };
         /** @description What a MusicBrainz relationships lookup found. */
         RelationsReport: {
             /**
@@ -4101,6 +4354,9 @@ export interface components {
         ReleaseChoice: {
             recording_id: string;
             release_id: string;
+        };
+        RenderRequest: {
+            parts: components["schemas"]["Part"][];
         };
         RestrictionInput: {
             enabled?: boolean;
@@ -4744,6 +5000,11 @@ export interface components {
         } | {
             /** @enum {string} */
             kind: "empty_trash";
+        } | {
+            /** @enum {string} */
+            kind: "render_medley";
+            /** Format: int64 */
+            medley_id: number;
         };
         /** @enum {string} */
         TaskStatus: "pending" | "running" | "done" | "failed";
@@ -7282,6 +7543,248 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LiveMessage"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_medleys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Medley"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_medley: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MedleyInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Medley"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_medley: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Medley"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_medley: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MedleyInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Medley"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_medley: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    pick_part: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PickRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    plan_medley: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MedleyPlan"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    render_medley: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenderRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
                 };
             };
             "4XX": {

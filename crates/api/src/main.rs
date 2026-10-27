@@ -23,6 +23,7 @@ mod librarian;
 mod library;
 mod listeners;
 mod live;
+mod medleys;
 mod outputs;
 mod player;
 mod public;
@@ -212,6 +213,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         pool.clone(),
         Arc::clone(&queue),
     )));
+    tasks.push(tokio::spawn(medleys::run_linker(pool.clone())));
     tasks.push(tokio::spawn(Arc::clone(&sync).run()));
     tasks.push(tokio::spawn(users::purge_sessions(pool.clone())));
 

@@ -4,6 +4,7 @@
 
 pub mod file;
 pub mod library;
+pub mod medley;
 pub mod output;
 pub mod playout;
 pub mod settings;

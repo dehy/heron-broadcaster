@@ -18,6 +18,7 @@ import { ClockEditor, Clocks } from "./pages/Clocks";
 import { Dashboard } from "./pages/Dashboard";
 import { History } from "./pages/History";
 import { Labels } from "./pages/Labels";
+import { MedleyEditor, Medleys } from "./pages/Medleys";
 import { Library } from "./pages/Library";
 import { Login } from "./pages/Login";
 import { Outputs } from "./pages/Outputs";
@@ -91,6 +92,7 @@ const PAGES: Page[] = [
   { path: "/library", label: "nav.tracks", icon: "library", section: "nav.library" },
   { path: "/buffer", label: "nav.buffer", icon: "upload" },
   { path: "/labels", label: "nav.labels", icon: "label" },
+  { path: "/medleys", label: "nav.medleys", icon: "queue" },
   { path: "/artists", label: "nav.artists", icon: "mic" },
   { path: "/review", label: "nav.review", icon: "review" },
   { path: "/trash", label: "nav.trash", icon: "trash" },
@@ -111,6 +113,10 @@ function route(pathname: string): ReactNode {
   const track = match("/library/:id", pathname);
   if (track) {
     return <Track id={Number(track.id)} />;
+  }
+  const medley = match("/medleys/:id", pathname);
+  if (medley) {
+    return <MedleyEditor id={medley.id === "new" ? null : Number(medley.id)} />;
   }
   const clock = match("/clocks/:id", pathname);
   if (clock) {
@@ -135,6 +141,8 @@ function route(pathname: string): ReactNode {
       return <Categories />;
     case "/labels":
       return <Labels />;
+    case "/medleys":
+      return <Medleys />;
     case "/artists":
       return <Artists />;
     case "/clocks":

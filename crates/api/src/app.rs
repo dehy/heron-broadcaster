@@ -30,8 +30,8 @@ use crate::sync::ConfigSync;
 use crate::webhooks::Webhooks;
 use crate::{
     artists, categories, category_types, clocks, history, import, labels, librarian, listeners,
-    live, outputs, player, public, restrictions, rotation, selection, settings, staging, tracks,
-    users, webhooks,
+    live, medleys, outputs, player, public, restrictions, rotation, selection, settings, staging,
+    tracks, users, webhooks,
 };
 
 pub const SERVICE: &str = "heron-api";
@@ -74,6 +74,7 @@ pub struct AppState {
         (name = "buffer", description = "The buffer zone: uploads, and new files waiting to be imported"),
         (name = "categories", description = "Groups of tracks"),
         (name = "labels", description = "Keywords on tracks, to sort the library"),
+        (name = "medleys", description = "Medleys built from song hooks and liners"),
         (name = "artists", description = "Artists, their names and similar artists"),
         (name = "rotation", description = "Clocks, the schedule, restrictions, the selection log and simulations"),
         (name = "history", description = "What was played"),
@@ -117,6 +118,7 @@ fn api() -> OpenApiRouter<AppState> {
         .merge(staging::router())
         .merge(categories::router())
         .merge(category_types::router())
+        .merge(medleys::router())
         .merge(artists::router())
         .merge(clocks::router())
         .merge(restrictions::router())
