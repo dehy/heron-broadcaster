@@ -71,6 +71,11 @@ message Track {
   // Sends no metadata to the stream servers (a jingle): they keep the last
   // track's while it plays.
   bool no_metadata = 14;
+  // A jingle played on the FX player over the next track's intro, ending
+  // where its vocals start, when that intro is long enough for it.
+  bool over_intro = 15;
+  // Where the intro ends (the vocals start), in ms on the file's timeline.
+  optional uint32 intro_ms = 16;
 }
 
 message QueueEntry {
@@ -185,6 +190,9 @@ message EngineState {
   // When the engine started. A restart resumes the saved queue: entry IDs
   // go on from where they were (from 1 when the state directory was lost).
   uint64 started_unix_ms = 8;
+  // The jingle played on the FX player over the cued track's intro: it
+  // comes before the cued track in the play order.
+  optional QueueEntry cued_jingle = 9;
 }
 
 message GetLevelsRequest {}

@@ -69,6 +69,18 @@ The player plans each transition when it loads the next track, as soon as the cu
 
 **Skip** fades the current track out over `skip_fade_ms` and starts the next one at once. **Pause** fades out over 10 ms and holds the decks; the stream keeps going with silence. Back-to-back tracks alternate between Deck A and Deck B. The **FX player** plays on top of the decks and does not change what is on air.
 
+### Jingles over the intro
+
+A track whose category type plays **over the intro** (on for *Jingle*, set on the *Categories* page) does not wait for its turn on a deck when the track after it has a long enough intro: the player cues that next track, and the jingle with it, to start on the FX player when the track reaches its intro point minus the jingle's length. The jingle ends where the vocals start.
+
+- The intro point is the one imported from the previous software (`track_markers.intro_ms`, see [Importing](import.md)), on the file's timeline: the engine counts it from the track's cue-in.
+- The intro must be at least as long as the jingle (its cue-in to cue-out), and the next track must not be a jingle itself. Otherwise, or when nothing is queued after it yet, the jingle plays on its own between the tracks, as before. A jingle cued alone is cued again over the next track's intro when that track is queued in time.
+- In the queue, the jingle stays before its track (marked *Over the intro*) and can be moved or removed: the pair is cued again from the new order. Inserting a track between them makes the jingle play on its own.
+- Skipping the track before its jingle starts drops the jingle; skipping it while the jingle plays fades both out.
+- The jingle is in the play history (on the FX deck) and counts for rotation like any pick. It sends no metadata if its type sends none.
+- There is no ducking: the jingle is mixed over the intro at its own level (loudness-normalized like any track).
+- A handover waits until the jingle has played.
+
 Fade curves (shape of a fade-in; a fade-out is its mirror):
 
 | Curve | Shape |

@@ -99,6 +99,8 @@ impl Station {
             playout: TrackPlayout::unanalyzed(duration_ms),
             source: PlaySource::Manual,
             no_metadata: false,
+            over_intro: false,
+            intro_ms: None,
         }
     }
 }
@@ -726,4 +728,213 @@ fn a_track_that_just_started_is_saved_once() {
     assert_eq!(saved.on_air.unwrap().entry.entry_id, ids[1]);
     let waiting: Vec<u64> = saved.waiting.iter().map(|entry| entry.entry_id).collect();
     assert_eq!(waiting, [ids[2]]);
+}
+
+impl Station {
+    /// A jingle played over the next track's intro.
+    fn jingle(&self, name: &str, seconds: f64) -> TrackRequest {
+        let mut jingle = self.file(name, seconds);
+        jingle.no_metadata = true;
+        jingle.over_intro = true;
+        jingle
+    }
+
+    /// A track whose vocals start at `intro_ms`.
+    fn song(&self, name: &str, seconds: f64, intro_ms: u32) -> TrackRequest {
+        let mut song = self.file(name, seconds);
+        song.intro_ms = Some(intro_ms);
+        song
+    }
+
+    fn fx(&self) -> Option<String> {
+        self.player.snapshot().decks[Deck::Fx.slot()]
+            .entry
+            .as_ref()
+            .map(|entry| entry.track.path.clone())
+    }
+
+    /// The waiting entries in play order.
+    fn waiting(&self) -> Vec<String> {
+        let snapshot = self.player.snapshot();
+        snapshot
+            .cued_jingle
+            .into_iter()
+            .chain(snapshot.cued)
+            .chain(snapshot.queue)
+            .map(|entry| entry.track.path)
+            .collect()
+    }
+}
+
+#[test]
+fn a_jingle_plays_over_the_next_intro() {
+    let mut station = Station::new();
+    let tracks = vec![
+        station.file("song.wav", 1.0),
+        station.jingle("jingle.wav", 0.5),
+        station.song("next.wav", 4.0, 2_000),
+    ];
+    station.player.enqueue(tracks, None).unwrap();
+    station.play(0.2);
+    let snapshot = station.player.snapshot();
+    assert_eq!(
+        snapshot.cued.map(|entry| entry.track.path).as_deref(),
+        Some("next.wav")
+    );
+    assert_eq!(station.waiting(), ["jingle.wav", "next.wav"]);
+    assert_eq!(
+        station.player.saved().waiting.len(),
+        2,
+        "both saved, jingle first"
+    );
+
+    // next.wav starts at 1 s; the jingle at 1 s + 1.5 s and ends on its intro.
+    station.play(2.0);
+    assert_eq!(station.fx(), None);
+    station.play(0.5);
+    assert_eq!(station.fx().as_deref(), Some("jingle.wav"));
+    assert_eq!(
+        station.now_playing.borrow().title.as_deref(),
+        Some("next.wav")
+    );
+    station.play(0.4);
+    assert_eq!(station.fx(), None);
+    let events = station.events();
+    assert_eq!(
+        started(&events),
+        [
+            (Deck::A, "song.wav".to_owned()),
+            (Deck::B, "next.wav".to_owned()),
+            (Deck::Fx, "jingle.wav".to_owned()),
+        ]
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        PlayerEvent::Ended {
+            deck: Deck::Fx,
+            played_ms: 500,
+            reason: EndReason::Finished,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn a_jingle_longer_than_the_intro_plays_on_its_own() {
+    for intro_ms in [Some(300), None] {
+        let mut station = Station::new();
+        let mut next = station.file("next.wav", 1.0);
+        next.intro_ms = intro_ms;
+        let tracks = vec![
+            station.file("song.wav", 1.0),
+            station.jingle("jingle.wav", 0.5),
+            next,
+        ];
+        station.player.enqueue(tracks, None).unwrap();
+        station.play(3.0);
+        assert_eq!(
+            started(&station.events()),
+            [
+                (Deck::A, "song.wav".to_owned()),
+                (Deck::B, "jingle.wav".to_owned()),
+                (Deck::A, "next.wav".to_owned()),
+            ]
+        );
+    }
+}
+
+#[test]
+fn a_jingle_cued_alone_waits_for_the_track_after_it() {
+    let mut station = Station::new();
+    let tracks = vec![
+        station.file("song.wav", 2.0),
+        station.jingle("jingle.wav", 0.5),
+    ];
+    station.player.enqueue(tracks, None).unwrap();
+    station.play(0.3);
+    assert_eq!(
+        station
+            .player
+            .snapshot()
+            .cued
+            .map(|entry| entry.track.path)
+            .as_deref(),
+        Some("jingle.wav")
+    );
+    let next = station.song("next.wav", 4.0, 1_500);
+    station.player.enqueue(vec![next], None).unwrap();
+    station.play(0.3);
+    assert_eq!(station.waiting(), ["jingle.wav", "next.wav"]);
+    assert!(station.player.snapshot().cued_jingle.is_some());
+    station.play(3.0);
+    assert_eq!(
+        started(&station.events()),
+        [
+            (Deck::A, "song.wav".to_owned()),
+            (Deck::B, "next.wav".to_owned()),
+            (Deck::Fx, "jingle.wav".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn a_jingle_over_an_intro_can_be_moved_or_removed() {
+    let mut station = Station::new();
+    let tracks = vec![
+        station.file("song.wav", 2.0),
+        station.jingle("jingle.wav", 0.5),
+        station.song("next.wav", 4.0, 2_000),
+        station.file("last.wav", 1.0),
+    ];
+    let ids = station.player.enqueue(tracks, None).unwrap();
+    station.play(0.2);
+    assert_eq!(station.waiting(), ["jingle.wav", "next.wav", "last.wav"]);
+
+    // Inserted between the jingle and its track: the jingle goes on its own.
+    let between = station.file("between.wav", 1.0);
+    station.player.enqueue(vec![between], Some(1)).unwrap();
+    station.play(0.2);
+    assert_eq!(
+        station.waiting(),
+        ["jingle.wav", "between.wav", "next.wav", "last.wav"]
+    );
+    assert!(station.player.snapshot().cued_jingle.is_none());
+
+    // Moved before a track with an intro: over it again.
+    station.player.move_entry(ids[1], 1).unwrap();
+    station.play(0.2);
+    assert_eq!(
+        station.waiting(),
+        ["between.wav", "jingle.wav", "next.wav", "last.wav"]
+    );
+    station.player.move_entry(ids[2], 0).unwrap();
+    station.player.move_entry(ids[1], 0).unwrap();
+    station.play(0.2);
+    assert_eq!(
+        station.waiting(),
+        ["jingle.wav", "next.wav", "between.wav", "last.wav"]
+    );
+    assert!(station.player.snapshot().cued_jingle.is_some());
+
+    // Removed: its track is cued alone.
+    station.player.remove(ids[1]).unwrap();
+    station.play(0.2);
+    assert_eq!(station.waiting(), ["next.wav", "between.wav", "last.wav"]);
+    assert!(station.player.snapshot().cued_jingle.is_none());
+}
+
+#[test]
+fn a_restart_keeps_the_jingle_over_the_intro() {
+    let mut station = Station::new();
+    let tracks = vec![
+        station.file("song.wav", 3.0),
+        station.jingle("jingle.wav", 0.5),
+        station.song("next.wav", 4.0, 2_000),
+    ];
+    station.player.enqueue(tracks, None).unwrap();
+    station.play(0.5);
+    let mut station = station.restart();
+    station.play(0.2);
+    assert_eq!(station.waiting(), ["jingle.wav", "next.wav"]);
+    assert!(station.player.snapshot().cued_jingle.is_some());
 }

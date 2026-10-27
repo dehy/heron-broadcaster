@@ -3274,8 +3274,12 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
     // public history and webhooks leave it out.
     let jingle_type = admin.get("/category-types").await[1].clone();
     assert_eq!(
-        (&jingle_type["name"], &jingle_type["sends_metadata"]),
-        (&json!("Jingle"), &json!(false))
+        (
+            &jingle_type["name"],
+            &jingle_type["sends_metadata"],
+            &jingle_type["plays_over_intro"]
+        ),
+        (&json!("Jingle"), &json!(false), &json!(true))
     );
     let (status, jingles) = admin
         .send(
@@ -3313,7 +3317,9 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
         let player = admin.get("/player").await;
         let jingle = player["decks"].as_array().unwrap().iter().find_map(|deck| {
             let track = &deck["entry"]["track"];
-            (deck["on_air"] == true && track["no_metadata"] == true).then(|| track["title"].clone())
+            // No intro marker on the next track: the jingle plays on its own.
+            (deck["on_air"] == true && track["no_metadata"] == true && track["over_intro"] == true)
+                .then(|| track["title"].clone())
         });
         if let Some(title) = jingle {
             break title;

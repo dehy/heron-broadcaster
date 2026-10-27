@@ -165,6 +165,8 @@ fn track(library: &Path, name: &str, seconds: f64) -> TrackRequest {
         playout: TrackPlayout::unanalyzed((seconds * 1_000.0) as u32),
         source: PlaySource::Manual,
         no_metadata: false,
+        over_intro: false,
+        intro_ms: None,
     }
 }
 

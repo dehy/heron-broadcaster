@@ -306,7 +306,8 @@ async fn plays(
 }
 
 /// What played up to `now_ms`, as far back as separation looks, and when
-/// each track last played.
+/// each track last played. The FX player counts only for what rotation
+/// picked there (jingles over an intro), not for jingles fired by hand.
 pub async fn load_history(pool: &MySqlPool, library: &Library, now_ms: i64) -> ApiResult<History> {
     let since_ms = now_ms - library.horizon_ms();
     let recorded: Vec<Recorded> = sqlx::query_as(
@@ -314,7 +315,7 @@ pub async fn load_history(pool: &MySqlPool, library: &Library, now_ms: i64) -> A
                 COALESCE(h.title, t.title) AS title, t.album,
                 CAST(UNIX_TIMESTAMP(h.started_at) * 1000 AS SIGNED) AS start_ms
          FROM play_history h LEFT JOIN tracks t ON t.id = h.track_id
-         WHERE h.deck <> 'fx' AND h.started_at >= FROM_UNIXTIME(?)
+         WHERE (h.deck <> 'fx' OR h.source = 'rotation') AND h.started_at >= FROM_UNIXTIME(?)
          ORDER BY h.started_at, h.id",
     )
     .bind(since_ms as f64 / 1_000.0)
@@ -323,7 +324,8 @@ pub async fn load_history(pool: &MySqlPool, library: &Library, now_ms: i64) -> A
     let plays = plays(pool, library, recorded).await?;
     let last: Vec<(u64, i64)> = sqlx::query_as(
         "SELECT track_id, CAST(UNIX_TIMESTAMP(MAX(started_at)) * 1000 AS SIGNED)
-         FROM play_history WHERE track_id IS NOT NULL AND deck <> 'fx' GROUP BY track_id",
+         FROM play_history WHERE track_id IS NOT NULL AND (deck <> 'fx' OR source = 'rotation')
+         GROUP BY track_id",
     )
     .fetch_all(pool)
     .await?;
@@ -374,7 +376,10 @@ pub fn planned_starts(state: &PlayerState, now_ms: i64) -> (Vec<(&QueueEntry, i6
     let mut planned = Vec::new();
     for entry in state.waiting() {
         planned.push((entry, at));
-        at += planned_length_ms(entry);
+        // A jingle over the cued track's intro takes no time of its own.
+        if state.cued_jingle.as_deref() != Some(entry) {
+            at += planned_length_ms(entry);
+        }
     }
     (planned, at)
 }

@@ -126,6 +126,6 @@ Clocks are assigned per hour and day of week (`clock_schedule` in the [data mode
 ## Rotation model
 
 - Rotation is a **pure function** of (library, play history, rules, current clock, current time), in the `heron-rotation` crate.
-- The history is what played on the decks (the FX player aside) as far back as the longest window looks, followed by the queue at its planned times: the queue manager picks each new track for when it should start.
+- The history is what played on the decks (on the FX player, only the jingles rotation picked to play over an intro) as far back as the longest window looks, followed by the queue at its planned times: the queue manager picks each new track for when it should start.
 - It returns the next track plus an **explanation**: which clock and slot, the windows applied, the relaxation step, how many tracks each rule held back or restrictions forbade, how many were left to choose from. Each pick is kept in the **selection log** (`rotation_picks`); its play is linked to it and carries its step (`play_history.relaxation_applied`).
 - This makes it possible to **simulate** days of programming offline and test it without audio. A simulation is **audited** without trusting the log: each pick's windows are recomputed from its slot and step, and the pick is compared with every play before it, one by one; restrictions are checked again. Simulations run from the API (`POST /rotation/simulate`) and the web UI, and in the tests on a synthetic station over a week that crosses a daylight saving change.

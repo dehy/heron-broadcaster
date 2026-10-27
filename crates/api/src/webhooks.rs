@@ -1217,6 +1217,8 @@ mod tests {
                 cue_out_ms: 180_000,
                 source: PlaySource::Rotation,
                 no_metadata: false,
+                over_intro: false,
+                intro_ms: None,
             },
         }
     }
@@ -1465,6 +1467,8 @@ mod delivery_tests {
                     cue_out_ms: 1_000,
                     source: PlaySource::Rotation,
                     no_metadata: false,
+                    over_intro: false,
+                    intro_ms: None,
                 },
             },
             at_unix_ms: unix_ms(SystemTime::now()),
