@@ -5747,6 +5747,57 @@
         }
       }
     },
+    "/api/v1/tracks/{id}/hook": {
+      "put": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Sets the track's hook (its most recognizable part). Operators and admins.",
+        "operationId": "put_hook",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HookInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackMarkers"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tracks/{id}/intro": {
       "put": {
         "tags": [
@@ -8297,6 +8348,29 @@
           "upload",
           "incoming"
         ]
+      },
+      "HookInput": {
+        "type": "object",
+        "properties": {
+          "hook_in_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Where the hook starts and ends, in ms on the file's timeline; both\n`null` remove it.",
+            "minimum": 0
+          },
+          "hook_out_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "HourOfDay": {
         "type": "object",

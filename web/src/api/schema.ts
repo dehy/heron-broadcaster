@@ -1949,6 +1949,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracks/{id}/hook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Sets the track's hook (its most recognizable part). Operators and admins. */
+        put: operations["put_hook"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracks/{id}/intro": {
         parameters: {
             query?: never;
@@ -2954,6 +2971,16 @@ export interface components {
         };
         /** @enum {string} */
         GroupSource: "upload" | "incoming";
+        HookInput: {
+            /**
+             * Format: int32
+             * @description Where the hook starts and ends, in ms on the file's timeline; both
+             *     `null` remove it.
+             */
+            hook_in_ms?: number | null;
+            /** Format: int32 */
+            hook_out_ms?: number | null;
+        };
         /** @description An hour of the day, over the days of a period. */
         HourOfDay: {
             /**
@@ -9480,6 +9507,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrackCategory"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_hook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HookInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackMarkers"];
                 };
             };
             "4XX": {

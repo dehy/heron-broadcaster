@@ -32,6 +32,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_track, patch_track))
         .routes(routes!(put_overrides, delete_overrides))
         .routes(routes!(put_intro))
+        .routes(routes!(put_hook))
         .routes(routes!(put_categories))
         .routes(routes!(preview_transition))
         .routes(routes!(get_waveform))
@@ -947,14 +948,7 @@ async fn put_intro(
     Json(input): Json<IntroInput>,
 ) -> ApiResult<Json<crate::import::TrackMarkers>> {
     user.require(Role::Operator)?;
-    let length: Option<Option<u32>> =
-        sqlx::query_scalar("SELECT duration_ms FROM tracks WHERE id = ? AND deleted_at IS NULL")
-            .bind(id)
-            .fetch_optional(&state.pool)
-            .await?;
-    let Some(length) = length else {
-        return Err(ApiError::not_found("track"));
-    };
+    let length = track_length(&state, id).await?;
     if let Some(intro_ms) = input.intro_ms
         && (intro_ms == 0 || length.is_some_and(|length| intro_ms > length))
     {
@@ -972,6 +966,60 @@ async fn put_intro(
     .await?;
     // Queued entries of the track follow.
     state.queue.wake();
+    let markers = crate::import::markers(&state.pool, id).await?;
+    Ok(Json(markers.unwrap_or_default()))
+}
+
+/// The length of a track that is not in the trash (unknown: none).
+async fn track_length(state: &AppState, id: u64) -> ApiResult<Option<u32>> {
+    let length: Option<Option<u32>> =
+        sqlx::query_scalar("SELECT duration_ms FROM tracks WHERE id = ? AND deleted_at IS NULL")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
+    length.ok_or_else(|| ApiError::not_found("track"))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HookInput {
+    /// Where the hook starts and ends, in ms on the file's timeline; both
+    /// `null` remove it.
+    pub hook_in_ms: Option<u32>,
+    pub hook_out_ms: Option<u32>,
+}
+
+/// Sets the track's hook (its most recognizable part). Operators and admins.
+#[utoipa::path(put, path = "/tracks/{id}/hook", tag = "library",
+    params(("id" = u64, Path)), request_body = HookInput,
+    responses((status = 200, body = crate::import::TrackMarkers), (status = "4XX", body = ErrorBody)))]
+async fn put_hook(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(input): Json<HookInput>,
+) -> ApiResult<Json<crate::import::TrackMarkers>> {
+    user.require(Role::Operator)?;
+    let length = track_length(&state, id).await?;
+    match (input.hook_in_ms, input.hook_out_ms) {
+        (None, None) => {}
+        (Some(hook_in), Some(hook_out))
+            if hook_in < hook_out && length.is_none_or(|length| hook_out <= length) => {}
+        _ => {
+            return Err(ApiError::Invalid(
+                "the hook starts before it ends, within the file (both null removes it)".to_owned(),
+            ));
+        }
+    }
+    sqlx::query(
+        "INSERT INTO track_markers (track_id, hook_in_ms, hook_out_ms) VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE hook_in_ms = VALUES(hook_in_ms), hook_out_ms = VALUES(hook_out_ms)",
+    )
+    .bind(id)
+    .bind(input.hook_in_ms)
+    .bind(input.hook_out_ms)
+    .execute(&state.pool)
+    .await?;
     let markers = crate::import::markers(&state.pool, id).await?;
     Ok(Json(markers.unwrap_or_default()))
 }

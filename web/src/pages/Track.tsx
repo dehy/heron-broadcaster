@@ -115,6 +115,13 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   // Where the vocals start, kept apart from the overrides (`track_markers`).
   const savedIntro = track.markers?.intro_ms ?? null;
   const [intro, setIntro] = useState<number | null>(savedIntro);
+  // The hook (most recognizable part), likewise.
+  const savedHook: Hook = { in: track.markers?.hook_in_ms ?? null, out: track.markers?.hook_out_ms ?? null };
+  const [hook, setHook] = useState<Hook>(savedHook);
+  // Looping the hook being edited, until stopped.
+  const [looping, setLooping] = useState(false);
+  const loop = useRef<Hook | null>(null);
+  loop.current = looping ? hook : null;
   const [zoom, setZoom] = useState<"whole" | "intro" | "outro">("whole");
   const audio = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -134,6 +141,9 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   useEffect(() => {
     setIntro(savedIntro);
   }, [savedIntro]);
+  useEffect(() => {
+    setHook({ in: savedHook.in, out: savedHook.out });
+  }, [savedHook.in, savedHook.out]);
 
   // Follow the audio while it plays.
   useEffect(() => {
@@ -142,8 +152,14 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
     }
     let frame = 0;
     const step = () => {
-      if (audio.current) {
-        setPlayhead(audio.current.currentTime * 1000);
+      const element = audio.current;
+      if (element) {
+        // Looping the hook: back to its start at its end.
+        const range = loop.current;
+        if (range?.in != null && range.out != null && element.currentTime * 1000 >= range.out) {
+          element.currentTime = range.in / 1000;
+        }
+        setPlayhead(element.currentTime * 1000);
       }
       frame = requestAnimationFrame(step);
     };
@@ -153,13 +169,29 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
 
   // The overrides and the intro point, each when it changed.
   const saveOverrides = useAction(
-    async ({ overrides, introMs }: { overrides: TrackOverrides | null; introMs: number | null | undefined }) => {
+    async ({
+      overrides,
+      introMs,
+      hookPoints,
+    }: {
+      overrides: TrackOverrides | null;
+      introMs: number | null | undefined;
+      hookPoints: Hook | undefined;
+    }) => {
       const path = { params: { path: { id: track.id } } };
       if (overrides) {
         await unwrap(api.PUT("/api/v1/tracks/{id}/overrides", { ...path, body: overrides }));
       }
       if (introMs !== undefined) {
         await unwrap(api.PUT("/api/v1/tracks/{id}/intro", { ...path, body: { intro_ms: introMs } }));
+      }
+      if (hookPoints) {
+        await unwrap(
+          api.PUT("/api/v1/tracks/{id}/hook", {
+            ...path,
+            body: { hook_in_ms: hookPoints.in, hook_out_ms: hookPoints.out },
+          }),
+        );
       }
     },
     { success: t("track.saved"), invalidate: [["track", track.id], ["tracks"]] },
@@ -224,7 +256,11 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
 
   const overridesDirty = JSON.stringify(draft) !== JSON.stringify(saved);
   const introDirty = intro !== savedIntro;
-  const dirty = overridesDirty || introDirty;
+  const hookDirty = hook.in !== savedHook.in || hook.out !== savedHook.out;
+  // Both points, in before out, or none.
+  const hookValid = (hook.in === null) === (hook.out === null) && (hook.in === null || hook.in < (hook.out ?? 0));
+  const hookSet = hook.in !== null && hook.out !== null && hook.in < hook.out;
+  const dirty = overridesDirty || introDirty || hookDirty;
   const hasOverrides = !isDefault(track.overrides);
 
   const markers: Marker[] = [
@@ -304,12 +340,33 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   if (imported?.intro2_ms != null) {
     markers.push({ id: "intro2", label: t("track.intro2Ends"), ms: imported.intro2_ms, color: "var(--fx)", row: 2 });
   }
-  if (imported?.hook_in_ms != null && imported.hook_out_ms != null && imported.hook_out_ms > imported.hook_in_ms) {
-    regions.push({
-      startMs: imported.hook_in_ms,
-      endMs: imported.hook_out_ms,
-      color: getVar("--deck-b"),
-      label: t("track.hook"),
+  if (hookSet) {
+    regions.push({ startMs: hook.in ?? 0, endMs: hook.out ?? 0, color: getVar("--deck-b"), label: t("track.hook") });
+  }
+  if (hook.in !== null) {
+    markers.push({
+      id: "hook_in",
+      label: t("track.hookIn"),
+      ms: hook.in,
+      color: "var(--deck-b)",
+      row: 3,
+      ...(canEdit && {
+        onDrag: (ms: number) => setHook((h) => ({ ...h, in: Math.max(0, Math.min(ms, (h.out ?? length) - 100)) })),
+      }),
+    });
+  }
+  if (hook.out !== null) {
+    markers.push({
+      id: "hook_out",
+      label: t("track.hookOut"),
+      ms: hook.out,
+      color: "var(--deck-b)",
+      end: true,
+      // A row of its own: a short hook would put both flags on each other.
+      row: 4,
+      ...(canEdit && {
+        onDrag: (ms: number) => setHook((h) => ({ ...h, out: Math.min(length, Math.max(ms, (h.in ?? 0) + 100)) })),
+      }),
     });
   }
 
@@ -464,6 +521,23 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
                 <button type="button" className="btn small" onClick={() => playFrom(cueIn)}>
                   {t("track.fromCueIn")}
                 </button>
+                {(hookSet || looping) && (
+                  <button
+                    type="button"
+                    className={looping ? "btn small primary" : "btn small"}
+                    aria-pressed={looping}
+                    onClick={() => {
+                      if (looping) {
+                        audio.current?.pause();
+                      } else {
+                        playFrom(hook.in ?? 0);
+                        setLooping(true);
+                      }
+                    }}
+                  >
+                    <Icon name={looping ? "stop" : "play"} size={14} /> {looping ? t("track.stopHook") : t("track.loopHook")}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn small"
@@ -518,11 +592,11 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
                 )}
               </span>
             )}
-            {imported?.hook_in_ms != null && imported.hook_out_ms != null && (
+            {hookSet && (
               <span>
                 <span className="swatch" style={{ background: "var(--deck-b)" }} /> {t("track.hook")}{" "}
                 <strong className="num">
-                  {duration(imported.hook_in_ms, true)} – {duration(imported.hook_out_ms, true)}
+                  {duration(hook.in, true)} – {duration(hook.out, true)}
                 </strong>
               </span>
             )}
@@ -543,6 +617,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
             onPlay={() => setPlaying(true)}
             onPause={() => {
               setPlaying(false);
+              setLooping(false);
               // Where it stopped, to the frame.
               if (audio.current) {
                 setPlayhead(audio.current.currentTime * 1000);
@@ -565,16 +640,21 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
           shortTrack={shortTrack}
           intro={intro}
           setIntro={setIntro}
+          hook={hook}
+          setHook={setHook}
+          hookValid={hookValid}
           playhead={playhead}
           onSave={() =>
             saveOverrides.mutate({
               overrides: overridesDirty ? draft : null,
               introMs: introDirty ? intro : undefined,
+              hookPoints: hookDirty ? hook : undefined,
             })
           }
           onRevert={() => {
             setDraft(saved);
             setIntro(savedIntro);
+            setHook(savedHook);
           }}
           onClear={() => clearOverrides.mutate(undefined)}
           saving={saveOverrides.isPending}
@@ -768,6 +848,9 @@ function CueInput({
   );
 }
 
+/** A hook's start and end, on the file's timeline; both null for none. */
+type Hook = { in: number | null; out: number | null };
+
 type Tri = "default" | "on" | "off";
 const tri = (value: boolean | null): Tri => (value === null ? "default" : value ? "on" : "off");
 const fromTri = (value: Tri): boolean | null => (value === "default" ? null : value === "on");
@@ -783,6 +866,9 @@ function OverridesCard({
   shortTrack,
   intro,
   setIntro,
+  hook,
+  setHook,
+  hookValid,
   playhead,
   onSave,
   onRevert,
@@ -796,6 +882,10 @@ function OverridesCard({
   /** Where the vocals start, on the file's timeline. */
   intro: number | null;
   setIntro: (ms: number | null) => void;
+  hook: Hook;
+  setHook: (update: (hook: Hook) => Hook) => void;
+  /** Both points in order, or none: it can be saved. */
+  hookValid: boolean;
   /** Where the preview is, to set the intro there. */
   playhead: number | null;
   canEdit: boolean;
@@ -829,7 +919,7 @@ function OverridesCard({
                 {t("track.revert")}
               </button>
             )}
-            <button type="button" className="btn small primary" disabled={!dirty || saving} onClick={onSave}>
+            <button type="button" className="btn small primary" disabled={!dirty || saving || !hookValid} onClick={onSave}>
               {t("common.save")}
             </button>
           </>
@@ -891,6 +981,46 @@ function OverridesCard({
             </div>
           </Field>
         </div>
+
+        <fieldset>
+          <legend>{t("track.hook")}</legend>
+          <div className="stack">
+            <p className="muted small" style={{ margin: 0 }}>
+              {t("track.hookHelp")}
+            </p>
+            <div className="form-grid">
+              {(["in", "out"] as const).map((end) => (
+                <Field key={end} label={end === "in" ? t("track.hookIn") : t("track.hookOut")}>
+                  <div className="row" style={{ flexWrap: "nowrap" }}>
+                    <CueInput
+                      value={hook[end]}
+                      disabled={disabled}
+                      onChange={(ms) => setHook((h) => ({ ...h, [end]: ms }))}
+                    />
+                    {canEdit && (
+                      <button
+                        type="button"
+                        className="btn small"
+                        disabled={playhead === null}
+                        title={t("track.atPlayheadHelp")}
+                        onClick={() =>
+                          playhead !== null && setHook((h) => ({ ...h, [end]: Math.round(playhead / 100) * 100 }))
+                        }
+                      >
+                        {t("track.introAtPlayhead")}
+                      </button>
+                    )}
+                  </div>
+                </Field>
+              ))}
+            </div>
+            {!hookValid && (
+              <p className="small" style={{ margin: 0, color: "var(--bad)" }}>
+                {t("track.hookInvalid")}
+              </p>
+            )}
+          </div>
+        </fieldset>
 
         <fieldset>
           <legend>{t("track.intoNext")}</legend>

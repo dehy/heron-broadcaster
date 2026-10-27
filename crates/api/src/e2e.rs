@@ -1134,6 +1134,46 @@ async fn library_tracks_overrides_and_categories() {
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
+    // The hook: in before out, within the file; both null remove it.
+    let hook = format!("/tracks/{id}/hook");
+    let (status, markers) = admin
+        .send(
+            Method::PUT,
+            &hook,
+            json!({"hook_in_ms": 500, "hook_out_ms": 2500}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{markers}");
+    assert_eq!(
+        (&markers["hook_in_ms"], &markers["hook_out_ms"]),
+        (&json!(500), &json!(2500))
+    );
+    for wrong in [
+        json!({"hook_in_ms": 2500, "hook_out_ms": 500}),
+        json!({"hook_in_ms": 500, "hook_out_ms": 3_600_000}),
+        json!({"hook_in_ms": 500, "hook_out_ms": null}),
+    ] {
+        let (status, _) = admin.send(Method::PUT, &hook, wrong.clone()).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{wrong}");
+    }
+    let (status, _) = viewer
+        .send(
+            Method::PUT,
+            &hook,
+            json!({"hook_in_ms": null, "hook_out_ms": null}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, markers) = admin
+        .send(
+            Method::PUT,
+            &hook,
+            json!({"hook_in_ms": null, "hook_out_ms": null}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(markers["hook_in_ms"], Value::Null);
+
     let (status, preview) = admin
         .send(
             Method::POST,
