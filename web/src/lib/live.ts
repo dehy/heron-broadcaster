@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // The live WebSocket (/api/v1/live): decks, queue, outputs, positions,
-// levels and track changes, kept in one store that components read slices
+// levels, track changes and the deck EQ, kept in one store that components read slices
 // of. Reconnects with a growing delay when the connection drops.
 
 import { useSyncExternalStore } from "react";
-import type { DeckPosition, Levels, LiveMessage, PlayerState, TrackEvent } from "../api";
+import type { DeckPosition, EqSettings, Levels, LiveMessage, PlayerState, TrackEvent } from "../api";
 
 export interface Positions {
   decks: DeckPosition[];
@@ -21,6 +21,8 @@ export interface LiveState {
   levels: Levels | null;
   /** The most recent track changes, newest first. */
   events: TrackEvent[];
+  /** The deck EQ as last changed while connected, `null` before. */
+  eq: EqSettings | null;
 }
 
 const MAX_EVENTS = 20;
@@ -32,6 +34,7 @@ let state: LiveState = {
   positions: null,
   levels: null,
   events: [],
+  eq: null,
 };
 const listeners = new Set<() => void>();
 let socket: WebSocket | null = null;
@@ -60,6 +63,9 @@ function handle(message: LiveMessage) {
     case "track":
       set({ events: [message.event, ...state.events].slice(0, MAX_EVENTS) });
       break;
+    case "eq":
+      set({ eq: message.settings });
+      break;
   }
 }
 
@@ -83,7 +89,8 @@ function connect() {
   };
   ws.onclose = () => {
     socket = null;
-    set({ connected: false, levels: null });
+    // Changes made while disconnected are not known: read them again.
+    set({ connected: false, levels: null, eq: null });
     if (wanted) {
       retry = setTimeout(connect, delay);
       delay = Math.min(delay * 2, MAX_DELAY_MS);
@@ -106,7 +113,7 @@ export function stopLive() {
   }
   socket?.close();
   socket = null;
-  state = { connected: false, player: undefined, positions: null, levels: null, events: [] };
+  state = { connected: false, player: undefined, positions: null, levels: null, events: [], eq: null };
 }
 
 function subscribe(listener: () => void) {

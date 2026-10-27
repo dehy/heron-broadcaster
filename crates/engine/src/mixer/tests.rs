@@ -5,6 +5,8 @@
 
 use std::f32::consts::{PI, TAU};
 
+use heron_dsp::GraphicEq;
+
 use super::*;
 
 /// Largest difference allowed between a render and its reference.
@@ -482,4 +484,122 @@ fn tracks_without_audio_never_go_on_air() {
     render(&mut mixer, 480, BLOCK_FRAMES);
     assert_eq!(events(&mut handle), [Event::Uncued { entry_id: 1 }]);
     assert!(handle.trash.pop().is_ok());
+}
+
+fn set_eq(handle: &mut MixerHandle, eq: EqTarget, filter_gains_db: [f32; EQ_BANDS], glide: bool) {
+    assert!(
+        handle
+            .commands
+            .push(Command::SetEq {
+                eq,
+                enabled: true,
+                filter_gains_db,
+                glide,
+            })
+            .is_ok()
+    );
+}
+
+/// `samples` through a deck EQ starting at rest.
+fn equalized(samples: &[f32], gains_db: [f32; EQ_BANDS]) -> Vec<f32> {
+    let mut eq = GraphicEq::new(SAMPLE_RATE);
+    eq.restart(true, gains_db);
+    let mut output = samples.to_vec();
+    eq.process(&mut output);
+    output
+}
+
+#[test]
+fn the_music_eq_filters_both_decks_through_a_crossfade() {
+    // The EQ is linear and each deck's starts at rest with its track: the
+    // master bus is the crossfade without EQ, through one EQ.
+    let gains = [6.0, -3.0, 0.0, 4.0, 0.0, -6.0, 3.0, 0.0, 0.0, 2.0];
+    let outgoing = tone(72_000, 440.0, 0.2);
+    let incoming = tone(48_000, 3_000.0, 0.2);
+    let transition = FrameTransition {
+        next_start: 48_000,
+        fade_out: Some(FrameRamp {
+            start: 48_000,
+            length: 12_000,
+            curve: FadeCurve::Linear,
+            level: 0.0,
+        }),
+    };
+    let crossfade = |eq: bool| {
+        let (mut mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
+        if eq {
+            set_eq(&mut handle, EqTarget::Music, gains, false);
+        }
+        cue(
+            &mut handle,
+            track(1, &outgoing),
+            FrameTransition::back_to_back(),
+        );
+        let mut output = render(&mut mixer, 480, BLOCK_FRAMES);
+        cue(&mut handle, track(2, &incoming), transition);
+        output.extend(render(&mut mixer, 96_000 - 480, BLOCK_FRAMES));
+        output
+    };
+    let plain = crossfade(false);
+    assert_matches(&crossfade(true), &equalized(&plain, gains));
+    // And it does change the sound.
+    assert!(
+        plain
+            .iter()
+            .zip(&crossfade(true))
+            .any(|(a, b)| (a - b).abs() > 0.01)
+    );
+}
+
+#[test]
+fn the_fx_eq_leaves_the_decks_alone() {
+    let gains = [12.0; EQ_BANDS];
+    let music = tone(9_600, 440.0, 0.1);
+    let jingle = tone(4_800, 1_000.0, 0.05);
+    let (mut mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
+    set_eq(&mut handle, EqTarget::Fx, gains, false);
+    cue(
+        &mut handle,
+        track(1, &music),
+        FrameTransition::back_to_back(),
+    );
+    assert!(
+        handle
+            .commands
+            .push(Command::PlayFx(track(2, &jingle)))
+            .is_ok()
+    );
+    let output = render(&mut mixer, 9_600, BLOCK_FRAMES);
+    let filtered = equalized(&jingle, gains);
+    let expected: Vec<f32> = music
+        .iter()
+        .enumerate()
+        .map(|(index, sample)| sample + filtered.get(index).copied().unwrap_or(0.0))
+        .collect();
+    assert_matches(&output, &expected);
+}
+
+#[test]
+fn eq_changes_glide_in() {
+    // The 1 kHz band to +12 dB on a 1 kHz tone, while it plays.
+    let mut gains = [0.0; EQ_BANDS];
+    gains[4] = 12.0;
+    let (mut mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
+    cue(
+        &mut handle,
+        track(1, &tone(48_000, 1_000.0, 0.1)),
+        FrameTransition::back_to_back(),
+    );
+    render(&mut mixer, 9_600, BLOCK_FRAMES);
+    set_eq(&mut handle, EqTarget::Music, gains, true);
+    let output = render(&mut mixer, 14_400, BLOCK_FRAMES);
+    let peak = |samples: &[f32]| samples.iter().fold(0.0_f32, |peak, s| peak.max(s.abs()));
+    // Not at once: the first millisecond is still close to the level
+    // before, and the level rises millisecond after millisecond.
+    let peaks: Vec<f32> = output.chunks(48 * CHANNELS).take(50).map(peak).collect();
+    assert!(peaks[0] < 0.12, "{}", peaks[0]);
+    assert!(peaks.windows(2).all(|pair| pair[1] >= pair[0] - 1e-4));
+    // There after 200 ms: 0.1 × 10^(12/20).
+    let level = peak(&output[9_600 * CHANNELS..]);
+    assert!((level - 0.398).abs() < 0.005, "{level}");
 }

@@ -806,6 +806,14 @@ table.table {
 }
 
 /* A label on a track. */
+a.badge-link {
+  text-decoration: none;
+}
+
+a.badge-link:hover {
+  text-decoration: underline;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -1544,4 +1552,143 @@ ul.steps .bar {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   gap: 1rem;
+}
+
+/* Deck EQ ------------------------------------------------------------------ */
+
+.eq {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.eq-curve {
+  width: 100%;
+  height: 140px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+}
+
+.eq-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.eq-zero {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.eq-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.eq-line.off {
+  stroke: var(--muted);
+  stroke-dasharray: 6 4;
+}
+
+.eq-bands {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.eq-band {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.eq-band input[type="range"] {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 1.75rem;
+  height: 9rem;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: ns-resize;
+}
+
+.eq.bypassed .eq-band input[type="range"] {
+  accent-color: var(--muted);
+}
+
+.eq-band .input.num {
+  width: 100%;
+  max-width: 4.25rem;
+  padding: 0.2rem 0.25rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  text-align: center;
+  /* No spinner: the slider is there. */
+  appearance: textfield;
+}
+
+.eq-band .input.num::-webkit-inner-spin-button,
+.eq-band .input.num::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.eq-frequency {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.eq-note {
+  margin: 0;
+}
+
+.eq-presets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.eq-presets li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7rem auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.eq-presets li:first-child {
+  border-top: none;
+}
+
+.eq-mini {
+  width: 7rem;
+  height: 1.75rem;
+}
+
+@media (max-width: 640px) {
+  .eq-band input[type="range"] {
+    width: 1.25rem;
+    height: 7.5rem;
+  }
+
+  .eq-band .input.num {
+    font-size: 0.7rem;
+    padding: 0.15rem 0;
+  }
+
+  .eq-presets li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .eq-mini {
+    display: none;
+  }
 }

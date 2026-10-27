@@ -8,7 +8,8 @@
 //!   engine's reachability change;
 //! - `positions` twice a second;
 //! - `levels` ten times a second (unless `?levels=false`);
-//! - `track` for each track change reported by the engine.
+//! - `track` for each track change reported by the engine;
+//! - `eq` whenever the deck EQ settings change.
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
@@ -48,6 +49,9 @@ pub enum LiveMessage {
     },
     Track {
         event: TrackEvent,
+    },
+    Eq {
+        settings: heron_core::EqSettings,
     },
 }
 
@@ -110,6 +114,7 @@ async fn serve(
 ) -> Result<(), axum::Error> {
     let mut player = state.engine.state();
     let mut events = state.engine.events();
+    let mut eq_changes = state.eq_changes.subscribe();
     let mut levels = with_levels.then(|| state.engine.levels());
 
     let current = player.borrow_and_update().clone();
@@ -142,6 +147,11 @@ async fn serve(
                     send(&mut socket, &LiveMessage::Track { event }).await?;
                 }
                 Ok(LinkEvent::Connected(_)) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => return Ok(()),
+            },
+            eq = eq_changes.recv() => match eq {
+                Ok(settings) => send(&mut socket, &LiveMessage::Eq { settings }).await?,
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => return Ok(()),
             },
             level = async {

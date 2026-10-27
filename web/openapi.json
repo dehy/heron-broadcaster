@@ -1253,6 +1253,157 @@
         }
       }
     },
+    "/api/v1/eq-presets": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Every EQ preset, by name.",
+        "operationId": "list_presets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EqPreset"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Saves gains as a new preset. Operators and admins.",
+        "operationId": "create_preset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EqPresetInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EqPreset"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/eq-presets/{id}": {
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Renames a preset or saves new gains in it. The EQs it was loaded into\nkeep their gains. Operators and admins.",
+        "operationId": "update_preset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EqPresetInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EqPreset"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Deletes a preset. The EQs it was loaded into keep their gains.\nOperators and admins.",
+        "operationId": "delete_preset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/history": {
       "get": {
         "tags": [
@@ -3653,6 +3804,72 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AnalysisSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/eq": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Both deck EQs.",
+        "operationId": "get_eq",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EqSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Replaces both deck EQs and pushes them to the engine at once, where\nthey glide in. Every open live WebSocket gets an `eq` message.\nOperators and admins.",
+        "operationId": "put_eq",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EqSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EqSettings"
                 }
               }
             }
@@ -7057,6 +7274,37 @@
         },
         "additionalProperties": false
       },
+      "DeckEq": {
+        "type": "object",
+        "description": "One deck EQ. Flat and bypassed by default.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "gains_db": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Gain of each band in dB, from 60 Hz up, −12 to +12.",
+            "default": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "DeckName": {
         "type": "string",
         "enum": [
@@ -7514,6 +7762,99 @@
             }
           }
         }
+      },
+      "EqPreset": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "gains_db"
+        ],
+        "properties": {
+          "gains_db": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Gain of each band in dB, from 60 Hz up."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "EqPresetInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "gains_db"
+        ],
+        "properties": {
+          "gains_db": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Gain of each band in dB, from 60 Hz up, −12 to +12."
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique, ignoring case."
+          }
+        },
+        "additionalProperties": false
+      },
+      "EqSettings": {
+        "type": "object",
+        "description": "The two deck EQs.",
+        "properties": {
+          "fx": {
+            "$ref": "#/components/schemas/DeckEq",
+            "description": "The FX player.",
+            "default": {
+              "enabled": false,
+              "gains_db": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          "music": {
+            "$ref": "#/components/schemas/DeckEq",
+            "description": "Decks A and B: they take turns, so they share one EQ.",
+            "default": {
+              "enabled": false,
+              "gains_db": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "Era": {
         "type": "object",
@@ -8332,6 +8673,24 @@
                 "type": "string",
                 "enum": [
                   "track"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "settings",
+              "type"
+            ],
+            "properties": {
+              "settings": {
+                "$ref": "#/components/schemas/EqSettings"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "eq"
                 ]
               }
             }

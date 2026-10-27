@@ -16,6 +16,7 @@ import { Buffer } from "./pages/Buffer";
 import { Categories } from "./pages/Categories";
 import { ClockEditor, Clocks } from "./pages/Clocks";
 import { Dashboard } from "./pages/Dashboard";
+import { Eq } from "./pages/Eq";
 import { History } from "./pages/History";
 import { Labels } from "./pages/Labels";
 import { Library } from "./pages/Library";
@@ -97,6 +98,7 @@ const PAGES: Page[] = [
   { path: "/restrictions", label: "nav.restrictions", icon: "ban" },
   { path: "/rotation", label: "nav.rotation", icon: "log" },
   { path: "/playout", label: "nav.playout", icon: "fade", section: "nav.station" },
+  { path: "/eq", label: "nav.eq", icon: "eq" },
   { path: "/outputs", label: "nav.outputs", icon: "output" },
   { path: "/settings", label: "nav.settings", icon: "settings" },
   { path: "/webhooks", label: "nav.webhooks", icon: "bolt", admin: true },
@@ -145,6 +147,8 @@ function route(pathname: string): ReactNode {
       return <Review />;
     case "/playout":
       return <Playout />;
+    case "/eq":
+      return <Eq />;
     case "/outputs":
       return <Outputs />;
     case "/settings":

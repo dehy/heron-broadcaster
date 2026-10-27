@@ -29,7 +29,7 @@ use crate::queue::QueueManager;
 use crate::sync::ConfigSync;
 use crate::webhooks::Webhooks;
 use crate::{
-    artists, categories, clocks, history, labels, librarian, listeners, live, outputs, player,
+    artists, categories, clocks, eq, history, labels, librarian, listeners, live, outputs, player,
     public, restrictions, rotation, selection, settings, staging, tracks, users, webhooks,
 };
 
@@ -49,6 +49,8 @@ pub struct AppState {
     pub webhooks: Arc<Webhooks>,
     /// Listener statistics from the stream servers.
     pub listeners: Arc<Collector>,
+    /// Deck EQ settings as they change, for the live WebSockets.
+    pub eq_changes: tokio::sync::broadcast::Sender<heron_core::EqSettings>,
 }
 
 #[derive(OpenApi)]
@@ -120,6 +122,7 @@ fn api() -> OpenApiRouter<AppState> {
         .merge(rotation::router())
         .merge(history::router())
         .merge(settings::router())
+        .merge(eq::router())
         .merge(outputs::router())
         .merge(listeners::router())
         .merge(live::router())

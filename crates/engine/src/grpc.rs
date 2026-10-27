@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use heron_core::playout::TrackPlayout;
-use heron_core::{OutputsConfig, PlaySource, PlayoutSettings};
+use heron_core::{EqSettings, OutputsConfig, PlaySource, PlayoutSettings};
 use heron_outputs::OutputState;
 use heron_proto::engine as pb;
 use heron_proto::engine::engine_server::{Engine as EngineRpc, EngineServer};
@@ -209,6 +209,7 @@ impl EngineRpc for EngineService {
         Ok(Response::new(pb::EngineConfig {
             playout_settings_json: to_json(&config.playout)?,
             outputs_json: to_json(&config.outputs)?,
+            eq_settings_json: to_json(&config.eq)?,
         }))
     }
 
@@ -239,6 +240,23 @@ impl EngineRpc for EngineService {
             .map_err(engine_status)?;
         Ok(Response::new(pb::SetOutputsResponse {}))
     }
+
+    async fn set_eq_settings(
+        &self,
+        request: Request<pb::SetEqSettingsRequest>,
+    ) -> Reply<pb::SetEqSettingsResponse> {
+        let settings = read_eq_settings(&request.into_inner().settings_json)?;
+        self.engine.set_eq(settings).map_err(engine_status)?;
+        Ok(Response::new(pb::SetEqSettingsResponse {}))
+    }
+}
+
+/// Reads and checks deck EQ settings sent over gRPC.
+fn read_eq_settings(json: &str) -> Result<EqSettings, Status> {
+    let settings: EqSettings = serde_json::from_str(json)
+        .map_err(|error| Status::invalid_argument(format!("invalid EQ settings: {error}")))?;
+    settings.check().map_err(Status::invalid_argument)?;
+    Ok(settings)
 }
 
 fn to_json<T: serde::Serialize>(value: &T) -> Result<String, Status> {
@@ -258,6 +276,7 @@ fn player_status(error: PlayerError) -> Status {
 fn engine_status(error: EngineError) -> Status {
     match error {
         EngineError::Config(error) => Status::invalid_argument(error.to_string()),
+        EngineError::Player(error) => player_status(error),
         error => Status::internal(error.to_string()),
     }
 }

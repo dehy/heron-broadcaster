@@ -18,7 +18,7 @@ Local users only for now ([Decisions](decisions.md#decisions-made-after-the-hand
 | Role | Can |
 |---|---|
 | `viewer` | See everything except users and secrets (output passwords, the AcoustID key are never sent back to anyone) |
-| `operator` | Also run the station: queue, skip, pause, FX, track overrides and categories, queue and rotation settings, clocks, the schedule, restrictions, artists, simulations, the review of identifications |
+| `operator` | Also run the station: queue, skip, pause, FX, the deck EQ and its presets, track overrides and categories, queue and rotation settings, clocks, the schedule, restrictions, artists, simulations, the review of identifications |
 | `admin` | Also playout, analysis, library and station (time zone) settings, organizing the library and undoing batches, encoder profiles, outputs, webhooks and users |
 
 Create the first admin on the command line (the password is read without echo; from stdin when it is not a terminal):
@@ -53,6 +53,7 @@ Then:
 | Artists | `GET /artists` (`q` matches any name, `limit`, `offset`); `GET`, `PATCH /artists/{id}` (`name`, `musicbrainz_id`); `POST /artists/{id}/merge` (`{"artist_id"}`, merged into this one); `PUT /artist-names/{id}` (`{"artist_id"}` moves the name, `{}` splits it off); `PUT`, `DELETE /artists/{id}/similar/{other}`; `GET /artist-suggestions`, `POST /artist-suggestions/{id}` (`{"accept"}`); `POST /artist-suggestions/musicbrainz` (a library task) |
 | Rotation | `GET`, `POST /clocks`; `GET`, `PUT`, `DELETE /clocks/{id}` (name, `looping` and slots, replaced as a whole); `POST /clocks/preview` (`{"slots", "looping"}`, saved or not: expected starts, categories running short); `GET`, `PUT /schedule` (the whole week); `GET /restrictions` (`target`, `target_id`), `POST /restrictions`, `PUT`, `DELETE /restrictions/{id}`; `GET /rotation/picks` (the selection log: `before`, `track_id`, `limit`); `POST /rotation/simulate` (`hours`, `start_unix_ms`, `seed`, `clock_id`) |
 | History | `GET /history` (`before`, `after`, `track_id`, `exclude_fx`, `limit`) |
+| Deck EQ | `GET`, `PUT /settings/eq`; `GET`, `POST /eq-presets`; `PUT`, `DELETE /eq-presets/{id}` — see [below](#deck-eq) |
 | Settings | `GET`, `PUT /settings/playout`, `/settings/analysis`, `/settings/queue`, `/settings/rotation`, `/settings/station`, `/settings/programming`, `/settings/statistics`; `GET`, `PATCH /settings/library` |
 | Outputs | `GET`, `POST /encoder-profiles`; `GET`, `PUT`, `DELETE /encoder-profiles/{id}`; `GET`, `POST /outputs`; `GET`, `PUT`, `DELETE /outputs/{id}` (with each output's live state, and its `statistics` settings: the stream server's admin credentials) |
 | Webhooks (admins) | `GET`, `POST /webhooks`; `GET`, `PUT`, `DELETE /webhooks/{id}`; `POST /webhooks/{id}/secret`; `POST /webhooks/{id}/test`; `GET /webhooks/{id}/deliveries` (`before`, `status`, `limit`); `POST /webhook-deliveries/{id}/retry` — see [below](#webhooks) |
@@ -60,7 +61,7 @@ Then:
 | Public | `GET /public/now-playing`, `GET /public/history` (`before`, `limit`) — no sign-in, see [below](#public-endpoints) |
 | Live | `GET /live` (WebSocket) |
 
-Every engine action is there: queue (enqueue, remove, clear, move, and replace, which the queue manager uses), transport (skip, pause, resume), FX player, state, levels, track changes (WebSocket), playout settings and outputs. Tracks the engine plays from its fallback directory show with the source `fallback`; autofill does not count them as queued, and anything queued replaces a cued one.
+Every engine action is there: queue (enqueue, remove, clear, move, and replace, which the queue manager uses), transport (skip, pause, resume), FX player, state, levels, track changes (WebSocket), playout settings, outputs and the deck EQ. Tracks the engine plays from its fallback directory show with the source `fallback`; autofill does not count them as queued, and anything queued replaces a cued one.
 
 ## Live WebSocket
 
@@ -71,6 +72,7 @@ Every engine action is there: queue (enqueue, remove, clear, move, and replace, 
 | `state` | On connection, then whenever the decks, the queue, the outputs or the engine's reachability change | `player`: the same as `GET /player`, `null` while the engine is unreachable |
 | `positions` | Twice a second | Each deck's position and length |
 | `levels` | Ten times a second, unless the URL has `?levels=false` | Peak and RMS (dBFS) of the master bus and each deck |
+| `eq` | Whenever the deck EQ settings change | `settings`: the same as `GET /settings/eq` |
 | `track` | Each track change | `event`: `started` or `ended` (with `played_ms` and `reason`: finished, skipped, stopped, replaced) |
 
 The API polls the engine's state twice a second and its levels ten times a second, only while someone watches them.
@@ -176,9 +178,17 @@ Recorded in `play_history` from the engine's track changes: a row when a track s
 
 While the API is down or cannot reach the engine, the engine plays on and those plays are not recorded. When the API reconnects, the tracks still playing are matched with their rows (or recorded, starting when their position says), and the other open rows are closed at that time, without an end reason.
 
+## Deck EQ
+
+The [deck EQ](audio-engine.md#deck-eq) of the music (Decks A and B) and of the FX player, operators only.
+
+- `GET /settings/eq` gives both EQs; `PUT /settings/eq` replaces them (`{"music": {"enabled", "gains_db"}, "fx": {…}}`, ten gains from −12 to +12 dB, from 60 Hz up; anything else is refused with `422`). The API saves them, pushes them to the engine at once and sends the `eq` live message, so every open Deck EQ page follows. The web UI sends a dragged slider at most every 100 ms; the engine glides between the values it receives.
+- Presets: `GET /eq-presets`; `POST /eq-presets` (`{"name", "gains_db"}`, the name unique); `PUT /eq-presets/{id}` (rename, or new gains); `DELETE /eq-presets/{id}`. Loading a preset is the web UI copying its gains into an EQ with `PUT /settings/eq`: presets are never sent to the engine.
+- When the API first reaches an engine that has EQ settings and the database has none (set with `ctl set-eq` before the API ran), it adopts the engine's, as it does for the playout settings.
+
 ## Engine configuration
 
-Playout settings, encoder profiles and outputs are stored in MariaDB and edited through the API. The API pushes them to the engine (`SetPlayoutSettings`, `SetOutputs`) when they change, when the engine starts or becomes reachable again, and checks once a minute; `GET /engine` says whether the engine runs the stored configuration (`synced`, `pending` while it is unreachable, `failed` with the engine's error). Encoder profiles and outputs are checked as a whole configuration before they are saved, the way the engine does: an invalid change saves nothing.
+Playout settings, the deck EQ, encoder profiles and outputs are stored in MariaDB and edited through the API. The API pushes them to the engine (`SetPlayoutSettings`, `SetEqSettings`, `SetOutputs`) when they change, when the engine starts or becomes reachable again, and checks once a minute; `GET /engine` says whether the engine runs the stored configuration (`synced`, `pending` while it is unreachable, `failed` with the engine's error). Encoder profiles and outputs are checked as a whole configuration before they are saved, the way the engine does: an invalid change saves nothing.
 
 Output settings never show their password, nor the stream server's admin password of their statistics settings; an update that leaves one out keeps the stored one. The statistics settings are not pushed to the engine.
 
