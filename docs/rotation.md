@@ -51,6 +51,17 @@ Every category has a **type**: what it holds. **Song**, **Jingle** and **Ad** ex
 
 Types let rules apply to every category of a kind at once, whatever their number: a station with nine jingle categories sets a rule once, on the Jingle type. Categories that existed before types were added got Jingle when the FX player offered them, Song otherwise: a guess to check. The [import from another software](import.md) gives Jingle to the categories it marks as jingles.
 
+### Never two in a row
+
+A category type can be set to **never play twice in a row** (*Categories › Category types*); Jingle is from the start, any other type can be (Ad, Liner…). Then:
+
+- Rotation **never picks a track of that type right after a track of the same type**: what played or is queued just before, whatever its category (nine jingle categories count as one), a track queued by hand included. FX player tracks do not count: they play over the music.
+- A clock slot calling a category of that type right after one is **passed over** for the next slot, like a slot with nothing to play, and the selection log says why (*same type twice in a row*). It is never relaxed: no relaxation step or fallback plays a jingle there instead.
+- Hours without a clock never pick two of them in a row either.
+- The clock editor warns about two slots in a row calling the same such type (the last slot followed by the first one included: the clock starts over), and simulations check the rule like the restrictions.
+
+Types are compared one by one: a jingle right after an ad is allowed.
+
 ### Queue depth
 
 Keep N tracks queued ahead: `queue.min_queued` ([API – Queue manager](api.md#queue-manager)). The default stays 3 rather than the 20 first proposed: tracks are picked for their planned start, and a deep queue plans further ahead, so dayparting and the clock's slots drift with every skip or manual insert.

@@ -26,6 +26,9 @@ pub fn router() -> OpenApiRouter<AppState> {
 pub struct CategoryType {
     pub id: u64,
     pub name: String,
+    /// Never two tracks of this type in a row: rotation passes a slot
+    /// calling it over right after one.
+    pub no_two_in_a_row: bool,
     /// Categories of this type.
     pub categories: i64,
 }
@@ -34,6 +37,9 @@ pub struct CategoryType {
 #[serde(deny_unknown_fields)]
 pub struct CategoryTypeInput {
     pub name: String,
+    /// Kept as it is when missing (off for a new type).
+    #[serde(default)]
+    pub no_two_in_a_row: Option<bool>,
 }
 
 impl CategoryTypeInput {
@@ -46,7 +52,7 @@ impl CategoryTypeInput {
     }
 }
 
-const SELECT: &str = "SELECT t.id, t.name,
+const SELECT: &str = "SELECT t.id, t.name, t.no_two_in_a_row,
            (SELECT COUNT(*) FROM categories c WHERE c.type_id = t.id) AS categories
     FROM category_types t";
 
@@ -89,8 +95,9 @@ async fn create_type(
     Json(input): Json<CategoryTypeInput>,
 ) -> ApiResult<(StatusCode, Json<CategoryType>)> {
     user.require(Role::Operator)?;
-    let id = sqlx::query("INSERT INTO category_types (name) VALUES (?)")
+    let id = sqlx::query("INSERT INTO category_types (name, no_two_in_a_row) VALUES (?, ?)")
         .bind(input.name()?)
+        .bind(input.no_two_in_a_row.unwrap_or(false))
         .execute(&state.pool)
         .await
         .map_err(conflict)?
@@ -98,7 +105,7 @@ async fn create_type(
     Ok((StatusCode::CREATED, Json(find(&state, id).await?)))
 }
 
-/// Renames a type. Operators and admins.
+/// Renames a type, or changes its rules. Operators and admins.
 #[utoipa::path(put, path = "/category-types/{id}", tag = "categories",
     params(("id" = u64, Path)), request_body = CategoryTypeInput,
     responses((status = 200, body = CategoryType), (status = "4XX", body = ErrorBody)))]
@@ -111,12 +118,16 @@ async fn update_type(
     user.require(Role::Operator)?;
     let name = input.name()?;
     find(&state, id).await?;
-    sqlx::query("UPDATE category_types SET name = ? WHERE id = ?")
-        .bind(name)
-        .bind(id)
-        .execute(&state.pool)
-        .await
-        .map_err(conflict)?;
+    sqlx::query(
+        "UPDATE category_types SET name = ?, no_two_in_a_row = COALESCE(?, no_two_in_a_row)
+         WHERE id = ?",
+    )
+    .bind(name)
+    .bind(input.no_two_in_a_row)
+    .bind(id)
+    .execute(&state.pool)
+    .await
+    .map_err(conflict)?;
     Ok(Json(find(&state, id).await?))
 }
 

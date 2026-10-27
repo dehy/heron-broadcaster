@@ -44,6 +44,7 @@ export function TypesCard() {
             <thead>
               <tr>
                 <th>{t("categories.name")}</th>
+                <th title={t("categories.noTwoInARowHint")}>{t("categories.noTwoInARow")}</th>
                 <th className="num">{t("nav.categories")}</th>
                 <th>
                   <span className="visually-hidden">{t("library.actions")}</span>
@@ -89,6 +90,16 @@ function TypeRow({ categoryType, canEdit }: { categoryType: CategoryType; canEdi
       ),
     { invalidate: [["category-types"], ["categories"]], onSuccess: () => setRenaming(null) },
   );
+  const setRule = useAction(
+    (noTwoInARow: boolean) =>
+      unwrap(
+        api.PUT("/api/v1/category-types/{id}", {
+          params: { path: { id: categoryType.id } },
+          body: { name: categoryType.name, no_two_in_a_row: noTwoInARow },
+        }),
+      ),
+    { invalidate: [["category-types"]] },
+  );
   const remove = useAction(
     () => done(api.DELETE("/api/v1/category-types/{id}", { params: { path: { id: categoryType.id } } })),
     { success: t("categories.typeDeleted"), invalidate: [["category-types"]] },
@@ -121,6 +132,15 @@ function TypeRow({ categoryType, canEdit }: { categoryType: CategoryType; canEdi
             </button>
           </form>
         )}
+      </td>
+      <td>
+        <input
+          type="checkbox"
+          checked={categoryType.no_two_in_a_row}
+          disabled={!canEdit || setRule.isPending}
+          aria-label={t("categories.noTwoInARowFor", { name: categoryType.name })}
+          onChange={(event) => setRule.mutate(event.target.checked)}
+        />
       </td>
       <td className="num">{number(categoryType.categories)}</td>
       <td className="actions">

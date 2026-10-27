@@ -1825,6 +1825,82 @@ async fn rotation_follows_clocks_restrictions_and_logs_its_picks() {
         .send(Method::POST, "/rotation/simulate", json!({"hours": 1}))
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Never two jingles in a row: A becomes a jingle category, and a clock
+    // calling it twice running passes the second slot over.
+    let jingle = admin.get("/category-types").await[1].clone();
+    assert_eq!(
+        (&jingle["name"], &jingle["no_two_in_a_row"]),
+        (&json!("Jingle"), &json!(true))
+    );
+    let (status, a) = admin
+        .send(
+            Method::PUT,
+            &format!("/categories/{}", categories[0]),
+            json!({"name": "A", "type_id": jingle["id"], "separation": {"track_min": 1}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{a}");
+    let (status, saved) = admin
+        .send(
+            Method::PUT,
+            &format!("/clocks/{clock_id}"),
+            json!({"name": "Hour", "slots": [
+                {"category_id": categories[0], "method": "random"},
+                {"category_id": categories[0], "method": "random"},
+                {"category_id": categories[1], "method": "random"},
+            ]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let simulate = || async {
+        let (status, report) = admin
+            .send(
+                Method::POST,
+                "/rotation/simulate",
+                json!({"hours": 1, "seed": 3}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{report}");
+        report["simulation"].clone()
+    };
+    let simulation = simulate().await;
+    assert!(
+        simulation["violations"].as_array().unwrap().is_empty(),
+        "{simulation}"
+    );
+    let picks = simulation["picks"].as_array().unwrap();
+    let from_a: Vec<bool> = picks
+        .iter()
+        .map(|p| p["explanation"]["slot_category_id"] == categories[0])
+        .collect();
+    assert!(from_a.iter().any(|a| *a), "jingles still play");
+    assert!(
+        !from_a.windows(2).any(|pair| pair[0] && pair[1]),
+        "two in a row"
+    );
+    assert!(picks.iter().any(|p| {
+        p["explanation"]["skipped_slots"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["reason"] == "same_type_in_a_row")
+    }));
+    // Turned off on the type, the clock plays both slots.
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/category-types/{}", jingle["id"]),
+            json!({"name": "Jingle", "no_two_in_a_row": false}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let simulation = simulate().await;
+    let picks = simulation["picks"].as_array().unwrap();
+    assert!(picks.windows(2).any(|pair| {
+        pair.iter()
+            .all(|p| p["explanation"]["slot_category_id"] == categories[0])
+    }));
     station.stop().await;
 }
 

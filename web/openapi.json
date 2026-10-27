@@ -884,7 +884,7 @@
         "tags": [
           "categories"
         ],
-        "summary": "Renames a type. Operators and admins.",
+        "summary": "Renames a type, or changes its rules. Operators and admins.",
         "operationId": "update_type",
         "parameters": [
           {
@@ -7095,6 +7095,7 @@
         "required": [
           "id",
           "name",
+          "no_two_in_a_row",
           "categories"
         ],
         "properties": {
@@ -7110,6 +7111,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "no_two_in_a_row": {
+            "type": "boolean",
+            "description": "Never two tracks of this type in a row: rotation passes a slot\ncalling it over right after one."
           }
         }
       },
@@ -7121,6 +7126,13 @@
         "properties": {
           "name": {
             "type": "string"
+          },
+          "no_two_in_a_row": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Kept as it is when missing (off for a new type)."
           }
         },
         "additionalProperties": false
@@ -11628,6 +11640,14 @@
         },
         "additionalProperties": false
       },
+      "SkipReason": {
+        "type": "string",
+        "description": "Why a slot was passed over.",
+        "enum": [
+          "nothing_allowed",
+          "same_type_in_a_row"
+        ]
+      },
       "SkippedFile": {
         "type": "object",
         "required": [
@@ -11652,6 +11672,10 @@
         "properties": {
           "category_id": {
             "$ref": "#/components/schemas/u64"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/SkipReason",
+            "description": "Missing in picks logged before reasons were (nothing allowed)."
           },
           "slot": {
             "type": "integer",
@@ -14149,6 +14173,31 @@
                 "type": "integer",
                 "format": "int32",
                 "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Right after a track of a type that never plays twice in a row.",
+            "required": [
+              "pick",
+              "type_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "in_a_row"
+                ]
+              },
+              "pick": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "type_id": {
+                "$ref": "#/components/schemas/u64"
               }
             }
           }

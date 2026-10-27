@@ -305,7 +305,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Renames a type. Operators and admins. */
+        /** Renames a type, or changes its rules. Operators and admins. */
         put: operations["update_type"];
         post?: never;
         /** Deletes a type no category uses. Operators and admins. */
@@ -2453,9 +2453,16 @@ export interface components {
             /** Format: int64 */
             id: number;
             name: string;
+            /**
+             * @description Never two tracks of this type in a row: rotation passes a slot
+             *     calling it over right after one.
+             */
+            no_two_in_a_row: boolean;
         };
         CategoryTypeInput: {
             name: string;
+            /** @description Kept as it is when missing (off for a new type). */
+            no_two_in_a_row?: boolean | null;
         };
         /** @description dBFS, −120 for silence. */
         ChannelLevels: {
@@ -4304,12 +4311,19 @@ export interface components {
              */
             start_unix_ms?: number | null;
         };
+        /**
+         * @description Why a slot was passed over.
+         * @enum {string}
+         */
+        SkipReason: "nothing_allowed" | "same_type_in_a_row";
         SkippedFile: {
             path: string;
             reason: string;
         };
         SkippedSlot: {
             category_id: components["schemas"]["u64"];
+            /** @description Missing in picks logged before reasons were (nothing allowed). */
+            reason?: components["schemas"]["SkipReason"];
             /** Format: int32 */
             slot: number;
         };
@@ -5096,6 +5110,12 @@ export interface components {
             kind: "category";
             /** Format: int32 */
             pick: number;
+        } | {
+            /** @enum {string} */
+            kind: "in_a_row";
+            /** Format: int32 */
+            pick: number;
+            type_id: components["schemas"]["u64"];
         };
         Waveform: {
             /**

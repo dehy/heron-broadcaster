@@ -53,6 +53,7 @@ import { duration } from "../lib/format";
 import { METHODS_LIST, describeOverrides, methodLabel, stepLabel } from "../lib/rotation";
 import { Link, navigate } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
+import { useCategoryTypes } from "./CategoryTypes";
 
 const HOUR_MS = 3_600_000;
 
@@ -530,6 +531,18 @@ function HourCard({
   looping: boolean;
 }) {
   const short = preview?.slots.filter((slot) => slot.short) ?? [];
+  // Two slots in a row calling a type that never plays twice in a row: the
+  // second is passed over (the last slot is followed by the first).
+  const types = useCategoryTypes();
+  const unrepeatable = (slot: ClockSlot | undefined) => {
+    const type = slot && categories.get(slot.category_id)?.type_id;
+    return type != null && types.data?.some((each) => each.id === type && each.no_two_in_a_row) ? type : null;
+  };
+  const inARow = slots.filter((slot, index) => {
+    const type = unrepeatable(slot);
+    const before = index > 0 ? slots[index - 1] : slots.length > 1 ? slots[slots.length - 1] : undefined;
+    return type !== null && unrepeatable(before) === type;
+  });
   const span = looping && preview ? Math.max(HOUR_MS, preview.duration_ms) : HOUR_MS;
   return (
     <Card title={looping ? t("clocks.theLoop") : t("clocks.theHour")}>
@@ -588,6 +601,18 @@ function HourCard({
               </>
             )}
           </dl>
+          {inARow.length > 0 && (
+            <Banner kind="warn">
+              {t("clocks.inARow", {
+                count: inARow.length,
+                types: [
+                  ...new Set(
+                    inARow.map((slot) => categories.get(slot.category_id)?.type_name ?? t("clocks.aCategory")),
+                  ),
+                ].join(", "),
+              })}
+            </Banner>
+          )}
           {short.length > 0 && (
             <Banner kind="warn">
               {t("clocks.tooFew", {
