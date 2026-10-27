@@ -349,7 +349,7 @@ pub async fn last_position(pool: &MySqlPool) -> ApiResult<Option<Position>> {
     }))
 }
 
-fn planned_length_ms(entry: &QueueEntry) -> i64 {
+pub fn planned_length_ms(entry: &QueueEntry) -> i64 {
     let track = &entry.track;
     let end = if track.cue_out_ms > track.cue_in_ms {
         track.cue_out_ms

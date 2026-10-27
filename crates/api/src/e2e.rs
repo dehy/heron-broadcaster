@@ -138,6 +138,9 @@ impl Station {
             history::HistoryRecorder::new(pool.clone()).run(history_events),
         ));
         tasks.push(tokio::spawn(Arc::clone(&webhooks).dispatch(webhook_events)));
+        tasks.push(tokio::spawn(
+            Arc::clone(&webhooks).watch_queue(link.state()),
+        ));
         tasks.push(tokio::spawn(Arc::clone(&webhooks).send_loop()));
         tasks.push(tokio::spawn(Arc::clone(&queue).run()));
         tasks.push(tokio::spawn(Arc::clone(&sync).run()));
@@ -3998,4 +4001,78 @@ async fn medleys_are_planned_rendered_and_linked() {
         admin.get(&format!("/tracks/{track}")).await["title"],
         "Hits of the week"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn queue_changes_reach_webhooks_and_the_public_queue() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    let (mut received, receiver) = webhook_receiver().await;
+    for (name, body) in [
+        ("json", json!({})),
+        (
+            "next",
+            json!({"content_type": "application/json",
+                   "body_template": "{\"next\": \"{{next.title}}\", \"all\": {{upcoming_json}}}"}),
+        ),
+    ] {
+        let mut webhook = json!({"name": name, "url": format!("http://{receiver}/{name}"),
+                                 "events": ["queue.changed"]});
+        webhook
+            .as_object_mut()
+            .unwrap()
+            .extend(body.as_object().unwrap().clone());
+        let (status, created) = admin.send(Method::POST, "/webhooks", webhook).await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+    }
+
+    // Autofill fills the queue and tracks start: queue.changed follows.
+    let mut got = std::collections::HashMap::new();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while got.len() < 2 && Instant::now() < deadline {
+        if let Ok(Some((_, name, headers, body))) =
+            tokio::time::timeout(Duration::from_secs(1), received.recv()).await
+        {
+            assert_eq!(headers["x-heron-event"], "queue.changed");
+            got.insert(name, body);
+        }
+    }
+    let default: Value = serde_json::from_str(&got["json"]).unwrap();
+    assert_eq!(default["event"], "queue.changed");
+    let upcoming = default["upcoming"].as_array().unwrap();
+    assert!(!upcoming.is_empty() && upcoming.len() <= 10, "{default}");
+    for (position, track) in upcoming.iter().enumerate() {
+        assert_eq!(track["position"], position);
+        assert!(
+            track["title"].as_str().unwrap().starts_with("Track "),
+            "{track}"
+        );
+        assert!(track.get("track_id").is_none() && track.get("path").is_none());
+    }
+    let starts: Vec<u64> = upcoming
+        .iter()
+        .map(|track| track["planned_start_unix_ms"].as_u64().unwrap())
+        .collect();
+    assert!(
+        starts.windows(2).all(|pair| pair[0] < pair[1]),
+        "{starts:?}"
+    );
+    let templated: Value = serde_json::from_str(&got["next"]).unwrap();
+    assert_eq!(templated["next"], templated["all"][0]["title"]);
+
+    // The same list without signing in, from any origin.
+    let anyone = reqwest::Client::new();
+    let response = anyone
+        .get(format!("http://{}/api/v1/public/queue", station.api))
+        .header("origin", "https://example.org")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["access-control-allow-origin"], "*");
+    let queue: Value = response.json().await.unwrap();
+    assert!(!queue["upcoming"].as_array().unwrap().is_empty(), "{queue}");
+    assert_eq!(queue["upcoming"][0]["position"], 0);
 }

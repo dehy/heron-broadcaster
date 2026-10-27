@@ -3814,6 +3814,29 @@
         ]
       }
     },
+    "/api/v1/public/queue": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "What comes next, in airing order: the music only (no FX player, no\ntracks that send no metadata), at most 10. No sign-in needed; any\nwebsite may read it.",
+        "operationId": "public_queue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicQueue"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/api/v1/queue": {
       "get": {
         "tags": [
@@ -11584,6 +11607,27 @@
           }
         }
       },
+      "PublicQueue": {
+        "type": "object",
+        "required": [
+          "upcoming",
+          "server_time_unix_ms"
+        ],
+        "properties": {
+          "server_time_unix_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "upcoming": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpcomingTrack"
+            },
+            "description": "In airing order; empty while the engine is unreachable."
+          }
+        }
+      },
       "PublicTrack": {
         "type": "object",
         "description": "What plays on air.",
@@ -15119,6 +15163,53 @@
           }
         }
       },
+      "UpcomingTrack": {
+        "type": "object",
+        "description": "A track waiting in the queue.",
+        "required": [
+          "position",
+          "duration_ms",
+          "planned_start_unix_ms"
+        ],
+        "properties": {
+          "album": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "duration_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "From the cue-in to the cue-out.",
+            "minimum": 0
+          },
+          "planned_start_unix_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it should start, without crossfades, as the Queue page shows it.",
+            "minimum": 0
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "description": "0 for the next one.",
+            "minimum": 0
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "User": {
         "type": "object",
         "required": [
@@ -15356,6 +15447,7 @@
           "track.started",
           "track.ended",
           "track.skipped",
+          "queue.changed",
           "ping"
         ]
       },
