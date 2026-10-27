@@ -497,6 +497,45 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
     setPlan((current) => (current ?? []).map((part, i) => (i === index ? chosen : part)));
   const addPart = (chosen: PartView) => setPlan((current) => [...(current ?? []), chosen]);
 
+  // A mix of the version being edited, outside the library.
+  const [previewTaskId, setPreviewTaskId] = useState<number | null>(null);
+  const [previewed, setPreviewed] = useState<string | null>(null);
+  const previewTask = useTask(previewTaskId);
+  const asPartsBody = (parts: PartView[]) => ({
+    parts: parts.map(({ kind, track_id, from_ms, to_ms }) => ({ kind, track_id, from_ms, to_ms })),
+  });
+  const mixPreview = useAction(
+    () =>
+      unwrap(
+        api.POST("/api/v1/medleys/{id}/preview", {
+          params: { path: { id: medley.id } },
+          body: asPartsBody(plan ?? []),
+        }),
+      ),
+    {
+      onSuccess: (asked) => {
+        setPreviewTaskId(asked.id);
+        setPreviewed(JSON.stringify(asPartsBody(plan ?? [])));
+      },
+    },
+  );
+  const previewReady = previewTask.data?.status === "done";
+  const previewStale = previewed !== null && previewed !== JSON.stringify(asPartsBody(plan ?? []));
+  // Moves a part's start or end by `by` ms, within its file, keeping it at least 0.5 s long.
+  const nudge = (index: number, end: "from_ms" | "to_ms", by: number) =>
+    setPlan((current) =>
+      (current ?? []).map((part, i) => {
+        if (i !== index) {
+          return part;
+        }
+        if (end === "from_ms") {
+          return { ...part, from_ms: Math.max(0, Math.min(part.from_ms + by, part.to_ms - 500)) };
+        }
+        const limit = part.duration_ms ?? Number.POSITIVE_INFINITY;
+        return { ...part, to_ms: Math.min(limit, part.from_ms + 120_000, Math.max(part.to_ms + by, part.from_ms + 500)) };
+      }),
+    );
+
   const status = task.data?.status;
   // The version and its track change once rendered, and again once scanned.
   const { refetch } = useMedleys();
@@ -548,6 +587,16 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
             {plan && (
               <button
                 type="button"
+                className="btn small"
+                disabled={mixPreview.isPending || hooks === 0 || previewTask.data?.status === "pending" || previewTask.data?.status === "running"}
+                onClick={() => mixPreview.mutate(undefined)}
+              >
+                <Icon name="play" size={14} /> {t("medleys.preview")}
+              </button>
+            )}
+            {plan && (
+              <button
+                type="button"
                 className="btn small primary"
                 disabled={render.isPending || hooks === 0}
                 onClick={() => render.mutate(undefined)}
@@ -572,6 +621,18 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
           )}
         </span>
         {!plan && <TaskState task={task.data} />}
+        {plan && previewTaskId !== null && !previewReady && <TaskState task={previewTask.data} />}
+        {plan && previewReady && (
+          <div className="stack" style={{ gap: "0.3rem", alignItems: "center" }}>
+            <audio
+              controls
+              autoPlay
+              src={`/api/v1/medleys/${medley.id}/preview?task=${previewTaskId}`}
+              aria-label={t("medleys.preview")}
+            />
+            {previewStale && <span className="small warn">{t("medleys.previewStale")}</span>}
+          </div>
+        )}
         {!plan && medley.track_id != null && (
           <span className="row small">
             <button
@@ -607,10 +668,24 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
                     <span className={part.kind === "hook" ? "badge accent" : "badge"}>
                       {part.kind === "hook" ? t("medleys.hook") : t("medleys.liner")}
                     </span>
-                    <span className="num">
-                      {duration(part.from_ms, true)} – {duration(part.to_ms, true)} ·{" "}
-                      {duration(part.to_ms - part.from_ms, true)}
-                    </span>
+                    {canEdit && plan ? (
+                      <span className="num row" style={{ gap: "0.25rem", flexWrap: "nowrap" }}>
+                        <Nudge label={t("medleys.startEarlier", { name: trackName(part) })} text="−" onClick={() => nudge(index, "from_ms", -100)} />
+                        {duration(part.from_ms, true)}
+                        <Nudge label={t("medleys.startLater", { name: trackName(part) })} text="+" onClick={() => nudge(index, "from_ms", 100)} />
+                        <span aria-hidden="true">→</span>
+                        <Nudge label={t("medleys.endEarlier", { name: trackName(part) })} text="−" onClick={() => nudge(index, "to_ms", -100)} />
+                        {duration(part.to_ms, true)}
+                        <Nudge label={t("medleys.endLater", { name: trackName(part) })} text="+" onClick={() => nudge(index, "to_ms", 100)} />
+                        {" · "}
+                        {duration(part.to_ms - part.from_ms, true)}
+                      </span>
+                    ) : (
+                      <span className="num">
+                        {duration(part.from_ms, true)} – {duration(part.to_ms, true)} ·{" "}
+                        {duration(part.to_ms - part.from_ms, true)}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="row" style={{ flexWrap: "nowrap", gap: "0.25rem" }}>
@@ -697,6 +772,15 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
         </div>
       )}
     </Card>
+  );
+}
+
+/** Moves a point by 0.1 s. */
+function Nudge({ label, text, onClick }: { label: string; text: string; onClick: () => void }) {
+  return (
+    <button type="button" className="btn small nudge" aria-label={label} title={label} onClick={onClick}>
+      {text}
+    </button>
   );
 }
 

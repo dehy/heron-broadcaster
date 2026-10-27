@@ -218,6 +218,10 @@ impl TaskRunner {
                 json(trash::delete(&self.pool, &self.roots, track_ids).await)
             }
             TaskRequest::EmptyTrash => json(trash::purge(&self.pool, &self.roots, None).await),
+            TaskRequest::PreviewMedley { medley_id, parts } => {
+                let report = medley::preview(&self.pool, &self.roots, *medley_id, parts).await?;
+                serde_json::to_value(report).map_err(|error| error.to_string())
+            }
             TaskRequest::RenderMedley { medley_id } => {
                 let report = medley::render(&self.pool, &self.roots, *medley_id).await?;
                 serde_json::to_value(report).map_err(|error| error.to_string())

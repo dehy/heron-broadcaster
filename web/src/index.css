@@ -1638,6 +1638,13 @@ ul.steps .bar {
   gap: 1rem;
 }
 
+/* A medley part's points, moved by 0.1 s. */
+.btn.nudge {
+  padding: 0 0.35rem;
+  min-height: 0;
+  line-height: 1.3;
+}
+
 /* A preview the browser could not play. */
 .btn.warn {
   color: var(--warn);

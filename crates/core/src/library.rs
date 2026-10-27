@@ -57,6 +57,12 @@ pub enum TaskRequest {
     EmptyTrash,
     /// Mixes a medley's parts into its file (`docs/medleys.md`).
     RenderMedley { medley_id: u64 },
+    /// Mixes `parts` as a render would, into the medley's preview, outside
+    /// the library (`docs/medleys.md`).
+    PreviewMedley {
+        medley_id: u64,
+        parts: Vec<crate::medley::Part>,
+    },
 }
 
 impl TaskRequest {
@@ -74,6 +80,7 @@ impl TaskRequest {
             Self::Delete { .. } => "delete",
             Self::EmptyTrash => "empty_trash",
             Self::RenderMedley { .. } => "render_medley",
+            Self::PreviewMedley { .. } => "preview_medley",
         }
     }
 }

@@ -26,6 +26,10 @@ A song qualifies when it is enabled, its file is there, it is analyzed and audib
 2. Each part can be **listened to** in the browser, **replaced** by a song (or liner) **chosen from a list** or by another random pick, **moved** or **removed**; **Add a hook** and **Add a liner** add one chosen from the same lists. The lists hold the tracks that qualify and are not in the medley yet.
 
    To change a medley already rendered without picking every song anew, **Edit** its current version: the parts stay as they are until changed.
+
+   Each part's start and end can be moved by **0.1 s** (− / +), within its file, to place a hook by ear. This changes the medley only, not the track's hook.
+
+   **Preview** mixes the version being edited exactly as a render would, into a temporary file outside the library (the buffer zone's hidden `.medley-previews/` folder, replaced by the next preview), and plays it. The library does not change; the page says when the version changed since its preview.
 3. **Render** saves the parts and asks the librarian (the only service that writes to the library, see [Library management](library.md)) to mix them into `medleys/medley-<id>.wav`, 48 kHz, 16-bit stereo:
    - each part is brought to the station's loudness target (the [playout settings](audio-engine.md#loudness)) before mixing, so the medley sounds even;
    - parts start and end with short fades, and overlap by the crossfade;
@@ -49,6 +53,8 @@ Deleting a medley removes its recipe; its rendered track stays in the library (d
 | `POST /medleys/{id}/plan` | Picks the parts (writes nothing): `{"parts": [{"kind": "hook" or "liner", "track_id", "from_ms", "to_ms", …}], "qualified"}` |
 | `POST /medleys/{id}/pick` | One more part of a kind, other than the tracks given (`{"kind", "exclude": [track IDs]}`), to replace one |
 | `GET /medleys/{id}/candidates?kind=hook` | Every track that can be a part of that kind (`hook` or `liner`), with the span it would take, by artist and title |
+| `POST /medleys/{id}/preview` | `{"parts": […]}`: mixes them into the medley's preview (a library task, `preview_medley`); nothing is saved |
+| `GET /medleys/{id}/preview` | The last preview's audio (WAV, with range requests) |
 | `POST /medleys/{id}/render` | `{"parts": […]}`: saves them and queues the rendering (a library task, `render_medley`) |
 
 Operators and admins change medleys; every signed-in user reads them.
