@@ -4,7 +4,7 @@ A modern, self-hosted **radio automation system** for Linux. Heron plays music 2
 
 The name comes from "air on" sounding like *héron*: keeping the air on, 24/7.
 
-![The On air page: decks A and B, the next tracks, levels, the FX player, outputs and the engine's state](docs/images/on-air.png)
+![The On air page: decks A and B with their categories, the next tracks, levels, the FX player counting down to a liner, outputs and the engine's state](docs/images/on-air.png)
 
 > **Status:** early development, but it plays. Heron imports and analyzes a music library, takes new music by upload or through an incoming folder and files it once you import it, plays a queue with crossfades to Icecast servers, picks the music with categories, clocks and a weekly schedule, keeps the air on when the database, the API or the library goes away, and when Heron itself is upgraded, tells websites and bots what plays through signed webhooks and public now-playing endpoints, counts its listeners from the stream servers, shapes the sound with a deck EQ, and is operated from a web interface in English or French. Next: the AGC and multiband processing (M10). See the [roadmap](docs/roadmap/README.md).
 
