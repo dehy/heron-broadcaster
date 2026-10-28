@@ -49,7 +49,7 @@ pub struct Recipe {
     pub order: HookOrder,
     /// Hooks shorter than this are left out.
     pub hook_min_ms: u32,
-    /// Hooks longer than this are cut to it.
+    /// Hooks longer than this are left out too: a hook is never cut.
     pub hook_max_ms: u32,
     /// Overlap between two parts.
     pub crossfade_ms: u32,
@@ -196,8 +196,13 @@ impl Picker {
     }
 }
 
-/// The songs whose hook is long enough, shuffled, those not in `avoid`
-/// (the medley's current version) first.
+/// Whether a song's hook lasts between the recipe's shortest and longest.
+fn fits(recipe: &Recipe, song: &Candidate) -> bool {
+    (recipe.hook_min_ms..=recipe.hook_max_ms).contains(&song.to_ms.saturating_sub(song.from_ms))
+}
+
+/// The songs whose hook fits, shuffled, those not in `avoid` (the medley's
+/// current version) first.
 fn usable_songs(
     recipe: &Recipe,
     songs: &[Candidate],
@@ -206,7 +211,7 @@ fn usable_songs(
 ) -> Vec<Candidate> {
     let mut usable: Vec<Candidate> = songs
         .iter()
-        .filter(|song| song.to_ms.saturating_sub(song.from_ms) >= recipe.hook_min_ms)
+        .filter(|song| fits(recipe, song))
         .copied()
         .collect();
     picker.shuffle(&mut usable);
@@ -215,14 +220,13 @@ fn usable_songs(
     usable
 }
 
-fn hook(recipe: &Recipe, song: &Candidate) -> Part {
+/// A song's hook, whole.
+fn hook(song: &Candidate) -> Part {
     Part {
         kind: PartKind::Hook,
         track_id: song.track_id,
         from_ms: song.from_ms,
-        to_ms: song
-            .to_ms
-            .min(song.from_ms.saturating_add(recipe.hook_max_ms)),
+        to_ms: song.to_ms,
     }
 }
 
@@ -235,12 +239,9 @@ fn liner(candidate: &Candidate) -> Part {
     }
 }
 
-/// How many songs can give a hook.
+/// How many songs have a hook that fits.
 pub fn qualified(recipe: &Recipe, songs: &[Candidate]) -> usize {
-    songs
-        .iter()
-        .filter(|song| song.to_ms.saturating_sub(song.from_ms) >= recipe.hook_min_ms)
-        .count()
+    songs.iter().filter(|song| fits(recipe, song)).count()
 }
 
 /// Picks the parts of a medley: `recipe.hooks` hooks (fewer when not
@@ -297,7 +298,7 @@ pub fn plan(
     }
     let count = picked.len();
     for (index, song) in picked.iter().enumerate() {
-        parts.push(hook(recipe, song));
+        parts.push(hook(song));
         let done = index + 1;
         if done < count && done % recipe.liner_every as usize == 0 {
             take_liner(&mut parts);
@@ -309,19 +310,17 @@ pub fn plan(
     parts
 }
 
-/// Every part of `kind` the candidates can give, in their order: hooks cut
-/// to the recipe's maximum (those too short left out), liners whole.
+/// Every part of `kind` the candidates can give, in their order: the hooks
+/// that fit the recipe, liners whole.
 pub fn choices(recipe: &Recipe, kind: PartKind, candidates: &[Candidate]) -> Vec<Part> {
     candidates
         .iter()
         .filter(|candidate| match kind {
-            PartKind::Hook => {
-                candidate.to_ms.saturating_sub(candidate.from_ms) >= recipe.hook_min_ms
-            }
+            PartKind::Hook => fits(recipe, candidate),
             PartKind::Liner => candidate.to_ms > candidate.from_ms,
         })
         .map(|candidate| match kind {
-            PartKind::Hook => hook(recipe, candidate),
+            PartKind::Hook => hook(candidate),
             PartKind::Liner => liner(candidate),
         })
         .collect()
@@ -341,7 +340,7 @@ pub fn pick_one(
         PartKind::Hook => usable_songs(recipe, candidates, avoid, &mut picker)
             .into_iter()
             .find(|song| !exclude.contains(&song.track_id))
-            .map(|song| hook(recipe, &song)),
+            .map(|song| hook(&song)),
         PartKind::Liner => {
             let mut liners: Vec<Candidate> = candidates
                 .iter()
@@ -535,9 +534,20 @@ mod tests {
     }
 
     #[test]
-    fn hooks_are_cut_never_repeated_and_new_songs_come_first() {
-        let songs: Vec<Candidate> = (1..=10)
-            .map(|id| song(id, 1_000, if id == 10 { 3_000 } else { 21_000 }))
+    fn hooks_fit_are_never_repeated_and_new_songs_come_first() {
+        // 10's hook is too short (2 s), 11's too long (12 s): left out, never cut.
+        let songs: Vec<Candidate> = (1..=11)
+            .map(|id| {
+                song(
+                    id,
+                    1_000,
+                    match id {
+                        10 => 3_000,
+                        11 => 13_000,
+                        _ => 7_000,
+                    },
+                )
+            })
             .collect();
         let avoid: HashSet<u64> = [1, 2, 3, 4].into();
         let recipe = Recipe {
@@ -548,14 +558,17 @@ mod tests {
         assert_eq!(parts.len(), 5);
         let ids: HashSet<u64> = parts.iter().map(|part| part.track_id).collect();
         assert_eq!(ids.len(), 5, "never the same song twice");
-        // 5, 6, 7, 8, 9 qualify and were not in the last version; 10's hook is too short.
+        // 5, 6, 7, 8, 9 qualify and were not in the last version.
         assert_eq!(ids, [5, 6, 7, 8, 9].into());
         assert!(
             parts
                 .iter()
-                .all(|part| part.length_ms() == 8_000 && part.from_ms == 1_000)
+                .all(|part| part.length_ms() == 6_000 && part.from_ms == 1_000)
         );
         assert_eq!(qualified(&recipe, &songs), 9);
+        // Only long hooks: nothing qualifies, nothing is cut.
+        let long = [song(20, 0, 30_000)];
+        assert!(plan(&recipe, &long, &[], &HashSet::new(), 1).is_empty());
     }
 
     #[test]
@@ -563,15 +576,15 @@ mod tests {
         let songs = [
             Candidate {
                 year: Some(1999),
-                ..song(1, 0, 9_000)
+                ..song(1, 0, 5_000)
             },
             Candidate {
                 year: None,
-                ..song(2, 0, 9_000)
+                ..song(2, 0, 5_000)
             },
             Candidate {
                 year: Some(1984),
-                ..song(3, 0, 9_000)
+                ..song(3, 0, 5_000)
             },
         ];
         let recipe = Recipe {
@@ -588,7 +601,7 @@ mod tests {
 
     #[test]
     fn liners_go_where_the_recipe_says_never_twice_in_a_row() {
-        let songs: Vec<Candidate> = (1..=6).map(|id| song(id, 0, 10_000)).collect();
+        let songs: Vec<Candidate> = (1..=6).map(|id| song(id, 0, 6_000)).collect();
         let liners = [song(100, 0, 2_000), song(101, 0, 2_000)];
         let recipe = Recipe {
             hooks: 6,
@@ -624,18 +637,18 @@ mod tests {
     }
 
     #[test]
-    fn choices_are_cut_like_picks() {
-        let songs = [song(1, 0, 20_000), song(2, 0, 3_000)];
+    fn choices_are_the_hooks_that_fit() {
+        let songs = [song(1, 0, 6_500), song(2, 0, 3_000), song(3, 0, 20_000)];
         let parts = choices(&recipe(), PartKind::Hook, &songs);
-        assert_eq!(parts.len(), 1, "the short hook is left out");
-        assert_eq!((parts[0].track_id, parts[0].to_ms), (1, 8_000));
+        assert_eq!(parts.len(), 1, "too short and too long left out");
+        assert_eq!((parts[0].track_id, parts[0].to_ms), (1, 6_500));
         let liners = choices(&recipe(), PartKind::Liner, &[song(3, 100, 2_000)]);
         assert_eq!((liners[0].kind, liners[0].to_ms), (PartKind::Liner, 2_000));
     }
 
     #[test]
     fn a_replacement_is_none_of_the_excluded() {
-        let songs: Vec<Candidate> = (1..=3).map(|id| song(id, 0, 10_000)).collect();
+        let songs: Vec<Candidate> = (1..=3).map(|id| song(id, 0, 5_000)).collect();
         let exclude: HashSet<u64> = [1, 2].into();
         let part = pick_one(
             &recipe(),

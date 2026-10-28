@@ -12306,7 +12306,7 @@
           "hook_max_ms": {
             "type": "integer",
             "format": "int32",
-            "description": "Hooks longer than this are cut to it.",
+            "description": "Hooks longer than this are left out too: a hook is never cut.",
             "default": 8000,
             "minimum": 0
           },

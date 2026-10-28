@@ -11,11 +11,11 @@ Medleys are made under *Library › Medleys* (operators and admins; viewers can 
 | **Name** | Shown in the library (the medley track's title) |
 | **Category** | The Heron category the rendered medley goes in, usually a Jingle-type one, so clocks and the FX player can call it |
 | **Songs** | The categories the hooks come from, optionally only the tracks with a label |
-| **Hooks** | How many (2 to 30), their order (as picked, by year, by BPM), and their length: a hook longer than the maximum is cut to it, a hook shorter than the minimum is left out (4 to 8 s by default) |
+| **Hooks** | How many (2 to 30), their order (as picked, by year, by BPM), and their length, a filter: only hooks lasting between the shortest and the longest qualify (4 to 8 s by default); a hook is never cut, but can be shortened by hand while editing |
 | **Crossfade** | Between two parts, 500 ms by default |
 | **Liners** | A category (none for no liners), placed every *N* hooks, optionally also at the start and at the end; **between** the hooks (they take their own time) or **over** the music (each one starts on the transition, the music lowered under it by the ducking level, −10 dB by default) |
 
-A song qualifies when it is enabled, its file is there, it is analyzed and audible, and it has a **hook** (imported from the previous software, see [Importing](import.md), or set on the track's page). The medley's own tracks never qualify.
+A song qualifies when it is enabled, its file is there, it is analyzed and audible, and it has a **hook** (imported from the previous software, see [Importing](import.md), or set on the track's page) whose length fits the recipe. The medley's own tracks never qualify.
 
 ## Building
 

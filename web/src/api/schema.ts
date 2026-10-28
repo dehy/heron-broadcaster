@@ -4530,7 +4530,7 @@ export interface components {
             duck_db: number;
             /**
              * Format: int32
-             * @description Hooks longer than this are cut to it.
+             * @description Hooks longer than this are left out too: a hook is never cut.
              * @default 8000
              */
             hook_max_ms: number;
