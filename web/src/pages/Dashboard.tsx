@@ -10,6 +10,7 @@ import { StereoMeter, LineMeter } from "../components/Meter";
 import { QueueList } from "../components/QueueList";
 import { TrackSearch } from "../components/TrackSearch";
 import { Card, ConfirmButton, Empty, Icon, Modal, PageHead } from "../components/ui";
+import { CategoryChips, type CategoryRef, useTrackCategories } from "../components/TrackCategories";
 import { type PlainKey, number, rich, t } from "../i18n";
 import { ago, bytes, clockTime, duration, trackName } from "../lib/format";
 import { sourceLabel } from "../lib/labels";
@@ -65,6 +66,10 @@ export function Dashboard() {
   const fx = player?.decks.find((deck) => deck.deck === "fx");
   const fxPlaying = Boolean(fx?.entry);
   const onAirDeck = decks.find((deck) => deck.on_air && deck.entry);
+  const deckCategories = useTrackCategories([
+    ...decks.map((deck) => deck.entry?.track.track_id),
+    player?.cued?.track.track_id,
+  ]);
 
   return (
     <>
@@ -122,6 +127,9 @@ export function Dashboard() {
                 paused={player?.paused ?? false}
                 cued={!deck.entry && !deck.on_air ? (player?.cued ?? null) : null}
                 pendingJingle={deck.on_air ? (player?.pending_jingle ?? null) : null}
+                categories={deckCategories.get(
+                  (deck.entry?.track ?? (!deck.on_air ? player?.cued?.track : undefined))?.track_id ?? -1,
+                )}
               />
             ))}
           </div>
@@ -282,6 +290,7 @@ function Deck({
   paused,
   cued,
   pendingJingle,
+  categories,
 }: {
   deck: DeckState;
   paused: boolean;
@@ -289,6 +298,8 @@ function Deck({
   cued: QueueEntry | null;
   /** The jingle waiting to start over this deck's intro. */
   pendingJingle: QueueEntry | null;
+  /** The track's categories. */
+  categories: CategoryRef[] | undefined;
 }) {
   const positions = useLive((live) => live.positions);
   const now = useTicker(deck.on_air ? 10 : 2);
@@ -344,6 +355,7 @@ function Deck({
               <div className="muted ellipsis">
                 {[track.artist, track.album].filter(Boolean).join(" · ") || track.path}
               </div>
+              <CategoryChips categories={categories} />
             </div>
             {cued ? (
               <div className="deck-times">

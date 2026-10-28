@@ -831,6 +831,7 @@ const fr = {
   "categories.description": "Des groupes de pistes (nouveautés, récurrentes, gold…) que les horloges appellent. Une piste peut être dans plusieurs. Une catégorie peut répéter ses pistes plus tôt, ou plus tard, que les règles de séparation de la station.",
   "categories.new": "Nouvelle catégorie",
   "categories.none": "Pas encore de catégorie.",
+  "categories.ofTrack": "Catégories",
   "categories.name": "Nom",
   "categories.separation": "Séparation",
   "categories.stationRules": "règles de la station",

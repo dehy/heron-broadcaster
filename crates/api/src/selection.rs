@@ -7,12 +7,12 @@
 //! the library setting `write_tags` is off.
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use heron_core::LibrarySettings;
 use heron_core::library::{FieldValues, TagField, TaskRequest};
 use serde::{Deserialize, Serialize};
 use sqlx::QueryBuilder;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -26,7 +26,7 @@ use crate::tracks::{ListContext, TrackQuery};
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(apply_labels))
-        .routes(routes!(apply_categories))
+        .routes(routes!(apply_categories, track_categories))
         .routes(routes!(apply_programming))
         .routes(routes!(edit_tags))
         .routes(routes!(override_tags))
@@ -251,6 +251,85 @@ pub struct CategoriesChange {
     /// Categories every selected track is taken out of.
     #[serde(default)]
     pub remove: Vec<u64>,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct TrackCategoriesQuery {
+    /// Track IDs, comma-separated: at most 200.
+    pub ids: String,
+}
+
+/// A category, as the decks and the queue show it.
+#[derive(Clone, Debug, PartialEq, Serialize, ToSchema)]
+pub struct CategoryRef {
+    pub id: u64,
+    pub name: String,
+    /// `#rrggbb`.
+    pub color: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, ToSchema)]
+pub struct TrackCategories {
+    pub track_id: u64,
+    /// By name; empty for none.
+    pub categories: Vec<CategoryRef>,
+}
+
+/// Each track's categories, for up to 200 tracks: what the decks and the
+/// queue show. Unknown tracks are left out.
+#[utoipa::path(get, path = "/tracks/categories", tag = "categories", params(TrackCategoriesQuery),
+    responses((status = 200, body = Vec<TrackCategories>), (status = "4XX", body = ErrorBody)))]
+async fn track_categories(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<TrackCategoriesQuery>,
+) -> ApiResult<Json<Vec<TrackCategories>>> {
+    let mut ids: Vec<u64> = query
+        .ids
+        .split(',')
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(|id| {
+            id.parse()
+                .map_err(|_| ApiError::BadRequest(format!("ids: {id:?} is not an ID")))
+        })
+        .collect::<ApiResult<_>>()?;
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.len() > 200 {
+        return Err(ApiError::BadRequest("ids: at most 200 tracks".to_owned()));
+    }
+    if ids.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    let mut sql = QueryBuilder::new(
+        "SELECT t.id, c.id, c.name, c.color FROM tracks t
+         LEFT JOIN track_categories tc ON tc.track_id = t.id
+         LEFT JOIN categories c ON c.id = tc.category_id
+         WHERE t.id IN (",
+    );
+    let mut separated = sql.separated(", ");
+    for id in &ids {
+        separated.push_bind(*id);
+    }
+    sql.push(") ORDER BY t.id, c.name");
+    // Track, category, name, color.
+    type Row = (u64, Option<u64>, Option<String>, Option<String>);
+    let rows: Vec<Row> = sql.build_query_as().fetch_all(&state.pool).await?;
+    let mut result: Vec<TrackCategories> = Vec::new();
+    for (track_id, category_id, name, color) in rows {
+        if result.last().is_none_or(|last| last.track_id != track_id) {
+            result.push(TrackCategories {
+                track_id,
+                categories: Vec::new(),
+            });
+        }
+        if let (Some(id), Some(name), Some(last)) = (category_id, name, result.last_mut()) {
+            last.categories.push(CategoryRef { id, name, color });
+        }
+    }
+    Ok(Json(result))
 }
 
 /// Puts every selected track in categories, or takes them out. Filling a

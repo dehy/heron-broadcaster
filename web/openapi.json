@@ -6048,6 +6048,47 @@
       }
     },
     "/api/v1/tracks/categories": {
+      "get": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Each track's categories, for up to 200 tracks: what the decks and the\nqueue show. Unknown tracks are left out.",
+        "operationId": "track_categories",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "description": "Track IDs, comma-separated: at most 200.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrackCategories"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "categories"
@@ -7939,6 +7980,31 @@
           }
         },
         "additionalProperties": false
+      },
+      "CategoryRef": {
+        "type": "object",
+        "description": "A category, as the decks and the queue show it.",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          }
+        }
       },
       "CategoryShare": {
         "type": "object",
@@ -14410,6 +14476,27 @@
               "null"
             ],
             "format": "double"
+          }
+        }
+      },
+      "TrackCategories": {
+        "type": "object",
+        "required": [
+          "track_id",
+          "categories"
+        ],
+        "properties": {
+          "categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CategoryRef"
+            },
+            "description": "By name; empty for none."
+          },
+          "track_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },

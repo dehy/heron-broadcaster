@@ -29,6 +29,7 @@ import { positionNow, useLive } from "../lib/live";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 import { jingleStart } from "../lib/intro";
+import { CategoryChips, type CategoryRef, useTrackCategories } from "./TrackCategories";
 import { Empty, Icon } from "./ui";
 
 /**
@@ -71,6 +72,7 @@ export function QueueList({ limit }: { limit?: number }) {
   const player = useLive((live) => live.player);
   const positions = useLive((live) => live.positions);
   const canEdit = useCan("operator");
+  const categoriesOf = useTrackCategories((waiting ?? []).map((entry) => entry.track.track_id));
   const [order, setOrder] = useState<QueueEntry[] | undefined>(waiting);
 
   // The live state wins whenever it changes.
@@ -146,6 +148,7 @@ export function QueueList({ limit }: { limit?: number }) {
               start={starts[index] ?? null}
               cued={player.cued?.entry_id === entry.entry_id}
               overIntro={player.cued_jingle?.entry_id === entry.entry_id}
+              categories={entry.track.track_id != null ? categoriesOf.get(entry.track.track_id) : undefined}
               jingleAt={
                 player.cued_jingle?.entry_id === entry.entry_id && player.cued
                   ? jingleStart(player.cued.track, entry.track)
@@ -180,6 +183,7 @@ function Item({
   start,
   cued,
   overIntro,
+  categories,
   jingleAt,
   canEdit,
   onNext,
@@ -190,6 +194,7 @@ function Item({
   start: number | null;
   cued: boolean;
   overIntro: boolean;
+  categories?: CategoryRef[] | undefined;
   /** Where the jingle starts in the track it plays over. */
   jingleAt?: number | null;
   canEdit: boolean;
@@ -237,6 +242,7 @@ function Item({
             {sourceLabel(track.source)}
           </span>
           <span className="num">{duration(track.cue_out_ms - track.cue_in_ms)}</span>
+          <CategoryChips categories={categories} />
         </div>
       </div>
       <span className="start" title={t("queue.expectedStart")}>
