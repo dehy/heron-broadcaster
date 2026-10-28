@@ -1067,6 +1067,22 @@ async fn library_tracks_overrides_and_categories() {
         .get(&format!("/tracks?category_id={}", category["id"]))
         .await;
     assert_eq!(in_gold["total"], 1);
+    // What the decks and the queue show: each track's categories.
+    let other = station.tracks.iter().find(|track| **track != id).unwrap();
+    let shown = viewer
+        .get(&format!("/tracks/categories?ids={id},{other},{id}"))
+        .await;
+    let shown = shown.as_array().unwrap();
+    assert_eq!(shown.len(), 2, "{shown:?}");
+    let mine = shown.iter().find(|t| t["track_id"] == id).unwrap();
+    assert_eq!(mine["categories"][0]["name"], "Gold");
+    assert_eq!(mine["categories"][0]["id"], category["id"]);
+    let theirs = shown.iter().find(|t| t["track_id"] == *other).unwrap();
+    assert_eq!(theirs["categories"], json!([]));
+    let (status, _) = viewer
+        .request(Method::GET, "/tracks/categories?ids=1,x", None)
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let (status, body) = admin
         .send(

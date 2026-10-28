@@ -822,6 +822,7 @@ const en = {
   "categories.description": "Groups of tracks (current hits, recurrents, gold…) that the clocks call. A track can be in several. A category can repeat its tracks sooner, or later, than the station's separation rules.",
   "categories.new": "New category",
   "categories.none": "No category yet.",
+  "categories.ofTrack": "Categories",
   "categories.name": "Name",
   "categories.separation": "Separation",
   "categories.stationRules": "station rules",

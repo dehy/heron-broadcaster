@@ -1994,7 +1994,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Each track's categories, for up to 200 tracks: what the decks and the
+         *     queue show. Unknown tracks are left out.
+         */
+        get: operations["track_categories"];
         put?: never;
         /**
          * Puts every selected track in categories, or takes them out. Filling a
@@ -2726,6 +2730,14 @@ export interface components {
              * @description A category type; none by default.
              */
             type_id?: number | null;
+        };
+        /** @description A category, as the decks and the queue show it. */
+        CategoryRef: {
+            /** @description `#rrggbb`. */
+            color?: string | null;
+            /** Format: int64 */
+            id: number;
+            name: string;
         };
         CategoryShare: {
             /** Format: int64 */
@@ -5281,6 +5293,12 @@ export interface components {
             integrated_lufs?: number | null;
             /** Format: double */
             true_peak_db?: number | null;
+        };
+        TrackCategories: {
+            /** @description By name; empty for none. */
+            categories: components["schemas"]["CategoryRef"][];
+            /** Format: int64 */
+            track_id: number;
         };
         TrackCategory: {
             /** Format: int64 */
@@ -10249,6 +10267,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrackPage"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    track_categories: {
+        parameters: {
+            query: {
+                /** @description Track IDs, comma-separated: at most 200. */
+                ids: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackCategories"][];
                 };
             };
             "4XX": {
