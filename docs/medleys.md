@@ -35,7 +35,7 @@ A song qualifies when it is enabled, its file is there, it is analyzed and audib
    - The same song is never twice in a medley. Songs that are not in the medley's current version come first, so building again gives new songs while there are enough.
    - The same liner is never used twice in a row.
    - The page says how many songs qualified, when fewer than asked.
-2. Each part can be **listened to** in the browser, **replaced** by a song (or liner) **chosen from a list** or by another random pick, **moved** or **removed**; **Add a hook** and **Add a liner** add one chosen from the same lists. The lists hold the tracks that qualify and are not in the medley yet.
+2. Each part can be **listened to** in the browser (see [Listening](#listening)), **replaced** by a song (or liner) **chosen from a list** or by another random pick, **moved** or **removed**; **Add a hook** and **Add a liner** add one chosen from the same lists. The lists hold the tracks that qualify and are not in the medley yet.
 
    To change a medley already rendered without picking every song anew, **Edit** its current version: the parts stay as they are until changed.
 
@@ -43,12 +43,24 @@ A song qualifies when it is enabled, its file is there, it is analyzed and audib
 
    The **timeline** draws the version as it will sound: the hooks with their crossfades, the liners, and the fade-out. With liners over the music, it shows the extra seconds of each hook under each liner, and the point where the music passes from one hook to the next can be dragged, or moved by 0.1 s, to change how much of the liner is over each hook.
 
+   Every part (hook or liner) can be **dragged** left or right on the timeline to move it in the medley's time; a click without moving plays from that point instead:
+   - a part played after another (a hook, or a liner between the hooks) overlaps the one before it more or less, from 0 (back to back) up to the shorter of the two, instead of by the recipe's crossfade; the parts after it move with it;
+   - a liner over the music moves over the music, the ducking with it; it can then cover a hook's chosen span.
+
+   The list shows how far each part was moved, with − / + (0.1 s) and a way back to where the recipe puts it.
+
    **Preview** mixes the version being edited exactly as a render would, into a temporary file the library scan never sees (the hidden `medleys/.previews/` folder, next to the rendered medleys; replaced by the next preview), and plays it. The library does not change; the page says when the version changed since its preview.
 3. **Render** saves the parts and asks the librarian (the only service that writes to the library, see [Library management](library.md)) to mix them into `medleys/medley-<id>.wav`, 48 kHz, 16-bit stereo:
    - each part is brought to the station's loudness target (the [playout settings](audio-engine.md#loudness)) before mixing, so the medley sounds even;
    - parts start and end with short fades, and overlap by the crossfade;
    - the result is scaled down if it would clip.
 4. The library scanner finds the file: the medley becomes a track, named after the medley, in the category of the [settings](#settings). Rendering again (after editing) replaces the file in place: the track keeps its ID, categories and history, and is analyzed again. A track on air at that moment plays on from the previous file.
+
+## Listening
+
+The page has one player for the medley: the rendered medley, the preview of the version being edited, and each part on its own all play through it, so starting one stops the others. It has play / pause, stop, and the position over the length. While it plays, a vertical bar follows the position on the timeline (inside a part's block when a single part plays).
+
+Clicking a point of the timeline plays from there: the rendered medley, or, while a version is edited, its preview, mixed again first when the version changed since.
 
 ## Liners over the music
 
@@ -96,7 +108,7 @@ Deleting a medley removes its recipe; its rendered track stays in the library (d
 | `POST /medleys/{id}/duplicate` | A new medley with the same recipe and parts, not rendered |
 | `POST /medleys/{id}/pick` | One more part of a kind, other than the tracks given (`{"kind", "exclude": [track IDs], "slot"}`), to replace one; for a liner, `slot` is `start`, `end` or `between` (the default), where the liner goes |
 | `GET /medleys/{id}/candidates?kind=hook` | Every track that can be a part of that kind (`hook` or `liner`, with `slot` for a liner), with the span it would take, by artist and title |
-| `POST /medleys/{id}/preview` | `{"parts": […]}` (each part `{"kind", "track_id", "from_ms", "to_ms", "shift_ms"}`, `shift_ms` for a liner over the music: how far from the middle of its gap the music passes from the hook before to the hook after, positive for more of the liner over the hook before): mixes them into the medley's preview (a library task, `preview_medley`); nothing is saved |
+| `POST /medleys/{id}/preview` | `{"parts": […]}` (each part `{"kind", "track_id", "from_ms", "to_ms", "shift_ms", "move_ms"}`; `shift_ms` for a liner over the music: how far from the middle of its gap the music passes from the hook before to the hook after, positive for more of the liner over the hook before; `move_ms`: how far the part was moved in the medley from where the recipe puts it, negative for earlier): mixes them into the medley's preview (a library task, `preview_medley`); nothing is saved |
 | `GET /medleys/{id}/preview` | The last preview's audio (WAV, with range requests) |
 | `POST /medleys/{id}/render` | `{"parts": […]}`: saves them, names the medley and queues the rendering (a library task, `render_medley`) |
 

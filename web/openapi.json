@@ -11537,6 +11537,11 @@
           "kind": {
             "$ref": "#/components/schemas/PartKind"
           },
+          "move_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How far the part was moved in the medley from where the recipe puts\nit, negative for earlier. See [`layout`]."
+          },
           "shift_ms": {
             "type": "integer",
             "format": "int32",
@@ -11570,6 +11575,7 @@
           "from_ms",
           "to_ms",
           "shift_ms",
+          "move_ms",
           "path"
         ],
         "properties": {
@@ -11596,6 +11602,11 @@
           },
           "kind": {
             "$ref": "#/components/schemas/PartKind"
+          },
+          "move_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How far it was moved in the medley, see `Part`."
           },
           "path": {
             "type": "string"

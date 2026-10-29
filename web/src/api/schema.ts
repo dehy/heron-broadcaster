@@ -4215,6 +4215,12 @@ export interface components {
             kind: components["schemas"]["PartKind"];
             /**
              * Format: int32
+             * @description How far the part was moved in the medley from where the recipe puts
+             *     it, negative for earlier. See [`layout`].
+             */
+            move_ms?: number;
+            /**
+             * Format: int32
              * @description A liner over the music: where in its gap the music passes from the
              *     hook before to the hook after, from the middle; positive for more of
              *     the liner over the hook before. See [`layout`].
@@ -4241,6 +4247,11 @@ export interface components {
              */
             from_ms: number;
             kind: components["schemas"]["PartKind"];
+            /**
+             * Format: int32
+             * @description How far it was moved in the medley, see `Part`.
+             */
+            move_ms: number;
             path: string;
             /**
              * Format: int32

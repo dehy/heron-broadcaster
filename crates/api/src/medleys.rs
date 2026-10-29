@@ -207,6 +207,8 @@ pub struct PartView {
     pub to_ms: u32,
     /// A liner over the music: how its gap is shared, see `Part`.
     pub shift_ms: i32,
+    /// How far it was moved in the medley, see `Part`.
+    pub move_ms: i32,
     pub title: Option<String>,
     pub artist: Option<String>,
     pub path: String,
@@ -348,8 +350,8 @@ async fn find(pool: &MySqlPool, id: u64) -> ApiResult<Medley> {
 }
 
 async fn saved_parts(pool: &MySqlPool, id: u64) -> ApiResult<Vec<Part>> {
-    let rows: Vec<(String, u64, u32, u32, i32)> = sqlx::query_as(
-        "SELECT CAST(kind AS CHAR), track_id, from_ms, to_ms, shift_ms FROM medley_parts
+    let rows: Vec<(String, u64, u32, u32, i32, i32)> = sqlx::query_as(
+        "SELECT CAST(kind AS CHAR), track_id, from_ms, to_ms, shift_ms, move_ms FROM medley_parts
          WHERE medley_id = ? ORDER BY position",
     )
     .bind(id)
@@ -357,7 +359,7 @@ async fn saved_parts(pool: &MySqlPool, id: u64) -> ApiResult<Vec<Part>> {
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(kind, track_id, from_ms, to_ms, shift_ms)| Part {
+        .map(|(kind, track_id, from_ms, to_ms, shift_ms, move_ms)| Part {
             kind: if kind == "liner" {
                 PartKind::Liner
             } else {
@@ -367,6 +369,7 @@ async fn saved_parts(pool: &MySqlPool, id: u64) -> ApiResult<Vec<Part>> {
             from_ms,
             to_ms,
             shift_ms,
+            move_ms,
         })
         .collect())
 }
@@ -396,6 +399,7 @@ async fn views(pool: &MySqlPool, parts: &[Part]) -> ApiResult<Vec<PartView>> {
                 from_ms: part.from_ms,
                 to_ms: part.to_ms,
                 shift_ms: part.shift_ms,
+                move_ms: part.move_ms,
                 title: title.clone(),
                 artist: artist.clone(),
                 path: path.clone(),
@@ -607,8 +611,8 @@ async fn duplicate_medley(
         .await?
         .last_insert_id();
     sqlx::query(
-        "INSERT INTO medley_parts (medley_id, position, kind, track_id, from_ms, to_ms, shift_ms)
-         SELECT ?, position, kind, track_id, from_ms, to_ms, shift_ms
+        "INSERT INTO medley_parts (medley_id, position, kind, track_id, from_ms, to_ms, shift_ms, move_ms)
+         SELECT ?, position, kind, track_id, from_ms, to_ms, shift_ms, move_ms
          FROM medley_parts WHERE medley_id = ?",
     )
     .bind(copy)
@@ -752,7 +756,8 @@ async fn render_medley(
         .execute(&mut *tx)
         .await?;
     let mut query = QueryBuilder::new(
-        "INSERT INTO medley_parts (medley_id, position, kind, track_id, from_ms, to_ms, shift_ms) ",
+        "INSERT INTO medley_parts
+         (medley_id, position, kind, track_id, from_ms, to_ms, shift_ms, move_ms) ",
     );
     query.push_values(parts.iter().enumerate(), |mut row, (position, part)| {
         row.push_bind(id)
@@ -764,7 +769,8 @@ async fn render_medley(
             .push_bind(part.track_id)
             .push_bind(part.from_ms)
             .push_bind(part.to_ms)
-            .push_bind(part.shift_ms);
+            .push_bind(part.shift_ms)
+            .push_bind(part.move_ms);
     });
     query.build().execute(&mut *tx).await?;
     tx.commit().await?;
@@ -838,9 +844,10 @@ async fn check_parts(pool: &MySqlPool, parts: &[Part]) -> ApiResult<()> {
         part.from_ms >= part.to_ms
             || part.length_ms() > MAX_PART_MS
             || part.shift_ms.unsigned_abs() > MAX_PART_MS
+            || part.move_ms.unsigned_abs() > MAX_PART_MS
     }) {
         return Err(ApiError::Invalid(format!(
-            "each part starts before it ends and lasts at most {} s, a liner moves at most as much",
+            "each part starts before it ends, lasts at most {} s and moves at most as much",
             MAX_PART_MS / 1_000
         )));
     }
