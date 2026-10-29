@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { displayName, fadeGain, layout, levelAt, linerSlot, medleyName, moveTo, plannedLength, renderMonth } from "./medley";
+import { displayName, duckRamps, fadeGain, layout, levelAt, linerSlot, medleyName, moveTo, plannedLength, renderMonth } from "./medley";
+
+/** Down over 0.15 s before the liners, back up during them: as medleys were mixed before the placement could be chosen. */
+const beforeAndDuring = { duck_attack_ms: 150, duck_attack_at: "outside", duck_release_at: "inside" } as const;
 
 const parts = [
   { kind: "hook", from_ms: 10_000, to_ms: 17_000 },
@@ -38,7 +41,7 @@ describe("levelAt", () => {
         { kind: "liner", from_ms: 0, to_ms: 2_000 },
         { kind: "hook", from_ms: 30_000, to_ms: 36_000 },
       ],
-      { crossfade_ms: 200, liner_mode: "over", duck_db: -20 },
+      { crossfade_ms: 200, liner_mode: "over", duck_db: -20, ...beforeAndDuring },
     );
     expect(levelAt(over, 0, 8_700)).toBeCloseTo(0.1, 3);
     expect(levelAt(over, 0, 7_000)).toBe(1);
@@ -104,7 +107,7 @@ describe("plannedLength", () => {
 
 // The same cases as heron_core::medley's tests: the two layouts must agree.
 describe("layout", () => {
-  const over = { crossfade_ms: 200, liner_mode: "over" };
+  const over = { crossfade_ms: 200, liner_mode: "over", ...beforeAndDuring };
   const hooks = [
     { kind: "hook", from_ms: 10_000, to_ms: 18_000 },
     { kind: "liner", from_ms: 0, to_ms: 2_000 },
@@ -158,6 +161,28 @@ describe("layout", () => {
     expect(moveTo(parts, between, 0, 400)).toBe(0);
     expect(moveTo(hooks, over, 1, 8_450)).toBe(300);
     expect(moveTo(hooks, over, 1, -100)).toBe(-8_150);
+  });
+
+  it("goes down and comes back up where chosen", () => {
+    // Across the liner's start and end by default: the spans stay clear of the ramps' halves.
+    const across = { crossfade_ms: 200, liner_mode: "over", duck_db: -20 };
+    const medley = layout(hooks, across);
+    const [, liner, second] = medley.parts;
+    expect(liner?.at_ms).toBe(8_150);
+    const lineEnd = (liner?.at_ms ?? 0) + 2_000;
+    expect((second?.at_ms ?? 0) + 30_000 - (second?.from_ms ?? 0)).toBe(lineEnd + 150);
+    const halfway = (1 + 0.1) / 2;
+    expect(levelAt(medley, 0, 8_150)).toBeCloseTo(halfway, 2);
+    expect(levelAt(medley, 2, lineEnd)).toBeCloseTo(halfway, 2);
+    expect(levelAt(medley, 0, 7_990)).toBe(1);
+    expect(levelAt(medley, 2, lineEnd + 160)).toBe(1);
+    // Outside, inside, and inside a liner too short for both.
+    const outside = { attack_ms: 300, attack_at: "outside", release_ms: 300, release_at: "outside" } as const;
+    expect(duckRamps(outside, 1_000, 2_000)).toEqual([700, 1_000, 2_000, 2_300]);
+    const inside = { ...outside, attack_at: "inside", release_at: "inside" } as const;
+    expect(duckRamps(inside, 1_000, 2_000)).toEqual([1_000, 1_300, 1_700, 2_000]);
+    expect(duckRamps(inside, 1_000, 1_400)).toEqual([1_000, 1_200, 1_200, 1_400]);
+    expect(layout(hooks, { ...across, duck_attack_at: "inside", duck_release_at: "inside" }).parts[1]?.at_ms).toBe(8_000);
   });
 
   it("extends one hook for a liner at the start or the end", () => {

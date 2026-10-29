@@ -3749,15 +3749,21 @@ export interface components {
          *     file's.
          */
         Layout: {
+            duck_attack_at?: components["schemas"]["MedleyDuckPlace"];
+            /**
+             * Format: int32
+             * @description How the music went down and came back up; a layout saved before
+             *     these were set went down before the liners over 150 ms, and came
+             *     back up during them.
+             */
+            duck_attack_ms?: number;
             /**
              * Format: double
              * @description How much the music goes down under a liner over it.
              */
             duck_db?: number;
-            /**
-             * Format: int32
-             * @description How long before a liner's end the music comes back up.
-             */
+            duck_release_at?: components["schemas"]["MedleyDuckPlace"];
+            /** Format: int32 */
             duck_release_ms?: number;
             fade_in_curve?: components["schemas"]["MedleyFadeCurve"];
             /**
@@ -4001,14 +4007,24 @@ export interface components {
              * @default 500
              */
             crossfade_ms: number;
+            /** @default across */
+            duck_attack_at: components["schemas"]["MedleyDuckPlace"];
+            /**
+             * Format: int32
+             * @description The music down over 0.3 s across a liner's start, and back up over
+             *     0.3 s across its end, by default.
+             * @default 300
+             */
+            duck_attack_ms: number;
             /**
              * Format: double
              * @default -10
              */
             duck_db: number;
+            /** @default across */
+            duck_release_at: components["schemas"]["MedleyDuckPlace"];
             /**
              * Format: int32
-             * @description The music back up over the last 0.3 s of a liner by default.
              * @default 300
              */
             duck_release_ms: number;
@@ -4056,6 +4072,11 @@ export interface components {
             liner_mode: components["schemas"]["LinerMode"];
         };
         /**
+         * @description Where the music goes down, or comes back up, around a liner over it.
+         * @enum {string}
+         */
+        MedleyDuckPlace: "outside" | "across" | "inside";
+        /**
          * @description How the music fades in at the start of a medley, or out at its end.
          *     For a fade-in, "fast then slow" comes up quickly at first.
          * @enum {string}
@@ -4093,7 +4114,10 @@ export interface components {
              * @description The recipe of a new medley; each medley can change it.
              * @default {
              *       "crossfade_ms": 500,
+             *       "duck_attack_at": "across",
+             *       "duck_attack_ms": 300,
              *       "duck_db": -10,
+             *       "duck_release_at": "across",
              *       "duck_release_ms": 300,
              *       "fade_in_curve": "linear",
              *       "fade_in_ms": 0,
@@ -4791,16 +4815,26 @@ export interface components {
              * @default 500
              */
             crossfade_ms: number;
+            /** @default across */
+            duck_attack_at: components["schemas"]["MedleyDuckPlace"];
+            /**
+             * Format: int32
+             * @description How long the music takes to go down under a liner over it, and
+             *     where.
+             * @default 300
+             */
+            duck_attack_ms: number;
             /**
              * Format: double
              * @description How much the music goes down under a liner played over it.
              * @default -10
              */
             duck_db: number;
+            /** @default across */
+            duck_release_at: components["schemas"]["MedleyDuckPlace"];
             /**
              * Format: int32
-             * @description How long before the end of a liner over the music the music starts
-             *     coming back up: it is at its full level as the liner ends.
+             * @description How long the music takes to come back up, and where.
              * @default 300
              */
             duck_release_ms: number;
