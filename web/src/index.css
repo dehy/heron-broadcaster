@@ -1861,15 +1861,15 @@ ul.steps .bar {
 }
 .medley-timeline .lanes {
   position: relative;
-  height: 5.6rem;
+  height: 7.8rem;
 }
 .medley-timeline .block {
   position: absolute;
-  height: 1.6rem;
+  height: 2.4rem;
   border-radius: 4px;
   overflow: hidden;
   font-size: 0.75rem;
-  line-height: 1.6rem;
+  line-height: 1.3rem;
   white-space: nowrap;
   box-sizing: border-box;
 }
@@ -1895,18 +1895,10 @@ ul.steps .bar {
     color-mix(in srgb, var(--accent) 30%, transparent) 4px 8px
   );
 }
-.medley-timeline .fade-out {
-  position: absolute;
-  top: 1.9rem;
-  height: 3.5rem;
-  background: linear-gradient(to right, transparent, color-mix(in srgb, var(--fg) 30%, transparent));
-  pointer-events: none;
-  border-radius: 0 4px 4px 0;
-}
 .medley-timeline .junction {
   position: absolute;
-  top: 1.7rem;
-  height: 3.9rem;
+  top: 2.5rem;
+  height: 5.5rem;
   width: 1.2rem;
   margin-left: -0.6rem;
   padding: 0;
@@ -2006,4 +1998,22 @@ ul.steps .bar {
     content: "‹";
     margin-right: 0.35rem;
   }
+}
+/* A part's level as mixed, across its block. */
+.medley-timeline .block .level {
+  position: absolute;
+  inset: 2px 0;
+  width: 100%;
+  height: calc(100% - 4px);
+  pointer-events: none;
+}
+.medley-timeline .block .level polyline {
+  fill: none;
+  stroke: var(--fg);
+  stroke-opacity: 0.55;
+  stroke-width: 1.5;
+}
+.medley-timeline .block.liner .level polyline {
+  stroke: var(--fx);
+  stroke-opacity: 0.9;
 }

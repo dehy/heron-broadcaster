@@ -406,6 +406,23 @@ function MedleysCard() {
                       <option value="over">{t("medleys.linerOver")}</option>
                     </select>
                   </Field>
+                  <Field label={`${t("medleys.fadeIn")} (s)`}>
+                    <NumberInput
+                      value={defaults.fade_in_ms / 1000}
+                      min={0}
+                      max={30}
+                      step={0.5}
+                      disabled={disabled}
+                      onChange={(s) => setDefaults({ fade_in_ms: Math.round(s * 1000) })}
+                    />
+                  </Field>
+                  <Field label={t("medleys.fadeInCurve")}>
+                    <FadeCurveSelect
+                      value={defaults.fade_in_curve}
+                      disabled={disabled || defaults.fade_in_ms === 0}
+                      onChange={(fade_in_curve) => setDefaults({ fade_in_curve })}
+                    />
+                  </Field>
                   <Field label={`${t("medleys.fadeOut")} (s)`}>
                     <NumberInput
                       value={defaults.fade_out_ms / 1000}
@@ -416,7 +433,7 @@ function MedleysCard() {
                       onChange={(s) => setDefaults({ fade_out_ms: Math.round(s * 1000) })}
                     />
                   </Field>
-                  <Field label={t("medleys.fadeOutCurve")}>
+                  <Field label={t("medleys.fadeOutCurveLong")}>
                     <FadeCurveSelect
                       value={defaults.fade_out_curve}
                       disabled={disabled || defaults.fade_out_ms === 0}

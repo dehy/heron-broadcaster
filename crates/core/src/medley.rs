@@ -98,6 +98,9 @@ pub struct Recipe {
     pub liner_mode: LinerMode,
     /// How much the music goes down under a liner played over it.
     pub duck_db: f64,
+    /// How long the music fades in at the start; 0 for no fade-in.
+    pub fade_in_ms: u32,
+    pub fade_in_curve: FadeCurve,
     /// How long the music fades out at the end; 0 for no fade-out.
     pub fade_out_ms: u32,
     pub fade_out_curve: FadeCurve,
@@ -119,6 +122,8 @@ impl Default for Recipe {
             liner_at_end: true,
             liner_mode: LinerMode::Between,
             duck_db: -10.0,
+            fade_in_ms: 0,
+            fade_in_curve: FadeCurve::Linear,
             fade_out_ms: 0,
             fade_out_curve: FadeCurve::Linear,
         }
@@ -155,9 +160,9 @@ impl Recipe {
         if !(-40.0..=0.0).contains(&self.duck_db) {
             return Err("ducking is between -40 and 0 dB".to_owned());
         }
-        if self.fade_out_ms > MAX_FADE_OUT_MS {
+        if self.fade_in_ms > MAX_FADE_OUT_MS || self.fade_out_ms > MAX_FADE_OUT_MS {
             return Err(format!(
-                "the fade-out lasts at most {} s",
+                "the fade-in and the fade-out last at most {} s",
                 MAX_FADE_OUT_MS / 1_000
             ));
         }
@@ -165,12 +170,14 @@ impl Recipe {
     }
 }
 
-/// The longest fade-out at the end of a medley.
+/// The longest fade-in, or fade-out, of a medley.
 pub const MAX_FADE_OUT_MS: u32 = 30_000;
 
-/// How the music fades out at the end of a medley.
+/// How the music fades in at the start of a medley, or out at its end.
+/// For a fade-in, "fast then slow" comes up quickly at first.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+// Named apart from the playout's own fade curves in the OpenAPI document.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema), schema(as = MedleyFadeCurve))]
 #[serde(rename_all = "snake_case")]
 pub enum FadeCurve {
     #[default]
@@ -193,6 +200,11 @@ impl FadeCurve {
             Self::SlowThenFast => 1.0 - t * t,
             Self::SCurve => 0.5 * (1.0 + (std::f32::consts::PI * t).cos()),
         }
+    }
+
+    /// The gain `t` of the way through a fade-in: from 0 up to 1.
+    pub fn rise(self, t: f32) -> f32 {
+        1.0 - self.gain(t)
     }
 }
 
@@ -562,17 +574,30 @@ impl Placed {
 /// The medley as it will sound: each part where it goes, in the parts'
 /// order. Saved with a medley when it is rendered, so its timeline is the
 /// file's.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Layout {
     pub parts: Vec<Placed>,
     /// How long the medley lasts.
     pub length_ms: u32,
+    /// Where the music (the hooks) starts: the fade-in starts there.
+    #[serde(default)]
+    pub music_start_ms: u32,
     /// Where the music (the hooks) ends: the fade-out ends there.
     pub music_end_ms: u32,
+    /// The recipe's fade-in.
+    #[serde(default)]
+    pub fade_in_ms: u32,
+    #[serde(default)]
+    pub fade_in_curve: FadeCurve,
     /// The recipe's fade-out.
     #[serde(default)]
     pub fade_out_ms: u32,
+    #[serde(default)]
+    pub fade_out_curve: FadeCurve,
+    /// How much the music goes down under a liner over it.
+    #[serde(default)]
+    pub duck_db: f64,
 }
 
 /// Lays the parts out on the medley's timeline: consecutive parts overlap
@@ -714,15 +739,25 @@ pub fn layout(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layou
             .map(Placed::end_ms)
             .max()
             .unwrap_or(0),
+        music_start_ms: parts
+            .iter()
+            .filter(|part| part.kind == PartKind::Hook)
+            .map(|part| part.at_ms)
+            .min()
+            .unwrap_or(0),
+        fade_in_ms: recipe.fade_in_ms,
+        fade_in_curve: recipe.fade_in_curve,
         fade_out_ms: recipe.fade_out_ms,
+        fade_out_curve: recipe.fade_out_curve,
+        duck_db: recipe.duck_db,
         parts,
     }
 }
 
 /// Mixes the parts where `layout` puts them into one interleaved stereo
 /// stretch, `audio[i]` the span `layout.parts[i]` reads. The music (the
-/// hooks) is lowered under the liners over it and fades out as the recipe
-/// says; the liners are never faded out. The result is scaled down if it
+/// hooks) is lowered under the liners over it and fades in and out as the
+/// recipe says; the liners are never faded. The result is scaled down if it
 /// would clip.
 pub fn mix(recipe: &Recipe, layout: &Layout, audio: &[PartAudio]) -> Vec<f32> {
     let total = ms_to_frames(layout.length_ms);
@@ -766,6 +801,14 @@ pub fn mix(recipe: &Recipe, layout: &Layout, audio: &[PartAudio]) -> Vec<f32> {
                 duck
             };
             *level = level.min(gain);
+        }
+    }
+    if recipe.fade_in_ms > 0 {
+        let start = ms_to_frames(layout.music_start_ms).min(total);
+        let length = ms_to_frames(recipe.fade_in_ms).max(1);
+        for (frame, level) in envelope.iter_mut().enumerate().skip(start).take(length) {
+            let t = (frame - start) as f32 / length as f32;
+            *level *= recipe.fade_in_curve.rise(t);
         }
     }
     if recipe.fade_out_ms > 0 {
@@ -1258,6 +1301,32 @@ mod tests {
         assert!(FadeCurve::SlowThenFast.gain(0.5) > FadeCurve::Linear.gain(0.5));
         assert!((FadeCurve::SCurve.gain(0.5) - 0.5).abs() < 1e-6);
         assert!(FadeCurve::SCurve.gain(0.1) > FadeCurve::Linear.gain(0.1));
+    }
+
+    #[test]
+    fn the_music_fades_in_but_not_an_opening_liner() {
+        let recipe = Recipe {
+            crossfade_ms: 0,
+            fade_in_ms: 1_000,
+            fade_in_curve: FadeCurve::SlowThenFast,
+            ..recipe()
+        };
+        let parts = [
+            part(PartKind::Liner, 0, 1_000),
+            part(PartKind::Hook, 0, 2_000),
+        ];
+        let (layout, out) = mixed(&recipe, &parts, &[], 0.5, 0.25);
+        assert_eq!((layout.music_start_ms, layout.fade_in_ms), (1_000, 1_000));
+        assert!((at(&out, 500) - 0.25).abs() < 1e-6, "the liner is whole");
+        // Halfway through the fade-in: slow then fast is at a quarter.
+        assert!(
+            (at(&out, 1_500) - 0.5 * 0.25).abs() < 1e-3,
+            "{}",
+            at(&out, 1_500)
+        );
+        assert!((at(&out, 2_500) - 0.5).abs() < 1e-6);
+        assert!((FadeCurve::FastThenSlow.rise(0.5) - 0.75).abs() < 1e-6);
+        assert!(FadeCurve::Linear.rise(0.0).abs() < 1e-6);
     }
 
     #[test]

@@ -2,15 +2,16 @@
 
 // A medley as it will sound (docs/medleys.md): the hooks with their
 // crossfades and the extensions under liners over the music, the liners,
-// and the fade-out. Under each liner over the music, the point where the
-// music passes from one hook to the next can be dragged to share the
-// liner between them. Every part can be dragged to move it in the medley;
-// a click without moving plays from that point.
+// and each part's level as mixed (fades, ducking, the medley's fade-in and
+// fade-out). Under each liner over the music, the point where the music
+// passes from one hook to the next can be dragged to share the liner
+// between them. Every part can be dragged to move it in the medley; a
+// click without moving plays from that point.
 
 import { type KeyboardEvent, type PointerEvent, useRef } from "react";
 import { t } from "../i18n";
 import { duration, trackName } from "../lib/format";
-import { type LayoutPart, type Placed, layout, moveTo } from "../lib/medley";
+import { type Layout, type LayoutPart, type Placed, layout, levelAt, moveTo } from "../lib/medley";
 
 export interface TimelinePart extends LayoutPart {
   title?: string | null;
@@ -69,9 +70,9 @@ export function MedleyTimeline({
   onSeek,
 }: {
   parts: readonly TimelinePart[];
-  recipe: { crossfade_ms: number; liner_mode: string; fade_out_ms: number };
+  recipe: Parameters<typeof layout>[1];
   /** The layout the medley's file was rendered with: drawn instead of laying the parts out again. */
-  rendered?: { parts: Placed[]; length_ms: number; music_end_ms: number; fade_out_ms?: number } | null | undefined;
+  rendered?: Layout | null | undefined;
   /** Where the player is on the timeline; none when it does not play. */
   playhead_ms?: number | null | undefined;
   /** Moves the liner at `index` to `shift_ms`; none: read only. */
@@ -85,14 +86,13 @@ export function MedleyTimeline({
   const drag = useRef<{ index: number; x: number; shift: number } | null>(null);
   // A press on the lanes: a click (seek) or, once it moves, a drag of a part.
   const press = useRef<{ index: number | null; x: number; at: number; dragging: boolean } | null>(null);
-  const { parts: placed, length_ms, music_end_ms } = rendered ?? layout(parts, recipe);
+  const shown = rendered ?? layout(parts, recipe);
+  const { parts: placed, length_ms } = shown;
   if (length_ms === 0) {
     return null;
   }
   const pct = (ms: number) => `${(ms / length_ms) * 100}%`;
-  const width = (from: number, to: number) => `${(Math.max(0, to - from) / length_ms) * 100}%`;
   const joins = junctions(parts, placed, recipe.crossfade_ms);
-  const fade = Math.min(rendered ? (rendered.fade_out_ms ?? 0) : recipe.fade_out_ms, music_end_ms);
   let hookLane = 0;
 
   const msAt = (clientX: number) => {
@@ -194,22 +194,16 @@ export function MedleyTimeline({
               key={`${index}-${part.from_ms}`}
               data-index={index}
               className={`block ${item.kind}${item.over ? " over" : ""}${part.move_ms ? " moved" : ""}`}
-              style={{ left: pct(item.at_ms), width: pct(span), top: `${lane * 1.9}rem` }}
+              style={{ left: pct(item.at_ms), width: pct(span), top: `${lane * 2.7}rem` }}
               title={`${name} · ${duration(item.at_ms, true)} – ${duration(item.at_ms + span, true)}`}
             >
               {before > 0 && <span className="extension" style={{ left: 0, width: `${(before / span) * 100}%` }} />}
               {after > 0 && <span className="extension" style={{ right: 0, width: `${(after / span) * 100}%` }} />}
+              <Level medley={shown} index={index} />
               <span className="label">{name}</span>
             </div>
           );
         })}
-        {fade > 0 && (
-          <div
-            className="fade-out"
-            style={{ left: pct(music_end_ms - fade), width: width(music_end_ms - fade, music_end_ms) }}
-            title={t("medleys.fadeOut")}
-          />
-        )}
         {playhead_ms != null && <div className="playhead" style={{ left: pct(playhead_ms) }} />}
         {joins.map((join) => (
           <button
@@ -240,5 +234,37 @@ export function MedleyTimeline({
         <span>{duration(length_ms, true)}</span>
       </div>
     </div>
+  );
+}
+
+/** Points drawn per part for its level. */
+const LEVEL_POINTS = 160;
+
+/**
+ * The level of a part across its block, as mixed: its fades and crossfades,
+ * and for the music the ducking under liners and the medley's fade-in and
+ * fade-out.
+ */
+function Level({ medley, index }: { medley: Layout; index: number }) {
+  const part = medley.parts[index];
+  if (!part) {
+    return null;
+  }
+  const span = part.to_ms - part.from_ms;
+  if (span <= 0) {
+    return null;
+  }
+  const points: string[] = [];
+  for (let i = 0; i <= LEVEL_POINTS; i += 1) {
+    const t = (span * i) / LEVEL_POINTS;
+    // Just inside the block's ends, where the fades reach 0.
+    const at = part.at_ms + Math.min(Math.max(t, 0.5), span - 0.5);
+    const level = levelAt(medley, index, at);
+    points.push(`${((t / span) * 1000).toFixed(1)},${(100 - level * 100).toFixed(1)}`);
+  }
+  return (
+    <svg className="level" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
+      <polyline points={points.join(" ")} vectorEffect="non-scaling-stroke" />
+    </svg>
   );
 }

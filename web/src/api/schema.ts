@@ -3750,6 +3750,18 @@ export interface components {
          */
         Layout: {
             /**
+             * Format: double
+             * @description How much the music goes down under a liner over it.
+             */
+            duck_db?: number;
+            fade_in_curve?: components["schemas"]["MedleyFadeCurve"];
+            /**
+             * Format: int32
+             * @description The recipe's fade-in.
+             */
+            fade_in_ms?: number;
+            fade_out_curve?: components["schemas"]["MedleyFadeCurve"];
+            /**
              * Format: int32
              * @description The recipe's fade-out.
              */
@@ -3764,6 +3776,11 @@ export interface components {
              * @description Where the music (the hooks) ends: the fade-out ends there.
              */
             music_end_ms: number;
+            /**
+             * Format: int32
+             * @description Where the music (the hooks) starts: the fade-in starts there.
+             */
+            music_start_ms?: number;
             parts: components["schemas"]["Placed"][];
         };
         Levels: {
@@ -3985,7 +4002,15 @@ export interface components {
              */
             duck_db: number;
             /** @default linear */
-            fade_out_curve: components["schemas"]["FadeCurve"];
+            fade_in_curve: components["schemas"]["MedleyFadeCurve"];
+            /**
+             * Format: int32
+             * @description No fade-in by default.
+             * @default 0
+             */
+            fade_in_ms: number;
+            /** @default linear */
+            fade_out_curve: components["schemas"]["MedleyFadeCurve"];
             /**
              * Format: int32
              * @description No fade-out by default.
@@ -4019,6 +4044,12 @@ export interface components {
             /** @default between */
             liner_mode: components["schemas"]["LinerMode"];
         };
+        /**
+         * @description How the music fades in at the start of a medley, or out at its end.
+         *     For a fade-in, "fast then slow" comes up quickly at first.
+         * @enum {string}
+         */
+        MedleyFadeCurve: "linear" | "fast_then_slow" | "slow_then_fast" | "s_curve";
         MedleyInput: {
             recipe?: components["schemas"]["Recipe"];
         };
@@ -4052,6 +4083,8 @@ export interface components {
              * @default {
              *       "crossfade_ms": 500,
              *       "duck_db": -10,
+             *       "fade_in_curve": "linear",
+             *       "fade_in_ms": 0,
              *       "fade_out_curve": "linear",
              *       "fade_out_ms": 0,
              *       "hook_max_ms": 8000,
@@ -4753,7 +4786,15 @@ export interface components {
              */
             duck_db: number;
             /** @default linear */
-            fade_out_curve: components["schemas"]["FadeCurve"];
+            fade_in_curve: components["schemas"]["MedleyFadeCurve"];
+            /**
+             * Format: int32
+             * @description How long the music fades in at the start; 0 for no fade-in.
+             * @default 0
+             */
+            fade_in_ms: number;
+            /** @default linear */
+            fade_out_curve: components["schemas"]["MedleyFadeCurve"];
             /**
              * Format: int32
              * @description How long the music fades out at the end; 0 for no fade-out.
