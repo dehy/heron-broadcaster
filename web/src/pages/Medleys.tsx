@@ -799,12 +799,20 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
           {plan && qualified !== null && qualified < medley.recipe.hooks && (
             <> · {t("medleys.fewSongs", { qualified: number(qualified), wanted: number(medley.recipe.hooks) })}</>
           )}
+          {/* On the same line, its room kept while hidden: nothing below moves when it shows. */}
+          {plan && previewSource !== null && (
+            <span className="warn" style={{ visibility: previewStale ? "visible" : "hidden" }} aria-hidden={!previewStale}>
+              {" · "}
+              {t("medleys.previewStale")}
+            </span>
+          )}
         </span>
         {nextName && hooks > 0 && (
           <span className="small muted">{t("medleys.nextName", { name: nextName })}</span>
         )}
         {!plan && <TaskState task={task.data} />}
-        {plan && previewTaskId !== null && !previewReady && <TaskState task={previewTask.data} />}
+        {/* While it mixes, the player says so on its own line; a failure shows here. */}
+        {plan && previewTask.data?.status === "failed" && <TaskState task={previewTask.data} />}
         {parts.length > 0 && !rendering && (plan || medley.track_id != null) && (
           <div className="medley-player small" role="group" aria-label={t("medleys.player")}>
             <button
@@ -844,7 +852,6 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
             {!plan && medley.track_id != null && <Link to={`/library/${medley.track_id}`}>{t("medleys.openTrack")}</Link>}
           </div>
         )}
-        {plan && previewStale && <span className="small warn">{t("medleys.previewStale")}</span>}
         {outOfStep && <span className="small warn">{t("medleys.timelineOutOfStep")}</span>}
         {!plan && medley.path && medley.track_id == null && status === "done" && (
           <span className="small muted">{t("medleys.waitingScan")}</span>
