@@ -1012,8 +1012,8 @@ export interface paths {
         };
         get: operations["get_medley"];
         /**
-         * Renames a medley or changes its recipe (applied on its next render).
-         *     Operators and admins.
+         * Changes a medley's recipe (applied on its next build). Operators and
+         *     admins.
          */
         put: operations["update_medley"];
         post?: never;
@@ -1057,8 +1057,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * A new medley with the same recipe, category and parts, not rendered.
-         *     Operators and admins.
+         * A new medley with the same recipe and parts, not rendered (no name
+         *     until it is). Operators and admins.
          */
         post: operations["duplicate_medley"];
         delete?: never;
@@ -1135,8 +1135,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Saves the parts as the medley's version and asks heron-librarian to
-         *     mix them into its file. Operators and admins.
+         * Saves the parts as the medley's version, names the medley after its
+         *     hooks and asks heron-librarian to mix them into its file. Operators and
+         *     admins.
          */
         post: operations["render_medley"];
         delete?: never;
@@ -1582,6 +1583,27 @@ export interface paths {
         head?: never;
         /** Changes some library settings; the others are kept. Admins only. */
         patch: operations["patch_library"];
+        trace?: never;
+    };
+    "/api/v1/settings/medleys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The medley settings. */
+        get: operations["get_settings"];
+        /**
+         * Replaces the medley settings (missing fields take the defaults). Tracks
+         *     already rendered keep their categories. Operators and admins.
+         */
+        put: operations["put_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/settings/playout": {
@@ -3068,10 +3090,6 @@ export interface components {
              */
             discarded: number;
         };
-        DuplicateRequest: {
-            /** @description The new medley's name ("Name (copy)", in the user's language). */
-            name: string;
-        };
         /** @description How the engine will play the track: analysis and overrides combined. */
         EffectivePlayout: {
             /** Format: int32 */
@@ -3812,6 +3830,12 @@ export interface components {
         };
         /** @enum {string} */
         LinerMode: "between" | "over";
+        /**
+         * @description Where a liner goes in a medley: its liners come from a category of
+         *     their own at the start and at the end, when the settings have one.
+         * @enum {string}
+         */
+        LinerSlot: "start" | "between" | "end";
         ListenersNow: {
             /** @description Each enabled output read at the last minute. */
             outputs: components["schemas"]["OutputListeners"][];
@@ -3874,15 +3898,10 @@ export interface components {
             target_lufs: number;
         };
         Medley: {
-            /**
-             * Format: int64
-             * @description Where the rendered medley goes.
-             */
-            category_id?: number | null;
-            category_name?: string | null;
             /** Format: int64 */
             id: number;
-            name: string;
+            /** @description Given at each render, from its hooks; none until rendered. */
+            name?: string | null;
             /** @description Its current version, in order (empty until rendered once). */
             parts: components["schemas"]["PartView"][];
             /** @description The rendered file, relative to the library root. */
@@ -3904,10 +3923,46 @@ export interface components {
              */
             track_id?: number | null;
         };
+        /** @description A recipe without its songs: the defaults of a new medley. */
+        MedleyDefaults: {
+            /**
+             * Format: int32
+             * @default 500
+             */
+            crossfade_ms: number;
+            /**
+             * Format: double
+             * @default -10
+             */
+            duck_db: number;
+            /**
+             * Format: int32
+             * @default 8000
+             */
+            hook_max_ms: number;
+            /**
+             * Format: int32
+             * @default 4000
+             */
+            hook_min_ms: number;
+            /**
+             * Format: int32
+             * @default 3
+             */
+            hooks: number;
+            /** @default true */
+            liner_at_end: boolean;
+            /** @default true */
+            liner_at_start: boolean;
+            /**
+             * Format: int32
+             * @default 1
+             */
+            liner_every: number;
+            /** @default between */
+            liner_mode: components["schemas"]["LinerMode"];
+        };
         MedleyInput: {
-            /** Format: int64 */
-            category_id?: number | null;
-            name: string;
             recipe?: components["schemas"]["Recipe"];
         };
         /** @description Parts picked from the recipe, not saved. */
@@ -3919,6 +3974,54 @@ export interface components {
              *     shorter medley.
              */
             qualified: number;
+        };
+        /** @description What every medley shares, and the recipe of a new one. */
+        MedleySettings: {
+            /**
+             * Format: int64
+             * @description The category rendered medleys go in (their track's), usually a
+             *     Jingle-type one.
+             * @default null
+             */
+            category_id: number | null;
+            /**
+             * Format: int64
+             * @description Where the liner at the end comes from; the liner category when unset.
+             * @default null
+             */
+            closing_liner_category_id: number | null;
+            /**
+             * @description The recipe of a new medley; each medley can change it.
+             * @default {
+             *       "crossfade_ms": 500,
+             *       "duck_db": -10,
+             *       "hook_max_ms": 8000,
+             *       "hook_min_ms": 4000,
+             *       "hooks": 3,
+             *       "liner_at_end": true,
+             *       "liner_at_start": true,
+             *       "liner_every": 1,
+             *       "liner_mode": "between"
+             *     }
+             */
+            defaults: components["schemas"]["MedleyDefaults"];
+            /**
+             * Format: int64
+             * @description Where the liners come from.
+             * @default null
+             */
+            liner_category_id: number | null;
+            /**
+             * @description Medleys are named after their hooks' artists, or titles.
+             * @default artists
+             */
+            name_from: components["schemas"]["NameFrom"];
+            /**
+             * Format: int64
+             * @description Where the liner at the start comes from; the liner category when unset.
+             * @default null
+             */
+            opening_liner_category_id: number | null;
         };
         MergeRequest: {
             /**
@@ -3958,6 +4061,8 @@ export interface components {
              */
             position: number;
         };
+        /** @enum {string} */
+        NameFrom: "artists" | "titles";
         NewGroup: {
             /** @description What the files are, for people (`Album 2024`, the dropped folder). */
             name: string;
@@ -4184,6 +4289,8 @@ export interface components {
             /** @description Tracks not to pick (those already in the plan). */
             exclude?: number[];
             kind: components["schemas"]["PartKind"];
+            /** @description Where the liner goes, for a liner. */
+            slot?: components["schemas"]["LinerSlot"];
         };
         PlannedMove: {
             /** @description Relative to the library root. */
@@ -4555,7 +4662,7 @@ export interface components {
             /**
              * Format: int32
              * @description How many hooks.
-             * @default 6
+             * @default 3
              */
             hooks: number;
             /**
@@ -4564,16 +4671,10 @@ export interface components {
              * @default null
              */
             label_id: number | null;
-            /** @default false */
+            /** @default true */
             liner_at_end: boolean;
-            /** @default false */
+            /** @default true */
             liner_at_start: boolean;
-            /**
-             * Format: int64
-             * @description Where the liners come from; none for no liners.
-             * @default null
-             */
-            liner_category_id: number | null;
             /**
              * Format: int32
              * @description A liner after every this many hooks.
@@ -4582,6 +4683,12 @@ export interface components {
             liner_every: number;
             /** @default between */
             liner_mode: components["schemas"]["LinerMode"];
+            /**
+             * @description Liners between or over the hooks, from the categories of the medley
+             *     settings; off for none.
+             * @default true
+             */
+            liners: boolean;
             /** @default picked */
             order: components["schemas"]["HookOrder"];
         };
@@ -8109,6 +8216,8 @@ export interface operations {
         parameters: {
             query: {
                 kind: components["schemas"]["PartKind"];
+                /** @description Where the liner goes, for a liner: `between` by default. */
+                slot?: "start" | "between" | "end";
             };
             header?: never;
             path: {
@@ -8145,11 +8254,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DuplicateRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             201: {
                 headers: {
@@ -9405,6 +9510,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibrarySettingsView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MedleySettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MedleySettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MedleySettings"];
                 };
             };
             "4XX": {

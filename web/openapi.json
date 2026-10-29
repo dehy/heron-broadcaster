@@ -3055,7 +3055,7 @@
         "tags": [
           "medleys"
         ],
-        "summary": "Renames a medley or changes its recipe (applied on its next render).\nOperators and admins.",
+        "summary": "Changes a medley's recipe (applied on its next build). Operators and\nadmins.",
         "operationId": "update_medley",
         "parameters": [
           {
@@ -3157,6 +3157,21 @@
             "schema": {
               "$ref": "#/components/schemas/PartKind"
             }
+          },
+          {
+            "name": "slot",
+            "in": "query",
+            "description": "Where the liner goes, for a liner: `between` by default.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Where a liner goes in a medley: its liners come from a category of\ntheir own at the start and at the end, when the settings have one.",
+              "enum": [
+                "start",
+                "between",
+                "end"
+              ]
+            }
           }
         ],
         "responses": {
@@ -3189,7 +3204,7 @@
         "tags": [
           "medleys"
         ],
-        "summary": "A new medley with the same recipe, category and parts, not rendered.\nOperators and admins.",
+        "summary": "A new medley with the same recipe and parts, not rendered (no name\nuntil it is). Operators and admins.",
         "operationId": "duplicate_medley",
         "parameters": [
           {
@@ -3203,16 +3218,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DuplicateRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "201": {
             "content": {
@@ -3418,7 +3423,7 @@
         "tags": [
           "medleys"
         ],
-        "summary": "Saves the parts as the medley's version and asks heron-librarian to\nmix them into its file. Operators and admins.",
+        "summary": "Saves the parts as the medley's version, names the medley after its\nhooks and asks heron-librarian to mix them into its file. Operators and\nadmins.",
         "operationId": "render_medley",
         "parameters": [
           {
@@ -4782,6 +4787,72 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LibrarySettingsView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/medleys": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "The medley settings.",
+        "operationId": "get_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MedleySettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Replaces the medley settings (missing fields take the defaults). Tracks\nalready rendered keep their categories. Operators and admins.",
+        "operationId": "put_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MedleySettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MedleySettings"
                 }
               }
             }
@@ -8743,19 +8814,6 @@
           }
         }
       },
-      "DuplicateRequest": {
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "The new medley's name (\"Name (copy)\", in the user's language)."
-          }
-        },
-        "additionalProperties": false
-      },
       "EffectivePlayout": {
         "type": "object",
         "description": "How the engine will play the track: analysis and overrides combined.",
@@ -10534,6 +10592,15 @@
           "over"
         ]
       },
+      "LinerSlot": {
+        "type": "string",
+        "description": "Where a liner goes in a medley: its liners come from a category of\ntheir own at the start and at the end, when the settings have one.",
+        "enum": [
+          "start",
+          "between",
+          "end"
+        ]
+      },
       "ListenersNow": {
         "type": "object",
         "required": [
@@ -10717,33 +10784,21 @@
         "type": "object",
         "required": [
           "id",
-          "name",
           "recipe",
           "parts"
         ],
         "properties": {
-          "category_id": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Where the rendered medley goes.",
-            "minimum": 0
-          },
-          "category_name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "id": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
           },
           "name": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Given at each render, from its hooks; none until rendered."
           },
           "parts": {
             "type": "array",
@@ -10802,23 +10857,63 @@
           }
         }
       },
-      "MedleyInput": {
+      "MedleyDefaults": {
         "type": "object",
-        "required": [
-          "name"
-        ],
+        "description": "A recipe without its songs: the defaults of a new medley.",
         "properties": {
-          "category_id": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
+          "crossfade_ms": {
+            "type": "integer",
+            "format": "int32",
+            "default": 500,
             "minimum": 0
           },
-          "name": {
-            "type": "string"
+          "duck_db": {
+            "type": "number",
+            "format": "double",
+            "default": -10.0
           },
+          "hook_max_ms": {
+            "type": "integer",
+            "format": "int32",
+            "default": 8000,
+            "minimum": 0
+          },
+          "hook_min_ms": {
+            "type": "integer",
+            "format": "int32",
+            "default": 4000,
+            "minimum": 0
+          },
+          "hooks": {
+            "type": "integer",
+            "format": "int32",
+            "default": 3,
+            "minimum": 0
+          },
+          "liner_at_end": {
+            "type": "boolean",
+            "default": true
+          },
+          "liner_at_start": {
+            "type": "boolean",
+            "default": true
+          },
+          "liner_every": {
+            "type": "integer",
+            "format": "int32",
+            "default": 1,
+            "minimum": 0
+          },
+          "liner_mode": {
+            "$ref": "#/components/schemas/LinerMode",
+            "default": "between"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MedleyInput": {
+        "type": "object",
+        "properties": {
           "recipe": {
             "$ref": "#/components/schemas/Recipe"
           }
@@ -10846,6 +10941,73 @@
             "minimum": 0
           }
         }
+      },
+      "MedleySettings": {
+        "type": "object",
+        "description": "What every medley shares, and the recipe of a new one.",
+        "properties": {
+          "category_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The category rendered medleys go in (their track's), usually a\nJingle-type one.",
+            "default": null,
+            "minimum": 0
+          },
+          "closing_liner_category_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Where the liner at the end comes from; the liner category when unset.",
+            "default": null,
+            "minimum": 0
+          },
+          "defaults": {
+            "$ref": "#/components/schemas/MedleyDefaults",
+            "description": "The recipe of a new medley; each medley can change it.",
+            "default": {
+              "crossfade_ms": 500,
+              "duck_db": -10.0,
+              "hook_max_ms": 8000,
+              "hook_min_ms": 4000,
+              "hooks": 3,
+              "liner_at_end": true,
+              "liner_at_start": true,
+              "liner_every": 1,
+              "liner_mode": "between"
+            }
+          },
+          "liner_category_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Where the liners come from.",
+            "default": null,
+            "minimum": 0
+          },
+          "name_from": {
+            "$ref": "#/components/schemas/NameFrom",
+            "description": "Medleys are named after their hooks' artists, or titles.",
+            "default": "artists"
+          },
+          "opening_liner_category_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Where the liner at the start comes from; the liner category when unset.",
+            "default": null,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "MergeRequest": {
         "type": "object",
@@ -10926,6 +11088,13 @@
           }
         },
         "additionalProperties": false
+      },
+      "NameFrom": {
+        "type": "string",
+        "enum": [
+          "artists",
+          "titles"
+        ]
       },
       "NewGroup": {
         "type": "object",
@@ -11550,6 +11719,10 @@
           },
           "kind": {
             "$ref": "#/components/schemas/PartKind"
+          },
+          "slot": {
+            "$ref": "#/components/schemas/LinerSlot",
+            "description": "Where the liner goes, for a liner."
           }
         },
         "additionalProperties": false
@@ -12387,7 +12560,7 @@
             "type": "integer",
             "format": "int32",
             "description": "How many hooks.",
-            "default": 6,
+            "default": 3,
             "minimum": 0
           },
           "label_id": {
@@ -12402,21 +12575,11 @@
           },
           "liner_at_end": {
             "type": "boolean",
-            "default": false
+            "default": true
           },
           "liner_at_start": {
             "type": "boolean",
-            "default": false
-          },
-          "liner_category_id": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Where the liners come from; none for no liners.",
-            "default": null,
-            "minimum": 0
+            "default": true
           },
           "liner_every": {
             "type": "integer",
@@ -12428,6 +12591,11 @@
           "liner_mode": {
             "$ref": "#/components/schemas/LinerMode",
             "default": "between"
+          },
+          "liners": {
+            "type": "boolean",
+            "description": "Liners between or over the hooks, from the categories of the medley\nsettings; off for none.",
+            "default": true
           },
           "order": {
             "$ref": "#/components/schemas/HookOrder",

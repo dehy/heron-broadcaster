@@ -14,7 +14,7 @@ use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use heron_core::library::TaskRequest;
-use heron_core::medley::{self, Candidate, Part, PartKind, Recipe};
+use heron_core::medley::{self, Candidate, LinerMode, LinerSlot, Liners, Part, PartKind, Recipe};
 use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, QueryBuilder};
 use utoipa::{IntoParams, ToSchema};
@@ -23,8 +23,9 @@ use utoipa_axum::routes;
 
 use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
-use crate::error::{ApiError, ApiResult, ErrorBody, is_duplicate, is_still_used};
+use crate::error::{ApiError, ApiResult, ErrorBody, is_duplicate};
 use crate::librarian::{self, LibraryTask};
+use crate::settings::{self, StationSettings};
 
 const LINK_INTERVAL: Duration = Duration::from_secs(10);
 /// The longest part of a medley.
@@ -42,6 +43,149 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_candidates))
         .routes(routes!(preview_medley, get_preview))
         .routes(routes!(render_medley))
+        .routes(routes!(get_settings, put_settings))
+}
+
+/// What every medley shares, and the recipe of a new one.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct MedleySettings {
+    /// The category rendered medleys go in (their track's), usually a
+    /// Jingle-type one.
+    pub category_id: Option<u64>,
+    /// Where the liners come from.
+    pub liner_category_id: Option<u64>,
+    /// Where the liner at the start comes from; the liner category when unset.
+    pub opening_liner_category_id: Option<u64>,
+    /// Where the liner at the end comes from; the liner category when unset.
+    pub closing_liner_category_id: Option<u64>,
+    /// Medleys are named after their hooks' artists, or titles.
+    pub name_from: NameFrom,
+    /// The recipe of a new medley; each medley can change it.
+    pub defaults: MedleyDefaults,
+}
+
+impl MedleySettings {
+    pub const SETTINGS_NAME: &'static str = "medleys";
+}
+
+impl Default for MedleySettings {
+    fn default() -> Self {
+        Self {
+            category_id: None,
+            liner_category_id: None,
+            opening_liner_category_id: None,
+            closing_liner_category_id: None,
+            name_from: NameFrom::Artists,
+            defaults: MedleyDefaults::default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NameFrom {
+    #[default]
+    Artists,
+    Titles,
+}
+
+/// A recipe without its songs: the defaults of a new medley.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct MedleyDefaults {
+    pub hooks: u32,
+    pub hook_min_ms: u32,
+    pub hook_max_ms: u32,
+    pub crossfade_ms: u32,
+    pub liner_every: u32,
+    pub liner_at_start: bool,
+    pub liner_at_end: bool,
+    pub liner_mode: LinerMode,
+    pub duck_db: f64,
+}
+
+impl Default for MedleyDefaults {
+    fn default() -> Self {
+        let recipe = Recipe::default();
+        Self {
+            hooks: recipe.hooks,
+            hook_min_ms: recipe.hook_min_ms,
+            hook_max_ms: recipe.hook_max_ms,
+            crossfade_ms: recipe.crossfade_ms,
+            liner_every: recipe.liner_every,
+            liner_at_start: recipe.liner_at_start,
+            liner_at_end: recipe.liner_at_end,
+            liner_mode: recipe.liner_mode,
+            duck_db: recipe.duck_db,
+        }
+    }
+}
+
+impl MedleyDefaults {
+    fn check(&self) -> Result<(), String> {
+        Recipe {
+            hooks: self.hooks,
+            hook_min_ms: self.hook_min_ms,
+            hook_max_ms: self.hook_max_ms,
+            crossfade_ms: self.crossfade_ms,
+            liner_every: self.liner_every,
+            liner_at_start: self.liner_at_start,
+            liner_at_end: self.liner_at_end,
+            liner_mode: self.liner_mode,
+            duck_db: self.duck_db,
+            ..Recipe::default()
+        }
+        .check_settings()
+    }
+}
+
+async fn load_settings(pool: &MySqlPool) -> ApiResult<MedleySettings> {
+    settings::load(pool, MedleySettings::SETTINGS_NAME).await
+}
+
+/// The medley settings.
+#[utoipa::path(get, path = "/settings/medleys", tag = "settings",
+    responses((status = 200, body = MedleySettings), (status = "4XX", body = ErrorBody)))]
+async fn get_settings(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<MedleySettings>> {
+    Ok(Json(load_settings(&state.pool).await?))
+}
+
+/// Replaces the medley settings (missing fields take the defaults). Tracks
+/// already rendered keep their categories. Operators and admins.
+#[utoipa::path(put, path = "/settings/medleys", tag = "settings",
+    request_body = MedleySettings,
+    responses((status = 200, body = MedleySettings), (status = "4XX", body = ErrorBody)))]
+async fn put_settings(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(settings): Json<MedleySettings>,
+) -> ApiResult<Json<MedleySettings>> {
+    user.require(Role::Operator)?;
+    settings.defaults.check().map_err(ApiError::Invalid)?;
+    for id in [
+        settings.category_id,
+        settings.liner_category_id,
+        settings.opening_liner_category_id,
+        settings.closing_liner_category_id,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let found: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM categories WHERE id = ?")
+            .bind(id)
+            .fetch_one(&state.pool)
+            .await?;
+        if found == 0 {
+            return Err(ApiError::Invalid(format!("no category {id}")));
+        }
+    }
+    settings::save(&state.pool, MedleySettings::SETTINGS_NAME, &settings).await?;
+    tracing::info!(user = %user.username, ?settings, "medley settings changed");
+    Ok(Json(settings))
 }
 
 /// A part, with what its track is.
@@ -62,10 +206,8 @@ pub struct PartView {
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct Medley {
     pub id: u64,
-    pub name: String,
-    /// Where the rendered medley goes.
-    pub category_id: Option<u64>,
-    pub category_name: Option<String>,
+    /// Given at each render, from its hooks; none until rendered.
+    pub name: Option<String>,
     pub recipe: Recipe,
     /// Its current version, in order (empty until rendered once).
     pub parts: Vec<PartView>,
@@ -84,22 +226,13 @@ pub struct Medley {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MedleyInput {
-    pub name: String,
-    pub category_id: Option<u64>,
     #[serde(default)]
     pub recipe: Recipe,
 }
 
 impl MedleyInput {
-    fn check(&self) -> ApiResult<String> {
-        let name = self.name.trim();
-        if name.is_empty() || name.chars().count() > 255 {
-            return Err(ApiError::Invalid(
-                "names are 1 to 255 characters".to_owned(),
-            ));
-        }
-        self.recipe.check().map_err(ApiError::Invalid)?;
-        Ok(name.to_owned())
+    fn check(&self) -> ApiResult<()> {
+        self.recipe.check().map_err(ApiError::Invalid)
     }
 }
 
@@ -119,12 +252,19 @@ pub struct PickRequest {
     /// Tracks not to pick (those already in the plan).
     #[serde(default)]
     pub exclude: Vec<u64>,
+    /// Where the liner goes, for a liner.
+    #[serde(default)]
+    pub slot: LinerSlot,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct CandidatesQuery {
     pub kind: PartKind,
+    /// Where the liner goes, for a liner: `between` by default.
+    #[serde(default)]
+    #[param(inline)]
+    pub slot: LinerSlot,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -135,8 +275,6 @@ pub struct RenderRequest {
 
 type MedleyRow = (
     u64,
-    String,
-    Option<u64>,
     Option<String>,
     String,
     Option<String>,
@@ -147,11 +285,10 @@ type MedleyRow = (
     Option<i64>,
 );
 
-const SELECT: &str = "SELECT m.id, m.name, m.category_id, c.name, CAST(m.recipe AS CHAR), m.path,
+const SELECT: &str = "SELECT m.id, m.name, CAST(m.recipe AS CHAR), m.path,
         m.track_id, m.task_id, CAST(lt.status AS CHAR), lt.error,
         CAST(UNIX_TIMESTAMP(m.rendered_at) * 1000 AS SIGNED)
     FROM medleys m
-    LEFT JOIN categories c ON c.id = m.category_id
     LEFT JOIN library_tasks lt ON lt.id = m.task_id";
 
 async fn load(pool: &MySqlPool, id: Option<u64>) -> ApiResult<Vec<Medley>> {
@@ -163,34 +300,22 @@ async fn load(pool: &MySqlPool, id: Option<u64>) -> ApiResult<Vec<Medley>> {
                 .await?
         }
         None => {
-            sqlx::query_as(sqlx::AssertSqlSafe(format!("{SELECT} ORDER BY m.name")))
-                .fetch_all(pool)
-                .await?
+            // Not rendered yet (no name) first, the newest first.
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "{SELECT} ORDER BY m.name IS NOT NULL, m.name, m.id DESC"
+            )))
+            .fetch_all(pool)
+            .await?
         }
     };
     let mut medleys = Vec::with_capacity(rows.len());
-    for (
-        id,
-        name,
-        category_id,
-        category_name,
-        recipe,
-        path,
-        track_id,
-        task_id,
-        status,
-        error,
-        rendered,
-    ) in rows
-    {
+    for (id, name, recipe, path, track_id, task_id, status, error, rendered) in rows {
         let recipe = serde_json::from_str(&recipe)
             .map_err(|error| ApiError::Internal(format!("medley {id}: {error}")))?;
         let parts: Vec<Part> = saved_parts(pool, id).await?;
         medleys.push(Medley {
             id,
             name,
-            category_id,
-            category_name,
             recipe,
             parts: views(pool, &parts).await?,
             path,
@@ -311,9 +436,24 @@ async fn songs(pool: &MySqlPool, recipe: &Recipe) -> ApiResult<Vec<Candidate>> {
         .collect())
 }
 
-/// The liners of the recipe's liner category, from cue-in to cue-out.
-async fn liners(pool: &MySqlPool, recipe: &Recipe) -> ApiResult<Vec<Candidate>> {
-    let Some(category_id) = recipe.liner_category_id else {
+/// The liners of the medley settings, by where they go; none when the
+/// recipe has its liners off.
+async fn liners(pool: &MySqlPool, recipe: &Recipe) -> ApiResult<Liners> {
+    if !recipe.liners {
+        return Ok(Liners::default());
+    }
+    let settings = load_settings(pool).await?;
+    Ok(Liners {
+        between: liner_tracks(pool, settings.liner_category_id).await?,
+        start: liner_tracks(pool, settings.opening_liner_category_id).await?,
+        end: liner_tracks(pool, settings.closing_liner_category_id).await?,
+    })
+}
+
+/// The tracks of a liner category, from cue-in to cue-out; never a medley,
+/// even when medleys go in that category.
+async fn liner_tracks(pool: &MySqlPool, category_id: Option<u64>) -> ApiResult<Vec<Candidate>> {
+    let Some(category_id) = category_id else {
         return Ok(Vec::new());
     };
     let rows: Vec<(u64, u32, u32)> = sqlx::query_as(
@@ -323,7 +463,8 @@ async fn liners(pool: &MySqlPool, recipe: &Recipe) -> ApiResult<Vec<Candidate>> 
          JOIN track_analysis a ON a.track_id = t.id
          LEFT JOIN track_overrides o ON o.track_id = t.id
          WHERE t.deleted_at IS NULL AND t.enabled AND t.missing_since IS NULL
-           AND a.cue_out_ms > a.cue_in_ms",
+           AND a.cue_out_ms > a.cue_in_ms
+           AND NOT EXISTS (SELECT 1 FROM medleys md WHERE md.track_id = t.id)",
     )
     .bind(category_id)
     .fetch_all(pool)
@@ -370,16 +511,6 @@ async fn get_medley(
     Ok(Json(find(&state.pool, id).await?))
 }
 
-fn conflict(error: sqlx::Error) -> ApiError {
-    if is_duplicate(&error) {
-        ApiError::Conflict("another medley has this name".to_owned())
-    } else if is_still_used(&error) {
-        ApiError::Invalid("no such category".to_owned())
-    } else {
-        error.into()
-    }
-}
-
 fn recipe_json(recipe: &Recipe) -> ApiResult<String> {
     serde_json::to_string(recipe).map_err(|error| ApiError::Internal(error.to_string()))
 }
@@ -393,20 +524,17 @@ async fn create_medley(
     Json(input): Json<MedleyInput>,
 ) -> ApiResult<(StatusCode, Json<Medley>)> {
     user.require(Role::Operator)?;
-    let name = input.check()?;
-    let id = sqlx::query("INSERT INTO medleys (name, category_id, recipe) VALUES (?, ?, ?)")
-        .bind(name)
-        .bind(input.category_id)
+    input.check()?;
+    let id = sqlx::query("INSERT INTO medleys (recipe) VALUES (?)")
         .bind(recipe_json(&input.recipe)?)
         .execute(&state.pool)
-        .await
-        .map_err(conflict)?
+        .await?
         .last_insert_id();
     Ok((StatusCode::CREATED, Json(find(&state.pool, id).await?)))
 }
 
-/// Renames a medley or changes its recipe (applied on its next render).
-/// Operators and admins.
+/// Changes a medley's recipe (applied on its next build). Operators and
+/// admins.
 #[utoipa::path(put, path = "/medleys/{id}", tag = "medleys", params(("id" = u64, Path)),
     request_body = MedleyInput,
     responses((status = 200, body = Medley), (status = "4XX", body = ErrorBody)))]
@@ -417,26 +545,13 @@ async fn update_medley(
     Json(input): Json<MedleyInput>,
 ) -> ApiResult<Json<Medley>> {
     user.require(Role::Operator)?;
-    let name = input.check()?;
-    let previous = find(&state.pool, id).await?;
-    sqlx::query("UPDATE medleys SET name = ?, category_id = ?, recipe = ? WHERE id = ?")
-        .bind(&name)
-        .bind(input.category_id)
+    input.check()?;
+    find(&state.pool, id).await?;
+    sqlx::query("UPDATE medleys SET recipe = ? WHERE id = ?")
         .bind(recipe_json(&input.recipe)?)
         .bind(id)
         .execute(&state.pool)
-        .await
-        .map_err(conflict)?;
-    if let Some(track_id) = previous.track_id {
-        if previous.name != name {
-            name_track(&state.pool, track_id, &name).await?;
-        }
-        if let Some(category_id) = input.category_id
-            && previous.category_id != Some(category_id)
-        {
-            put_in_category(&state.pool, track_id, category_id).await?;
-        }
-    }
+        .await?;
     Ok(Json(find(&state.pool, id).await?))
 }
 
@@ -461,40 +576,22 @@ async fn delete_medley(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct DuplicateRequest {
-    /// The new medley's name ("Name (copy)", in the user's language).
-    pub name: String,
-}
-
-/// A new medley with the same recipe, category and parts, not rendered.
-/// Operators and admins.
+/// A new medley with the same recipe and parts, not rendered (no name
+/// until it is). Operators and admins.
 #[utoipa::path(post, path = "/medleys/{id}/duplicate", tag = "medleys", params(("id" = u64, Path)),
-    request_body = DuplicateRequest,
     responses((status = 201, body = Medley), (status = "4XX", body = ErrorBody)))]
 async fn duplicate_medley(
     user: CurrentUser,
     State(state): State<AppState>,
     Path(id): Path<u64>,
-    Json(request): Json<DuplicateRequest>,
 ) -> ApiResult<(StatusCode, Json<Medley>)> {
     user.require(Role::Operator)?;
     let original = find(&state.pool, id).await?;
-    let name = MedleyInput {
-        name: request.name,
-        category_id: original.category_id,
-        recipe: original.recipe.clone(),
-    }
-    .check()?;
     let mut tx = state.pool.begin().await?;
-    let copy = sqlx::query("INSERT INTO medleys (name, category_id, recipe) VALUES (?, ?, ?)")
-        .bind(name)
-        .bind(original.category_id)
+    let copy = sqlx::query("INSERT INTO medleys (recipe) VALUES (?)")
         .bind(recipe_json(&original.recipe)?)
         .execute(&mut *tx)
-        .await
-        .map_err(conflict)?
+        .await?
         .last_insert_id();
     sqlx::query(
         "INSERT INTO medley_parts (medley_id, position, kind, track_id, from_ms, to_ms)
@@ -549,7 +646,10 @@ async fn pick_part(
     let medley = find(&state.pool, id).await?;
     let candidates = match request.kind {
         PartKind::Hook => songs(&state.pool, &medley.recipe).await?,
-        PartKind::Liner => liners(&state.pool, &medley.recipe).await?,
+        PartKind::Liner => liners(&state.pool, &medley.recipe)
+            .await?
+            .at(request.slot)
+            .to_vec(),
     };
     let exclude: HashSet<u64> = request.exclude.into_iter().collect();
     let avoid = current_tracks(&state.pool, id).await?;
@@ -584,7 +684,10 @@ async fn list_candidates(
     let medley = find(&state.pool, id).await?;
     let candidates = match query.kind {
         PartKind::Hook => songs(&state.pool, &medley.recipe).await?,
-        PartKind::Liner => liners(&state.pool, &medley.recipe).await?,
+        PartKind::Liner => liners(&state.pool, &medley.recipe)
+            .await?
+            .at(query.slot)
+            .to_vec(),
     };
     let parts = medley::choices(&medley.recipe, query.kind, &candidates);
     let mut views = views(&state.pool, &parts).await?;
@@ -600,8 +703,9 @@ async fn list_candidates(
     Ok(Json(views))
 }
 
-/// Saves the parts as the medley's version and asks heron-librarian to
-/// mix them into its file. Operators and admins.
+/// Saves the parts as the medley's version, names the medley after its
+/// hooks and asks heron-librarian to mix them into its file. Operators and
+/// admins.
 #[utoipa::path(post, path = "/medleys/{id}/render", tag = "medleys", params(("id" = u64, Path)),
     request_body = RenderRequest,
     responses((status = 202, body = LibraryTask), (status = "4XX", body = ErrorBody)))]
@@ -612,10 +716,23 @@ async fn render_medley(
     Json(request): Json<RenderRequest>,
 ) -> ApiResult<(StatusCode, Json<LibraryTask>)> {
     user.require(Role::Operator)?;
-    find(&state.pool, id).await?;
+    let medley = find(&state.pool, id).await?;
     let parts = request.parts;
     check_parts(&state.pool, &parts).await?;
+    let name = name_for(&state.pool, id, &parts).await?;
     let mut tx = state.pool.begin().await?;
+    sqlx::query("UPDATE medleys SET name = ? WHERE id = ?")
+        .bind(&name)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            if is_duplicate(&error) {
+                ApiError::Conflict("another medley took this name: try again".to_owned())
+            } else {
+                error.into()
+            }
+        })?;
     sqlx::query("DELETE FROM medley_parts WHERE medley_id = ?")
         .bind(id)
         .execute(&mut *tx)
@@ -636,6 +753,11 @@ async fn render_medley(
     });
     query.build().execute(&mut *tx).await?;
     tx.commit().await?;
+    if let Some(track_id) = medley.track_id
+        && medley.name.as_deref() != Some(&name)
+    {
+        name_track(&state.pool, track_id, &name).await?;
+    }
     let task = librarian::ask(&state, &user, TaskRequest::RenderMedley { medley_id: id }).await?;
     sqlx::query("UPDATE medleys SET task_id = ? WHERE id = ?")
         .bind(task.id)
@@ -643,6 +765,46 @@ async fn render_medley(
         .execute(&state.pool)
         .await?;
     Ok((StatusCode::ACCEPTED, Json(task)))
+}
+
+/// The name a medley gets for these parts: after its hooks' artists or
+/// titles (as set), the month of now in the station's time zone, with
+/// ` (2)`, ` (3)`… when another medley has it.
+async fn name_for(pool: &MySqlPool, id: u64, parts: &[Part]) -> ApiResult<String> {
+    let settings = load_settings(pool).await?;
+    let station: StationSettings = settings::load(pool, StationSettings::SETTINGS_NAME).await?;
+    let month = jiff::Timestamp::now()
+        .to_zoned(station.time_zone())
+        .strftime("%Y-%m")
+        .to_string();
+    let hooks: Vec<Part> = parts
+        .iter()
+        .filter(|part| part.kind == PartKind::Hook)
+        .copied()
+        .collect();
+    let views = views(pool, &hooks).await?;
+    let names: Vec<&str> = views
+        .iter()
+        .filter_map(|view| match settings.name_from {
+            NameFrom::Artists => view.artist.as_deref(),
+            NameFrom::Titles => view.title.as_deref(),
+        })
+        .collect();
+    let base = medley::name(&month, &names);
+    let mut name = base.clone();
+    for number in 2.. {
+        let taken: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM medleys WHERE id <> ? AND name = ?")
+                .bind(id)
+                .bind(&name)
+                .fetch_one(pool)
+                .await?;
+        if taken == 0 {
+            break;
+        }
+        name = format!("{base} ({number})");
+    }
+    Ok(name)
 }
 
 /// Why these parts cannot make a medley, if they cannot.
@@ -751,34 +913,45 @@ async fn name_track(pool: &MySqlPool, track_id: u64, name: &str) -> ApiResult<()
     Ok(())
 }
 
+/// Puts a track in a category, if the category still exists.
 async fn put_in_category(pool: &MySqlPool, track_id: u64, category_id: u64) -> ApiResult<()> {
-    sqlx::query("INSERT IGNORE INTO track_categories (track_id, category_id) VALUES (?, ?)")
-        .bind(track_id)
-        .bind(category_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT IGNORE INTO track_categories (track_id, category_id)
+         SELECT ?, id FROM categories WHERE id = ?",
+    )
+    .bind(track_id)
+    .bind(category_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
 /// Links the medleys rendered since to their tracks, once the scanner found
-/// their files: the track gets the medley's name and category.
+/// their files: the track gets the medley's name and the category of the
+/// medley settings.
 pub async fn link(pool: &MySqlPool) -> ApiResult<usize> {
-    let rows: Vec<(u64, String, Option<u64>, u64)> = sqlx::query_as(
-        "SELECT m.id, m.name, m.category_id, t.id FROM medleys m
+    let rows: Vec<(u64, Option<String>, u64)> = sqlx::query_as(
+        "SELECT m.id, m.name, t.id FROM medleys m
          JOIN tracks t ON t.path = m.path AND t.deleted_at IS NULL
          WHERE m.track_id IS NULL OR m.track_id <> t.id",
     )
     .fetch_all(pool)
     .await?;
-    for (medley_id, name, category_id, track_id) in &rows {
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    let category_id = load_settings(pool).await?.category_id;
+    for (medley_id, name, track_id) in &rows {
         sqlx::query("UPDATE medleys SET track_id = ? WHERE id = ?")
             .bind(track_id)
             .bind(medley_id)
             .execute(pool)
             .await?;
-        name_track(pool, *track_id, name).await?;
+        if let Some(name) = name {
+            name_track(pool, *track_id, name).await?;
+        }
         if let Some(category_id) = category_id {
-            put_in_category(pool, *track_id, *category_id).await?;
+            put_in_category(pool, *track_id, category_id).await?;
         }
     }
     Ok(rows.len())

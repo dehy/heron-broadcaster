@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Station settings: autofill, rotation, time zone, programming details,
-// listener statistics, analysis and library management.
+// medleys, listener statistics, analysis and library management.
 
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
@@ -11,6 +11,7 @@ import { type PlainKey, number, rich, t } from "../i18n";
 import { WINDOW_FIELDS } from "../lib/rotation";
 import { Link } from "../lib/router";
 import { useCategories } from "./Clocks";
+import { useMedleySettings } from "./Medleys";
 import { useAction, useCan } from "../lib/session";
 
 export function Settings() {
@@ -21,6 +22,7 @@ export function Settings() {
       <RotationCard />
       <StationCard />
       <ProgrammingCard />
+      <MedleysCard />
       <StatisticsCard />
       <LibraryCard />
       <AnalysisCard />
@@ -229,6 +231,219 @@ function RotationCard() {
           </div>
         </>
       )}
+    </SettingsCard>
+  );
+}
+
+/** A category to pick, or none (`noneLabel`). */
+function CategorySelect({
+  value,
+  noneLabel,
+  disabled,
+  onChange,
+}: {
+  value: number | null | undefined;
+  noneLabel: string;
+  disabled: boolean;
+  onChange: (id: number | null) => void;
+}) {
+  const categories = useCategories();
+  return (
+    <select
+      className="input"
+      value={value ?? ""}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+    >
+      <option value="">{noneLabel}</option>
+      {categories.data?.map((category) => (
+        <option key={category.id} value={category.id}>
+          {category.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function MedleysCard() {
+  const canEdit = useCan("operator");
+  const settings = useMedleySettings();
+  const save = useAction(
+    (body: Schemas["MedleySettings"]) => unwrap(api.PUT("/api/v1/settings/medleys", { body })),
+    { success: t("categories.saved"), invalidate: [["settings", "medleys"]] },
+  );
+  if (settings.isPending) {
+    return <Loading />;
+  }
+  if (settings.isError) {
+    return <ErrorView error={settings.error} />;
+  }
+  const disabled = !canEdit;
+  return (
+    <SettingsCard
+      title={t("nav.medleys")}
+      description={rich("settings.medleysHelp", { medleys: <Link to="/medleys">{t("settings.medleysLink")}</Link> })}
+      value={settings.data}
+      save={(value) => save.mutate(value)}
+      saving={save.isPending}
+      canEdit={canEdit}
+    >
+      {(draft, set) => {
+        const defaults = draft.defaults;
+        const setDefaults = (changes: Partial<Schemas["MedleyDefaults"]>) =>
+          set({ defaults: { ...defaults, ...changes } });
+        return (
+          <>
+            <div className="form-grid">
+              <Field label={t("settings.medleyCategory")} hint={t("settings.medleyCategoryHint")}>
+                <CategorySelect
+                  value={draft.category_id}
+                  noneLabel={t("settings.noMedleyCategory")}
+                  disabled={disabled}
+                  onChange={(category_id) => set({ category_id })}
+                />
+              </Field>
+              <Field label={t("settings.medleyNames")} hint={t("settings.medleyNamesHint")}>
+                <select
+                  className="input"
+                  value={draft.name_from}
+                  disabled={disabled}
+                  onChange={(e) => set({ name_from: e.target.value as Schemas["NameFrom"] })}
+                >
+                  <option value="artists">{t("settings.namesFromArtists")}</option>
+                  <option value="titles">{t("settings.namesFromTitles")}</option>
+                </select>
+              </Field>
+            </div>
+            <div className="form-grid">
+              <Field label={t("settings.linerCategory")}>
+                <CategorySelect
+                  value={draft.liner_category_id}
+                  noneLabel={t("settings.noLiners")}
+                  disabled={disabled}
+                  onChange={(liner_category_id) => set({ liner_category_id })}
+                />
+              </Field>
+              <Field label={t("settings.openingLiners")} hint={t("settings.specialLinersHint")}>
+                <CategorySelect
+                  value={draft.opening_liner_category_id}
+                  noneLabel={t("settings.sameLiners")}
+                  disabled={disabled}
+                  onChange={(opening_liner_category_id) => set({ opening_liner_category_id })}
+                />
+              </Field>
+              <Field label={t("settings.closingLiners")} hint={t("settings.specialLinersHint")}>
+                <CategorySelect
+                  value={draft.closing_liner_category_id}
+                  noneLabel={t("settings.sameLiners")}
+                  disabled={disabled}
+                  onChange={(closing_liner_category_id) => set({ closing_liner_category_id })}
+                />
+              </Field>
+            </div>
+            <fieldset>
+              <legend>{t("settings.medleyDefaults")}</legend>
+              <div className="stack">
+                <div className="form-grid">
+                  <Field label={t("medleys.hookCount")}>
+                    <NumberInput
+                      value={defaults.hooks}
+                      min={2}
+                      max={30}
+                      step={1}
+                      disabled={disabled}
+                      onChange={(hooks) => setDefaults({ hooks: Math.round(hooks) })}
+                    />
+                  </Field>
+                  <Field label={t("medleys.crossfade")}>
+                    <NumberInput
+                      value={defaults.crossfade_ms / 1000}
+                      min={0}
+                      max={5}
+                      step={0.1}
+                      disabled={disabled}
+                      onChange={(s) => setDefaults({ crossfade_ms: Math.round(s * 1000) })}
+                    />
+                  </Field>
+                  <Field label={t("medleys.hookMin")}>
+                    <NumberInput
+                      value={defaults.hook_min_ms / 1000}
+                      min={1}
+                      max={60}
+                      step={0.5}
+                      disabled={disabled}
+                      onChange={(s) => setDefaults({ hook_min_ms: Math.round(s * 1000) })}
+                    />
+                  </Field>
+                  <Field label={t("medleys.hookMax")}>
+                    <NumberInput
+                      value={defaults.hook_max_ms / 1000}
+                      min={1}
+                      max={60}
+                      step={0.5}
+                      disabled={disabled}
+                      onChange={(s) => setDefaults({ hook_max_ms: Math.round(s * 1000) })}
+                    />
+                  </Field>
+                  <Field label={t("medleys.linerEvery")}>
+                    <NumberInput
+                      value={defaults.liner_every}
+                      min={1}
+                      max={30}
+                      step={1}
+                      disabled={disabled}
+                      onChange={(every) => setDefaults({ liner_every: Math.round(every) })}
+                    />
+                  </Field>
+                  <Field label={t("medleys.linerMode")}>
+                    <select
+                      className="input"
+                      value={defaults.liner_mode}
+                      disabled={disabled}
+                      onChange={(e) => setDefaults({ liner_mode: e.target.value as Schemas["LinerMode"] })}
+                    >
+                      <option value="between">{t("medleys.linerBetween")}</option>
+                      <option value="over">{t("medleys.linerOver")}</option>
+                    </select>
+                  </Field>
+                  {defaults.liner_mode === "over" && (
+                    <Field label={t("medleys.duck")}>
+                      <NumberInput
+                        value={defaults.duck_db}
+                        min={-40}
+                        max={0}
+                        step={1}
+                        disabled={disabled}
+                        onChange={(duck_db) => setDefaults({ duck_db })}
+                      />
+                    </Field>
+                  )}
+                </div>
+                <div className="row">
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={defaults.liner_at_start}
+                      disabled={disabled}
+                      onChange={(e) => setDefaults({ liner_at_start: e.target.checked })}
+                    />
+                    {t("medleys.linerAtStart")}
+                  </label>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={defaults.liner_at_end}
+                      disabled={disabled}
+                      onChange={(e) => setDefaults({ liner_at_end: e.target.checked })}
+                    />
+                    {t("medleys.linerAtEnd")}
+                  </label>
+                </div>
+              </div>
+            </fieldset>
+          </>
+        );
+      }}
     </SettingsCard>
   );
 }

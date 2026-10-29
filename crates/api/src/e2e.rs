@@ -3807,25 +3807,57 @@ async fn medleys_are_planned_rendered_and_linked() {
         }
     }
 
+    // Where medleys go and where their liners come from: the settings.
+    let defaults = viewer.get("/settings/medleys").await;
+    assert_eq!(defaults["defaults"]["hooks"], 3);
+    assert_eq!(defaults["defaults"]["liner_at_start"], true);
+    assert_eq!(defaults["name_from"], "artists");
+    let settings = json!({"category_id": target, "liner_category_id": liners});
+    let (status, _) = viewer
+        .send(Method::PUT, "/settings/medleys", settings.clone())
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/medleys",
+            json!({"category_id": 999_999}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "no such category");
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/medleys",
+            json!({"defaults": {"hooks": 1}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "one hook");
+    let (status, saved) = admin.send(Method::PUT, "/settings/medleys", settings).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+
     let recipe = json!({
         "category_ids": [songs], "hooks": 3, "hook_min_ms": 1_000, "hook_max_ms": 2_500,
-        "crossfade_ms": 200, "liner_category_id": liners, "liner_every": 1
+        "crossfade_ms": 200, "liner_every": 1, "liner_at_start": false, "liner_at_end": false
     });
-    let medley = json!({"name": "Hits medley", "category_id": target, "recipe": recipe});
+    let medley = json!({"recipe": recipe});
     let (status, _) = viewer.send(Method::POST, "/medleys", medley.clone()).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, _) = admin
         .send(
             Method::POST,
             "/medleys",
-            json!({"name": "Wrong", "recipe": {"category_ids": [songs], "hooks": 1}}),
+            json!({"recipe": {"category_ids": [songs], "hooks": 1}}),
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     let (status, created) = admin.send(Method::POST, "/medleys", medley).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     let id = created["id"].as_u64().unwrap();
-    assert_eq!(viewer.get("/medleys").await[0]["name"], "Hits medley");
+    assert!(
+        viewer.get("/medleys").await[0]["name"].is_null(),
+        "named when rendered"
+    );
 
     // Planned: hook, liner, hook, liner, hook; three different songs.
     let (status, plan) = admin
@@ -3878,6 +3910,11 @@ async fn medleys_are_planned_rendered_and_linked() {
         .get(&format!("/medleys/{id}/candidates?kind=liner"))
         .await;
     assert_eq!(liners_listed[0]["track_id"], tracks[4]);
+    // No opening liners set: the start takes the liners.
+    let opening = admin
+        .get(&format!("/medleys/{id}/candidates?kind=liner&slot=start"))
+        .await;
+    assert_eq!(opening[0]["track_id"], tracks[4]);
     let (status, _) = viewer
         .request(
             Method::GET,
@@ -3974,6 +4011,18 @@ async fn medleys_are_planned_rendered_and_linked() {
     assert!(librarian.run_next().await.unwrap());
     let rendered = admin.get(&format!("/medleys/{id}")).await;
     assert_eq!(rendered["task_status"], "done", "{rendered}");
+    // Named after its hooks' artists, in order.
+    let artists: Vec<&str> = parts
+        .iter()
+        .filter(|p| p["kind"] == "hook")
+        .map(|p| p["artist"].as_str().unwrap())
+        .collect();
+    let name = rendered["name"].as_str().unwrap().to_owned();
+    assert!(name.starts_with("Medley 20"), "{name}");
+    assert!(
+        name.ends_with(&format!("({})", artists.join(" - "))),
+        "{name}"
+    );
     let path = rendered["path"].as_str().unwrap().to_owned();
     assert_eq!(path, format!("medleys/medley-{id}.wav"));
     assert_eq!(rendered["parts"].as_array().unwrap().len(), 5);
@@ -3993,7 +4042,7 @@ async fn medleys_are_planned_rendered_and_linked() {
     assert_eq!(crate::medleys::link(pool).await.unwrap(), 1);
     assert_eq!(crate::medleys::link(pool).await.unwrap(), 0);
     let detail = admin.get(&format!("/tracks/{track}")).await;
-    assert_eq!(detail["title"], "Hits medley");
+    assert_eq!(detail["title"], name.as_str());
     assert_eq!(detail["categories"][0]["category_id"], target);
     assert_eq!(
         admin.get(&format!("/medleys/{id}")).await["track_id"],
@@ -4026,28 +4075,16 @@ async fn medleys_are_planned_rendered_and_linked() {
         .await;
     assert_eq!(status, StatusCode::CONFLICT);
     let (status, copy) = admin
-        .send(
-            Method::POST,
-            &format!("/medleys/{id}/duplicate"),
-            json!({"name": "Hits medley (copy)"}),
-        )
+        .request(Method::POST, &format!("/medleys/{id}/duplicate"), None)
         .await;
     assert_eq!(status, StatusCode::CREATED, "{copy}");
     assert_eq!(copy["recipe"], rendered["recipe"]);
-    assert_eq!(copy["category_id"], target);
+    assert!(copy["name"].is_null());
     assert_eq!(
         copy["parts"],
         admin.get(&format!("/medleys/{id}")).await["parts"]
     );
     assert!(copy["path"].is_null() && copy["track_id"].is_null());
-    let (status, _) = admin
-        .send(
-            Method::POST,
-            &format!("/medleys/{id}/duplicate"),
-            json!({"name": "Hits medley (copy)"}),
-        )
-        .await;
-    assert_eq!(status, StatusCode::CONFLICT, "names are unique");
     let copy_id = copy["id"].as_u64().unwrap();
     let (status, plan) = admin
         .request(Method::POST, &format!("/medleys/{copy_id}/plan"), None)
@@ -4063,19 +4100,59 @@ async fn medleys_are_planned_rendered_and_linked() {
     assert!(again.contains(&fourth), "{again:?}");
     // The medley's own track never gives a hook.
     assert!(!again.contains(&track));
-
-    // Renamed: its track follows. Deleted: its track stays.
+    // Nor a liner, when medleys go in the liner category.
     let (status, _) = admin
         .send(
             Method::PUT,
-            &format!("/medleys/{id}"),
-            json!({"name": "Hits of the week", "category_id": target, "recipe": recipe}),
+            "/settings/medleys",
+            json!({"category_id": target, "liner_category_id": target}),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
+    let as_liners = admin
+        .get(&format!("/medleys/{copy_id}/candidates?kind=liner"))
+        .await;
+    assert_eq!(as_liners, json!([]), "the medley is no liner");
+
+    // The copy rendered with the same hooks: a name of its own.
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            &format!("/medleys/{copy_id}/render"),
+            json!({"parts": parts}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(
-        admin.get(&format!("/tracks/{track}")).await["title"],
-        "Hits of the week"
+        admin.get(&format!("/medleys/{copy_id}")).await["name"],
+        format!("{name} (2)")
+    );
+    // Rendered again by title: named again, its track follows. Deleted:
+    // its track stays.
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/medleys",
+            json!({"category_id": target, "liner_category_id": liners, "name_from": "titles"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = admin
+        .send(Method::POST, &render, json!({"parts": parts}))
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let titles: Vec<&str> = parts
+        .iter()
+        .filter(|p| p["kind"] == "hook")
+        .map(|p| p["title"].as_str().unwrap())
+        .collect();
+    let retitled = admin.get(&format!("/tracks/{track}")).await["title"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        retitled.ends_with(&format!("({})", titles.join(" - "))),
+        "{retitled}"
     );
     let (status, _) = admin
         .request(Method::DELETE, &format!("/medleys/{id}"), None)
@@ -4083,7 +4160,7 @@ async fn medleys_are_planned_rendered_and_linked() {
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(
         admin.get(&format!("/tracks/{track}")).await["title"],
-        "Hits of the week"
+        retitled.as_str()
     );
 }
 
