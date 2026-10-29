@@ -34,6 +34,7 @@ import { type PlainKey, rich, t } from "../i18n";
 import { ago, bytes, duration } from "../lib/format";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
+import { type RangeSelection, useRangeSelection } from "../lib/rangeSelection";
 import {
   AUDIO_EXTENSIONS,
   type Picked,
@@ -409,6 +410,9 @@ export function Buffer() {
     return file !== undefined && isPreparable(file);
   });
   const importing = taskId !== null && task.data?.status !== "done" && task.data?.status !== "failed";
+  // Every file that can be selected, in the order shown, across the groups.
+  const order = groups.flatMap((group) => group.files.filter((f) => f.status !== "importing").map((f) => f.id));
+  const range = useRangeSelection(order, selected, setSelected, null);
   const toggle = (ids: number[], on: boolean) =>
     setSelected((current) => {
       const next = new Set(current);
@@ -526,7 +530,7 @@ export function Buffer() {
           </Card>
         )}
         {groups.map((group) => (
-          <Group key={group.id} group={group} selected={selected} onToggle={toggle} canEdit={canEdit} />
+          <Group key={group.id} group={group} selected={selected} onToggle={toggle} range={range} canEdit={canEdit} />
         ))}
       </div>
       <CategoryDialog
@@ -556,11 +560,13 @@ function Group({
   group,
   selected,
   onToggle,
+  range,
   canEdit,
 }: {
   group: StagedGroup;
   selected: Set<number>;
   onToggle: (ids: number[], on: boolean) => void;
+  range: RangeSelection<number>;
   canEdit: boolean;
 }) {
   const [open, setOpen] = useState<number | null>(null);
@@ -616,7 +622,7 @@ function Group({
                 file={file}
                 canEdit={canEdit}
                 selected={selected.has(file.id)}
-                onToggle={() => onToggle([file.id], !selected.has(file.id))}
+                range={range}
                 open={open === file.id}
                 onOpen={() => setOpen(open === file.id ? null : file.id)}
               />
@@ -770,21 +776,21 @@ function FileRows({
   file,
   canEdit,
   selected,
-  onToggle,
+  range,
   open,
   onOpen,
 }: {
   file: StagedFile;
   canEdit: boolean;
   selected: boolean;
-  onToggle: () => void;
+  range: RangeSelection<number>;
   open: boolean;
   onOpen: () => void;
 }) {
   const shown = file.tags ?? file.own_tags;
   return (
     <>
-      <tr>
+      <tr onClickCapture={canEdit && file.status !== "importing" ? range.row(file.id) : undefined}>
         {canEdit && (
           <td>
             <input
@@ -792,7 +798,7 @@ function FileRows({
               aria-label={t("library.select", { name: file.name })}
               checked={selected}
               disabled={file.status === "importing"}
-              onChange={onToggle}
+              {...range.checkbox(file.id)}
             />
           </td>
         )}
