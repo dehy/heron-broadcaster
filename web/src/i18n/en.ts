@@ -78,6 +78,7 @@ const en = {
   "ui.close": "Close",
   "ui.areYouSure": "Are you sure?",
   "ui.cancel": "Cancel",
+  "ui.moreActions": "More actions",
 
   // Meters
   "meter.peak": "{channel}: peak {level} dBFS",
@@ -1553,6 +1554,15 @@ const en = {
   "buffer.keepOwn": "Keep its own tags",
 
   // Deletion and trash
+  "library.moreActions": "More actions on the selection",
+  "library.enable": "Enable",
+  "library.disable": "Disable",
+  "library.disableHelp": "Autofill, clocks and medleys no longer pick them; tracks already queued stay",
+  "library.enabledChanged": { one: "{count} track changed", other: "{count} tracks changed" },
+  "library.backToFileTags": "Back to the files' tags",
+  "library.backToFileTagsHelp": "Drops the tags kept in Heron and reads the files' own again",
+  "library.overridesCleared": { one: "{count} kept tag dropped", other: "{count} kept tags dropped" },
+  "library.deletePageOnly": "Select tracks on the page to delete them",
   "library.delete": "Delete",
   "library.deleting": "Moving to the trash…",
   "library.deleteConfirm": { one: "Delete {count} track", other: "Delete {count} tracks" },

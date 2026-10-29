@@ -6237,6 +6237,45 @@
         }
       }
     },
+    "/api/v1/tracks/enabled": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Disables or enables every selected track. Tracks already waiting in the\nqueue stay there. Operators and admins.",
+        "operationId": "set_enabled",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnabledChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tracks/labels": {
       "post": {
         "tags": [
@@ -8847,6 +8886,23 @@
             "minimum": 0
           }
         }
+      },
+      "EnabledChange": {
+        "type": "object",
+        "required": [
+          "selection",
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Off: autofill, clocks and medleys never pick the tracks."
+          },
+          "selection": {
+            "$ref": "#/components/schemas/TrackSelection"
+          }
+        },
+        "additionalProperties": false
       },
       "EncoderKind": {
         "type": "string",

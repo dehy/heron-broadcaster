@@ -31,6 +31,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(edit_tags))
         .routes(routes!(override_tags))
         .routes(routes!(clear_tag_overrides))
+        .routes(routes!(set_enabled))
 }
 
 /// Tracks in one selection, at most.
@@ -98,6 +99,51 @@ pub struct SelectionResult {
     pub tracks: u64,
     /// Changes made (a label added to a track counts once).
     pub changed: u64,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EnabledChange {
+    pub selection: TrackSelection,
+    /// Off: autofill, clocks and medleys never pick the tracks.
+    pub enabled: bool,
+}
+
+/// Disables or enables every selected track. Tracks already waiting in the
+/// queue stay there. Operators and admins.
+#[utoipa::path(post, path = "/tracks/enabled", tag = "library",
+    request_body = EnabledChange,
+    responses((status = 200, body = SelectionResult), (status = "4XX", body = ErrorBody)))]
+async fn set_enabled(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Json(change): Json<EnabledChange>,
+) -> ApiResult<Json<SelectionResult>> {
+    user.require(Role::Operator)?;
+    let ids = change.selection.resolve(&state, MAX_SELECTION).await?;
+    let mut tx = state.pool.begin().await?;
+    let mut changed = 0;
+    for chunk in ids.chunks(CHUNK) {
+        let mut query = QueryBuilder::new("UPDATE tracks SET enabled = ");
+        query
+            .push_bind(change.enabled)
+            .push(" WHERE enabled <> ")
+            .push_bind(change.enabled)
+            .push(" AND id IN (");
+        let mut separated = query.separated(", ");
+        for id in chunk {
+            separated.push_bind(*id);
+        }
+        query.push(")");
+        changed += query.build().execute(&mut *tx).await?.rows_affected();
+    }
+    tx.commit().await?;
+    tracing::info!(user = %user.username, tracks = ids.len(), changed, enabled = change.enabled,
+        "tracks enabled or disabled");
+    Ok(Json(SelectionResult {
+        tracks: ids.len() as u64,
+        changed,
+    }))
 }
 
 /// Refuses labels that do not exist.
