@@ -33,6 +33,16 @@
 
 Viewers see every page (except users and webhooks) without the controls. Every page shows a banner when something needs attention: the API, the database or the engine unreachable, live updates disconnected, the engine refusing the configuration, or the **server clock** not synchronized or off by more than about a second (from `GET /api/v1/status`, see [API](api.md#authentication)).
 
+## Selecting rows
+
+In the lists with selection checkboxes (*Tracks*, *Buffer*):
+
+- a **click** on a checkbox checks or unchecks its row, and makes it the **anchor**;
+- **Shift + click** on a checkbox gives every row from the anchor to this one, both included, the new state of the checkbox clicked: check 8, then Shift + click 12, and rows 8 to 12 are checked; uncheck 9, then Shift + click 11, and 9 to 11 are unchecked. The anchor stays, so another Shift + click changes the range;
+- **Ctrl + click** (⌘ + click on macOS) **anywhere on a row** checks or unchecks it without opening it, and makes it the anchor; a plain click on a row still opens it.
+
+The range follows the rows as they are shown (sort, filters, page; in the Buffer, every group in turn). Another page or other filters drop the anchor.
+
 ## Live updates
 
 The app keeps one WebSocket to `/api/v1/live` ([API – Live WebSocket](api.md#live-websocket)): the decks, queue and outputs change as soon as the engine reports them, positions move smoothly between the twice-a-second updates, and levels arrive ten times a second. It reconnects by itself (from half a second up to 10 s between tries). Changes are sent with REST calls; the queue shows a drag at once and follows the engine's answer.
