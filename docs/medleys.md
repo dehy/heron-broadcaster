@@ -13,7 +13,7 @@ What every medley shares is set once, under *Settings › Medleys* (operators an
 | **Category** | The Heron category rendered medleys go in, usually a Jingle-type one, so clocks and the FX player can call it |
 | **Liners** | The category of the liners; optionally a category of **opening liners** and one of **closing liners**, for the liner at the start and the one at the end of a medley (the liner category when not set) |
 | **Naming** | Medleys are named after the **artists** (the default) or the **titles** of their hooks, see [Names](#names) |
-| **Defaults** | The recipe of a new medley: 3 hooks, a 500 ms crossfade, hooks of 4 to 8 s, a liner every hook, between the hooks, a liner at the start and one at the end, −10 dB of ducking, no fade-out. Each medley can change them |
+| **Defaults** | The recipe of a new medley: 3 hooks, a 500 ms crossfade, hooks of 4 to 8 s, a liner every hook, between the hooks, a liner at the start and one at the end, −10 dB of ducking, no fade-in and no fade-out. Each medley can change them |
 
 Medleys made before these settings existed each had their own category and liner category: the settings start with the ones they used most, the tracks already rendered keep their categories, a medley that had no liners has its liners off, and each keeps its name until it is rendered again.
 
@@ -25,6 +25,7 @@ Medleys made before these settings existed each had their own category and liner
 | **Hooks** | How many (2 to 30), their order (as picked, by year, by BPM), and their length, a filter: only hooks lasting between the shortest and the longest qualify; a hook is never cut, but can be shortened by hand while editing |
 | **Crossfade** | Between two parts |
 | **Liners** | On or off; placed every *N* hooks, optionally also at the start and at the end; **between** the hooks (they take their own time) or **over** the music (the hooks around them play longer, the music lowered under them by the ducking level, see [Liners over the music](#liners-over-the-music)) |
+| **Fade-in** | How long the music fades in at the start of the medley (none by default), and its curve: linear, fast then slow (the music comes up quickly at first), slow then fast, or S-shaped. A liner at the start is not faded: the music comes up under it, or after it when liners go between the hooks |
 | **Fade-out** | How long the music fades out at the end of the medley (none by default), and its curve: linear, fast then slow, slow then fast, or S-shaped. A liner at the end is not faded: the music fades under it, or before it when liners go between the hooks |
 
 A song qualifies when it is enabled, its file is there, it is analyzed and audible, and it has a **hook** (imported from the previous software, see [Importing](import.md), or set on the track's page) whose length fits the recipe. Medleys never qualify, as songs or as liners (even when they go in the liner category).
@@ -41,7 +42,7 @@ A song qualifies when it is enabled, its file is there, it is analyzed and audib
 
    Each part's start and end can be moved by **0.1 s** (− / +), within its file, to place a hook by ear. This changes the medley only, not the track's hook.
 
-   The **timeline** draws the version as it will sound: the hooks with their crossfades, the liners, and the fade-out. With liners over the music, it shows the extra seconds of each hook under each liner, and the point where the music passes from one hook to the next can be dragged, or moved by 0.1 s, to change how much of the liner is over each hook.
+   The **timeline** draws the version as it will sound: the hooks with their crossfades, the liners, the fade-in and the fade-out. With liners over the music, it shows the extra seconds of each hook under each liner, and the point where the music passes from one hook to the next can be dragged, or moved by 0.1 s, to change how much of the liner is over each hook.
 
    Every part (hook or liner) can be **dragged** left or right on the timeline to move it in the medley's time; a click without moving plays from that point instead:
    - a part played after another (a hook, or a liner between the hooks) overlaps the one before it more or less, from 0 (back to back) up to the shorter of the two, instead of by the recipe's crossfade; the parts after it move with it;
