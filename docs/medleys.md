@@ -13,7 +13,7 @@ What every medley shares is set once, under *Settings › Medleys* (operators an
 | **Category** | The Heron category rendered medleys go in, usually a Jingle-type one, so clocks and the FX player can call it |
 | **Liners** | The category of the liners; optionally a category of **opening liners** and one of **closing liners**, for the liner at the start and the one at the end of a medley (the liner category when not set) |
 | **Naming** | Medleys are named after the **artists** (the default) or the **titles** of their hooks, see [Names](#names) |
-| **Defaults** | The recipe of a new medley: 3 hooks, a 500 ms crossfade, hooks of 4 to 8 s, a liner every hook, between the hooks, a liner at the start and one at the end, −10 dB of ducking with the music back up over the last 0.3 s of each liner, no fade-in and no fade-out. Each medley can change them |
+| **Defaults** | The recipe of a new medley: 3 hooks, a 500 ms crossfade, hooks of 4 to 8 s, a liner every hook, between the hooks, a liner at the start and one at the end, −10 dB of ducking, the music going down across the start of each liner and back up across its end over 0.3 s each, no fade-in and no fade-out. Each medley can change them |
 
 Medleys made before these settings existed each had their own category and liner category: the settings start with the ones they used most, the tracks already rendered keep their categories, a medley that had no liners has its liners off, and each keeps its name until it is rendered again.
 
@@ -24,7 +24,7 @@ Medleys made before these settings existed each had their own category and liner
 | **Songs** | The categories the hooks come from, optionally only the tracks with a label |
 | **Hooks** | How many (2 to 30), their order (as picked, by year, by BPM), and their length, a filter: only hooks lasting between the shortest and the longest qualify; a hook is never cut, but can be shortened by hand while editing |
 | **Crossfade** | Between two parts |
-| **Liners** | On or off; placed every *N* hooks, optionally also at the start and at the end; **between** the hooks (they take their own time) or **over** the music (the hooks around them play longer, the music lowered under them by the ducking level and back up over the **release** time before each liner ends, see [Liners over the music](#liners-over-the-music)) |
+| **Liners** | On or off; placed every *N* hooks, optionally also at the start and at the end; **between** the hooks (they take their own time) or **over** the music (the hooks around them play longer, the music lowered under them by the ducking level; where and how fast it goes down and comes back up is set, see [Liners over the music](#liners-over-the-music)) |
 | **Fade-in** | How long the music fades in at the start of the medley (none by default), and its curve: linear, fast then slow (the music comes up quickly at first), slow then fast, or S-shaped. A liner at the start is not faded: the music comes up under it, or after it when liners go between the hooks |
 | **Fade-out** | How long the music fades out at the end of the medley (none by default), and its curve: linear, fast then slow, slow then fast, or S-shaped. A liner at the end is not faded: the music fades under it, or before it when liners go between the hooks |
 
@@ -71,11 +71,18 @@ Outside editing, the timeline draws the medley **as it was rendered**: the libra
 
 A liner over the music never covers the span of a hook chosen to be heard. The hooks around it play longer instead, and the liner plays over those extra seconds only.
 
-Under it, the music goes down by the ducking level over 150 ms before the liner starts, and comes back up over the **release** time before it ends (0.3 s by default, at most 5 s and never more than the liner), as radio software brings the music back during a jingle's tail: the music is at its full level as the liner ends. Liners in a row keep it down from the first to the last.
+Under it, the music goes down by the ducking level, then comes back up. Each of the two has a length (0 to 5 s) and a place:
 
-- **Between two hooks**, the hook before plays on past its end and the hook after starts before its start. The gap they make lasts the liner, plus the crossfade between the two hooks, plus the 150 ms before the liner, so both chosen spans are heard whole and never ducked: the span of the hook after starts as the liner ends.
+| | Before / after the liner | Across (a crossfade) | During the liner |
+|---|---|---|---|
+| **Going down** | Ends as the liner starts | Centred on the liner's start | Starts as the liner starts |
+| **Coming back up** | Starts as the liner ends | Centred on the liner's end | Ends as the liner ends, as radio software brings the music back during a jingle's tail |
+
+New medleys take both across, over 0.3 s each. Medleys made before these settings keep how they sounded: going down before the liner over 0.15 s, coming back up during it over their release time. Placed during the liner, the two never go past it nor cross: when the liner is too short for both, they share it. Liners in a row keep the music down from the first to the last.
+
+- **Between two hooks**, the hook before plays on past its end and the hook after starts before its start. The gap they make lasts the liner, plus the crossfade between the two hooks, plus what the going down takes before the liner and the coming back up after it, so both chosen spans are heard whole and never ducked: the span of the hook before ends as the music starts going down, the span of the hook after starts once it is back up.
 - By default the liner is over as much of the hook before as of the hook after (50/50): a 2 s liner after a hook from 2:17.4 to 2:25.4 plays that hook on to about 2:26.4, and starts the next one about 1 s before its start. The share is set for each liner on the timeline, from all of it over the hook before to all of it over the hook after; the two extensions follow.
-- **At the start** of the medley, the first hook starts earlier by the liner's whole length, its span starting as the liner ends; **at the end**, the last hook plays on under the liner for its whole length.
+- **At the start** of the medley, the first hook starts earlier by the liner's whole length (and what the coming back up takes after it), its span starting once the music is back up; **at the end**, the last hook plays on under the liner for its whole length.
 - Several liners in a row between the same hooks play one after the other in the same gap, with the share of the first.
 - An extension stops at the start or the end of its file; the other hook takes what is missing.
 
