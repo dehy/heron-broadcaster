@@ -62,6 +62,8 @@ The page has one player for the medley: the rendered medley, the preview of the 
 
 Clicking a point of the timeline plays from there: the rendered medley, or, while a version is edited, its preview, mixed again first when the version changed since.
 
+Outside editing, the timeline draws the medley **as it was rendered**: the librarian saves the layout it mixed (where each part starts, the span of its file played, the length and the fade-out) with the medley, so the bar follows what is heard even after the recipe changed. A medley rendered before that layout was saved, or whose file does not last as long as its layout (by more than a quarter of a second), shows today's layout with a warning: render it again for the two to match.
+
 ## Liners over the music
 
 A liner over the music never covers the span of a hook chosen to be heard. The hooks around it play longer instead, and the liner plays over those extra seconds only:
