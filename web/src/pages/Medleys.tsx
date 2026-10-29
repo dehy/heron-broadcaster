@@ -799,9 +799,9 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
           {plan && qualified !== null && qualified < medley.recipe.hooks && (
             <> · {t("medleys.fewSongs", { qualified: number(qualified), wanted: number(medley.recipe.hooks) })}</>
           )}
-          {/* On the same line, its room kept while hidden: nothing below moves when it shows. */}
-          {plan && previewSource !== null && (
-            <span className="warn" style={{ visibility: previewStale ? "visible" : "hidden" }} aria-hidden={!previewStale}>
+          {/* On the same line, added and removed: nothing below moves when it shows. */}
+          {plan && previewStale && (
+            <span className="warn">
               {" · "}
               {t("medleys.previewStale")}
             </span>
