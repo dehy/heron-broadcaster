@@ -70,6 +70,8 @@ export interface LayoutPart {
   from_ms: number;
   to_ms: number;
   shift_ms?: number;
+  /** How far it was moved from where the recipe puts it, negative for earlier. */
+  move_ms?: number;
   /** The file's length, which extensions stop at. */
   duration_ms?: number | null;
 }
@@ -161,21 +163,29 @@ export function layout(
   });
   const placed: (Placed | undefined)[] = parts.map(() => undefined);
   let cursor = 0;
-  sequence.forEach((index, position) => {
+  let previous: Placed | undefined;
+  for (const index of sequence) {
     const part = parts[index];
     if (!part) {
-      return;
+      continue;
     }
     const item: Placed = {
       kind: part.kind,
-      at_ms: position === 0 ? 0 : Math.max(0, cursor - crossfade),
+      at_ms: 0,
       from_ms: part.from_ms - (earlier[index] ?? 0),
       to_ms: part.to_ms + (later[index] ?? 0),
       over: false,
     };
+    if (previous) {
+      // Overlaps the part before by the crossfade, less its move: from 0 to the shorter of the two.
+      const longest = Math.min(item.to_ms - item.from_ms, previous.to_ms - previous.from_ms);
+      const overlap = Math.min(Math.max(crossfade - (part.move_ms ?? 0), 0), longest);
+      item.at_ms = cursor - overlap;
+    }
     cursor = end(item);
     placed[index] = item;
-  });
+    previous = item;
+  }
   gaps.forEach((liners, gap) => {
     let at = 0;
     if (gap > 0) {
@@ -188,8 +198,14 @@ export function layout(
       if (!part) {
         continue;
       }
-      const item: Placed = { kind: part.kind, at_ms: at, from_ms: part.from_ms, to_ms: part.to_ms, over: true };
-      at = end(item);
+      const item: Placed = {
+        kind: part.kind,
+        at_ms: Math.max(0, at + (part.move_ms ?? 0)),
+        from_ms: part.from_ms,
+        to_ms: part.to_ms,
+        over: true,
+      };
+      at += part.to_ms - part.from_ms;
       placed[index] = item;
     }
   });
@@ -207,4 +223,39 @@ export function plannedLength(
   recipe: { crossfade_ms: number; liner_mode: string },
 ): number {
   return layout(parts, recipe).length_ms;
+}
+
+/**
+ * The `move_ms` that puts the part at `index` at `at_ms` in the medley, as
+ * near as it can go: a part after another overlaps it from 0 up to the
+ * shorter of the two; a liner over the music starts at 0 at the earliest.
+ */
+export function moveTo(
+  parts: readonly LayoutPart[],
+  recipe: { crossfade_ms: number; liner_mode: string },
+  index: number,
+  at_ms: number,
+): number {
+  const unmoved = parts.map((part, i) => (i === index ? { ...part, move_ms: 0 } : part));
+  const placed = layout(unmoved, recipe).parts;
+  const item = placed[index];
+  if (!item) {
+    return 0;
+  }
+  if (item.over) {
+    return Math.round(Math.max(at_ms, 0) - item.at_ms);
+  }
+  // The part played before it.
+  let before = index - 1;
+  while (before >= 0 && placed[before]?.over) {
+    before -= 1;
+  }
+  const previous = placed[before];
+  if (!previous) {
+    return 0;
+  }
+  const cursor = previous.at_ms + previous.to_ms - previous.from_ms;
+  const longest = Math.min(item.to_ms - item.from_ms, previous.to_ms - previous.from_ms);
+  const overlap = Math.min(Math.max(cursor - at_ms, 0), longest);
+  return Math.round(recipe.crossfade_ms - overlap);
 }

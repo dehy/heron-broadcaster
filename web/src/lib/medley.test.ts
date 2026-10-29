@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { displayName, layout, linerSlot, medleyName, plannedLength, renderMonth } from "./medley";
+import { displayName, layout, linerSlot, medleyName, moveTo, plannedLength, renderMonth } from "./medley";
 
 const parts = [
   { kind: "hook", from_ms: 10_000, to_ms: 17_000 },
@@ -86,6 +86,38 @@ describe("layout", () => {
     const short = hooks.map((part, i) => (i === 0 ? { ...part, duration_ms: 18_500 } : part));
     const cut = layout(short, over).parts;
     expect([cut[0]?.to_ms, cut[2]?.from_ms]).toEqual([18_500, 28_000]);
+  });
+
+  it("moves parts: overlaps more or less, liners over the music move over it", () => {
+    const between = { crossfade_ms: 500, liner_mode: "between" };
+    const moved = (by: number) => {
+      const parts = [
+        { kind: "hook", from_ms: 0, to_ms: 1_000 },
+        { kind: "liner", from_ms: 0, to_ms: 1_000, move_ms: by },
+        { kind: "hook", from_ms: 0, to_ms: 1_000 },
+      ];
+      const placed = layout(parts, between).parts;
+      return [placed[1]?.at_ms, placed[2]?.at_ms];
+    };
+    expect(moved(-200)).toEqual([300, 800]);
+    expect(moved(600)[0]).toBe(1_000);
+    expect(moved(-5_000)[0]).toBe(0);
+    const shifted = hooks.map((part, i) => (i === 1 ? { ...part, move_ms: 300 } : part));
+    expect(layout(shifted, over).parts[1]?.at_ms).toBe(8_450);
+  });
+
+  it("finds the move that puts a part where it was dropped", () => {
+    const between = { crossfade_ms: 500, liner_mode: "between" };
+    const parts = [
+      { kind: "hook", from_ms: 0, to_ms: 1_000 },
+      { kind: "hook", from_ms: 0, to_ms: 1_000 },
+    ];
+    expect(moveTo(parts, between, 1, 300)).toBe(-200);
+    expect(moveTo(parts, between, 1, 2_000)).toBe(500);
+    expect(moveTo(parts, between, 1, -50)).toBe(-500);
+    expect(moveTo(parts, between, 0, 400)).toBe(0);
+    expect(moveTo(hooks, over, 1, 8_450)).toBe(300);
+    expect(moveTo(hooks, over, 1, -100)).toBe(-8_150);
   });
 
   it("extends one hook for a liner at the start or the end", () => {

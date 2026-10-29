@@ -38,6 +38,7 @@ struct PartRow {
     from_ms: u32,
     to_ms: u32,
     shift_ms: i32,
+    move_ms: i32,
     /// The file's length, which the extensions under liners stop at.
     duration_ms: Option<u32>,
     integrated_lufs: Option<f64>,
@@ -84,6 +85,7 @@ async fn mix_rows(
             from_ms: row.from_ms,
             to_ms: row.to_ms,
             shift_ms: row.shift_ms,
+            move_ms: row.move_ms,
         })
         .collect();
     let lengths: Vec<Option<u32>> = rows.iter().map(|row| row.duration_ms).collect();
@@ -129,7 +131,7 @@ pub async fn render(
 ) -> Result<RenderReport, String> {
     let recipe = recipe(pool, medley_id).await?;
     let rows: Vec<PartRow> = sqlx::query_as(
-        "SELECT CAST(p.kind AS CHAR) AS kind, t.path, p.from_ms, p.to_ms, p.shift_ms,
+        "SELECT CAST(p.kind AS CHAR) AS kind, t.path, p.from_ms, p.to_ms, p.shift_ms, p.move_ms,
                 t.duration_ms, a.integrated_lufs, a.true_peak_db
          FROM medley_parts p
          JOIN tracks t ON t.id = p.track_id
@@ -206,6 +208,7 @@ pub async fn preview(
             from_ms: part.from_ms,
             to_ms: part.to_ms,
             shift_ms: part.shift_ms,
+            move_ms: part.move_ms,
             duration_ms,
             integrated_lufs,
             true_peak_db,

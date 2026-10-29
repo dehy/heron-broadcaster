@@ -14,7 +14,7 @@ import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, PageHead }
 import { number, rich, t } from "../i18n";
 import { ago, duration, trackName } from "../lib/format";
 import { displayName, layout, linerSlot, medleyName, plannedLength, renderMonth } from "../lib/medley";
-import { usePreview } from "../lib/preview";
+import { type PlayerSource, useMedleyPlayer } from "../lib/medleyPlayer";
 import { Link, navigate } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 
@@ -481,7 +481,7 @@ export function FadeCurveSelect({
 }
 
 function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: MedleySettings; canEdit: boolean }) {
-  const preview = usePreview();
+  const player = useMedleyPlayer();
   // A new version being built; the current one otherwise.
   const [plan, setPlan] = useState<PartView[] | null>(null);
   const [qualified, setQualified] = useState<number | null>(null);
@@ -525,12 +525,13 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
         api.POST("/api/v1/medleys/{id}/render", {
           params: { path: { id: medley.id } },
           body: {
-            parts: (plan ?? []).map(({ kind, track_id, from_ms, to_ms, shift_ms }) => ({
+            parts: (plan ?? []).map(({ kind, track_id, from_ms, to_ms, shift_ms, move_ms }) => ({
               kind,
               track_id,
               from_ms,
               to_ms,
               shift_ms,
+              move_ms,
             })),
           },
         }),
@@ -564,7 +565,14 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
   const [previewed, setPreviewed] = useState<string | null>(null);
   const previewTask = useTask(previewTaskId);
   const asPartsBody = (parts: PartView[]) => ({
-    parts: parts.map(({ kind, track_id, from_ms, to_ms, shift_ms }) => ({ kind, track_id, from_ms, to_ms, shift_ms })),
+    parts: parts.map(({ kind, track_id, from_ms, to_ms, shift_ms, move_ms }) => ({
+      kind,
+      track_id,
+      from_ms,
+      to_ms,
+      shift_ms,
+      move_ms,
+    })),
   });
   const mixPreview = useAction(
     () =>
@@ -583,6 +591,34 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
   );
   const previewReady = previewTask.data?.status === "done";
   const previewStale = previewed !== null && previewed !== JSON.stringify(asPartsBody(plan ?? []));
+  const previewSource: PlayerSource | null =
+    previewReady && previewTaskId !== null
+      ? { kind: "medley", url: `/api/v1/medleys/${medley.id}/preview?task=${previewTaskId}` }
+      : null;
+  const renderedSource: PlayerSource | null =
+    medley.track_id != null ? { kind: "medley", url: `/api/v1/tracks/${medley.track_id}/audio` } : null;
+  // Where to play the preview from once it is mixed.
+  const [pendingSeek, setPendingSeek] = useState<number | null>(null);
+  const { play } = player;
+  useEffect(() => {
+    if (pendingSeek !== null && previewSource && !previewStale) {
+      play(previewSource, pendingSeek);
+      setPendingSeek(null);
+    }
+  }, [pendingSeek, previewSource?.url, previewStale, play]);
+  /** Plays the medley from `at_ms`: the version being edited (mixed first when needed), or the rendered one. */
+  const playFrom = (at_ms: number) => {
+    if (plan) {
+      if (previewSource && !previewStale) {
+        player.play(previewSource, at_ms);
+      } else if (canEdit && !mixPreview.isPending) {
+        setPendingSeek(at_ms);
+        mixPreview.mutate(undefined);
+      }
+    } else if (renderedSource) {
+      player.play(renderedSource, at_ms);
+    }
+  };
   // Moves a part's start or end by `by` ms, within its file, keeping it at least 0.5 s long.
   const nudge = (index: number, end: "from_ms" | "to_ms", by: number) =>
     setPlan((current) =>
@@ -611,12 +647,22 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
   // Shares a liner over the music between the hooks around it.
   const setShift = (index: number, shift_ms: number) =>
     setPlan((current) => (current ?? []).map((part, i) => (i === index ? { ...part, shift_ms } : part)));
+  const placed = layout(parts, medley.recipe).parts;
   const shares = new Map(
-    junctions(parts, layout(parts, medley.recipe).parts, medley.recipe.crossfade_ms).map((join) => [
-      join.liner,
-      join.share,
-    ]),
+    junctions(parts, placed, medley.recipe.crossfade_ms).map((join) => [join.liner, join.share]),
   );
+  // Moves a part in the medley.
+  const setMove = (index: number, move_ms: number) =>
+    setPlan((current) => (current ?? []).map((part, i) => (i === index ? { ...part, move_ms } : part)));
+  const source = player.source;
+  const playhead =
+    source?.kind === "medley"
+      ? player.position_ms
+      : source?.kind === "part" && placed[source.index]
+        ? (placed[source.index]?.at_ms ?? 0) + player.position_ms - (placed[source.index]?.from_ms ?? 0)
+        : null;
+  const medleySource = plan ? previewSource : renderedSource;
+  const playingMedley = source?.kind === "medley" && medleySource !== null && source.url === medleySource.url;
   const move = (index: number, by: number) =>
     setPlan((current) => {
       const next = [...(current ?? [])];
@@ -673,7 +719,10 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
                 type="button"
                 className="btn small"
                 disabled={mixPreview.isPending || hooks === 0 || previewTask.data?.status === "pending" || previewTask.data?.status === "running"}
-                onClick={() => mixPreview.mutate(undefined)}
+                onClick={() => {
+                  setPendingSeek(0);
+                  mixPreview.mutate(undefined);
+                }}
               >
                 <Icon name="play" size={14} /> {t("medleys.preview")}
               </button>
@@ -709,44 +758,66 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
         )}
         {!plan && <TaskState task={task.data} />}
         {plan && previewTaskId !== null && !previewReady && <TaskState task={previewTask.data} />}
-        {plan && previewReady && (
-          <div className="stack" style={{ gap: "0.3rem", alignItems: "center" }}>
-            <audio
-              controls
-              autoPlay
-              src={`/api/v1/medleys/${medley.id}/preview?task=${previewTaskId}`}
-              aria-label={t("medleys.preview")}
-            />
-            {previewStale && <span className="small warn">{t("medleys.previewStale")}</span>}
-          </div>
-        )}
-        {!plan && medley.track_id != null && (
-          <span className="row small">
+        {parts.length > 0 && (plan || medley.track_id != null) && (
+          <div className="medley-player small" role="group" aria-label={t("medleys.player")}>
             <button
               type="button"
               className="btn small"
-              aria-pressed={preview.playing === medley.track_id}
-              onClick={() => preview.toggle({ id: medley.track_id ?? 0 })}
+              disabled={plan ? !canEdit && !previewSource : false}
+              onClick={() => {
+                if (playingMedley && player.playing) {
+                  player.pause();
+                } else if (playingMedley) {
+                  player.resume();
+                } else {
+                  playFrom(0);
+                }
+              }}
             >
-              <Icon name={preview.playing === medley.track_id ? "stop" : "play"} size={14} />{" "}
-              {preview.playing === medley.track_id ? t("medleys.stop") : t("medleys.listenMedley")}
+              <Icon name={playingMedley && player.playing ? "pause" : "play"} size={14} />{" "}
+              {playingMedley && player.playing
+                ? t("medleys.pause")
+                : plan
+                  ? t("medleys.listenVersion")
+                  : t("medleys.listenMedley")}
             </button>
-            <Link to={`/library/${medley.track_id}`}>{t("medleys.openTrack")}</Link>
-          </span>
+            {source && (
+              <button type="button" className="btn small" onClick={() => player.stop()}>
+                {t("medleys.stop")}
+              </button>
+            )}
+            {source && (
+              <span className="num muted">
+                {source.kind === "part"
+                  ? trackName(parts[source.index] ?? { path: "" })
+                  : `${duration(player.position_ms, true)} / ${duration(player.length_ms ?? plannedLength(parts, medley.recipe), true)}`}
+              </span>
+            )}
+            {pendingSeek !== null && <span className="muted">{t("medleys.mixing")}</span>}
+            {!plan && medley.track_id != null && <Link to={`/library/${medley.track_id}`}>{t("medleys.openTrack")}</Link>}
+          </div>
         )}
+        {plan && previewStale && <span className="small warn">{t("medleys.previewStale")}</span>}
         {!plan && medley.path && medley.track_id == null && status === "done" && (
           <span className="small muted">{t("medleys.waitingScan")}</span>
         )}
       </div>
       {parts.length > 0 && (
-        <MedleyTimeline parts={parts} recipe={medley.recipe} onShift={canEdit && plan ? setShift : undefined} />
+        <MedleyTimeline
+          parts={parts}
+          recipe={medley.recipe}
+          playhead_ms={source ? playhead : null}
+          onShift={canEdit && plan ? setShift : undefined}
+          onMove={canEdit && plan ? setMove : undefined}
+          onSeek={plan || renderedSource ? playFrom : undefined}
+        />
       )}
       {parts.length === 0 ? (
         <Empty>{canEdit ? t("medleys.buildHelp") : t("medleys.notBuilt")}</Empty>
       ) : (
         <ol className="list">
           {parts.map((part, index) => {
-            const playing = preview.playing === part.track_id;
+            const playing = source?.kind === "part" && source.index === index && player.playing;
             return (
               <li key={`${index}-${part.track_id}`} className="queue-item">
                 <span className="index">{index + 1}</span>
@@ -776,6 +847,36 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
                         {duration(part.to_ms - part.from_ms, true)}
                       </span>
                     )}
+                    {(part.move_ms ?? 0) !== 0 && (
+                      <span className="num row" style={{ gap: "0.25rem", flexWrap: "nowrap" }}>
+                        {canEdit && plan && (
+                          <Nudge
+                            label={t("medleys.moveEarlier", { name: trackName(part) })}
+                            text="−"
+                            onClick={() => setMove(index, (part.move_ms ?? 0) - SHIFT_STEP_MS)}
+                          />
+                        )}
+                        {t("medleys.moved", { by: `${(part.move_ms ?? 0) > 0 ? "+" : "−"}${duration(Math.abs(part.move_ms ?? 0), true)}` })}
+                        {canEdit && plan && (
+                          <>
+                            <Nudge
+                              label={t("medleys.moveLater", { name: trackName(part) })}
+                              text="+"
+                              onClick={() => setMove(index, (part.move_ms ?? 0) + SHIFT_STEP_MS)}
+                            />
+                            <button
+                              type="button"
+                              className="btn small nudge"
+                              aria-label={t("medleys.moveBack", { name: trackName(part) })}
+                              title={t("medleys.moveBack", { name: trackName(part) })}
+                              onClick={() => setMove(index, 0)}
+                            >
+                              ↺
+                            </button>
+                          </>
+                        )}
+                      </span>
+                    )}
                     {shares.has(index) && (
                       <span className="num row" style={{ gap: "0.25rem", flexWrap: "nowrap" }}>
                         {canEdit && plan && (
@@ -803,7 +904,17 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
                     className="btn ghost small icon"
                     aria-label={t(playing ? "library.stopPreviewNamed" : "library.previewNamed", { name: trackName(part) })}
                     aria-pressed={playing}
-                    onClick={() => preview.toggle({ id: part.track_id, cue_in_ms: part.from_ms, cue_out_ms: part.to_ms })}
+                    onClick={() =>
+                      playing
+                        ? player.stop()
+                        : player.play({
+                            kind: "part",
+                            index,
+                            track_id: part.track_id,
+                            from_ms: part.from_ms,
+                            to_ms: part.to_ms,
+                          })
+                    }
                   >
                     <Icon name={playing ? "stop" : "play"} />
                   </button>

@@ -255,6 +255,10 @@ pub struct Part {
     /// the liner over the hook before. See [`layout`].
     #[serde(default)]
     pub shift_ms: i32,
+    /// How far the part was moved in the medley from where the recipe puts
+    /// it, negative for earlier. See [`layout`].
+    #[serde(default)]
+    pub move_ms: i32,
 }
 
 impl Part {
@@ -350,6 +354,7 @@ fn hook(song: &Candidate) -> Part {
         from_ms: song.from_ms,
         to_ms: song.to_ms,
         shift_ms: 0,
+        move_ms: 0,
     }
 }
 
@@ -360,6 +365,7 @@ fn liner(candidate: &Candidate) -> Part {
         from_ms: candidate.from_ms,
         to_ms: candidate.to_ms,
         shift_ms: 0,
+        move_ms: 0,
     }
 }
 
@@ -573,9 +579,13 @@ pub struct Layout {
 /// after the last, that hook alone plays longer. An extension stops at the
 /// file's start, or its end (`lengths`, each part's file length when known),
 /// the other hook taking what is missing.
+///
+/// A part's `move_ms` then moves it in the medley: a part played after
+/// another overlaps it by the crossfade minus `move_ms`, from 0 (back to
+/// back) up to the shorter of the two, the parts after it following; a
+/// liner over the music moves over the music.
 pub fn layout(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layout {
     let crossfade = recipe.crossfade_ms;
-    let blend = crossfade.max(EDGE_FADE_MS);
     let over = recipe.liner_mode == LinerMode::Over;
     let is_over = |part: &Part| over && part.kind == PartKind::Liner;
     // The parts played one after another, and the liners over them by gap:
@@ -635,29 +645,33 @@ pub fn layout(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layou
 
     let mut placed: Vec<Option<Placed>> = vec![None; parts.len()];
     let mut cursor = 0u32;
-    for (position, &index) in sequence.iter().enumerate() {
+    let mut previous: Option<usize> = None;
+    for &index in &sequence {
         let part = &parts[index];
-        let at = if position == 0 {
-            0
-        } else {
-            cursor.saturating_sub(crossfade)
-        };
-        let item = Placed {
+        let from_ms = part.from_ms - earlier[index];
+        let to_ms = part.to_ms + later[index];
+        // The medley's own start and end only fade over the edge.
+        let mut item = Placed {
             kind: part.kind,
-            at_ms: at,
-            from_ms: part.from_ms - earlier[index],
-            to_ms: part.to_ms + later[index],
-            // The medley's own start and end only fade over the edge.
-            fade_in_ms: if position == 0 { EDGE_FADE_MS } else { blend },
-            fade_out_ms: if position + 1 == count {
-                EDGE_FADE_MS
-            } else {
-                blend
-            },
+            at_ms: 0,
+            from_ms,
+            to_ms,
+            fade_in_ms: EDGE_FADE_MS,
+            fade_out_ms: EDGE_FADE_MS,
             over: false,
         };
+        if let Some(before) = previous.and_then(|before| placed[before].as_mut()) {
+            let longest = (to_ms - from_ms).min(before.to_ms - before.from_ms);
+            let overlap = (i64::from(crossfade) - i64::from(part.move_ms))
+                .clamp(0, i64::from(longest)) as u32;
+            item.at_ms = cursor - overlap;
+            let blend = overlap.max(EDGE_FADE_MS);
+            item.fade_in_ms = blend;
+            before.fade_out_ms = blend;
+        }
         cursor = item.end_ms();
         placed[index] = Some(item);
+        previous = Some(index);
     }
     // Each group of liners starts as the music before it is lowered: after
     // the span of the hook before (and its ramp), at 0 before the first.
@@ -674,14 +688,14 @@ pub fn layout(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layou
             let part = &parts[index];
             let item = Placed {
                 kind: part.kind,
-                at_ms: at,
+                at_ms: (i64::from(at) + i64::from(part.move_ms)).max(0) as u32,
                 from_ms: part.from_ms,
                 to_ms: part.to_ms,
                 fade_in_ms: EDGE_FADE_MS,
                 fade_out_ms: EDGE_FADE_MS,
                 over: true,
             };
-            at = item.end_ms();
+            at += part.length_ms();
             placed[index] = Some(item);
         }
     }
@@ -1034,6 +1048,7 @@ mod tests {
             from_ms,
             to_ms,
             shift_ms: 0,
+            move_ms: 0,
         }
     }
 
@@ -1139,6 +1154,43 @@ mod tests {
 
     fn layout_of(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layout {
         layout(recipe, parts, lengths)
+    }
+
+    #[test]
+    fn moved_parts_overlap_more_or_less() {
+        let between = Recipe {
+            crossfade_ms: 500,
+            ..recipe()
+        };
+        let moved = |by: i32| {
+            let mut parts = [
+                part(PartKind::Hook, 0, 1_000),
+                part(PartKind::Liner, 0, 1_000),
+                part(PartKind::Hook, 0, 1_000),
+            ];
+            parts[1].move_ms = by;
+            let layout = layout_of(&between, &parts, &[]);
+            (layout.parts[1], layout.parts[2].at_ms)
+        };
+        // 0.2 s earlier: a 0.7 s crossfade, the next part follows.
+        let (liner, next) = moved(-200);
+        assert_eq!((liner.at_ms, liner.fade_in_ms, next), (300, 700, 800));
+        // Never apart, never more than the shorter part.
+        assert_eq!(moved(600).0.at_ms, 1_000);
+        assert_eq!(moved(-5_000).0.at_ms, 0);
+        // A liner over the music moves over it.
+        let over = Recipe {
+            crossfade_ms: 200,
+            liner_mode: LinerMode::Over,
+            ..recipe()
+        };
+        let mut parts = [
+            part(PartKind::Hook, 10_000, 18_000),
+            part(PartKind::Liner, 0, 2_000),
+            part(PartKind::Hook, 30_000, 36_000),
+        ];
+        parts[1].move_ms = 300;
+        assert_eq!(layout_of(&over, &parts, &[]).parts[1].at_ms, 8_450);
     }
 
     #[test]

@@ -4,12 +4,13 @@
 // crossfades and the extensions under liners over the music, the liners,
 // and the fade-out. Under each liner over the music, the point where the
 // music passes from one hook to the next can be dragged to share the
-// liner between them.
+// liner between them. Every part can be dragged to move it in the medley;
+// a click without moving plays from that point.
 
 import { type KeyboardEvent, type PointerEvent, useRef } from "react";
 import { t } from "../i18n";
 import { duration, trackName } from "../lib/format";
-import { type LayoutPart, type Placed, layout } from "../lib/medley";
+import { type LayoutPart, type Placed, layout, moveTo } from "../lib/medley";
 
 export interface TimelinePart extends LayoutPart {
   title?: string | null;
@@ -55,18 +56,32 @@ export function junctions(
   return found;
 }
 
+/** How far the pointer moves before a press is a drag, not a click. */
+const DRAG_PX = 4;
+
 export function MedleyTimeline({
   parts,
   recipe,
+  playhead_ms,
   onShift,
+  onMove,
+  onSeek,
 }: {
   parts: readonly TimelinePart[];
   recipe: { crossfade_ms: number; liner_mode: string; fade_out_ms: number };
+  /** Where the player is on the timeline; none when it does not play. */
+  playhead_ms?: number | null | undefined;
   /** Moves the liner at `index` to `shift_ms`; none: read only. */
   onShift?: ((index: number, shift_ms: number) => void) | undefined;
+  /** Moves the part at `index` to `move_ms`; none: read only. */
+  onMove?: ((index: number, move_ms: number) => void) | undefined;
+  /** Plays from `at_ms` on the timeline. */
+  onSeek?: ((at_ms: number) => void) | undefined;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const drag = useRef<{ index: number; x: number; shift: number } | null>(null);
+  // A press on the lanes: a click (seek) or, once it moves, a drag of a part.
+  const press = useRef<{ index: number | null; x: number; at: number; dragging: boolean } | null>(null);
   const { parts: placed, length_ms, music_end_ms } = layout(parts, recipe);
   if (length_ms === 0) {
     return null;
@@ -76,6 +91,44 @@ export function MedleyTimeline({
   const joins = junctions(parts, placed, recipe.crossfade_ms);
   const fade = Math.min(recipe.fade_out_ms, music_end_ms);
   let hookLane = 0;
+
+  const msAt = (clientX: number) => {
+    const rect = box.current?.querySelector(".lanes")?.getBoundingClientRect();
+    return rect && rect.width > 0 ? Math.min(length_ms, Math.max(0, ((clientX - rect.left) / rect.width) * length_ms)) : 0;
+  };
+  const msPerPx = () => {
+    const rect = box.current?.querySelector(".lanes")?.getBoundingClientRect();
+    return rect && rect.width > 0 ? length_ms / rect.width : 0;
+  };
+  const pressDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || (event.target as HTMLElement).closest(".junction")) {
+      return;
+    }
+    const block = (event.target as HTMLElement).closest<HTMLElement>("[data-index]");
+    const index = block ? Number(block.dataset.index) : null;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    press.current = { index, x: event.clientX, at: index !== null ? (placed[index]?.at_ms ?? 0) : 0, dragging: false };
+  };
+  const pressMove = (event: PointerEvent<HTMLDivElement>) => {
+    const current = press.current;
+    if (!current || current.index === null || !onMove) {
+      return;
+    }
+    const dx = event.clientX - current.x;
+    if (!current.dragging && Math.abs(dx) < DRAG_PX) {
+      return;
+    }
+    current.dragging = true;
+    const at = current.at + dx * msPerPx();
+    onMove(current.index, Math.round(moveTo(parts, recipe, current.index, at) / 10) * 10);
+  };
+  const pressUp = (event: PointerEvent<HTMLDivElement>) => {
+    const current = press.current;
+    press.current = null;
+    if (current && !current.dragging && onSeek) {
+      onSeek(msAt(event.clientX));
+    }
+  };
 
   const shiftOf = (index: number) => parts[index]?.shift_ms ?? 0;
   const startDrag = (index: number) => (event: PointerEvent<HTMLButtonElement>) => {
@@ -113,7 +166,15 @@ export function MedleyTimeline({
 
   return (
     <div className="medley-timeline" ref={box} role="group" aria-label={t("medleys.timeline")}>
-      <div className="lanes">
+      <div
+        className={`lanes${onMove ? " movable" : ""}${onSeek ? " seekable" : ""}`}
+        onPointerDown={pressDown}
+        onPointerMove={pressMove}
+        onPointerUp={pressUp}
+        onPointerCancel={() => {
+          press.current = null;
+        }}
+      >
         {placed.map((item, index) => {
           const part = parts[index];
           if (!part) {
@@ -128,7 +189,8 @@ export function MedleyTimeline({
           return (
             <div
               key={`${index}-${part.from_ms}`}
-              className={`block ${item.kind}${item.over ? " over" : ""}`}
+              data-index={index}
+              className={`block ${item.kind}${item.over ? " over" : ""}${part.move_ms ? " moved" : ""}`}
               style={{ left: pct(item.at_ms), width: pct(span), top: `${lane * 1.9}rem` }}
               title={`${name} · ${duration(item.at_ms, true)} – ${duration(item.at_ms + span, true)}`}
             >
@@ -145,6 +207,7 @@ export function MedleyTimeline({
             title={t("medleys.fadeOut")}
           />
         )}
+        {playhead_ms != null && <div className="playhead" style={{ left: pct(playhead_ms) }} />}
         {joins.map((join) => (
           <button
             key={join.liner}
