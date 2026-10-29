@@ -42,7 +42,7 @@ A song qualifies when it is enabled, its file is there, it is analyzed and audib
 
    Each part's start and end can be moved by **0.1 s** (− / +), within its file, to place a hook by ear. This changes the medley only, not the track's hook.
 
-   The **timeline** draws the version as it will sound: the hooks with their crossfades, the liners, the fade-in and the fade-out. With liners over the music, it shows the extra seconds of each hook under each liner, and the point where the music passes from one hook to the next can be dragged, or moved by 0.1 s, to change how much of the liner is over each hook.
+   The **timeline** draws the version as it will sound: the hooks with their crossfades and the liners, each with a line of its level as mixed: its fades and crossfades, and for the music the ducking under the liners, the fade-in and the fade-out. With liners over the music, it shows the extra seconds of each hook under each liner, and the point where the music passes from one hook to the next can be dragged, or moved by 0.1 s, to change how much of the liner is over each hook.
 
    Every part (hook or liner) can be **dragged** left or right on the timeline to move it in the medley's time; a click without moving plays from that point instead:
    - a part played after another (a hook, or a liner between the hooks) overlaps the one before it more or less, from 0 (back to back) up to the shorter of the two, instead of by the recipe's crossfade; the parts after it move with it;
