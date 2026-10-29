@@ -698,6 +698,7 @@ const en = {
   "medleys.moveEarlier": "Move {name} 0.1 s earlier",
   "medleys.moveLater": "Move {name} 0.1 s later",
   "medleys.moveBack": "Put {name} back where the recipe places it",
+  "medleys.timelineOutOfStep": "This medley was rendered before its timeline was saved, or with other rules: the timeline may not match what is heard. Render it again for the two to match.",
   "medleys.removeNamed": "Remove {name}",
   "labels.description": "Keywords on tracks (christmas, instrumental, live…), to sort and select the library. Files are not modified. Clocks call categories, not labels: a category can be filled from a label on the {link} page.",
   "labels.categoriesLink": "categories",

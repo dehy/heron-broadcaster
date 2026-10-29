@@ -10331,6 +10331,41 @@
         },
         "additionalProperties": false
       },
+      "Layout": {
+        "type": "object",
+        "description": "The medley as it will sound: each part where it goes, in the parts'\norder. Saved with a medley when it is rendered, so its timeline is the\nfile's.",
+        "required": [
+          "parts",
+          "length_ms",
+          "music_end_ms"
+        ],
+        "properties": {
+          "fade_out_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The recipe's fade-out.",
+            "minimum": 0
+          },
+          "length_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How long the medley lasts.",
+            "minimum": 0
+          },
+          "music_end_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Where the music (the hooks) ends: the fade-out ends there.",
+            "minimum": 0
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Placed"
+            }
+          }
+        }
+      },
       "Levels": {
         "type": "object",
         "required": [
@@ -10879,6 +10914,17 @@
               "null"
             ],
             "format": "int64"
+          },
+          "rendered_layout": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Layout",
+                "description": "The layout of the file rendered last, part by part; none for a medley\nrendered before it was saved."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "task_error": {
             "type": [
@@ -11817,6 +11863,55 @@
           }
         },
         "additionalProperties": false
+      },
+      "Placed": {
+        "type": "object",
+        "description": "Where a part goes in the medley, in ms on the medley's timeline.",
+        "required": [
+          "kind",
+          "at_ms",
+          "from_ms",
+          "to_ms",
+          "fade_in_ms",
+          "fade_out_ms",
+          "over"
+        ],
+        "properties": {
+          "at_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Where it starts in the medley.",
+            "minimum": 0
+          },
+          "fade_in_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "fade_out_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "from_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The span of its file played: the part's own, with the extensions\nunder liners over the music.",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PartKind"
+          },
+          "over": {
+            "type": "boolean",
+            "description": "A liner over the music: the music is lowered while it plays."
+          },
+          "to_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
       },
       "PlannedMove": {
         "type": "object",

@@ -62,6 +62,7 @@ const DRAG_PX = 4;
 export function MedleyTimeline({
   parts,
   recipe,
+  rendered,
   playhead_ms,
   onShift,
   onMove,
@@ -69,6 +70,8 @@ export function MedleyTimeline({
 }: {
   parts: readonly TimelinePart[];
   recipe: { crossfade_ms: number; liner_mode: string; fade_out_ms: number };
+  /** The layout the medley's file was rendered with: drawn instead of laying the parts out again. */
+  rendered?: { parts: Placed[]; length_ms: number; music_end_ms: number; fade_out_ms?: number } | null | undefined;
   /** Where the player is on the timeline; none when it does not play. */
   playhead_ms?: number | null | undefined;
   /** Moves the liner at `index` to `shift_ms`; none: read only. */
@@ -82,14 +85,14 @@ export function MedleyTimeline({
   const drag = useRef<{ index: number; x: number; shift: number } | null>(null);
   // A press on the lanes: a click (seek) or, once it moves, a drag of a part.
   const press = useRef<{ index: number | null; x: number; at: number; dragging: boolean } | null>(null);
-  const { parts: placed, length_ms, music_end_ms } = layout(parts, recipe);
+  const { parts: placed, length_ms, music_end_ms } = rendered ?? layout(parts, recipe);
   if (length_ms === 0) {
     return null;
   }
   const pct = (ms: number) => `${(ms / length_ms) * 100}%`;
   const width = (from: number, to: number) => `${(Math.max(0, to - from) / length_ms) * 100}%`;
   const joins = junctions(parts, placed, recipe.crossfade_ms);
-  const fade = Math.min(recipe.fade_out_ms, music_end_ms);
+  const fade = Math.min(rendered ? (rendered.fade_out_ms ?? 0) : recipe.fade_out_ms, music_end_ms);
   let hookLane = 0;
 
   const msAt = (clientX: number) => {

@@ -234,6 +234,9 @@ pub struct Medley {
     pub task_status: Option<String>,
     pub task_error: Option<String>,
     pub rendered_at_unix_ms: Option<i64>,
+    /// The layout of the file rendered last, part by part; none for a medley
+    /// rendered before it was saved.
+    pub rendered_layout: Option<medley::Layout>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -296,11 +299,12 @@ type MedleyRow = (
     Option<String>,
     Option<String>,
     Option<i64>,
+    Option<String>,
 );
 
 const SELECT: &str = "SELECT m.id, m.name, CAST(m.recipe AS CHAR), m.path,
         m.track_id, m.task_id, CAST(lt.status AS CHAR), lt.error,
-        CAST(UNIX_TIMESTAMP(m.rendered_at) * 1000 AS SIGNED)
+        CAST(UNIX_TIMESTAMP(m.rendered_at) * 1000 AS SIGNED), CAST(m.rendered_layout AS CHAR)
     FROM medleys m
     LEFT JOIN library_tasks lt ON lt.id = m.task_id";
 
@@ -322,7 +326,7 @@ async fn load(pool: &MySqlPool, id: Option<u64>) -> ApiResult<Vec<Medley>> {
         }
     };
     let mut medleys = Vec::with_capacity(rows.len());
-    for (id, name, recipe, path, track_id, task_id, status, error, rendered) in rows {
+    for (id, name, recipe, path, track_id, task_id, status, error, rendered, layout) in rows {
         let recipe = serde_json::from_str(&recipe)
             .map_err(|error| ApiError::Internal(format!("medley {id}: {error}")))?;
         let parts: Vec<Part> = saved_parts(pool, id).await?;
@@ -337,6 +341,8 @@ async fn load(pool: &MySqlPool, id: Option<u64>) -> ApiResult<Vec<Medley>> {
             task_status: status,
             task_error: error,
             rendered_at_unix_ms: rendered,
+            // A layout this version cannot read is left out, not an error.
+            rendered_layout: layout.and_then(|json| serde_json::from_str(&json).ok()),
         });
     }
     Ok(medleys)

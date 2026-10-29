@@ -707,6 +707,7 @@ const fr = {
   "medleys.moveEarlier": "Avancer {name} de 0,1 s",
   "medleys.moveLater": "Reculer {name} de 0,1 s",
   "medleys.moveBack": "Remettre {name} là où la recette le place",
+  "medleys.timelineOutOfStep": "Ce medley a été rendu avant que sa frise soit enregistrée, ou avec d’autres règles : la frise peut ne pas correspondre à ce qu’on entend. Relancez le rendu pour qu’elles correspondent.",
   "medleys.removeNamed": "Retirer {name}",
   "labels.description": "Des mots-clés sur les pistes (noël, instrumental, live…), pour trier et sélectionner la bibliothèque. Les fichiers ne sont pas modifiés. Les horloges appellent des catégories, pas des étiquettes : une catégorie se remplit à partir d’une étiquette sur la page {link}.",
   "labels.categoriesLink": "catégories",

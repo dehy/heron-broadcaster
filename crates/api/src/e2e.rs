@@ -4024,6 +4024,19 @@ async fn medleys_are_planned_rendered_and_linked() {
         "{name}"
     );
     let path = rendered["path"].as_str().unwrap().to_owned();
+    // The layout it was rendered with, as long as the file.
+    assert_eq!(
+        rendered["rendered_layout"]["length_ms"],
+        3 * 2_000 + 2 * 3_000 - 4 * 200,
+        "{rendered}"
+    );
+    assert_eq!(
+        rendered["rendered_layout"]["parts"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
     assert_eq!(path, format!("medleys/medley-{id}.wav"));
     assert_eq!(rendered["parts"].as_array().unwrap().len(), 5);
     let reader = hound::WavReader::open(station.library.path().join(&path)).unwrap();

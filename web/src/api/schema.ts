@@ -3743,6 +3743,29 @@ export interface components {
             remove?: number[];
             selection: components["schemas"]["TrackSelection"];
         };
+        /**
+         * @description The medley as it will sound: each part where it goes, in the parts'
+         *     order. Saved with a medley when it is rendered, so its timeline is the
+         *     file's.
+         */
+        Layout: {
+            /**
+             * Format: int32
+             * @description The recipe's fade-out.
+             */
+            fade_out_ms?: number;
+            /**
+             * Format: int32
+             * @description How long the medley lasts.
+             */
+            length_ms: number;
+            /**
+             * Format: int32
+             * @description Where the music (the hooks) ends: the fade-out ends there.
+             */
+            music_end_ms: number;
+            parts: components["schemas"]["Placed"][];
+        };
         Levels: {
             deck_a: components["schemas"]["ChannelLevels"];
             deck_b: components["schemas"]["ChannelLevels"];
@@ -3934,6 +3957,7 @@ export interface components {
             recipe: components["schemas"]["Recipe"];
             /** Format: int64 */
             rendered_at_unix_ms?: number | null;
+            rendered_layout?: components["schemas"]["Layout"] | null;
             task_error?: string | null;
             /**
              * Format: int64
@@ -4349,6 +4373,29 @@ export interface components {
             kind: components["schemas"]["PartKind"];
             /** @description Where the liner goes, for a liner. */
             slot?: components["schemas"]["LinerSlot"];
+        };
+        /** @description Where a part goes in the medley, in ms on the medley's timeline. */
+        Placed: {
+            /**
+             * Format: int32
+             * @description Where it starts in the medley.
+             */
+            at_ms: number;
+            /** Format: int32 */
+            fade_in_ms: number;
+            /** Format: int32 */
+            fade_out_ms: number;
+            /**
+             * Format: int32
+             * @description The span of its file played: the part's own, with the extensions
+             *     under liners over the music.
+             */
+            from_ms: number;
+            kind: components["schemas"]["PartKind"];
+            /** @description A liner over the music: the music is lowered while it plays. */
+            over: boolean;
+            /** Format: int32 */
+            to_ms: number;
         };
         PlannedMove: {
             /** @description Relative to the library root. */
