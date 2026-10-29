@@ -3,9 +3,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { api, done, errorMessage, fetchStatus, unwrap } from "./api";
-import { Banner, Icon, type IconName, Loading, Logo } from "./components/ui";
+import { Banner, Icon, Loading, Logo } from "./components/ui";
 import { type PlainKey, rich, setLanguage, t, toSetting, useLanguage } from "./i18n";
 import { setTimeZone } from "./lib/format";
+import { PAGES, isCurrent } from "./lib/pages";
 import { startLive, stopLive, useLive } from "./lib/live";
 import { Link, match, navigate, useLocation } from "./lib/router";
 import { ME_KEY, UserContext, useCan, useMeQuery } from "./lib/session";
@@ -77,40 +78,6 @@ export function App() {
   );
 }
 
-interface Page {
-  path: string;
-  label: PlainKey;
-  icon: IconName;
-  section?: PlainKey;
-  admin?: boolean;
-}
-
-const PAGES: Page[] = [
-  { path: "/", label: "nav.onAir", icon: "air" },
-  { path: "/queue", label: "nav.queue", icon: "queue" },
-  { path: "/history", label: "nav.history", icon: "history" },
-  { path: "/statistics", label: "nav.statistics", icon: "chart" },
-  { path: "/library", label: "nav.tracks", icon: "library", section: "nav.library" },
-  { path: "/buffer", label: "nav.buffer", icon: "upload" },
-  { path: "/labels", label: "nav.labels", icon: "label" },
-  { path: "/medleys", label: "nav.medleys", icon: "queue" },
-  { path: "/artists", label: "nav.artists", icon: "mic" },
-  { path: "/review", label: "nav.review", icon: "review" },
-  { path: "/trash", label: "nav.trash", icon: "trash" },
-  { path: "/import", label: "nav.import", icon: "upload", admin: true },
-  { path: "/clocks", label: "nav.clocks", icon: "clock", section: "nav.programming" },
-  { path: "/schedule", label: "nav.schedule", icon: "calendar" },
-  { path: "/categories", label: "nav.categories", icon: "tag" },
-  { path: "/restrictions", label: "nav.restrictions", icon: "ban" },
-  { path: "/rotation", label: "nav.rotation", icon: "log" },
-  { path: "/playout", label: "nav.playout", icon: "fade", section: "nav.station" },
-  { path: "/eq", label: "nav.eq", icon: "eq" },
-  { path: "/outputs", label: "nav.outputs", icon: "output" },
-  { path: "/settings", label: "nav.settings", icon: "settings" },
-  { path: "/webhooks", label: "nav.webhooks", icon: "bolt", admin: true },
-  { path: "/users", label: "nav.users", icon: "users", admin: true },
-];
-
 function route(pathname: string): ReactNode {
   const track = match("/library/:id", pathname);
   if (track) {
@@ -180,10 +147,6 @@ function route(pathname: string): ReactNode {
         </Banner>
       );
   }
-}
-
-function isCurrent(page: string, pathname: string): boolean {
-  return page === "/" ? pathname === "/" : pathname === page || pathname.startsWith(`${page}/`);
 }
 
 function Shell() {

@@ -40,6 +40,7 @@ const fr = {
   "app.title": "{page} · Heron Broadcaster",
 
   // Navigation
+  "app.breadcrumb": "Fil d’Ariane",
   "nav.label": "Navigation",
   "nav.menu": "Menu",
   "nav.onAir": "À l'antenne",
@@ -922,7 +923,6 @@ const fr = {
   "clocks.hoursAWeek": { one: "{count} heure par semaine", other: "{count} heures par semaine" },
   "clocks.saved": "Horloge enregistrée",
   "clocks.deleted": "Horloge supprimée",
-  "clocks.all": "Toutes les horloges",
   "clocks.deleteQuestion": "Supprimer {name} ? Les heures où elle est programmée font tourner toute la bibliothèque jusqu'à ce qu'une autre horloge y soit programmée.",
   "clocks.loop": "Boucler d'une heure à l'autre",
   "clocks.loopHelp": "L'horloge reprend après son dernier créneau quelle que soit l'heure, comme une clockwheel de SAM Broadcaster : elle peut durer plus d'une heure.",

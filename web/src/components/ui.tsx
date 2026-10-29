@@ -12,6 +12,7 @@ import {
   useState,
 } from "react";
 import { errorMessage } from "../api";
+import { Breadcrumb } from "./Breadcrumb";
 import { t } from "../i18n";
 
 // Icons (24 px grid, stroked) ---------------------------------------------
@@ -149,6 +150,7 @@ export function PageHead({
   return (
     <header className="page-head">
       <div>
+        <Breadcrumb title={title} />
         <h1>{title}</h1>
         {description && <p className="muted">{description}</p>}
       </div>

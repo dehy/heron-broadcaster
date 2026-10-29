@@ -1916,3 +1916,37 @@ ul.steps .bar {
   gap: 0.5rem;
   flex-wrap: wrap;
 }
+
+/* Where the page sits: section › page › the page inside it. */
+.breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0 0.25rem;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.breadcrumb li + li::before {
+  content: "›";
+  margin-right: 0.35rem;
+}
+.breadcrumb li[aria-current="page"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40ch;
+}
+@media (max-width: 760px) {
+  .breadcrumb:not(.nested) {
+    display: none;
+  }
+  .breadcrumb.nested li:not(.parent) {
+    display: none;
+  }
+  .breadcrumb.nested .parent::before {
+    content: "‹";
+    margin-right: 0.35rem;
+  }
+}

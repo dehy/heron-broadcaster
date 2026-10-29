@@ -7,10 +7,25 @@ import { type AnchorHTMLAttributes, type MouseEvent, useSyncExternalStore } from
 
 const listeners = new Set<() => void>();
 
+// The query string each path had when last shown: a list's search, filters,
+// sort and page, so a link back to it brings it back as it was left.
+const searches = new Map<string, string>();
+
+function remember() {
+  searches.set(window.location.pathname, window.location.search);
+}
+remember();
+
 function notify() {
+  remember();
   for (const listener of listeners) {
     listener();
   }
+}
+
+/** `path` with the query string it had when last shown, if any. */
+export function lastHref(path: string): string {
+  return path + (searches.get(path) ?? "");
 }
 
 window.addEventListener("popstate", notify);
