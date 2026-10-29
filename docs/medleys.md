@@ -26,7 +26,7 @@ Medleys made before these settings existed each had their own category and liner
 | **Crossfade** | Between two parts |
 | **Liners** | On or off; placed every *N* hooks, optionally also at the start and at the end; **between** the hooks (they take their own time) or **over** the music (each one starts on the transition, the music lowered under it by the ducking level) |
 
-A song qualifies when it is enabled, its file is there, it is analyzed and audible, and it has a **hook** (imported from the previous software, see [Importing](import.md), or set on the track's page) whose length fits the recipe. The medley's own tracks never qualify.
+A song qualifies when it is enabled, its file is there, it is analyzed and audible, and it has a **hook** (imported from the previous software, see [Importing](import.md), or set on the track's page) whose length fits the recipe. Medleys never qualify, as songs or as liners (even when they go in the liner category).
 
 ## Building
 

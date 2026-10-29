@@ -10,9 +10,9 @@ import { type Schemas, api, done, unwrap } from "../api";
 import { useLabels } from "../components/SelectionActions";
 import { TaskState, useTask } from "../components/Task";
 import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, PageHead } from "../components/ui";
-import { number, t } from "../i18n";
+import { number, rich, t } from "../i18n";
 import { ago, duration, trackName } from "../lib/format";
-import { copyName, plannedLength } from "../lib/medley";
+import { displayName, linerSlot, medleyName, plannedLength, renderMonth } from "../lib/medley";
 import { usePreview } from "../lib/preview";
 import { Link, navigate } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
@@ -21,21 +21,19 @@ type Medley = Schemas["Medley"];
 type Recipe = Schemas["Recipe"];
 type PartView = Schemas["PartView"];
 
-const DEFAULT_RECIPE: Recipe = {
-  category_ids: [],
-  label_id: null,
-  hooks: 6,
-  order: "picked",
-  hook_min_ms: 4_000,
-  hook_max_ms: 8_000,
-  crossfade_ms: 500,
-  liner_category_id: null,
-  liner_every: 1,
-  liner_at_start: false,
-  liner_at_end: false,
-  liner_mode: "between",
-  duck_db: -10,
-};
+type MedleySettings = Schemas["MedleySettings"];
+
+/** A new medley's recipe: the defaults of the settings, no songs yet. */
+function newRecipe(settings: MedleySettings): Recipe {
+  return { category_ids: [], label_id: null, order: "picked", liners: true, ...settings.defaults };
+}
+
+export function useMedleySettings() {
+  return useQuery({
+    queryKey: ["settings", "medleys"],
+    queryFn: () => unwrap(api.GET("/api/v1/settings/medleys")),
+  });
+}
 
 function useMedleys() {
   return useQuery({
@@ -83,7 +81,6 @@ export function Medleys() {
             <thead>
               <tr>
                 <th>{t("medleys.name")}</th>
-                <th>{t("medleys.category")}</th>
                 <th>{t("medleys.hooks")}</th>
                 <th>{t("medleys.rendered")}</th>
               </tr>
@@ -92,9 +89,8 @@ export function Medleys() {
               {medleys.data.map((medley) => (
                 <tr key={medley.id}>
                   <td>
-                    <Link to={`/medleys/${medley.id}`}>{medley.name}</Link>
+                    <Link to={`/medleys/${medley.id}`}>{displayName(medley)}</Link>
                   </td>
-                  <td>{medley.category_name ?? <span className="muted">–</span>}</td>
                   <td className="num">{number(medley.parts.filter((part) => part.kind === "hook").length)}</td>
                   <td className="small muted">
                     {medley.task_status === "failed"
@@ -117,9 +113,13 @@ export function Medleys() {
 export function MedleyEditor({ id }: { id: number | null }) {
   const canEdit = useCan("operator");
   const medleys = useMedleys();
+  const settings = useMedleySettings();
   const medley = id === null ? null : medleys.data?.find((m) => m.id === id);
-  if (id !== null && medleys.isPending) {
+  if ((id !== null && medleys.isPending) || settings.isPending) {
     return <Loading />;
+  }
+  if (settings.isError) {
+    return <ErrorView error={settings.error} />;
   }
   if (id !== null && !medley) {
     return <ErrorView error={medleys.error ?? new Error(t("medleys.notFound"))} />;
@@ -127,29 +127,35 @@ export function MedleyEditor({ id }: { id: number | null }) {
   return (
     <>
       <PageHead
-        title={medley?.name ?? t("medleys.new")}
+        title={medley ? displayName(medley) : t("medleys.new")}
         description={
           <Link to="/medleys">
             ← {t("nav.medleys")}
           </Link>
         }
       />
-      <RecipeCard key={medley?.id ?? "new"} medley={medley ?? null} canEdit={canEdit} />
-      {medley && <BuildCard key={`build-${medley.id}`} medley={medley} canEdit={canEdit} />}
+      <RecipeCard key={medley?.id ?? "new"} medley={medley ?? null} settings={settings.data} canEdit={canEdit} />
+      {medley && <BuildCard key={`build-${medley.id}`} medley={medley} settings={settings.data} canEdit={canEdit} />}
     </>
   );
 }
 
-function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boolean }) {
+function RecipeCard({
+  medley,
+  settings,
+  canEdit,
+}: {
+  medley: Medley | null;
+  settings: MedleySettings;
+  canEdit: boolean;
+}) {
   const categories = useCategories();
   const labels = useLabels();
-  const [name, setName] = useState(medley?.name ?? "");
-  const [categoryId, setCategoryId] = useState<number | null>(medley?.category_id ?? null);
-  const [recipe, setRecipe] = useState<Recipe>(medley?.recipe ?? DEFAULT_RECIPE);
+  const [recipe, setRecipe] = useState<Recipe>(medley?.recipe ?? newRecipe(settings));
   const set = (changes: Partial<Recipe>) => setRecipe((r) => ({ ...r, ...changes }));
   const save = useAction(
     () => {
-      const body = { name: name.trim(), category_id: categoryId, recipe };
+      const body = { recipe };
       return medley
         ? unwrap(api.PUT("/api/v1/medleys/{id}", { params: { path: { id: medley.id } }, body }))
         : unwrap(api.POST("/api/v1/medleys", { body }));
@@ -168,13 +174,11 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
     () => done(api.DELETE("/api/v1/medleys/{id}", { params: { path: { id: medley?.id ?? 0 } } })),
     { success: t("medleys.deleted"), invalidate: [["medleys"]], onSuccess: () => navigate("/medleys") },
   );
-  const medleys = useMedleys();
   const duplicate = useAction(
     () =>
       unwrap(
         api.POST("/api/v1/medleys/{id}/duplicate", {
           params: { path: { id: medley?.id ?? 0 } },
-          body: { name: copyName(medley?.name ?? "", (medleys.data ?? []).map((m) => m.name)) },
         }),
       ),
     {
@@ -208,7 +212,7 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
             </button>
             <ConfirmButton
               className="btn small danger"
-              question={t("medleys.deleteQuestion", { name: medley.name })}
+              question={t("medleys.deleteQuestion", { name: displayName(medley) })}
               confirm={t("medleys.delete")}
               onConfirm={() => remove.mutate(undefined)}
             >
@@ -219,33 +223,11 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
       }
     >
       <form className="stack" onSubmit={submit}>
-        <div className="form-grid">
-          <Field label={t("medleys.name")}>
-            <input
-              className="input"
-              value={name}
-              maxLength={255}
-              required
-              disabled={disabled}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </Field>
-          <Field label={t("medleys.category")} hint={t("medleys.categoryHelp")}>
-            <select
-              className="input"
-              value={categoryId ?? ""}
-              disabled={disabled}
-              onChange={(event) => setCategoryId(event.target.value ? Number(event.target.value) : null)}
-            >
-              <option value="">{t("medleys.noCategory")}</option>
-              {categories.data?.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
+        <p className="small muted" style={{ margin: 0 }}>
+          {rich("medleys.sharedHelp", {
+            settings: <Link to="/settings">{t("medleys.settingsLink")}</Link>,
+          })}
+        </p>
 
         <fieldset>
           <legend>{t("medleys.songs")}</legend>
@@ -357,24 +339,19 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
         <fieldset>
           <legend>{t("medleys.liners")}</legend>
           <div className="stack">
+            <label className="row small" style={{ gap: "0.3rem" }}>
+              <input
+                type="checkbox"
+                checked={recipe.liners}
+                disabled={disabled}
+                onChange={(event) => set({ liners: event.target.checked })}
+              />
+              {t("medleys.withLiners")}
+            </label>
+            {recipe.liners && settings.liner_category_id == null && (
+              <span className="small warn">{t("medleys.noLinerCategory")}</span>
+            )}
             <div className="form-grid">
-              <Field label={t("medleys.linerCategory")}>
-                <select
-                  className="input"
-                  value={recipe.liner_category_id ?? ""}
-                  disabled={disabled}
-                  onChange={(event) =>
-                    set({ liner_category_id: event.target.value ? Number(event.target.value) : null })
-                  }
-                >
-                  <option value="">{t("medleys.noLiners")}</option>
-                  {categories.data?.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
               <Field label={t("medleys.linerEvery")}>
                 <input
                   className="input num"
@@ -382,7 +359,7 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
                   min={1}
                   max={30}
                   value={recipe.liner_every}
-                  disabled={disabled || recipe.liner_category_id === null}
+                  disabled={disabled || !recipe.liners}
                   onChange={(event) => set({ liner_every: Number(event.target.value) })}
                 />
               </Field>
@@ -390,7 +367,7 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
                 <select
                   className="input"
                   value={recipe.liner_mode}
-                  disabled={disabled || recipe.liner_category_id === null}
+                  disabled={disabled || !recipe.liners}
                   onChange={(event) => set({ liner_mode: event.target.value as Recipe["liner_mode"] })}
                 >
                   <option value="between">{t("medleys.linerBetween")}</option>
@@ -406,7 +383,7 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
                     max={0}
                     step={1}
                     value={recipe.duck_db}
-                    disabled={disabled || recipe.liner_category_id === null}
+                    disabled={disabled || !recipe.liners}
                     onChange={(event) => set({ duck_db: Number(event.target.value) })}
                   />
                 </Field>
@@ -417,7 +394,7 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
                 <input
                   type="checkbox"
                   checked={recipe.liner_at_start}
-                  disabled={disabled || recipe.liner_category_id === null}
+                  disabled={disabled || !recipe.liners}
                   onChange={(event) => set({ liner_at_start: event.target.checked })}
                 />
                 {t("medleys.linerAtStart")}
@@ -426,7 +403,7 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
                 <input
                   type="checkbox"
                   checked={recipe.liner_at_end}
-                  disabled={disabled || recipe.liner_category_id === null}
+                  disabled={disabled || !recipe.liners}
                   onChange={(event) => set({ liner_at_end: event.target.checked })}
                 />
                 {t("medleys.linerAtEnd")}
@@ -440,7 +417,7 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
             <button
               type="submit"
               className="btn primary"
-              disabled={save.isPending || !name.trim() || recipe.category_ids.length === 0}
+              disabled={save.isPending || recipe.category_ids.length === 0}
             >
               {t("common.save")}
             </button>
@@ -452,7 +429,7 @@ function RecipeCard({ medley, canEdit }: { medley: Medley | null; canEdit: boole
   );
 }
 
-function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
+function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: MedleySettings; canEdit: boolean }) {
   const preview = usePreview();
   // A new version being built; the current one otherwise.
   const [plan, setPlan] = useState<PartView[] | null>(null);
@@ -478,7 +455,7 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
       const other = await unwrap(
         api.POST("/api/v1/medleys/{id}/pick", {
           params: { path: { id: medley.id } },
-          body: { kind: part.kind, exclude: parts.map((p) => p.track_id) },
+          body: { kind: part.kind, exclude: parts.map((p) => p.track_id), slot: linerSlot(parts, index) },
         }),
       );
       return { index, other };
@@ -511,13 +488,15 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
     },
   );
   // The songs and liners to choose from, while a new version is edited.
-  const hookChoices = useCandidates(medley.id, "hook", canEdit && plan !== null);
-  const linerChoices = useCandidates(
-    medley.id,
-    "liner",
-    canEdit && plan !== null && medley.recipe.liner_category_id != null,
-  );
-  const choices = (kind: string) => (kind === "hook" ? hookChoices.data : linerChoices.data) ?? [];
+  const hookChoices = useCandidates(medley.id, "hook", "between", canEdit && plan !== null);
+  const withLiners = canEdit && plan !== null && medley.recipe.liners;
+  const linerChoices = {
+    start: useCandidates(medley.id, "liner", "start", withLiners),
+    between: useCandidates(medley.id, "liner", "between", withLiners),
+    end: useCandidates(medley.id, "liner", "end", withLiners),
+  };
+  const choices = (kind: string, index: number) =>
+    (kind === "hook" ? hookChoices.data : linerChoices[linerSlot(plan ?? [], index)].data) ?? [];
   const inPlan = new Set((plan ?? []).map((part) => part.track_id));
   const setPart = (index: number, chosen: PartView) =>
     setPlan((current) => (current ?? []).map((part, i) => (i === index ? chosen : part)));
@@ -582,6 +561,16 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
       return next;
     });
   const hooks = parts.filter((part) => part.kind === "hook").length;
+  // The name the next render gives, while a version is edited or before the first.
+  const nextName =
+    plan || medley.name == null
+      ? medleyName(
+          renderMonth(new Date()),
+          parts
+            .filter((part) => part.kind === "hook")
+            .map((part) => (settings.name_from === "titles" ? part.title : part.artist)),
+        )
+      : null;
 
   return (
     <Card
@@ -649,6 +638,9 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
             <> · {t("medleys.fewSongs", { qualified: number(qualified), wanted: number(medley.recipe.hooks) })}</>
           )}
         </span>
+        {nextName && hooks > 0 && (
+          <span className="small muted">{t("medleys.nextName", { name: nextName })}</span>
+        )}
         {!plan && <TaskState task={task.data} />}
         {plan && previewTaskId !== null && !previewReady && <TaskState task={previewTask.data} />}
         {plan && previewReady && (
@@ -733,7 +725,7 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
                         label={t("medleys.chooseFor", { name: trackName(part) })}
                         placeholder={part.kind === "hook" ? t("medleys.chooseSong") : t("medleys.chooseLiner")}
                         // A song once per medley; a liner anywhere but twice in a row.
-                        choices={choices(part.kind).filter((choice) =>
+                        choices={choices(part.kind, index).filter((choice) =>
                           part.kind === "hook" ? !inPlan.has(choice.track_id) : choice.track_id !== part.track_id,
                         )}
                         onChoose={(chosen) => setPart(index, chosen)}
@@ -790,11 +782,12 @@ function BuildCard({ medley, canEdit }: { medley: Medley; canEdit: boolean }) {
             choices={hookChoices.data?.filter((choice) => !inPlan.has(choice.track_id)) ?? []}
             onChoose={addPart}
           />
-          {medley.recipe.liner_category_id != null && (
+          {medley.recipe.liners && (
             <ChoiceSelect
               label={t("medleys.addLiner")}
               placeholder={t("medleys.addLiner")}
-              choices={linerChoices.data ?? []}
+              // Added last: after every hook.
+              choices={linerChoices.end.data ?? []}
               onChoose={addPart}
             />
           )}
@@ -813,12 +806,12 @@ function Nudge({ label, text, onClick }: { label: string; text: string; onClick:
   );
 }
 
-function useCandidates(id: number, kind: "hook" | "liner", enabled: boolean) {
+function useCandidates(id: number, kind: "hook" | "liner", slot: "start" | "between" | "end", enabled: boolean) {
   return useQuery({
-    queryKey: ["medley-candidates", id, kind],
+    queryKey: ["medley-candidates", id, kind, slot],
     enabled,
     queryFn: () =>
-      unwrap(api.GET("/api/v1/medleys/{id}/candidates", { params: { path: { id }, query: { kind } } })),
+      unwrap(api.GET("/api/v1/medleys/{id}/candidates", { params: { path: { id }, query: { kind, slot } } })),
   });
 }
 

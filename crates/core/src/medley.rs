@@ -35,6 +35,41 @@ pub fn preview_path(medley_id: u64) -> String {
     format!("{PREVIEW_FOLDER}/medley-{medley_id}.wav")
 }
 
+/// The longest medley name, from its hooks: a track title holds 255
+/// characters, and a medley named like another gets ` (2)`, ` (3)`… too.
+pub const NAME_CHARS: usize = 249;
+
+/// A medley's name: `Medley 2026-10 (A - B - C)`, `month` the year and
+/// month of its render, `names` its hooks' artists (or titles) in order.
+/// Each comes once (ignoring case), empty ones are left out, and the list
+/// ends with `…` after the last name that fits in [`NAME_CHARS`].
+pub fn name(month: &str, names: &[&str]) -> String {
+    let base = format!("Medley {month}");
+    let mut seen = HashSet::new();
+    let names: Vec<&str> = names
+        .iter()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty() && seen.insert(name.to_lowercase()))
+        .collect();
+    if names.is_empty() {
+        return base;
+    }
+    for count in (1..=names.len()).rev() {
+        let mut list = names[..count].join(" - ");
+        if count < names.len() {
+            list.push_str(" - …");
+        }
+        let name = format!("{base} ({list})");
+        if name.chars().count() <= NAME_CHARS {
+            return name;
+        }
+    }
+    // A single name too long: cut it.
+    let room = NAME_CHARS - base.chars().count() - " (…)".chars().count();
+    let first: String = names[0].chars().take(room).collect();
+    format!("{base} ({first}…)")
+}
+
 /// How a medley is built.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -53,8 +88,9 @@ pub struct Recipe {
     pub hook_max_ms: u32,
     /// Overlap between two parts.
     pub crossfade_ms: u32,
-    /// Where the liners come from; none for no liners.
-    pub liner_category_id: Option<u64>,
+    /// Liners between or over the hooks, from the categories of the medley
+    /// settings; off for none.
+    pub liners: bool,
     /// A liner after every this many hooks.
     pub liner_every: u32,
     pub liner_at_start: bool,
@@ -69,15 +105,15 @@ impl Default for Recipe {
         Self {
             category_ids: Vec::new(),
             label_id: None,
-            hooks: 6,
+            hooks: 3,
             order: HookOrder::Picked,
             hook_min_ms: 4_000,
             hook_max_ms: 8_000,
             crossfade_ms: 500,
-            liner_category_id: None,
+            liners: true,
             liner_every: 1,
-            liner_at_start: false,
-            liner_at_end: false,
+            liner_at_start: true,
+            liner_at_end: true,
             liner_mode: LinerMode::Between,
             duck_db: -10.0,
         }
@@ -90,6 +126,12 @@ impl Recipe {
         if self.category_ids.is_empty() {
             return Err("pick at least one category for the songs".to_owned());
         }
+        self.check_settings()
+    }
+
+    /// [`Recipe::check`] but for the songs: what the defaults of a new
+    /// medley must pass.
+    pub fn check_settings(&self) -> Result<(), String> {
         if !(2..=30).contains(&self.hooks) {
             return Err("a medley has 2 to 30 hooks".to_owned());
         }
@@ -137,6 +179,18 @@ pub enum LinerMode {
     Over,
 }
 
+/// Where a liner goes in a medley: its liners come from a category of
+/// their own at the start and at the end, when the settings have one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum LinerSlot {
+    Start,
+    #[default]
+    Between,
+    End,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
@@ -171,6 +225,27 @@ pub struct Candidate {
     pub to_ms: u32,
     pub year: Option<u16>,
     pub bpm: Option<f64>,
+}
+
+/// The liners a medley can take, by where they go.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Liners {
+    pub between: Vec<Candidate>,
+    /// For the liner at the start: `between` when empty.
+    pub start: Vec<Candidate>,
+    /// For the liner at the end: `between` when empty.
+    pub end: Vec<Candidate>,
+}
+
+impl Liners {
+    /// The liners that can go in `slot`.
+    pub fn at(&self, slot: LinerSlot) -> &[Candidate] {
+        match slot {
+            LinerSlot::Start if !self.start.is_empty() => &self.start,
+            LinerSlot::End if !self.end.is_empty() => &self.end,
+            _ => &self.between,
+        }
+    }
 }
 
 /// A small random generator (xorshift): picks need no cryptographic randomness.
@@ -246,11 +321,12 @@ pub fn qualified(recipe: &Recipe, songs: &[Candidate]) -> usize {
 
 /// Picks the parts of a medley: `recipe.hooks` hooks (fewer when not
 /// enough songs qualify), never the same song twice, songs not in `avoid`
-/// first; liners where the recipe puts them, never the same twice in a row.
+/// first; liners where the recipe puts them (from their own category at the
+/// start and at the end, when there is one), never the same twice in a row.
 pub fn plan(
     recipe: &Recipe,
     songs: &[Candidate],
-    liners: &[Candidate],
+    liners: &Liners,
     avoid: &HashSet<u64>,
     seed: u64,
 ) -> Vec<Part> {
@@ -270,23 +346,38 @@ pub fn plan(
         }),
     }
 
-    let mut liners: Vec<Candidate> = liners
-        .iter()
-        .filter(|l| l.to_ms > l.from_ms)
-        .copied()
-        .collect();
-    picker.shuffle(&mut liners);
-    let mut next_liner = 0;
+    // Each slot's liners, shuffled, and where the next pick is in them.
+    let mut pools: Vec<(LinerSlot, Vec<Candidate>, usize)> =
+        [LinerSlot::Start, LinerSlot::Between, LinerSlot::End]
+            .into_iter()
+            .map(|slot| {
+                let mut pool: Vec<Candidate> = if recipe.liners {
+                    liners
+                        .at(slot)
+                        .iter()
+                        .filter(|l| l.to_ms > l.from_ms)
+                        .copied()
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                picker.shuffle(&mut pool);
+                (slot, pool, 0)
+            })
+            .collect();
     let mut previous: Option<u64> = None;
-    let mut take_liner = |parts: &mut Vec<Part>| {
-        if liners.is_empty() {
+    let mut take_liner = |parts: &mut Vec<Part>, slot: LinerSlot| {
+        let Some((_, pool, next)) = pools.iter_mut().find(|(s, _, _)| *s == slot) else {
+            return;
+        };
+        if pool.is_empty() {
             return;
         }
-        let mut candidate = liners[next_liner % liners.len()];
-        next_liner += 1;
-        if previous == Some(candidate.track_id) && liners.len() > 1 {
-            candidate = liners[next_liner % liners.len()];
-            next_liner += 1;
+        let mut candidate = pool[*next % pool.len()];
+        *next += 1;
+        if previous == Some(candidate.track_id) && pool.len() > 1 {
+            candidate = pool[*next % pool.len()];
+            *next += 1;
         }
         previous = Some(candidate.track_id);
         parts.push(liner(&candidate));
@@ -294,18 +385,18 @@ pub fn plan(
 
     let mut parts = Vec::new();
     if recipe.liner_at_start && !picked.is_empty() {
-        take_liner(&mut parts);
+        take_liner(&mut parts, LinerSlot::Start);
     }
     let count = picked.len();
     for (index, song) in picked.iter().enumerate() {
         parts.push(hook(song));
         let done = index + 1;
         if done < count && done % recipe.liner_every as usize == 0 {
-            take_liner(&mut parts);
+            take_liner(&mut parts, LinerSlot::Between);
         }
     }
     if recipe.liner_at_end && count > 0 {
-        take_liner(&mut parts);
+        take_liner(&mut parts, LinerSlot::End);
     }
     parts
 }
@@ -554,7 +645,7 @@ mod tests {
             hooks: 5,
             ..recipe()
         };
-        let parts = plan(&recipe, &songs, &[], &avoid, 42);
+        let parts = plan(&recipe, &songs, &Liners::default(), &avoid, 42);
         assert_eq!(parts.len(), 5);
         let ids: HashSet<u64> = parts.iter().map(|part| part.track_id).collect();
         assert_eq!(ids.len(), 5, "never the same song twice");
@@ -568,7 +659,7 @@ mod tests {
         assert_eq!(qualified(&recipe, &songs), 9);
         // Only long hooks: nothing qualifies, nothing is cut.
         let long = [song(20, 0, 30_000)];
-        assert!(plan(&recipe, &long, &[], &HashSet::new(), 1).is_empty());
+        assert!(plan(&recipe, &long, &Liners::default(), &HashSet::new(), 1).is_empty());
     }
 
     #[test]
@@ -592,7 +683,7 @@ mod tests {
             order: HookOrder::Year,
             ..recipe()
         };
-        let ids: Vec<u64> = plan(&recipe, &songs, &[], &HashSet::new(), 7)
+        let ids: Vec<u64> = plan(&recipe, &songs, &Liners::default(), &HashSet::new(), 7)
             .iter()
             .map(|part| part.track_id)
             .collect();
@@ -603,9 +694,12 @@ mod tests {
     fn liners_go_where_the_recipe_says_never_twice_in_a_row() {
         let songs: Vec<Candidate> = (1..=6).map(|id| song(id, 0, 6_000)).collect();
         let liners = [song(100, 0, 2_000), song(101, 0, 2_000)];
+        let liners = Liners {
+            between: liners.to_vec(),
+            ..Liners::default()
+        };
         let recipe = Recipe {
             hooks: 6,
-            liner_category_id: Some(9),
             liner_every: 2,
             liner_at_start: true,
             liner_at_end: true,
@@ -634,6 +728,63 @@ mod tests {
                 "{liners:?}"
             );
         }
+    }
+
+    #[test]
+    fn opening_and_closing_liners_come_from_their_own_category() {
+        let songs: Vec<Candidate> = (1..=3).map(|id| song(id, 0, 6_000)).collect();
+        let liners = Liners {
+            between: vec![song(100, 0, 2_000), song(101, 0, 2_000)],
+            start: vec![song(200, 0, 2_000)],
+            end: vec![song(300, 0, 2_000)],
+        };
+        let recipe = recipe();
+        for seed in 1..10 {
+            let parts = plan(&recipe, &songs, &liners, &HashSet::new(), seed);
+            let ids: Vec<u64> = parts.iter().map(|part| part.track_id).collect();
+            assert_eq!(parts.len(), 7, "{ids:?}");
+            assert_eq!(ids[0], 200);
+            assert_eq!(ids[6], 300);
+            assert!([100, 101].contains(&ids[2]) && [100, 101].contains(&ids[4]));
+        }
+        // Without their own, the start and the end take the others.
+        let shared = Liners {
+            between: vec![song(100, 0, 2_000)],
+            ..Liners::default()
+        };
+        let parts = plan(&recipe, &songs, &shared, &HashSet::new(), 3);
+        assert_eq!(parts.first().map(|part| part.track_id), Some(100));
+        assert_eq!(parts.last().map(|part| part.track_id), Some(100));
+        // Liners off: hooks only.
+        let off = Recipe {
+            liners: false,
+            ..recipe
+        };
+        let parts = plan(&off, &songs, &liners, &HashSet::new(), 3);
+        assert!(parts.iter().all(|part| part.kind == PartKind::Hook));
+        assert_eq!(parts.len(), 3);
+    }
+
+    #[test]
+    fn names_list_the_hooks_once_and_fit_a_title() {
+        assert_eq!(
+            name("2026-10", &["Helena", "Panic! At The Disco", "Mabel"]),
+            "Medley 2026-10 (Helena - Panic! At The Disco - Mabel)"
+        );
+        assert_eq!(
+            name("2026-10", &["Mabel", " ", "mabel", "Helena"]),
+            "Medley 2026-10 (Mabel - Helena)"
+        );
+        assert_eq!(name("2026-11", &[]), "Medley 2026-11");
+        let many: Vec<String> = (1..=30).map(|i| format!("Artist number {i:02}")).collect();
+        let many: Vec<&str> = many.iter().map(String::as_str).collect();
+        let long = name("2026-10", &many);
+        assert!(long.chars().count() <= NAME_CHARS, "{long}");
+        assert!(long.ends_with(" - …)"), "{long}");
+        let huge = "x".repeat(400);
+        let cut = name("2026-10", &[&huge]);
+        assert_eq!(cut.chars().count(), NAME_CHARS);
+        assert!(cut.ends_with("x…)"));
     }
 
     #[test]
