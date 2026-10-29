@@ -105,7 +105,7 @@ pub struct MedleyDefaults {
     pub liner_at_end: bool,
     pub liner_mode: LinerMode,
     pub duck_db: f64,
-    /// The music down over 0.3 s across a liner's start, and back up over
+    /// The music down over 0.3 s from a liner's start, and back up over
     /// 0.3 s across its end, by default.
     pub duck_attack_ms: u32,
     pub duck_attack_at: DuckPlace,

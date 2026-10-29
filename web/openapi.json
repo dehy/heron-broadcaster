@@ -11011,12 +11011,12 @@
           },
           "duck_attack_at": {
             "$ref": "#/components/schemas/MedleyDuckPlace",
-            "default": "across"
+            "default": "inside"
           },
           "duck_attack_ms": {
             "type": "integer",
             "format": "int32",
-            "description": "The music down over 0.3 s across a liner's start, and back up over\n0.3 s across its end, by default.",
+            "description": "The music down over 0.3 s from a liner's start, and back up over\n0.3 s across its end, by default.",
             "default": 300,
             "minimum": 0
           },
@@ -11175,7 +11175,7 @@
             "description": "The recipe of a new medley; each medley can change it.",
             "default": {
               "crossfade_ms": 500,
-              "duck_attack_at": "across",
+              "duck_attack_at": "inside",
               "duck_attack_ms": 300,
               "duck_db": -10.0,
               "duck_release_at": "across",
@@ -12821,7 +12821,7 @@
           },
           "duck_attack_at": {
             "$ref": "#/components/schemas/MedleyDuckPlace",
-            "default": "across"
+            "default": "inside"
           },
           "duck_attack_ms": {
             "type": "integer",

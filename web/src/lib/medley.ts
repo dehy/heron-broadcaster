@@ -189,10 +189,10 @@ interface MixRecipe {
   duck_release_at?: DuckPlace;
 }
 
-/** How a recipe makes the music go down: 0.3 s across each end of the liners by default. */
+/** How a recipe makes the music go down: by default during the liners over 0.3 s, back up across their end over 0.3 s. */
 const recipeDucking = (recipe: MixRecipe): Ducking => ({
   attack_ms: recipe.duck_attack_ms ?? 300,
-  attack_at: recipe.duck_attack_at ?? "across",
+  attack_at: recipe.duck_attack_at ?? "inside",
   release_ms: recipe.duck_release_ms ?? 300,
   release_at: recipe.duck_release_at ?? "across",
 });
