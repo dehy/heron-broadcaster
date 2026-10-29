@@ -670,7 +670,7 @@ const fr = {
   "medleys.addHook": "Ajouter un hook…",
   "medleys.addLiner": "Ajouter un liner…",
   "medleys.preview": "Aperçu",
-  "medleys.previewStale": "La version a changé depuis cet aperçu : relancez l’aperçu pour entendre les changements.",
+  "medleys.previewStale": "modifiée depuis l’aperçu",
   "medleys.startEarlier": "Commencer {name} 0,1 s plus tôt",
   "medleys.startLater": "Commencer {name} 0,1 s plus tard",
   "medleys.endEarlier": "Finir {name} 0,1 s plus tôt",

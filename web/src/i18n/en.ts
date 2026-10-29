@@ -661,7 +661,7 @@ const en = {
   "medleys.addHook": "Add a hook…",
   "medleys.addLiner": "Add a liner…",
   "medleys.preview": "Preview",
-  "medleys.previewStale": "The version changed since this preview: preview it again to hear the changes.",
+  "medleys.previewStale": "changed since the preview",
   "medleys.startEarlier": "Start {name} 0.1 s earlier",
   "medleys.startLater": "Start {name} 0.1 s later",
   "medleys.endEarlier": "End {name} 0.1 s earlier",
