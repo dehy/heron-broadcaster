@@ -1,24 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // The schedule: which clock runs at each hour of the week, in the
-// station's time zone. Pick a clock, then click or drag over the hours.
+// station's time zone. Pick a clock, then paint hours, rectangles, days,
+// an hour of every day or the week (docs/web.md › Painting the schedule).
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ScheduledHour, api, unwrap } from "../api";
 import { Card, Empty, ErrorView, Loading, PageHead } from "../components/ui";
 import { rich, t } from "../i18n";
 import { DAY_NUMBERS, dayName, hourLabel } from "../lib/rotation";
+import {
+  type Grid,
+  type Hour,
+  HOURS,
+  WEEKDAYS,
+  WEEKEND,
+  cell,
+  copyDay,
+  everyDay,
+  paint as paintHours,
+  rectangle,
+  wholeDays,
+} from "../lib/schedule";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 
 const PALETTE = ["#2f6fd6", "#b4549a", "#1d7a3e", "#b07a00", "#0b6e66", "#6b4fbb", "#c62828", "#5f6268"];
-
-const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
-
-type Grid = Map<string, number>;
-
-const cell = (day: number, hour: number) => `${day}-${hour}`;
 
 function toGrid(hours: ScheduledHour[]): Grid {
   return new Map(hours.map((h) => [cell(h.day_of_week, h.hour), h.clock_id]));
@@ -47,7 +55,15 @@ export function Schedule() {
   // The clock painted; null paints "no clock", undefined until one is picked.
   const [picked, setBrush] = useState<number | null | undefined>(undefined);
   const brush = picked === undefined ? (clocks.data?.[0]?.id ?? null) : picked;
-  const painting = useRef(false);
+  const [onlyEmpty, setOnlyEmpty] = useState(false);
+  // The weeks before each stroke, to undo them.
+  const [undo, setUndo] = useState<Grid[]>([]);
+  // A drag: where it started, and the week before it.
+  const stroke = useRef<{ start: Hour; base: Grid } | null>(null);
+  // The hour clicked last, for Shift + click.
+  const last = useRef<Hour | null>(null);
+  const [copyFrom, setCopyFrom] = useState<number>(1);
+  const [copyTo, setCopyTo] = useState<ReadonlySet<number>>(new Set());
 
   useEffect(() => {
     if (schedule.data) {
@@ -56,11 +72,34 @@ export function Schedule() {
   }, [schedule.data]);
   useEffect(() => {
     const stop = () => {
-      painting.current = false;
+      stroke.current = null;
     };
     window.addEventListener("pointerup", stop);
     return () => window.removeEventListener("pointerup", stop);
   }, []);
+  const undoLast = useCallback(() => {
+    setUndo((stack) => {
+      const previous = stack[stack.length - 1];
+      if (previous) {
+        setGrid(previous);
+      }
+      return stack.slice(0, -1);
+    });
+  }, []);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest("input, textarea, select")) {
+          return;
+        }
+        event.preventDefault();
+        undoLast();
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [undoLast]);
 
   const colors = useMemo(
     () => new Map((clocks.data ?? []).map((clock, index) => [clock.id, PALETTE[index % PALETTE.length]])),
@@ -79,16 +118,15 @@ export function Schedule() {
     return <ErrorView error={clocks.error ?? schedule.error} />;
   }
   const dirty = !sameGrid(toGrid(schedule.data), grid);
-  const paint = (day: number, hour: number) => {
-    setGrid((current) => {
-      const next = new Map(current);
-      if (brush === null) {
-        next.delete(cell(day, hour));
-      } else {
-        next.set(cell(day, hour), brush);
-      }
-      return next;
-    });
+  /** One stroke: these hours painted with the clock picked, undoable. */
+  const apply = (hours: Hour[]) => {
+    setUndo((stack) => [...stack, grid]);
+    setGrid(paintHours(grid, hours, brush, onlyEmpty));
+  };
+  const brushName = brush === null ? t("schedule.noClockBrush") : (names.get(brush) ?? "?");
+  const revert = () => {
+    setGrid(toGrid(schedule.data));
+    setUndo([]);
   };
   const hoursOf = (clock: number) => [...grid.values()].filter((id) => id === clock).length;
 
@@ -103,8 +141,17 @@ export function Schedule() {
         actions={
           canEdit && (
             <>
+              <button
+                type="button"
+                className="btn"
+                disabled={undo.length === 0}
+                title={t("schedule.undoHelp")}
+                onClick={undoLast}
+              >
+                {t("schedule.undo")}
+              </button>
               {dirty && (
-                <button type="button" className="btn" onClick={() => setGrid(toGrid(schedule.data))}>
+                <button type="button" className="btn" onClick={revert}>
                   {t("track.revert")}
                 </button>
               )}
@@ -157,21 +204,97 @@ export function Schedule() {
                 </button>
               </div>
             )}
+            {canEdit && (
+              <div className="row small">
+                <button type="button" className="btn small" onClick={() => apply(wholeDays(WEEKDAYS))}>
+                  {t("schedule.weekdays")}
+                </button>
+                <button type="button" className="btn small" onClick={() => apply(wholeDays(WEEKEND))}>
+                  {t("schedule.weekend")}
+                </button>
+                <button type="button" className="btn small" onClick={() => apply(wholeDays(DAY_NUMBERS))}>
+                  {t("schedule.wholeWeek")}
+                </button>
+                <label className="check">
+                  <input type="checkbox" checked={onlyEmpty} onChange={(e) => setOnlyEmpty(e.target.checked)} />
+                  {t("schedule.onlyEmpty")}
+                </label>
+                <span className="spacer" />
+                <span className="row" role="group" aria-label={t("schedule.copyDay")}>
+                  <span>{t("schedule.copy")}</span>
+                  <select
+                    className="input"
+                    style={{ width: "auto" }}
+                    aria-label={t("schedule.copyFrom")}
+                    value={copyFrom}
+                    onChange={(e) => setCopyFrom(Number(e.target.value))}
+                  >
+                      {DAY_NUMBERS.map((day) => (
+                        <option key={day} value={day}>
+                          {dayName(day)}
+                        </option>
+                      ))}
+                  </select>
+                  {t("schedule.onto")}
+                  {DAY_NUMBERS.filter((day) => day !== copyFrom).map((day) => (
+                    <label key={day} className="check">
+                      <input
+                        type="checkbox"
+                        checked={copyTo.has(day)}
+                        onChange={(e) =>
+                          setCopyTo((current) => {
+                            const next = new Set(current);
+                            if (e.target.checked) {
+                              next.add(day);
+                            } else {
+                              next.delete(day);
+                            }
+                            return next;
+                          })
+                        }
+                      />
+                      {dayName(day)}
+                    </label>
+                  ))}
+                  <button
+                    type="button"
+                    className="btn small"
+                    disabled={[...copyTo].every((day) => day === copyFrom)}
+                    onClick={() => {
+                      setUndo((stack) => [...stack, grid]);
+                      setGrid(copyDay(grid, copyFrom, [...copyTo]));
+                    }}
+                  >
+                    {t("schedule.copyButton")}
+                  </button>
+                </span>
+              </div>
+            )}
             <div className="table-wrap">
-              <table
-                className="schedule"
-                onPointerLeave={() => {
-                  painting.current = false;
-                }}
-              >
+              <table className="schedule">
                 <thead>
                   <tr>
                     <th />
-                    {HOURS.map((hour) => (
-                      <th key={hour} scope="col" title={hourLabel(hour)}>
-                        {String(hour).padStart(2, "0")}
-                      </th>
-                    ))}
+                    {HOURS.map((hour) => {
+                      const label = t("schedule.paintHour", { hour: hourLabel(hour), clock: brushName });
+                      return (
+                        <th key={hour} scope="col">
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              className="head"
+                              aria-label={label}
+                              title={label}
+                              onClick={() => apply(everyDay(hour))}
+                            >
+                              {String(hour).padStart(2, "0")}
+                            </button>
+                          ) : (
+                            String(hour).padStart(2, "0")
+                          )}
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
@@ -179,7 +302,21 @@ export function Schedule() {
                     const name = dayName(day);
                     return (
                       <tr key={day}>
-                        <th scope="row">{name}</th>
+                        <th scope="row">
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              className="head"
+                              aria-label={t("schedule.paintDay", { day: name, clock: brushName })}
+                              title={t("schedule.paintDay", { day: name, clock: brushName })}
+                              onClick={() => apply(wholeDays([day]))}
+                            >
+                              {name}
+                            </button>
+                          ) : (
+                            name
+                          )}
+                        </th>
                         {HOURS.map((hour) => {
                           const clock = grid.get(cell(day, hour));
                           const label = t("schedule.cell", {
@@ -198,18 +335,31 @@ export function Schedule() {
                                 style={{ background: clock !== undefined ? colors.get(clock) : undefined }}
                                 onPointerDown={(event) => {
                                   event.preventDefault();
-                                  painting.current = true;
-                                  paint(day, hour);
+                                  // The pointer may cross other cells: let them get its events.
+                                  event.currentTarget.releasePointerCapture(event.pointerId);
+                                  const here = { day, hour };
+                                  const from = last.current;
+                                  last.current = here;
+                                  if (event.shiftKey && from) {
+                                    apply(rectangle(from, here));
+                                    return;
+                                  }
+                                  stroke.current = { start: here, base: grid };
+                                  apply([here]);
                                 }}
                                 onPointerEnter={() => {
-                                  if (painting.current) {
-                                    paint(day, hour);
+                                  const current = stroke.current;
+                                  if (current) {
+                                    setGrid(paintHours(current.base, rectangle(current.start, { day, hour }), brush, onlyEmpty));
                                   }
                                 }}
                                 onKeyDown={(event) => {
                                   if (event.key === "Enter" || event.key === " ") {
                                     event.preventDefault();
-                                    paint(day, hour);
+                                    const here = { day, hour };
+                                    const from = last.current;
+                                    last.current = here;
+                                    apply(event.shiftKey && from ? rectangle(from, here) : [here]);
                                   }
                                 }}
                               />

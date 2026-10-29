@@ -15,7 +15,7 @@
 | **Track** | Waveform with the cue-in, cue-out, where the next track starts and the fades; listen from anywhere, from the cue-in or the ending; drag the points or type them; Gap Killer and crossfade overrides; categories and weights; labels, era, BPM, mood, sound code and the MusicBrainz details; analysis, file (codec, bitrate, sample rate, channels) and identification; plays; edit its tags; delete it | operator |
 | **Artists** | Artists and their names (search any name); rename, move a name to another artist or split it off, merge artists, mark artists similar, restrict an artist; the suggestions to review, and the MusicBrainz relationships lookup | operator |
 | **Clocks** | Each clock's slots, reordered by dragging (or with the keyboard), with their category, selection method, enforce-rules flag and separation overrides; whether the clock loops across hours; the hour (or the loop) drawn as it will sound, categories running short, an hour simulated | operator |
-| **Schedule** | The week, hour by hour: pick a clock and click or drag over the hours, in station time | operator |
+| **Schedule** | The week, hour by hour, in station time: pick a clock, then paint hours, rectangles, whole days, an hour of every day or the whole week, optionally only the empty hours, or copy a day onto others (see [Painting the schedule](#painting-the-schedule)) | operator |
 | **Labels** | Create, rename, recolor, merge and delete labels, with their tracks | operator |
 | **Categories** | Create, rename, recolor and delete categories; their type (Song, Jingle, Ad, or the station's own, managed on the same page); the separation windows they override; whether the FX player offers them (liners, power intros, voice tracks); fill a category from a label | operator |
 | **Restrictions** | Dayparting, date ranges and sequences on tracks, artists and categories; turn them on and off | operator |
@@ -32,6 +32,18 @@
 | **Account** | Theme, language, width, password, API tokens | |
 
 Viewers see every page (except users and webhooks) without the controls. Every page shows a banner when something needs attention: the API, the database or the engine unreachable, live updates disconnected, the engine refusing the configuration, or the **server clock** not synchronized or off by more than about a second (from `GET /api/v1/status`, see [API](api.md#authentication)).
+
+## Painting the schedule
+
+On *Schedule*, pick a clock (or *No clock*), then:
+
+- **click** an hour to paint it; **drag** from one hour to another to paint the rectangle between them (Monday to Friday, 06:00 to 10:00); **Shift + click** paints the rectangle from the hour clicked last;
+- click a **day** (the row's name) to paint its 24 hours, or an **hour** (the column's number) to paint that hour on the 7 days;
+- **Mon–Fri**, **Sat–Sun** and **The whole week** paint those days whole;
+- **Only the empty hours** keeps the hours that already have a clock, whatever is painted (a default clock everywhere, the special shows untouched);
+- **Copy a day** puts a day's hours onto the days ticked (Monday onto Tuesday to Friday).
+
+**Undo** (Ctrl/⌘ + Z) takes back the last stroke; nothing is saved until **Save**, and **Revert** goes back to the saved schedule. The day and hour headers are buttons, usable with the keyboard, and say what they paint (*Paint Monday with Morning drive*).
 
 ## Live updates
 
