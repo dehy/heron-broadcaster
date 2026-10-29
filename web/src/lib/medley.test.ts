@@ -1,13 +1,50 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { displayName, layout, linerSlot, medleyName, moveTo, plannedLength, renderMonth } from "./medley";
+import { displayName, fadeGain, layout, levelAt, linerSlot, medleyName, moveTo, plannedLength, renderMonth } from "./medley";
 
 const parts = [
   { kind: "hook", from_ms: 10_000, to_ms: 17_000 },
   { kind: "liner", from_ms: 0, to_ms: 3_000 },
   { kind: "hook", from_ms: 5_000, to_ms: 12_000 },
 ];
+
+describe("levelAt", () => {
+  it("draws the fades, the ducking and the medley's fade-in and fade-out", () => {
+    const parts = [
+      { kind: "liner", from_ms: 0, to_ms: 1_000 },
+      { kind: "hook", from_ms: 0, to_ms: 4_000 },
+    ];
+    const medley = layout(parts, {
+      crossfade_ms: 0,
+      liner_mode: "between",
+      fade_in_ms: 1_000,
+      fade_in_curve: "slow_then_fast",
+      fade_out_ms: 1_000,
+      fade_out_curve: "linear",
+    });
+    expect(medley.music_start_ms).toBe(1_000);
+    // The liner is never faded but at its edges.
+    expect(levelAt(medley, 0, 500)).toBe(1);
+    // Halfway through the fade-in, slow then fast: a quarter.
+    expect(levelAt(medley, 1, 1_500)).toBeCloseTo(0.25, 3);
+    expect(levelAt(medley, 1, 3_000)).toBe(1);
+    expect(levelAt(medley, 1, 4_500)).toBeCloseTo(0.5, 3);
+    expect(levelAt(medley, 1, 9_000)).toBe(0);
+    // Under a liner over the music: ducked.
+    const over = layout(
+      [
+        { kind: "hook", from_ms: 10_000, to_ms: 18_000 },
+        { kind: "liner", from_ms: 0, to_ms: 2_000 },
+        { kind: "hook", from_ms: 30_000, to_ms: 36_000 },
+      ],
+      { crossfade_ms: 200, liner_mode: "over", duck_db: -20 },
+    );
+    expect(levelAt(over, 0, 8_700)).toBeCloseTo(0.1, 3);
+    expect(levelAt(over, 0, 7_000)).toBe(1);
+    expect(fadeGain("s_curve", 0.5)).toBeCloseTo(0.5, 6);
+  });
+});
 
 describe("medleyName", () => {
   it("lists each artist once, in order", () => {

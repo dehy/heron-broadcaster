@@ -64,6 +64,25 @@ export function linerSlot(parts: readonly { kind: string }[], index: number): "s
 
 /** The music goes down under a liner, and back up, over this (DUCK_RAMP_MS). */
 export const DUCK_RAMP_MS = 150;
+/** Every part fades in and out over at least this (EDGE_FADE_MS). */
+const EDGE_FADE_MS = 20;
+
+export type FadeCurve = "linear" | "fast_then_slow" | "slow_then_fast" | "s_curve";
+
+/** A fade-out's gain `t` of the way through it (FadeCurve::gain): 1 down to 0. */
+export function fadeGain(curve: FadeCurve, t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  switch (curve) {
+    case "fast_then_slow":
+      return (1 - x) * (1 - x);
+    case "slow_then_fast":
+      return 1 - x * x;
+    case "s_curve":
+      return 0.5 * (1 + Math.cos(Math.PI * x));
+    default:
+      return 1 - x;
+  }
+}
 
 export interface LayoutPart {
   kind: string;
@@ -85,13 +104,32 @@ export interface Placed {
   to_ms: number;
   /** A liner over the music. */
   over: boolean;
+  /** Its own fades, at the edges and over the crossfades. */
+  fade_in_ms: number;
+  fade_out_ms: number;
 }
 
 export interface Layout {
   parts: Placed[];
   length_ms: number;
-  /** Where the music ends: the fade-out ends there. */
+  /** Where the music starts and ends: the fade-in starts, the fade-out ends there. */
+  music_start_ms?: number;
   music_end_ms: number;
+  fade_in_ms?: number;
+  fade_in_curve?: FadeCurve;
+  fade_out_ms?: number;
+  fade_out_curve?: FadeCurve;
+  duck_db?: number;
+}
+
+interface MixRecipe {
+  crossfade_ms: number;
+  liner_mode: string;
+  fade_in_ms?: number;
+  fade_in_curve?: FadeCurve;
+  fade_out_ms?: number;
+  fade_out_curve?: FadeCurve;
+  duck_db?: number;
 }
 
 const end = (placed: Placed) => placed.at_ms + placed.to_ms - placed.from_ms;
@@ -101,10 +139,7 @@ const end = (placed: Placed) => placed.at_ms + placed.to_ms - placed.from_ms;
  * (heron_core::medley::layout): parts overlap by the crossfade; liners over
  * the music fall in gaps made by the hooks around them playing longer.
  */
-export function layout(
-  parts: readonly LayoutPart[],
-  recipe: { crossfade_ms: number; liner_mode: string },
-): Layout {
+export function layout(parts: readonly LayoutPart[], recipe: MixRecipe): Layout {
   const crossfade = recipe.crossfade_ms;
   const isOver = (part: LayoutPart) => recipe.liner_mode === "over" && part.kind === "liner";
   const sequence: number[] = [];
@@ -175,12 +210,17 @@ export function layout(
       from_ms: part.from_ms - (earlier[index] ?? 0),
       to_ms: part.to_ms + (later[index] ?? 0),
       over: false,
+      fade_in_ms: EDGE_FADE_MS,
+      fade_out_ms: EDGE_FADE_MS,
     };
     if (previous) {
       // Overlaps the part before by the crossfade, less its move: from 0 to the shorter of the two.
       const longest = Math.min(item.to_ms - item.from_ms, previous.to_ms - previous.from_ms);
       const overlap = Math.min(Math.max(crossfade - (part.move_ms ?? 0), 0), longest);
       item.at_ms = cursor - overlap;
+      const blend = Math.max(overlap, EDGE_FADE_MS);
+      item.fade_in_ms = blend;
+      previous.fade_out_ms = blend;
     }
     cursor = end(item);
     placed[index] = item;
@@ -204,24 +244,86 @@ export function layout(
         from_ms: part.from_ms,
         to_ms: part.to_ms,
         over: true,
+        fade_in_ms: EDGE_FADE_MS,
+        fade_out_ms: EDGE_FADE_MS,
       };
       at += part.to_ms - part.from_ms;
       placed[index] = item;
     }
   });
   const all = placed.filter((item): item is Placed => item !== undefined);
+  const hooks = all.filter((item) => item.kind === "hook");
   return {
     parts: all,
     length_ms: Math.max(0, ...all.map(end)),
-    music_end_ms: Math.max(0, ...all.filter((item) => item.kind === "hook").map(end)),
+    music_start_ms: hooks.length > 0 ? Math.min(...hooks.map((item) => item.at_ms)) : 0,
+    music_end_ms: Math.max(0, ...hooks.map(end)),
+    fade_in_ms: recipe.fade_in_ms ?? 0,
+    fade_in_curve: recipe.fade_in_curve ?? "linear",
+    fade_out_ms: recipe.fade_out_ms ?? 0,
+    fade_out_curve: recipe.fade_out_curve ?? "linear",
+    duck_db: recipe.duck_db ?? -10,
   };
 }
 
+/**
+ * The level of part `index` at `at_ms` on the medley's timeline, as the
+ * librarian mixes it (heron_core::medley::mix), from 0 to 1: its own fades,
+ * and for the music, the ducking under liners over it and the medley's
+ * fade-in and fade-out.
+ */
+export function levelAt(medley: Layout, index: number, at_ms: number): number {
+  const part = medley.parts[index];
+  if (!part) {
+    return 0;
+  }
+  const length = part.to_ms - part.from_ms;
+  const t = at_ms - part.at_ms;
+  if (t < 0 || t > length) {
+    return 0;
+  }
+  // Its own fades: linear, each at most half the part.
+  const fadeIn = Math.max(1, Math.min(part.fade_in_ms, length / 2));
+  const fadeOut = Math.max(1, Math.min(part.fade_out_ms, length / 2));
+  let level = Math.min(1, t / fadeIn) * Math.min(1, (length - t) / fadeOut);
+  if (part.kind !== "hook") {
+    return level;
+  }
+  const duck = 10 ** ((medley.duck_db ?? -10) / 20);
+  for (const liner of medley.parts) {
+    if (!liner.over) {
+      continue;
+    }
+    const start = liner.at_ms;
+    const stop = end(liner);
+    let gain = 1;
+    if (at_ms >= start && at_ms < stop) {
+      gain = duck;
+    } else if (at_ms < start && start - at_ms < DUCK_RAMP_MS) {
+      gain = duck + (1 - duck) * ((start - at_ms) / DUCK_RAMP_MS);
+    } else if (at_ms >= stop && at_ms - stop < DUCK_RAMP_MS) {
+      gain = duck + (1 - duck) * ((at_ms - stop) / DUCK_RAMP_MS);
+    }
+    level *= gain;
+    // Overlapping liners: the lowest wins in the mix, enough for a drawing.
+    if (gain < 1) {
+      break;
+    }
+  }
+  const start = medley.music_start_ms ?? 0;
+  const fadeInMs = medley.fade_in_ms ?? 0;
+  if (fadeInMs > 0 && at_ms >= start && at_ms < start + fadeInMs) {
+    level *= 1 - fadeGain(medley.fade_in_curve ?? "linear", (at_ms - start) / fadeInMs);
+  }
+  const fadeOutMs = Math.min(medley.fade_out_ms ?? 0, medley.music_end_ms);
+  if (fadeOutMs > 0 && at_ms >= medley.music_end_ms - fadeOutMs) {
+    level *= fadeGain(medley.fade_out_curve ?? "linear", (at_ms - (medley.music_end_ms - fadeOutMs)) / fadeOutMs);
+  }
+  return level;
+}
+
 /** How long the parts last together once mixed. */
-export function plannedLength(
-  parts: readonly LayoutPart[],
-  recipe: { crossfade_ms: number; liner_mode: string },
-): number {
+export function plannedLength(parts: readonly LayoutPart[], recipe: MixRecipe): number {
   return layout(parts, recipe).length_ms;
 }
 
@@ -232,7 +334,7 @@ export function plannedLength(
  */
 export function moveTo(
   parts: readonly LayoutPart[],
-  recipe: { crossfade_ms: number; liner_mode: string },
+  recipe: MixRecipe,
   index: number,
   at_ms: number,
 ): number {

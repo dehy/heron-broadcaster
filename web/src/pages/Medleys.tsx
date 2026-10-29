@@ -409,6 +409,31 @@ function RecipeCard({
         </fieldset>
 
         <fieldset>
+          <legend>{t("medleys.fadeIn")}</legend>
+          <div className="form-grid">
+            <Field label={t("medleys.fadeOutLength")} hint={t("medleys.fadeInHelp")}>
+              <input
+                className="input num"
+                type="number"
+                min={0}
+                max={30}
+                step={0.5}
+                value={seconds(recipe.fade_in_ms)}
+                disabled={disabled}
+                onChange={(event) => set({ fade_in_ms: fromSeconds(event.target.value) })}
+              />
+            </Field>
+            <Field label={t("medleys.fadeOutCurve")}>
+              <FadeCurveSelect
+                value={recipe.fade_in_curve}
+                disabled={disabled || recipe.fade_in_ms === 0}
+                onChange={(fade_in_curve) => set({ fade_in_curve })}
+              />
+            </Field>
+          </div>
+        </fieldset>
+
+        <fieldset>
           <legend>{t("medleys.fadeOut")}</legend>
           <div className="form-grid">
             <Field label={t("medleys.fadeOutLength")} hint={t("medleys.fadeOutHelp")}>
