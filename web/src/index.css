@@ -1916,3 +1916,18 @@ ul.steps .bar {
   gap: 0.5rem;
   flex-wrap: wrap;
 }
+table.schedule .head {
+  background: none;
+  border: none;
+  padding: 0.1rem 0.2rem;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+table.schedule .head:hover {
+  background: var(--accent-soft);
+}
+table.schedule .head:focus-visible {
+  outline: 2px solid var(--accent);
+}
