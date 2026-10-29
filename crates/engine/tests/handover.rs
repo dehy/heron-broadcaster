@@ -294,19 +294,19 @@ async fn hand_over(relay: Option<&Path>) {
     assert!(matches!(follow.await.unwrap(), Followed::TookOver));
 
     // The new engine plays the same track, on the same connection, from
-    // where the old one stopped (held there since).
+    // where the old one stopped (held there since). It went on at the cut,
+    // inside hand_over: only its start bounds how far it may have played.
     assert!(!standby.is_standby());
-    let cut = Instant::now();
     wait_for("the track on air", Duration::from_secs(2), || {
         on_air(&standby).is_some_and(|(id, _)| id == entry_id)
     })
     .await;
     let (_, stopped_ms) = on_air(&active).unwrap();
     let (_, resumed_ms) = on_air(&standby).unwrap();
-    let elapsed_ms = cut.elapsed().as_millis() as u64;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
     assert!(
         resumed_ms >= stopped_ms && resumed_ms <= stopped_ms + elapsed_ms + 50,
-        "stopped at {stopped_ms} ms, resumed at {resumed_ms} ms, {elapsed_ms} ms later"
+        "stopped at {stopped_ms} ms, resumed at {resumed_ms} ms, {elapsed_ms} ms after the hand-over started"
     );
     assert_eq!(standby.player().saved().waiting, waiting);
     assert_eq!(standby.config().eq, station_eq());
