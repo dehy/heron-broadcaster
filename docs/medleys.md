@@ -13,7 +13,7 @@ What every medley shares is set once, under *Settings › Medleys* (operators an
 | **Category** | The Heron category rendered medleys go in, usually a Jingle-type one, so clocks and the FX player can call it |
 | **Liners** | The category of the liners; optionally a category of **opening liners** and one of **closing liners**, for the liner at the start and the one at the end of a medley (the liner category when not set) |
 | **Naming** | Medleys are named after the **artists** (the default) or the **titles** of their hooks, see [Names](#names) |
-| **Defaults** | The recipe of a new medley: 3 hooks, a 500 ms crossfade, hooks of 4 to 8 s, a liner every hook, between the hooks, a liner at the start and one at the end, −10 dB of ducking. Each medley can change them |
+| **Defaults** | The recipe of a new medley: 3 hooks, a 500 ms crossfade, hooks of 4 to 8 s, a liner every hook, between the hooks, a liner at the start and one at the end, −10 dB of ducking, no fade-out. Each medley can change them |
 
 Medleys made before these settings existed each had their own category and liner category: the settings start with the ones they used most, the tracks already rendered keep their categories, a medley that had no liners has its liners off, and each keeps its name until it is rendered again.
 
@@ -24,7 +24,8 @@ Medleys made before these settings existed each had their own category and liner
 | **Songs** | The categories the hooks come from, optionally only the tracks with a label |
 | **Hooks** | How many (2 to 30), their order (as picked, by year, by BPM), and their length, a filter: only hooks lasting between the shortest and the longest qualify; a hook is never cut, but can be shortened by hand while editing |
 | **Crossfade** | Between two parts |
-| **Liners** | On or off; placed every *N* hooks, optionally also at the start and at the end; **between** the hooks (they take their own time) or **over** the music (each one starts on the transition, the music lowered under it by the ducking level) |
+| **Liners** | On or off; placed every *N* hooks, optionally also at the start and at the end; **between** the hooks (they take their own time) or **over** the music (the hooks around them play longer, the music lowered under them by the ducking level, see [Liners over the music](#liners-over-the-music)) |
+| **Fade-out** | How long the music fades out at the end of the medley (none by default), and its curve: linear, fast then slow, slow then fast, or S-shaped. A liner at the end is not faded: the music fades under it, or before it when liners go between the hooks |
 
 A song qualifies when it is enabled, its file is there, it is analyzed and audible, and it has a **hook** (imported from the previous software, see [Importing](import.md), or set on the track's page) whose length fits the recipe. Medleys never qualify, as songs or as liners (even when they go in the liner category).
 
@@ -40,12 +41,26 @@ A song qualifies when it is enabled, its file is there, it is analyzed and audib
 
    Each part's start and end can be moved by **0.1 s** (− / +), within its file, to place a hook by ear. This changes the medley only, not the track's hook.
 
+   The **timeline** draws the version as it will sound: the hooks with their crossfades, the liners, and the fade-out. With liners over the music, it shows the extra seconds of each hook under each liner, and the point where the music passes from one hook to the next can be dragged, or moved by 0.1 s, to change how much of the liner is over each hook.
+
    **Preview** mixes the version being edited exactly as a render would, into a temporary file the library scan never sees (the hidden `medleys/.previews/` folder, next to the rendered medleys; replaced by the next preview), and plays it. The library does not change; the page says when the version changed since its preview.
 3. **Render** saves the parts and asks the librarian (the only service that writes to the library, see [Library management](library.md)) to mix them into `medleys/medley-<id>.wav`, 48 kHz, 16-bit stereo:
    - each part is brought to the station's loudness target (the [playout settings](audio-engine.md#loudness)) before mixing, so the medley sounds even;
    - parts start and end with short fades, and overlap by the crossfade;
    - the result is scaled down if it would clip.
 4. The library scanner finds the file: the medley becomes a track, named after the medley, in the category of the [settings](#settings). Rendering again (after editing) replaces the file in place: the track keeps its ID, categories and history, and is analyzed again. A track on air at that moment plays on from the previous file.
+
+## Liners over the music
+
+A liner over the music never covers the span of a hook chosen to be heard. The hooks around it play longer instead, and the liner plays over those extra seconds only:
+
+- **Between two hooks**, the hook before plays on past its end and the hook after starts before its start. The gap they make lasts the liner, plus the crossfade between the two hooks, plus the ducking ramps (150 ms on each side), so both chosen spans are heard whole and never ducked.
+- By default the liner is over as much of the hook before as of the hook after (50/50): a 2 s liner after a hook from 2:17.4 to 2:25.4 plays that hook on to about 2:26.4, and starts the next one about 1 s before its start. The share is set for each liner on the timeline, from all of it over the hook before to all of it over the hook after; the two extensions follow.
+- **At the start** of the medley, the first hook starts earlier by the liner's whole length; **at the end**, the last hook plays on under the liner for its whole length.
+- Several liners in a row between the same hooks play one after the other in the same gap, with the share of the first.
+- An extension stops at the start or the end of its file; the other hook takes what is missing.
+
+The parts keep the spans chosen to be heard; the extensions are worked out at each preview and render.
 
 ## Names
 
@@ -81,7 +96,7 @@ Deleting a medley removes its recipe; its rendered track stays in the library (d
 | `POST /medleys/{id}/duplicate` | A new medley with the same recipe and parts, not rendered |
 | `POST /medleys/{id}/pick` | One more part of a kind, other than the tracks given (`{"kind", "exclude": [track IDs], "slot"}`), to replace one; for a liner, `slot` is `start`, `end` or `between` (the default), where the liner goes |
 | `GET /medleys/{id}/candidates?kind=hook` | Every track that can be a part of that kind (`hook` or `liner`, with `slot` for a liner), with the span it would take, by artist and title |
-| `POST /medleys/{id}/preview` | `{"parts": […]}`: mixes them into the medley's preview (a library task, `preview_medley`); nothing is saved |
+| `POST /medleys/{id}/preview` | `{"parts": […]}` (each part `{"kind", "track_id", "from_ms", "to_ms", "shift_ms"}`, `shift_ms` for a liner over the music: how far from the middle of its gap the music passes from the hook before to the hook after, positive for more of the liner over the hook before): mixes them into the medley's preview (a library task, `preview_medley`); nothing is saved |
 | `GET /medleys/{id}/preview` | The last preview's audio (WAV, with range requests) |
 | `POST /medleys/{id}/render` | `{"parts": […]}`: saves them, names the medley and queues the rendering (a library task, `render_medley`) |
 
