@@ -49,6 +49,16 @@ On *Schedule*, pick a clock (or *No clock*), then:
 
 The app keeps one WebSocket to `/api/v1/live` ([API – Live WebSocket](api.md#live-websocket)): the decks, queue and outputs change as soon as the engine reports them, positions move smoothly between the twice-a-second updates, and levels arrive ten times a second. It reconnects by itself (from half a second up to 10 s between tries). Changes are sent with REST calls; the queue shows a drag at once and follows the engine's answer.
 
+## Selecting rows
+
+In the lists with selection checkboxes (*Tracks*, *Buffer*):
+
+- a **click** on a checkbox checks or unchecks its row, and makes it the **anchor**;
+- **Shift + click** on a checkbox gives every row from the anchor to this one, both included, the new state of the checkbox clicked: check 8, then Shift + click 12, and rows 8 to 12 are checked; uncheck 9, then Shift + click 11, and 9 to 11 are unchecked. The anchor stays, so another Shift + click changes the range;
+- **Ctrl + click** (⌘ + click on macOS) **anywhere on a row** checks or unchecks it without opening it, and makes it the anchor; a plain click on a row still opens it.
+
+The range follows the rows as they are shown (sort, filters, page; in the Buffer, every group in turn). Another page or other filters drop the anchor.
+
 ## Waveform and previews
 
 The waveform comes with the analysis ([Import and analysis](analysis.md)): one point per 50 ms, on a dB scale so quiet intros and fade-outs show. Tracks analyzed before M5 are analyzed again once to get theirs. Previews play the file itself (`GET /api/v1/tracks/{id}/audio`) in the browser, at its own level, without the station's processing; formats the browser cannot play (some FLAC or ALAC files in Safari) stay silent. The transition preview of *Crossfade & loudness* mixes its two files in the browser the way the engine plans it: the incoming track starts at its planned time, each track has its loudness gain and its fade, and a limiter keeps the sum from clipping. It plays from a few seconds before the transition to a few seconds after, and stops when the tracks or the settings change. It is a preview: the engine's own processing (and its audio processing, from M9) may sound slightly different.

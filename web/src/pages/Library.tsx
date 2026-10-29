@@ -31,6 +31,7 @@ import { Card, ConfirmButton, Empty, ErrorView, Icon, Loading, PageHead, useToas
 import { type PlainKey, number, rich, t } from "../i18n";
 import { ago, duration, trackName } from "../lib/format";
 import { Link, setSearch, useLocation } from "../lib/router";
+import { type RangeSelection, useRangeSelection } from "../lib/rangeSelection";
 import { useAction, useCan } from "../lib/session";
 import { type Preview, usePreview } from "../lib/preview";
 
@@ -283,18 +284,15 @@ export function Library() {
     deleteTask !== null && deleting.data?.status !== "done" && deleting.data?.status !== "failed";
   const total = tracks.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE));
-  const toggle = (id: number) => {
-    setAllMatching(false);
-    setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
+  const range = useRangeSelection(
+    items.map((track) => track.id),
+    selected,
+    (next) => {
+      setAllMatching(false);
+      setSelected(next);
+    },
+    `${filterKey} ${page}`,
+  );
   const pageSelected = items.length > 0 && items.every((track) => selected.has(track.id));
   const selection: Selection = allMatching ? { filters } : { track_ids: [...selected] };
   const selectedCount = allMatching ? total : selected.size;
@@ -526,7 +524,7 @@ export function Library() {
                     columns={shown.map((c) => c.value)}
                     canQueue={canEdit}
                     selected={allMatching || selected.has(track.id)}
-                    onToggle={() => toggle(track.id)}
+                    range={range}
                     onQueue={(next) => enqueue.mutate({ ids: [track.id], next })}
                     onArtist={setText}
                     preview={preview}
@@ -778,7 +776,7 @@ function Row({
   columns,
   canQueue,
   selected,
-  onToggle,
+  range,
   onQueue,
   onArtist,
   preview,
@@ -787,7 +785,7 @@ function Row({
   columns: Column[];
   canQueue: boolean;
   selected: boolean;
-  onToggle: () => void;
+  range: RangeSelection<number>;
   onQueue: (next: boolean) => void;
   onArtist: (artist: string) => void;
   preview: Preview;
@@ -819,13 +817,13 @@ function Row({
     ),
   };
   return (
-    <tr className={previewing ? "previewing" : undefined}>
+    <tr className={previewing ? "previewing" : undefined} onClickCapture={range.row(track.id)}>
       <td>
         <input
           type="checkbox"
           aria-label={t("library.select", { name: track.title ?? file })}
           checked={selected}
-          onChange={onToggle}
+          {...range.checkbox(track.id)}
         />
       </td>
       <td className="title-cell">
