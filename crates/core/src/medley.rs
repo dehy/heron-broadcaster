@@ -15,6 +15,8 @@ pub const CHANNELS: usize = 2;
 pub const EDGE_FADE_MS: u32 = 20;
 /// The music goes down under a liner (and back up) over this.
 pub const DUCK_RAMP_MS: u32 = 150;
+/// The longest time the music takes to come back up under a liner.
+pub const MAX_DUCK_RELEASE_MS: u32 = 5_000;
 /// The mix is scaled down when its peak would go over this.
 pub const PEAK_LIMIT: f32 = 0.98;
 
@@ -98,6 +100,9 @@ pub struct Recipe {
     pub liner_mode: LinerMode,
     /// How much the music goes down under a liner played over it.
     pub duck_db: f64,
+    /// How long before the end of a liner over the music the music starts
+    /// coming back up: it is at its full level as the liner ends.
+    pub duck_release_ms: u32,
     /// How long the music fades in at the start; 0 for no fade-in.
     pub fade_in_ms: u32,
     pub fade_in_curve: FadeCurve,
@@ -122,6 +127,7 @@ impl Default for Recipe {
             liner_at_end: true,
             liner_mode: LinerMode::Between,
             duck_db: -10.0,
+            duck_release_ms: 300,
             fade_in_ms: 0,
             fade_in_curve: FadeCurve::Linear,
             fade_out_ms: 0,
@@ -159,6 +165,12 @@ impl Recipe {
         }
         if !(-40.0..=0.0).contains(&self.duck_db) {
             return Err("ducking is between -40 and 0 dB".to_owned());
+        }
+        if self.duck_release_ms > MAX_DUCK_RELEASE_MS {
+            return Err(format!(
+                "the music comes back up over at most {} s",
+                MAX_DUCK_RELEASE_MS / 1_000
+            ));
         }
         if self.fade_in_ms > MAX_FADE_OUT_MS || self.fade_out_ms > MAX_FADE_OUT_MS {
             return Err(format!(
@@ -598,6 +610,9 @@ pub struct Layout {
     /// How much the music goes down under a liner over it.
     #[serde(default)]
     pub duck_db: f64,
+    /// How long before a liner's end the music comes back up.
+    #[serde(default)]
+    pub duck_release_ms: u32,
 }
 
 /// Lays the parts out on the medley's timeline: consecutive parts overlap
@@ -650,15 +665,19 @@ pub fn layout(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layou
         let voice: u32 = liners.iter().map(|&i| parts[i].length_ms()).sum();
         if gap == 0 {
             let first = sequence[0];
-            earlier[first] = (voice + DUCK_RAMP_MS).min(parts[first].from_ms);
+            // The music is back up as the liner ends: the span starts there.
+            earlier[first] = voice.min(parts[first].from_ms);
         } else if gap == count {
             let last = sequence[count - 1];
             later[last] = (voice + DUCK_RAMP_MS).min(room_after(last));
         } else {
             let (before, after) = (sequence[gap - 1], sequence[gap]);
-            let total = voice + crossfade + 2 * DUCK_RAMP_MS;
+            // The music goes down before the liners, and is back up as they end.
+            let total = voice + crossfade + DUCK_RAMP_MS;
             let shift = i64::from(parts[liners[0]].shift_ms);
-            let mut on = (i64::from(total) / 2 + shift).clamp(0, i64::from(total)) as u32;
+            // Centred on the liners: the ramp down is before them, none after.
+            let mut on =
+                (i64::from(total + DUCK_RAMP_MS) / 2 + shift).clamp(0, i64::from(total)) as u32;
             let mut ahead = total - on;
             let (room_on, room_ahead) = (room_after(before), parts[after].from_ms);
             if on > room_on {
@@ -750,8 +769,29 @@ pub fn layout(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layou
         fade_out_ms: recipe.fade_out_ms,
         fade_out_curve: recipe.fade_out_curve,
         duck_db: recipe.duck_db,
+        duck_release_ms: recipe.duck_release_ms,
         parts,
     }
+}
+
+/// When the music is lowered: the liners over it, those in a row (their
+/// ramps would meet) as one, from the first's start to the last's end.
+pub fn duck_windows(layout: &Layout, release_ms: u32) -> Vec<(u32, u32)> {
+    let mut liners: Vec<(u32, u32)> = layout
+        .parts
+        .iter()
+        .filter(|placed| placed.over)
+        .map(|placed| (placed.at_ms, placed.end_ms()))
+        .collect();
+    liners.sort_unstable();
+    let mut windows: Vec<(u32, u32)> = Vec::new();
+    for (start, end) in liners {
+        match windows.last_mut() {
+            Some(last) if start < last.1 + DUCK_RAMP_MS + release_ms => last.1 = last.1.max(end),
+            _ => windows.push((start, end)),
+        }
+    }
+    windows
 }
 
 /// Mixes the parts where `layout` puts them into one interleaved stereo
@@ -784,18 +824,22 @@ pub fn mix(recipe: &Recipe, layout: &Layout, audio: &[PartAudio]) -> Vec<f32> {
     let mut envelope = vec![1.0f32; total];
     let duck = 10f32.powf(recipe.duck_db as f32 / 20.0);
     let ramp = ms_to_frames(DUCK_RAMP_MS).max(1);
-    for placed in layout.parts.iter().filter(|placed| placed.over) {
-        let start = ms_to_frames(placed.at_ms);
-        let end = ms_to_frames(placed.end_ms()).min(total);
+    for (start_ms, end_ms) in duck_windows(layout, recipe.duck_release_ms) {
+        let start = ms_to_frames(start_ms);
+        let end = ms_to_frames(end_ms).min(total);
+        // Back up over the release, before the end; never longer than the window.
+        let release = ms_to_frames(recipe.duck_release_ms)
+            .min(end.saturating_sub(start))
+            .max(1);
+        let up = end.saturating_sub(release);
         let from = start.saturating_sub(ramp);
-        let to = (end + ramp).min(total);
-        for (frame, level) in envelope.iter_mut().enumerate().take(to).skip(from) {
-            // Down over `ramp` before the liner, back up over `ramp` after it.
+        for (frame, level) in envelope.iter_mut().enumerate().take(end).skip(from) {
             let gain = if frame < start {
+                // Down over `ramp` before the liner.
                 let t = (start - frame) as f32 / ramp as f32;
                 duck + (1.0 - duck) * t
-            } else if frame >= end {
-                let t = (frame - end) as f32 / ramp as f32;
+            } else if frame >= up {
+                let t = (frame - up) as f32 / release as f32;
                 duck + (1.0 - duck) * t
             } else {
                 duck
@@ -1168,30 +1212,44 @@ mod tests {
             part(PartKind::Hook, 30_000, 36_000),
         ];
         let (layout, out) = mixed(&recipe, &parts, &[], 0.5, 0.0);
-        // The gap: the liner, the crossfade and two ramps, 2.5 s, half each.
+        // The gap: the liner, the crossfade and the ramp down before it,
+        // 2.35 s, the music passing from one hook to the other under the
+        // middle of the liner.
         let [first, liner, second] = layout.parts[..] else {
             panic!("three parts");
         };
         assert_eq!((first.from_ms, first.to_ms), (10_000, 19_250));
-        assert_eq!((second.from_ms, second.to_ms), (28_750, 36_000));
+        assert_eq!((second.from_ms, second.to_ms), (28_900, 36_000));
         assert_eq!(second.at_ms, 9_250 - 200);
         // The liner starts after the first hook's span and its ramp, and
-        // the second hook's span starts once the music is back up.
+        // the second hook's span starts as it ends: the music is back up.
         assert_eq!(liner.at_ms, 8_000 + 150);
-        assert_eq!(liner.end_ms() + 150, second.at_ms + 1_250);
-        assert_eq!(layout.length_ms, 9_050 + 7_250);
-        // Both spans whole and not lowered; the extensions under the liner at -20 dB.
+        assert_eq!(liner.end_ms(), second.at_ms + 1_100);
+        assert_eq!(
+            second.at_ms + 100,
+            liner.at_ms + 1_000,
+            "the middle of the liner"
+        );
+        assert_eq!(layout.length_ms, 9_050 + 7_100);
+        // Both spans whole and not lowered; the extensions under the liner
+        // at -20 dB, coming back up over its last 0.3 s.
         assert!((at(&out, 7_900) - 0.5).abs() < 1e-6);
         assert!((at(&out, 8_700) - 0.05).abs() < 1e-4, "{}", at(&out, 8_700));
         assert!((at(&out, 9_800) - 0.05).abs() < 1e-4, "{}", at(&out, 9_800));
-        assert!((at(&out, 10_400) - 0.5).abs() < 1e-6);
+        let halfway = 0.05 + (0.5 - 0.05) * 0.5;
+        assert!(
+            (at(&out, 10_000) - halfway).abs() < 1e-3,
+            "{}",
+            at(&out, 10_000)
+        );
+        assert!((at(&out, 10_160) - 0.5).abs() < 1e-6);
 
         // More of the liner over the hook before.
         let mut shifted = parts;
         shifted[1].shift_ms = 500;
         let moved = layout_of(&recipe, &shifted, &[]);
         assert_eq!(moved.parts[0].to_ms, 18_000 + 1_750);
-        assert_eq!(moved.parts[2].from_ms, 30_000 - 750);
+        assert_eq!(moved.parts[2].from_ms, 30_000 - 600);
         assert_eq!(
             moved.parts[1].at_ms, 8_150,
             "the liner stays after the span"
@@ -1199,7 +1257,7 @@ mod tests {
         // The first file ends 0.5 s after its hook: the second takes the rest.
         let short = layout_of(&recipe, &parts, &[Some(18_500), None, None]);
         assert_eq!(short.parts[0].to_ms, 18_500);
-        assert_eq!(short.parts[2].from_ms, 30_000 - 2_000);
+        assert_eq!(short.parts[2].from_ms, 30_000 - 1_850);
     }
 
     fn layout_of(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layout {
@@ -1259,9 +1317,10 @@ mod tests {
         let [opening, hook, closing] = layout.parts[..] else {
             panic!("three parts");
         };
-        assert_eq!((hook.at_ms, hook.from_ms, hook.to_ms), (0, 2_850, 10_150));
+        // The span starts as the opening liner ends.
+        assert_eq!((hook.at_ms, hook.from_ms, hook.to_ms), (0, 3_000, 10_150));
         assert_eq!(opening.at_ms, 0);
-        assert_eq!(closing.at_ms, (9_000 - 2_850) + 150);
+        assert_eq!(closing.at_ms, (9_000 - 3_000) + 150);
         assert_eq!(closing.end_ms(), hook.end_ms());
         // Not before the file's start.
         let early = [
@@ -1327,6 +1386,32 @@ mod tests {
         assert!((at(&out, 2_500) - 0.5).abs() < 1e-6);
         assert!((FadeCurve::FastThenSlow.rise(0.5) - 0.75).abs() < 1e-6);
         assert!(FadeCurve::Linear.rise(0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn liners_in_a_row_keep_the_music_down() {
+        let recipe = Recipe {
+            crossfade_ms: 0,
+            liner_mode: LinerMode::Over,
+            duck_db: -20.0,
+            ..recipe()
+        };
+        let parts = [
+            part(PartKind::Hook, 0, 10_000),
+            part(PartKind::Liner, 0, 1_000),
+            part(PartKind::Liner, 0, 1_000),
+            part(PartKind::Hook, 0, 10_000),
+        ];
+        let (layout, out) = mixed(&recipe, &parts, &[], 0.5, 0.0);
+        let windows = duck_windows(&layout, recipe.duck_release_ms);
+        assert_eq!(windows.len(), 1, "{windows:?}");
+        // Where the first liner ends and the second starts: still down.
+        let between = layout.parts[1].end_ms();
+        assert!(
+            (at(&out, between) - 0.05).abs() < 1e-4,
+            "{}",
+            at(&out, between)
+        );
     }
 
     #[test]

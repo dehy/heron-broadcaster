@@ -3754,6 +3754,11 @@ export interface components {
              * @description How much the music goes down under a liner over it.
              */
             duck_db?: number;
+            /**
+             * Format: int32
+             * @description How long before a liner's end the music comes back up.
+             */
+            duck_release_ms?: number;
             fade_in_curve?: components["schemas"]["MedleyFadeCurve"];
             /**
              * Format: int32
@@ -4001,6 +4006,12 @@ export interface components {
              * @default -10
              */
             duck_db: number;
+            /**
+             * Format: int32
+             * @description The music back up over the last 0.3 s of a liner by default.
+             * @default 300
+             */
+            duck_release_ms: number;
             /** @default linear */
             fade_in_curve: components["schemas"]["MedleyFadeCurve"];
             /**
@@ -4083,6 +4094,7 @@ export interface components {
              * @default {
              *       "crossfade_ms": 500,
              *       "duck_db": -10,
+             *       "duck_release_ms": 300,
              *       "fade_in_curve": "linear",
              *       "fade_in_ms": 0,
              *       "fade_out_curve": "linear",
@@ -4785,6 +4797,13 @@ export interface components {
              * @default -10
              */
             duck_db: number;
+            /**
+             * Format: int32
+             * @description How long before the end of a liner over the music the music starts
+             *     coming back up: it is at its full level as the liner ends.
+             * @default 300
+             */
+            duck_release_ms: number;
             /** @default linear */
             fade_in_curve: components["schemas"]["MedleyFadeCurve"];
             /**

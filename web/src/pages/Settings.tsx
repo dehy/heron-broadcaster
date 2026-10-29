@@ -452,6 +452,18 @@ function MedleysCard() {
                       />
                     </Field>
                   )}
+                  {defaults.liner_mode === "over" && (
+                    <Field label={t("medleys.duckRelease")} hint={t("medleys.duckReleaseHelp")}>
+                      <NumberInput
+                        value={defaults.duck_release_ms / 1000}
+                        min={0}
+                        max={5}
+                        step={0.1}
+                        disabled={disabled}
+                        onChange={(s) => setDefaults({ duck_release_ms: Math.round(s * 1000) })}
+                      />
+                    </Field>
+                  )}
                 </div>
                 <div className="row">
                   <label className="check">

@@ -120,6 +120,7 @@ export interface Layout {
   fade_out_ms?: number;
   fade_out_curve?: FadeCurve;
   duck_db?: number;
+  duck_release_ms?: number;
 }
 
 interface MixRecipe {
@@ -130,6 +131,7 @@ interface MixRecipe {
   fade_out_ms?: number;
   fade_out_curve?: FadeCurve;
   duck_db?: number;
+  duck_release_ms?: number;
 }
 
 const end = (placed: Placed) => placed.at_ms + placed.to_ms - placed.from_ms;
@@ -171,16 +173,19 @@ export function layout(parts: readonly LayoutPart[], recipe: MixRecipe): Layout 
     const voice = liners.reduce((sum, index) => sum + length(index), 0);
     if (gap === 0) {
       const hook = sequence[0] ?? 0;
-      earlier[hook] = Math.min(voice + DUCK_RAMP_MS, parts[hook]?.from_ms ?? 0);
+      // The music is back up as the liner ends: the span starts there.
+      earlier[hook] = Math.min(voice, parts[hook]?.from_ms ?? 0);
     } else if (gap === count) {
       const hook = sequence[count - 1] ?? 0;
       later[hook] = Math.min(voice + DUCK_RAMP_MS, roomAfter(hook));
     } else {
       const before = sequence[gap - 1] ?? 0;
       const after = sequence[gap] ?? 0;
-      const total = voice + crossfade + 2 * DUCK_RAMP_MS;
+      // The music goes down before the liners, and is back up as they end.
+      const total = voice + crossfade + DUCK_RAMP_MS;
       const shift = parts[first]?.shift_ms ?? 0;
-      let on = Math.min(Math.max(Math.trunc(total / 2) + shift, 0), total);
+      // Centred on the liners: the ramp down is before them, none after.
+      let on = Math.min(Math.max(Math.trunc((total + DUCK_RAMP_MS) / 2) + shift, 0), total);
       let ahead = total - on;
       const roomOn = roomAfter(before);
       const roomAhead = parts[after]?.from_ms ?? 0;
@@ -263,7 +268,27 @@ export function layout(parts: readonly LayoutPart[], recipe: MixRecipe): Layout 
     fade_out_ms: recipe.fade_out_ms ?? 0,
     fade_out_curve: recipe.fade_out_curve ?? "linear",
     duck_db: recipe.duck_db ?? -10,
+    duck_release_ms: recipe.duck_release_ms ?? 300,
   };
+}
+
+/** When the music is lowered (heron_core::medley::duck_windows): liners in a row as one. */
+export function duckWindows(medley: Layout): [number, number][] {
+  const release = medley.duck_release_ms ?? 0;
+  const liners = medley.parts
+    .filter((part) => part.over)
+    .map((part): [number, number] => [part.at_ms, end(part)])
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const windows: [number, number][] = [];
+  for (const [start, stop] of liners) {
+    const last = windows[windows.length - 1];
+    if (last && start < last[1] + DUCK_RAMP_MS + release) {
+      last[1] = Math.max(last[1], stop);
+    } else {
+      windows.push([start, stop]);
+    }
+  }
+  return windows;
 }
 
 /**
@@ -290,26 +315,22 @@ export function levelAt(medley: Layout, index: number, at_ms: number): number {
     return level;
   }
   const duck = 10 ** ((medley.duck_db ?? -10) / 20);
-  for (const liner of medley.parts) {
-    if (!liner.over) {
-      continue;
+  let gain = 1;
+  for (const [start, stop] of duckWindows(medley)) {
+    // Back up over the release, before the end; never longer than the window.
+    const release = Math.max(1, Math.min(medley.duck_release_ms ?? 0, stop - start));
+    const up = stop - release;
+    let here = 1;
+    if (at_ms < start && start - at_ms < DUCK_RAMP_MS) {
+      here = duck + (1 - duck) * ((start - at_ms) / DUCK_RAMP_MS);
+    } else if (at_ms >= start && at_ms < up) {
+      here = duck;
+    } else if (at_ms >= up && at_ms < stop) {
+      here = duck + (1 - duck) * ((at_ms - up) / release);
     }
-    const start = liner.at_ms;
-    const stop = end(liner);
-    let gain = 1;
-    if (at_ms >= start && at_ms < stop) {
-      gain = duck;
-    } else if (at_ms < start && start - at_ms < DUCK_RAMP_MS) {
-      gain = duck + (1 - duck) * ((start - at_ms) / DUCK_RAMP_MS);
-    } else if (at_ms >= stop && at_ms - stop < DUCK_RAMP_MS) {
-      gain = duck + (1 - duck) * ((at_ms - stop) / DUCK_RAMP_MS);
-    }
-    level *= gain;
-    // Overlapping liners: the lowest wins in the mix, enough for a drawing.
-    if (gain < 1) {
-      break;
-    }
+    gain = Math.min(gain, here);
   }
+  level *= gain;
   const start = medley.music_start_ms ?? 0;
   const fadeInMs = medley.fade_in_ms ?? 0;
   if (fadeInMs > 0 && at_ms >= start && at_ms < start + fadeInMs) {

@@ -384,6 +384,20 @@ function RecipeCard({
                   />
                 </Field>
               )}
+              {recipe.liner_mode === "over" && (
+                <Field label={t("medleys.duckRelease")} hint={t("medleys.duckReleaseHelp")}>
+                  <input
+                    className="input num"
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={0.1}
+                    value={seconds(recipe.duck_release_ms)}
+                    disabled={disabled || !recipe.liners}
+                    onChange={(event) => set({ duck_release_ms: fromSeconds(event.target.value) })}
+                  />
+                </Field>
+              )}
             </div>
             <div className="row">
               <label className="row small" style={{ gap: "0.3rem" }}>

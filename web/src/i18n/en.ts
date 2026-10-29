@@ -633,6 +633,8 @@ const en = {
   "medleys.linerMode": "Placed",
   "medleys.linerBetween": "Between the hooks",
   "medleys.linerOver": "Over the music (ducked)",
+  "medleys.duckRelease": "Music back up before the liner ends (s)",
+  "medleys.duckReleaseHelp": "The music comes back up over this, and is at its full level as the liner ends.",
   "medleys.duck": "Music under a liner (dB)",
   "medleys.linerAtStart": "A liner at the start",
   "medleys.linerAtEnd": "A liner at the end",
