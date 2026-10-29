@@ -2058,6 +2058,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracks/enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disables or enables every selected track. Tracks already waiting in the
+         *     queue stay there. Operators and admins.
+         */
+        post: operations["set_enabled"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracks/labels": {
         parameters: {
             query?: never;
@@ -3103,6 +3123,11 @@ export interface components {
             gain_db: number;
             /** Format: int32 */
             mix_point_ms?: number | null;
+        };
+        EnabledChange: {
+            /** @description Off: autofill, clocks and medleys never pick the tracks. */
+            enabled: boolean;
+            selection: components["schemas"]["TrackSelection"];
         };
         /** @enum {string} */
         EncoderKind: "mp3" | "aac" | "opus" | "vorbis" | "external_ffmpeg";
@@ -10563,6 +10588,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    set_enabled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnabledChange"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectionResult"];
                 };
             };
             "4XX": {

@@ -27,7 +27,8 @@ import {
 } from "../components/SelectionActions";
 import { useDebounced } from "../components/TrackSearch";
 import { TaskState, useTask } from "../components/Task";
-import { Card, ConfirmButton, Empty, ErrorView, Icon, Loading, PageHead, useToast } from "../components/ui";
+import { Menu } from "../components/Menu";
+import { Card, ConfirmDialog, Empty, ErrorView, Icon, Loading, PageHead, useToast } from "../components/ui";
 import { type PlainKey, number, rich, t } from "../i18n";
 import { ago, duration, trackName } from "../lib/format";
 import { Link, setSearch, useLocation } from "../lib/router";
@@ -244,6 +245,21 @@ export function Library() {
     },
   );
 
+  const setEnabled = useAction(
+    (enabled: boolean) => unwrap(api.POST("/api/v1/tracks/enabled", { body: { selection, enabled } })),
+    {
+      success: (result) => t("library.enabledChanged", { count: result.changed }),
+      invalidate: [["tracks"], ["track"]],
+    },
+  );
+  const backToFileTags = useAction(
+    () => unwrap(api.POST("/api/v1/tracks/tag-overrides/clear", { body: { selection } })),
+    {
+      success: (result) => t("library.overridesCleared", { count: result.changed }),
+      invalidate: [["tracks"], ["track"]],
+    },
+  );
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const remove = useAction(
     (ids: number[]) => unwrap(api.POST("/api/v1/tracks/delete", { body: { track_ids: ids } })),
     {
@@ -442,44 +458,55 @@ export function Library() {
                   >
                     <Icon name="plus" size={14} /> {t("library.addToQueue")}
                   </button>
-                  <ConfirmButton
-                    className="btn small danger"
-                    confirm={t("library.deleteConfirm", { count: selected.size })}
-                    disabled={deletingNow}
-                    question={<DeleteQuestion tracks={selectedTracks} />}
-                    onConfirm={() => remove.mutate([...selected])}
-                  >
-                    <Icon name="trash" size={14} /> {t("library.delete")}
-                  </ConfirmButton>
                 </>
               )}
               {canEdit && (
-                <>
-                  <button type="button" className="btn small" onClick={() => setDialog("labels")}>
-                    {t("library.labelsAction")}
-                  </button>
-                  <button type="button" className="btn small" onClick={() => setDialog("category")}>
-                    {t("library.categoryAction")}
-                  </button>
-                  <button type="button" className="btn small" onClick={() => setDialog("programming")}>
-                    {t("library.programmingAction")}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn small"
-                    disabled={selectedCount > MAX_TAG_EDIT}
-                    title={
-                      selectedCount > MAX_TAG_EDIT ? t("library.tagsLimit", { max: MAX_TAG_EDIT }) : undefined
-                    }
-                    onClick={() => setDialog("tags")}
-                  >
-                    <Icon name="edit" size={14} /> {t("library.tagsAction")}
-                  </button>
-                </>
+                <button
+                  type="button"
+                  className="btn small"
+                  disabled={selectedCount > MAX_TAG_EDIT}
+                  title={selectedCount > MAX_TAG_EDIT ? t("library.tagsLimit", { max: MAX_TAG_EDIT }) : undefined}
+                  onClick={() => setDialog("tags")}
+                >
+                  <Icon name="edit" size={14} /> {t("library.tagsAction")}
+                </button>
               )}
               <button type="button" className="btn small ghost" onClick={clear}>
                 {t("queuePage.clear")}
               </button>
+              {canEdit && (
+                <Menu
+                  label={t("library.moreActions")}
+                  items={[
+                    { label: t("library.labelsAction"), onSelect: () => setDialog("labels") },
+                    { label: t("library.categoryAction"), onSelect: () => setDialog("category") },
+                    { label: t("library.programmingAction"), onSelect: () => setDialog("programming") },
+                    { label: t("library.enable"), onSelect: () => setEnabled.mutate(true), disabled: setEnabled.isPending },
+                    {
+                      label: t("library.disable"),
+                      title: t("library.disableHelp"),
+                      onSelect: () => setEnabled.mutate(false),
+                      disabled: setEnabled.isPending,
+                    },
+                    {
+                      label: t("library.backToFileTags"),
+                      title:
+                        selectedCount > MAX_TAG_EDIT
+                          ? t("library.tagsLimit", { max: MAX_TAG_EDIT })
+                          : t("library.backToFileTagsHelp"),
+                      onSelect: () => backToFileTags.mutate(undefined),
+                      disabled: selectedCount > MAX_TAG_EDIT || backToFileTags.isPending,
+                    },
+                    {
+                      label: t("library.delete"),
+                      danger: true,
+                      title: allMatching ? t("library.deletePageOnly") : undefined,
+                      onSelect: () => setConfirmDelete(true),
+                      disabled: allMatching || deletingNow,
+                    },
+                  ]}
+                />
+              )}
             </div>
           </div>
         )}
@@ -560,6 +587,13 @@ export function Library() {
           </div>
         )}
       </Card>
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        question={<DeleteQuestion tracks={selectedTracks} />}
+        confirm={t("library.deleteConfirm", { count: selected.size })}
+        onConfirm={() => remove.mutate([...selected])}
+      />
       <LabelsDialog
         open={dialog === "labels"}
         onClose={() => setDialog(null)}

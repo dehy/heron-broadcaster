@@ -80,6 +80,7 @@ const fr = {
   "ui.close": "Fermer",
   "ui.areYouSure": "Confirmer ?",
   "ui.cancel": "Annuler",
+  "ui.moreActions": "Autres actions",
 
   // Meters
   "meter.peak": "{channel} : crête {level} dBFS",
@@ -1549,6 +1550,15 @@ const fr = {
   "buffer.keepOwn": "Garder ses tags",
 
   // Suppression et corbeille
+  "library.moreActions": "Autres actions sur la sélection",
+  "library.enable": "Activer",
+  "library.disable": "Désactiver",
+  "library.disableHelp": "L’autofill, les horloges et les medleys ne les tirent plus ; les titres déjà dans la file y restent",
+  "library.enabledChanged": { one: "{count} titre modifié", other: "{count} titres modifiés" },
+  "library.backToFileTags": "Revenir aux tags des fichiers",
+  "library.backToFileTagsHelp": "Supprime les tags gardés dans Heron et relit ceux des fichiers",
+  "library.overridesCleared": { one: "{count} tag gardé supprimé", other: "{count} tags gardés supprimés" },
+  "library.deletePageOnly": "Sélectionnez des titres de la page pour les supprimer",
   "library.delete": "Supprimer",
   "library.deleting": "Mise à la corbeille…",
   "library.deleteConfirm": { one: "Supprimer {count} piste", other: "Supprimer {count} pistes" },

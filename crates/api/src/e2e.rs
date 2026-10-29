@@ -4165,6 +4165,41 @@ async fn medleys_are_planned_rendered_and_linked() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_selection_is_disabled_and_enabled() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+    let tracks = station.tracks.clone();
+    let body = json!({"selection": {"track_ids": [tracks[0], tracks[1]]}, "enabled": false});
+    let (status, _) = viewer
+        .send(Method::POST, "/tracks/enabled", body.clone())
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, done) = admin.send(Method::POST, "/tracks/enabled", body).await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    assert_eq!(
+        (done["tracks"].as_u64(), done["changed"].as_u64()),
+        (Some(2), Some(2))
+    );
+    assert_eq!(admin.get("/tracks?filter=disabled").await["total"], 2);
+    // Every disabled track enabled again, by filters; the others did not change.
+    let (_, again) = admin
+        .send(
+            Method::POST,
+            "/tracks/enabled",
+            json!({"selection": {"filters": {}}, "enabled": true}),
+        )
+        .await;
+    assert_eq!(
+        (again["tracks"].as_u64(), again["changed"].as_u64()),
+        (Some(tracks.len() as u64), Some(2))
+    );
+    assert_eq!(admin.get("/tracks?filter=disabled").await["total"], 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn queue_changes_reach_webhooks_and_the_public_queue() {
     let Some(station) = Station::start().await else {
         return;

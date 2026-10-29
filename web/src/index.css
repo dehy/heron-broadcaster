@@ -1916,3 +1916,45 @@ ul.steps .bar {
   gap: 0.5rem;
   flex-wrap: wrap;
 }
+
+/* A "…" menu of actions. */
+.menu {
+  position: relative;
+  display: inline-block;
+}
+.menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 20;
+  min-width: 14rem;
+  display: flex;
+  flex-direction: column;
+  padding: 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.menu-list [role="menuitem"] {
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.menu-list [role="menuitem"]:hover:not(:disabled),
+.menu-list [role="menuitem"]:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+.menu-list [role="menuitem"]:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.menu-list [role="menuitem"].danger {
+  color: var(--bad);
+}

@@ -384,31 +384,56 @@ export function ConfirmButton({
       >
         {children}
       </button>
-      <Modal
-        title={t("ui.areYouSure")}
+      <ConfirmDialog
         open={open}
         onClose={() => setOpen(false)}
-        footer={
-          <>
-            <button type="button" className="btn" onClick={() => setOpen(false)}>
-              {t("ui.cancel")}
-            </button>
-            <button
-              type="button"
-              className="btn danger solid"
-              onClick={() => {
-                setOpen(false);
-                onConfirm();
-              }}
-            >
-              {confirm}
-            </button>
-          </>
-        }
-      >
-        {question}
-      </Modal>
+        question={question}
+        confirm={confirm}
+        onConfirm={onConfirm}
+      />
     </>
+  );
+}
+
+/** Asks before doing something hard to take back, opened by its caller. */
+export function ConfirmDialog({
+  open,
+  onClose,
+  question,
+  confirm,
+  onConfirm,
+}: {
+  open: boolean;
+  onClose: () => void;
+  question: ReactNode;
+  confirm: string;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal
+      title={t("ui.areYouSure")}
+      open={open}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="btn" onClick={onClose}>
+            {t("ui.cancel")}
+          </button>
+          <button
+            type="button"
+            className="btn danger solid"
+            onClick={() => {
+              onClose();
+              onConfirm();
+            }}
+          >
+            {confirm}
+          </button>
+        </>
+      }
+    >
+      {question}
+    </Modal>
   );
 }
 
