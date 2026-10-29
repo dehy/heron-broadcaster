@@ -13,7 +13,7 @@ import { TaskState, useTask } from "../components/Task";
 import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, PageHead } from "../components/ui";
 import { number, rich, t } from "../i18n";
 import { ago, duration, trackName } from "../lib/format";
-import { displayName, layout, linerSlot, medleyName, plannedLength, renderMonth } from "../lib/medley";
+import { displayName, layout, linerSlot, medleyName, renderMonth } from "../lib/medley";
 import { type PlayerSource, useMedleyPlayer } from "../lib/medleyPlayer";
 import { Link, navigate } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
@@ -642,7 +642,20 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
   // Shares a liner over the music between the hooks around it.
   const setShift = (index: number, shift_ms: number) =>
     setPlan((current) => (current ?? []).map((part, i) => (i === index ? { ...part, shift_ms } : part)));
-  const placed = layout(parts, medley.recipe).parts;
+  // Outside editing: the layout the file was rendered with, when saved for these parts.
+  const saved = medley.rendered_layout;
+  const rendered = !plan && saved && saved.parts.length === parts.length ? saved : null;
+  const shown = rendered ?? layout(parts, medley.recipe);
+  const placed = shown.parts;
+  // The file playing does not last as long as the timeline says.
+  const fileLength =
+    !plan && player.source?.kind === "medley" && renderedSource && player.source.url === renderedSource.url
+      ? player.length_ms
+      : null;
+  const outOfStep =
+    !plan &&
+    medley.track_id != null &&
+    (rendered === null || (fileLength !== null && Math.abs(fileLength - shown.length_ms) > 250));
   const shares = new Map(
     junctions(parts, placed, medley.recipe.crossfade_ms).map((join) => [join.liner, join.share]),
   );
@@ -742,7 +755,7 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
           {t("medleys.summary", {
             hooks: number(hooks),
             liners: number(parts.length - hooks),
-            length: duration(plannedLength(parts, medley.recipe)),
+            length: duration(shown.length_ms),
           })}
           {plan && qualified !== null && qualified < medley.recipe.hooks && (
             <> · {t("medleys.fewSongs", { qualified: number(qualified), wanted: number(medley.recipe.hooks) })}</>
@@ -785,7 +798,7 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
               <span className="num muted">
                 {source.kind === "part"
                   ? trackName(parts[source.index] ?? { path: "" })
-                  : `${duration(player.position_ms, true)} / ${duration(player.length_ms ?? plannedLength(parts, medley.recipe), true)}`}
+                  : `${duration(player.position_ms, true)} / ${duration(player.length_ms ?? shown.length_ms, true)}`}
               </span>
             )}
             {pendingSeek !== null && <span className="muted">{t("medleys.mixing")}</span>}
@@ -793,6 +806,7 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
           </div>
         )}
         {plan && previewStale && <span className="small warn">{t("medleys.previewStale")}</span>}
+        {outOfStep && <span className="small warn">{t("medleys.timelineOutOfStep")}</span>}
         {!plan && medley.path && medley.track_id == null && status === "done" && (
           <span className="small muted">{t("medleys.waitingScan")}</span>
         )}
@@ -801,6 +815,7 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
         <MedleyTimeline
           parts={parts}
           recipe={medley.recipe}
+          rendered={rendered}
           playhead_ms={source ? playhead : null}
           onShift={canEdit && plan ? setShift : undefined}
           onMove={canEdit && plan ? setMove : undefined}

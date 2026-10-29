@@ -537,7 +537,8 @@ fn add(out: &mut Vec<f32>, at: usize, part: &PartAudio, fade_in: usize, fade_out
 }
 
 /// Where a part goes in the medley, in ms on the medley's timeline.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Placed {
     pub kind: PartKind,
     /// Where it starts in the medley.
@@ -559,14 +560,19 @@ impl Placed {
 }
 
 /// The medley as it will sound: each part where it goes, in the parts'
-/// order.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// order. Saved with a medley when it is rendered, so its timeline is the
+/// file's.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Layout {
     pub parts: Vec<Placed>,
     /// How long the medley lasts.
     pub length_ms: u32,
     /// Where the music (the hooks) ends: the fade-out ends there.
     pub music_end_ms: u32,
+    /// The recipe's fade-out.
+    #[serde(default)]
+    pub fade_out_ms: u32,
 }
 
 /// Lays the parts out on the medley's timeline: consecutive parts overlap
@@ -708,6 +714,7 @@ pub fn layout(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layou
             .map(Placed::end_ms)
             .max()
             .unwrap_or(0),
+        fade_out_ms: recipe.fade_out_ms,
         parts,
     }
 }

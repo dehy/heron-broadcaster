@@ -62,7 +62,7 @@ async fn mix_rows(
     roots: &Roots,
     recipe: Recipe,
     rows: Vec<PartRow>,
-) -> Result<Vec<f32>, String> {
+) -> Result<(Vec<f32>, medley::Layout), String> {
     if rows.is_empty() {
         return Err("the medley has no parts: build it first".to_owned());
     }
@@ -90,7 +90,8 @@ async fn mix_rows(
         .collect();
     let lengths: Vec<Option<u32>> = rows.iter().map(|row| row.duration_ms).collect();
     let layout = medley::layout(&recipe, &parts, &lengths);
-    tokio::task::spawn_blocking(move || -> Result<Vec<f32>, String> {
+    let mixed = layout.clone();
+    let audio = tokio::task::spawn_blocking(move || -> Result<Vec<f32>, String> {
         let mut parts = Vec::with_capacity(rows.len());
         for (row, placed) in rows.iter().zip(&layout.parts) {
             let file = LibraryPath::from_stored(row.path.clone()).resolve(&library);
@@ -108,7 +109,8 @@ async fn mix_rows(
         Ok(medley::mix(&recipe, &layout, &parts))
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())??;
+    Ok((audio, mixed))
 }
 
 fn kind(kind: &str) -> PartKind {
@@ -143,7 +145,8 @@ pub async fn render(
     .await
     .map_err(|error| error.to_string())?;
     let count = rows.len();
-    let audio = mix_rows(pool, roots, recipe, rows).await?;
+    let (audio, layout) = mix_rows(pool, roots, recipe, rows).await?;
+    let layout = serde_json::to_string(&layout).map_err(|error| error.to_string())?;
     let duration_ms = duration_ms(&audio);
 
     let path = medley_path(medley_id);
@@ -161,12 +164,15 @@ pub async fn render(
     lock.release().await.map_err(|error| error.to_string())?;
     written??;
 
-    sqlx::query("UPDATE medleys SET path = ?, rendered_at = NOW(6) WHERE id = ?")
-        .bind(&path)
-        .bind(medley_id)
-        .execute(pool)
-        .await
-        .map_err(|error| error.to_string())?;
+    sqlx::query(
+        "UPDATE medleys SET path = ?, rendered_layout = ?, rendered_at = NOW(6) WHERE id = ?",
+    )
+    .bind(&path)
+    .bind(&layout)
+    .bind(medley_id)
+    .execute(pool)
+    .await
+    .map_err(|error| error.to_string())?;
     tracing::info!(medley_id, %path, duration_ms, parts = count, "medley rendered");
     Ok(RenderReport {
         medley_id,
@@ -214,7 +220,7 @@ pub async fn preview(
             true_peak_db,
         });
     }
-    let audio = mix_rows(pool, roots, recipe, rows).await?;
+    let (audio, _) = mix_rows(pool, roots, recipe, rows).await?;
     let duration_ms = duration_ms(&audio);
     let path = medley::preview_path(medley_id);
     let target = roots.library.join(&path);
