@@ -158,7 +158,8 @@ function RecipeCard({
     },
     {
       success: t("medleys.saved"),
-      invalidate: [["medleys"], ["tracks"], ["track"]],
+      // The songs and liners to pick from follow the recipe.
+      invalidate: [["medleys"], ["tracks"], ["track"], ["medley-candidates"]],
       onSuccess: (saved) => {
         if (!medley) {
           navigate(`/medleys/${saved.id}`, { replace: true });

@@ -270,7 +270,7 @@ function MedleysCard() {
   const settings = useMedleySettings();
   const save = useAction(
     (body: Schemas["MedleySettings"]) => unwrap(api.PUT("/api/v1/settings/medleys", { body })),
-    { success: t("categories.saved"), invalidate: [["settings", "medleys"]] },
+    { success: t("categories.saved"), invalidate: [["settings", "medleys"], ["medley-candidates"]] },
   );
   if (settings.isPending) {
     return <Loading />;
