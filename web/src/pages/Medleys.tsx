@@ -129,11 +129,6 @@ export function MedleyEditor({ id }: { id: number | null }) {
     <>
       <PageHead
         title={medley ? displayName(medley) : t("medleys.new")}
-        description={
-          <Link to="/medleys">
-            ← {t("nav.medleys")}
-          </Link>
-        }
       />
       <RecipeCard key={medley?.id ?? "new"} medley={medley ?? null} settings={settings.data} canEdit={canEdit} />
       {medley && <BuildCard key={`build-${medley.id}`} medley={medley} settings={settings.data} canEdit={canEdit} />}

@@ -37,6 +37,7 @@ const en = {
   "app.title": "{page} · Heron Broadcaster",
 
   // Navigation
+  "app.breadcrumb": "Breadcrumb",
   "nav.label": "Navigation",
   "nav.menu": "Menu",
   "nav.onAir": "On air",
@@ -913,7 +914,6 @@ const en = {
   "clocks.hoursAWeek": { one: "{count} hour a week", other: "{count} hours a week" },
   "clocks.saved": "Clock saved",
   "clocks.deleted": "Clock deleted",
-  "clocks.all": "All clocks",
   "clocks.deleteQuestion": "Delete {name}? The hours it is scheduled at rotate the whole library until another clock is scheduled.",
   "clocks.loop": "Loop across hours",
   "clocks.loopHelp": "The clock carries on from its last slot whatever the hour, like a SAM Broadcaster clockwheel: it can be longer than an hour.",

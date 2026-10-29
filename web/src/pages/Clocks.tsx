@@ -239,7 +239,6 @@ function Editor({ clock }: { clock: ClockView | null }) {
     <>
       <PageHead
         title={clock ? clock.name : t("clocks.new")}
-        description={<Link to="/clocks">{t("clocks.all")}</Link>}
         actions={
           canEdit && (
             <>
