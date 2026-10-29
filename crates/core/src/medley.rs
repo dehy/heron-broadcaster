@@ -196,7 +196,7 @@ impl Default for Recipe {
             liner_mode: LinerMode::Between,
             duck_db: -10.0,
             duck_attack_ms: 300,
-            duck_attack_at: DuckPlace::Across,
+            duck_attack_at: DuckPlace::Inside,
             duck_release_ms: 300,
             duck_release_at: DuckPlace::Across,
             fade_in_ms: 0,
@@ -1418,7 +1418,7 @@ mod tests {
         let over = Recipe {
             crossfade_ms: 200,
             liner_mode: LinerMode::Over,
-            ..recipe()
+            ..before_and_during()
         };
         let mut parts = [
             part(PartKind::Hook, 10_000, 18_000),
@@ -1518,8 +1518,9 @@ mod tests {
 
     #[test]
     fn the_music_goes_down_and_comes_back_up_where_chosen() {
-        // Across the liner's start and end, the default: a crossfade.
+        // Across the liner's start and end: a crossfade.
         let recipe = Recipe {
+            duck_attack_at: DuckPlace::Across,
             crossfade_ms: 200,
             liner_mode: LinerMode::Over,
             duck_db: -20.0,

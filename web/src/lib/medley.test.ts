@@ -164,8 +164,8 @@ describe("layout", () => {
   });
 
   it("goes down and comes back up where chosen", () => {
-    // Across the liner's start and end by default: the spans stay clear of the ramps' halves.
-    const across = { crossfade_ms: 200, liner_mode: "over", duck_db: -20 };
+    // Across the liner's start and end: the spans stay clear of the ramps' halves.
+    const across = { crossfade_ms: 200, liner_mode: "over", duck_db: -20, duck_attack_at: "across" } as const;
     const medley = layout(hooks, across);
     const [, liner, second] = medley.parts;
     expect(liner?.at_ms).toBe(8_150);

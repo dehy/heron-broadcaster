@@ -4007,11 +4007,11 @@ export interface components {
              * @default 500
              */
             crossfade_ms: number;
-            /** @default across */
+            /** @default inside */
             duck_attack_at: components["schemas"]["MedleyDuckPlace"];
             /**
              * Format: int32
-             * @description The music down over 0.3 s across a liner's start, and back up over
+             * @description The music down over 0.3 s from a liner's start, and back up over
              *     0.3 s across its end, by default.
              * @default 300
              */
@@ -4114,7 +4114,7 @@ export interface components {
              * @description The recipe of a new medley; each medley can change it.
              * @default {
              *       "crossfade_ms": 500,
-             *       "duck_attack_at": "across",
+             *       "duck_attack_at": "inside",
              *       "duck_attack_ms": 300,
              *       "duck_db": -10,
              *       "duck_release_at": "across",
@@ -4815,7 +4815,7 @@ export interface components {
              * @default 500
              */
             crossfade_ms: number;
-            /** @default across */
+            /** @default inside */
             duck_attack_at: components["schemas"]["MedleyDuckPlace"];
             /**
              * Format: int32
