@@ -736,8 +736,9 @@ function ProgrammingCard({ track, canEdit }: { track: TrackDetail; canEdit: bool
             <span className="muted">
               {" "}
               {mb?.first_release_year
-                ? t("track.firstReleased", { year: track.year })
-                : t("track.yearTag", { year: track.year })}
+                ? // A year, not an amount: no thousands separator ("2,018").
+                  t("track.firstReleased", { year: String(track.year) })
+                : t("track.yearTag", { year: String(track.year) })}
             </span>
           )}
         </dd>
