@@ -7,12 +7,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
 import { type Schemas, api, done, unwrap } from "../api";
+import { MedleyTimeline, SHIFT_STEP_MS, junctions } from "../components/MedleyTimeline";
 import { useLabels } from "../components/SelectionActions";
 import { TaskState, useTask } from "../components/Task";
 import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, PageHead } from "../components/ui";
 import { number, rich, t } from "../i18n";
 import { ago, duration, trackName } from "../lib/format";
-import { displayName, linerSlot, medleyName, plannedLength, renderMonth } from "../lib/medley";
+import { displayName, layout, linerSlot, medleyName, plannedLength, renderMonth } from "../lib/medley";
 import { usePreview } from "../lib/preview";
 import { Link, navigate } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
@@ -412,6 +413,31 @@ function RecipeCard({
           </div>
         </fieldset>
 
+        <fieldset>
+          <legend>{t("medleys.fadeOut")}</legend>
+          <div className="form-grid">
+            <Field label={t("medleys.fadeOutLength")} hint={t("medleys.fadeOutHelp")}>
+              <input
+                className="input num"
+                type="number"
+                min={0}
+                max={30}
+                step={0.5}
+                value={seconds(recipe.fade_out_ms)}
+                disabled={disabled}
+                onChange={(event) => set({ fade_out_ms: fromSeconds(event.target.value) })}
+              />
+            </Field>
+            <Field label={t("medleys.fadeOutCurve")}>
+              <FadeCurveSelect
+                value={recipe.fade_out_curve}
+                disabled={disabled || recipe.fade_out_ms === 0}
+                onChange={(fade_out_curve) => set({ fade_out_curve })}
+              />
+            </Field>
+          </div>
+        </fieldset>
+
         {canEdit && (
           <div className="row">
             <button
@@ -426,6 +452,31 @@ function RecipeCard({
         )}
       </form>
     </Card>
+  );
+}
+
+/** The curves of a fade-out. */
+export function FadeCurveSelect({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: Recipe["fade_out_curve"];
+  disabled: boolean;
+  onChange: (curve: Recipe["fade_out_curve"]) => void;
+}) {
+  return (
+    <select
+      className="input"
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value as Recipe["fade_out_curve"])}
+    >
+      <option value="linear">{t("medleys.curveLinear")}</option>
+      <option value="fast_then_slow">{t("medleys.curveFastThenSlow")}</option>
+      <option value="slow_then_fast">{t("medleys.curveSlowThenFast")}</option>
+      <option value="s_curve">{t("medleys.curveS")}</option>
+    </select>
   );
 }
 
@@ -474,7 +525,13 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
         api.POST("/api/v1/medleys/{id}/render", {
           params: { path: { id: medley.id } },
           body: {
-            parts: (plan ?? []).map(({ kind, track_id, from_ms, to_ms }) => ({ kind, track_id, from_ms, to_ms })),
+            parts: (plan ?? []).map(({ kind, track_id, from_ms, to_ms, shift_ms }) => ({
+              kind,
+              track_id,
+              from_ms,
+              to_ms,
+              shift_ms,
+            })),
           },
         }),
       ),
@@ -507,7 +564,7 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
   const [previewed, setPreviewed] = useState<string | null>(null);
   const previewTask = useTask(previewTaskId);
   const asPartsBody = (parts: PartView[]) => ({
-    parts: parts.map(({ kind, track_id, from_ms, to_ms }) => ({ kind, track_id, from_ms, to_ms })),
+    parts: parts.map(({ kind, track_id, from_ms, to_ms, shift_ms }) => ({ kind, track_id, from_ms, to_ms, shift_ms })),
   });
   const mixPreview = useAction(
     () =>
@@ -551,6 +608,15 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
   }, [status, refetch]);
 
   const parts = plan ?? medley.parts;
+  // Shares a liner over the music between the hooks around it.
+  const setShift = (index: number, shift_ms: number) =>
+    setPlan((current) => (current ?? []).map((part, i) => (i === index ? { ...part, shift_ms } : part)));
+  const shares = new Map(
+    junctions(parts, layout(parts, medley.recipe).parts, medley.recipe.crossfade_ms).map((join) => [
+      join.liner,
+      join.share,
+    ]),
+  );
   const move = (index: number, by: number) =>
     setPlan((current) => {
       const next = [...(current ?? [])];
@@ -672,6 +738,9 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
           <span className="small muted">{t("medleys.waitingScan")}</span>
         )}
       </div>
+      {parts.length > 0 && (
+        <MedleyTimeline parts={parts} recipe={medley.recipe} onShift={canEdit && plan ? setShift : undefined} />
+      )}
       {parts.length === 0 ? (
         <Empty>{canEdit ? t("medleys.buildHelp") : t("medleys.notBuilt")}</Empty>
       ) : (
@@ -705,6 +774,25 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
                       <span className="num">
                         {duration(part.from_ms, true)} – {duration(part.to_ms, true)} ·{" "}
                         {duration(part.to_ms - part.from_ms, true)}
+                      </span>
+                    )}
+                    {shares.has(index) && (
+                      <span className="num row" style={{ gap: "0.25rem", flexWrap: "nowrap" }}>
+                        {canEdit && plan && (
+                          <Nudge
+                            label={t("medleys.moreAfter", { name: trackName(part) })}
+                            text="−"
+                            onClick={() => setShift(index, (part.shift_ms ?? 0) - SHIFT_STEP_MS)}
+                          />
+                        )}
+                        {t("medleys.share", { before: String(Math.round((shares.get(index) ?? 0.5) * 100)) })}
+                        {canEdit && plan && (
+                          <Nudge
+                            label={t("medleys.moreBefore", { name: trackName(part) })}
+                            text="+"
+                            onClick={() => setShift(index, (part.shift_ms ?? 0) + SHIFT_STEP_MS)}
+                          />
+                        )}
                       </span>
                     )}
                   </div>

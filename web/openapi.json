@@ -10872,6 +10872,17 @@
             "format": "double",
             "default": -10.0
           },
+          "fade_out_curve": {
+            "$ref": "#/components/schemas/FadeCurve",
+            "default": "linear"
+          },
+          "fade_out_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "No fade-out by default.",
+            "default": 0,
+            "minimum": 0
+          },
           "hook_max_ms": {
             "type": "integer",
             "format": "int32",
@@ -10972,6 +10983,8 @@
             "default": {
               "crossfade_ms": 500,
               "duck_db": -10.0,
+              "fade_out_curve": "linear",
+              "fade_out_ms": 0,
               "hook_max_ms": 8000,
               "hook_min_ms": 4000,
               "hooks": 3,
@@ -11524,6 +11537,11 @@
           "kind": {
             "$ref": "#/components/schemas/PartKind"
           },
+          "shift_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "A liner over the music: where in its gap the music passes from the\nhook before to the hook after, from the middle; positive for more of\nthe liner over the hook before. See [`layout`]."
+          },
           "to_ms": {
             "type": "integer",
             "format": "int32",
@@ -11551,6 +11569,7 @@
           "track_id",
           "from_ms",
           "to_ms",
+          "shift_ms",
           "path"
         ],
         "properties": {
@@ -11580,6 +11599,11 @@
           },
           "path": {
             "type": "string"
+          },
+          "shift_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "A liner over the music: how its gap is shared, see `Part`."
           },
           "title": {
             "type": [
@@ -12541,6 +12565,17 @@
             "format": "double",
             "description": "How much the music goes down under a liner played over it.",
             "default": -10.0
+          },
+          "fade_out_curve": {
+            "$ref": "#/components/schemas/FadeCurve",
+            "default": "linear"
+          },
+          "fade_out_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How long the music fades out at the end; 0 for no fade-out.",
+            "default": 0,
+            "minimum": 0
           },
           "hook_max_ms": {
             "type": "integer",
