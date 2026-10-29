@@ -535,6 +535,8 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
       success: t("medleys.renderAsked"),
       invalidate: [["medleys"]],
       onSuccess: (asked) => {
+        // The file is about to change: nothing plays the old one meanwhile.
+        player.stop();
         setTaskId(asked.id);
         setPlan(null);
       },
@@ -570,28 +572,37 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
     })),
   });
   const mixPreview = useAction(
-    () =>
-      unwrap(
+    () => {
+      // What is sent now, whatever changes while it mixes; the last
+      // preview is no longer playable meanwhile.
+      setPreviewed(previewKey);
+      setPreviewTaskId(null);
+      return unwrap(
         api.POST("/api/v1/medleys/{id}/preview", {
           params: { path: { id: medley.id } },
           body: asPartsBody(plan ?? []),
         }),
-      ),
+      );
+    },
     {
-      onSuccess: (asked) => {
-        setPreviewTaskId(asked.id);
-        setPreviewed(JSON.stringify(asPartsBody(plan ?? [])));
-      },
+      onSuccess: (asked) => setPreviewTaskId(asked.id),
     },
   );
   const previewReady = previewTask.data?.status === "done";
-  const previewStale = previewed !== null && previewed !== JSON.stringify(asPartsBody(plan ?? []));
+  // What a preview was mixed from: the parts and the recipe saved (a recipe
+  // saved since, a crossfade or the liners' placement, changes the mix too).
+  const previewKey = JSON.stringify({ parts: asPartsBody(plan ?? []), recipe: medley.recipe });
+  const previewStale = previewed !== null && previewed !== previewKey;
   const previewSource: PlayerSource | null =
     previewReady && previewTaskId !== null
       ? { kind: "medley", url: `/api/v1/medleys/${medley.id}/preview?task=${previewTaskId}` }
       : null;
   const renderedSource: PlayerSource | null =
-    medley.track_id != null ? { kind: "medley", url: `/api/v1/tracks/${medley.track_id}/audio` } : null;
+    medley.track_id != null
+      ? // Each render replaces the file at the same path: a new address for
+        // each, or the browser plays the one it has kept.
+        { kind: "medley", url: `/api/v1/tracks/${medley.track_id}/audio?render=${medley.rendered_at_unix_ms ?? 0}` }
+      : null;
   // Where to play the preview from once it is mixed.
   const [pendingSeek, setPendingSeek] = useState<number | null>(null);
   const { play } = player;
@@ -630,6 +641,9 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
     );
 
   const status = task.data?.status;
+  // While a render runs, the file and its layout are about to change: no
+  // timeline and nothing to play until they have.
+  const rendering = !plan && (status === "pending" || status === "running");
   // The version and its track change once rendered, and again once scanned.
   const { refetch } = useMedleys();
   useEffect(() => {
@@ -766,7 +780,7 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
         )}
         {!plan && <TaskState task={task.data} />}
         {plan && previewTaskId !== null && !previewReady && <TaskState task={previewTask.data} />}
-        {parts.length > 0 && (plan || medley.track_id != null) && (
+        {parts.length > 0 && !rendering && (plan || medley.track_id != null) && (
           <div className="medley-player small" role="group" aria-label={t("medleys.player")}>
             <button
               type="button"
@@ -811,7 +825,7 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
           <span className="small muted">{t("medleys.waitingScan")}</span>
         )}
       </div>
-      {parts.length > 0 && (
+      {parts.length > 0 && !rendering && (
         <MedleyTimeline
           parts={parts}
           recipe={medley.recipe}
@@ -909,25 +923,27 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
                   </div>
                 </div>
                 <div className="row" style={{ flexWrap: "nowrap", gap: "0.25rem" }}>
-                  <button
-                    type="button"
-                    className="btn ghost small icon"
-                    aria-label={t(playing ? "library.stopPreviewNamed" : "library.previewNamed", { name: trackName(part) })}
-                    aria-pressed={playing}
-                    onClick={() =>
-                      playing
-                        ? player.stop()
-                        : player.play({
-                            kind: "part",
-                            index,
-                            track_id: part.track_id,
-                            from_ms: part.from_ms,
-                            to_ms: part.to_ms,
-                          })
-                    }
-                  >
-                    <Icon name={playing ? "stop" : "play"} />
-                  </button>
+                  {!rendering && (
+                    <button
+                      type="button"
+                      className="btn ghost small icon"
+                      aria-label={t(playing ? "library.stopPreviewNamed" : "library.previewNamed", { name: trackName(part) })}
+                      aria-pressed={playing}
+                      onClick={() =>
+                        playing
+                          ? player.stop()
+                          : player.play({
+                              kind: "part",
+                              index,
+                              track_id: part.track_id,
+                              from_ms: part.from_ms,
+                              to_ms: part.to_ms,
+                            })
+                      }
+                    >
+                      <Icon name={playing ? "stop" : "play"} />
+                    </button>
+                  )}
                   {canEdit && plan && (
                     <>
                       <ChoiceSelect
