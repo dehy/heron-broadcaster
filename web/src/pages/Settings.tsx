@@ -11,7 +11,7 @@ import { type PlainKey, number, rich, t } from "../i18n";
 import { WINDOW_FIELDS } from "../lib/rotation";
 import { Link } from "../lib/router";
 import { useCategories } from "./Clocks";
-import { useMedleySettings } from "./Medleys";
+import { FadeCurveSelect, useMedleySettings } from "./Medleys";
 import { useAction, useCan } from "../lib/session";
 
 export function Settings() {
@@ -405,6 +405,23 @@ function MedleysCard() {
                       <option value="between">{t("medleys.linerBetween")}</option>
                       <option value="over">{t("medleys.linerOver")}</option>
                     </select>
+                  </Field>
+                  <Field label={`${t("medleys.fadeOut")} (s)`}>
+                    <NumberInput
+                      value={defaults.fade_out_ms / 1000}
+                      min={0}
+                      max={30}
+                      step={0.5}
+                      disabled={disabled}
+                      onChange={(s) => setDefaults({ fade_out_ms: Math.round(s * 1000) })}
+                    />
+                  </Field>
+                  <Field label={t("medleys.fadeOutCurve")}>
+                    <FadeCurveSelect
+                      value={defaults.fade_out_curve}
+                      disabled={disabled || defaults.fade_out_ms === 0}
+                      onChange={(fade_out_curve) => setDefaults({ fade_out_curve })}
+                    />
                   </Field>
                   {defaults.liner_mode === "over" && (
                     <Field label={t("medleys.duck")}>

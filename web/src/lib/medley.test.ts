@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { displayName, linerSlot, medleyName, plannedLength, renderMonth } from "./medley";
+import { displayName, layout, linerSlot, medleyName, plannedLength, renderMonth } from "./medley";
 
 const parts = [
   { kind: "hook", from_ms: 10_000, to_ms: 17_000 },
@@ -58,10 +58,47 @@ describe("linerSlot", () => {
 describe("plannedLength", () => {
   it("overlaps parts by the crossfade", () => {
     expect(plannedLength(parts, { crossfade_ms: 500, liner_mode: "between" })).toBe(17_000 - 2 * 500);
+    expect(plannedLength([], { crossfade_ms: 500, liner_mode: "over" })).toBe(0);
+  });
+});
+
+// The same cases as heron_core::medley's tests: the two layouts must agree.
+describe("layout", () => {
+  const over = { crossfade_ms: 200, liner_mode: "over" };
+  const hooks = [
+    { kind: "hook", from_ms: 10_000, to_ms: 18_000 },
+    { kind: "liner", from_ms: 0, to_ms: 2_000 },
+    { kind: "hook", from_ms: 30_000, to_ms: 36_000 },
+  ];
+
+  it("puts liners over the music between whole hooks, half each", () => {
+    const { parts: [first, liner, second] = [], length_ms } = layout(hooks, over);
+    expect([first?.from_ms, first?.to_ms]).toEqual([10_000, 19_250]);
+    expect([second?.from_ms, second?.to_ms, second?.at_ms]).toEqual([28_750, 36_000, 9_050]);
+    expect(liner?.at_ms).toBe(8_150);
+    expect(length_ms).toBe(9_050 + 7_250);
   });
 
-  it("gives liners over the music no time of their own", () => {
-    expect(plannedLength(parts, { crossfade_ms: 500, liner_mode: "over" })).toBe(14_000 - 500);
-    expect(plannedLength([], { crossfade_ms: 500, liner_mode: "over" })).toBe(0);
+  it("shares the gap as the liner says, within the files", () => {
+    const shifted = hooks.map((part, i) => (i === 1 ? { ...part, shift_ms: 500 } : part));
+    const moved = layout(shifted, over).parts;
+    expect([moved[0]?.to_ms, moved[2]?.from_ms, moved[1]?.at_ms]).toEqual([19_750, 29_250, 8_150]);
+    const short = hooks.map((part, i) => (i === 0 ? { ...part, duration_ms: 18_500 } : part));
+    const cut = layout(short, over).parts;
+    expect([cut[0]?.to_ms, cut[2]?.from_ms]).toEqual([18_500, 28_000]);
+  });
+
+  it("extends one hook for a liner at the start or the end", () => {
+    const { parts: [opening, hook, closing] = [] } = layout(
+      [
+        { kind: "liner", from_ms: 0, to_ms: 2_000 },
+        { kind: "hook", from_ms: 5_000, to_ms: 9_000 },
+        { kind: "liner", from_ms: 0, to_ms: 1_000 },
+      ],
+      over,
+    );
+    expect([hook?.at_ms, hook?.from_ms, hook?.to_ms]).toEqual([0, 2_850, 10_150]);
+    expect(opening?.at_ms).toBe(0);
+    expect(closing?.at_ms).toBe(9_000 - 2_850 + 150);
   });
 });

@@ -62,19 +62,149 @@ export function linerSlot(parts: readonly { kind: string }[], index: number): "s
   return "between";
 }
 
-interface Span {
+/** The music goes down under a liner, and back up, over this (DUCK_RAMP_MS). */
+export const DUCK_RAMP_MS = 150;
+
+export interface LayoutPart {
   kind: string;
   from_ms: number;
   to_ms: number;
+  shift_ms?: number;
+  /** The file's length, which extensions stop at. */
+  duration_ms?: number | null;
 }
 
+export interface Placed {
+  kind: string;
+  /** Where it starts in the medley. */
+  at_ms: number;
+  /** The span of its file played, extensions under liners included. */
+  from_ms: number;
+  to_ms: number;
+  /** A liner over the music. */
+  over: boolean;
+}
+
+export interface Layout {
+  parts: Placed[];
+  length_ms: number;
+  /** Where the music ends: the fade-out ends there. */
+  music_end_ms: number;
+}
+
+const end = (placed: Placed) => placed.at_ms + placed.to_ms - placed.from_ms;
+
 /**
- * How long the parts last together once mixed: consecutive parts overlap
- * by the crossfade; liners over the music take no time of their own.
+ * The medley as it will sound, as the librarian mixes it
+ * (heron_core::medley::layout): parts overlap by the crossfade; liners over
+ * the music fall in gaps made by the hooks around them playing longer.
  */
-export function plannedLength(parts: Span[], recipe: { crossfade_ms: number; liner_mode: string }): number {
-  const over = recipe.liner_mode === "over";
-  const sequence = parts.filter((part) => !(over && part.kind === "liner"));
-  const total = sequence.reduce((sum, part) => sum + (part.to_ms - part.from_ms), 0);
-  return Math.max(0, total - Math.max(0, sequence.length - 1) * recipe.crossfade_ms);
+export function layout(
+  parts: readonly LayoutPart[],
+  recipe: { crossfade_ms: number; liner_mode: string },
+): Layout {
+  const crossfade = recipe.crossfade_ms;
+  const isOver = (part: LayoutPart) => recipe.liner_mode === "over" && part.kind === "liner";
+  const sequence: number[] = [];
+  const gaps: number[][] = [[]];
+  parts.forEach((part, index) => {
+    if (isOver(part)) {
+      gaps[gaps.length - 1]?.push(index);
+    } else {
+      sequence.push(index);
+      gaps.push([]);
+    }
+  });
+  const earlier = parts.map(() => 0);
+  const later = parts.map(() => 0);
+  const roomAfter = (index: number) => {
+    const part = parts[index];
+    return part?.duration_ms != null ? Math.max(0, part.duration_ms - part.to_ms) : Number.POSITIVE_INFINITY;
+  };
+  const length = (index: number) => {
+    const part = parts[index];
+    return part ? part.to_ms - part.from_ms : 0;
+  };
+  const count = sequence.length;
+  gaps.forEach((liners, gap) => {
+    const first = liners[0];
+    if (first === undefined || count === 0) {
+      return;
+    }
+    const voice = liners.reduce((sum, index) => sum + length(index), 0);
+    if (gap === 0) {
+      const hook = sequence[0] ?? 0;
+      earlier[hook] = Math.min(voice + DUCK_RAMP_MS, parts[hook]?.from_ms ?? 0);
+    } else if (gap === count) {
+      const hook = sequence[count - 1] ?? 0;
+      later[hook] = Math.min(voice + DUCK_RAMP_MS, roomAfter(hook));
+    } else {
+      const before = sequence[gap - 1] ?? 0;
+      const after = sequence[gap] ?? 0;
+      const total = voice + crossfade + 2 * DUCK_RAMP_MS;
+      const shift = parts[first]?.shift_ms ?? 0;
+      let on = Math.min(Math.max(Math.trunc(total / 2) + shift, 0), total);
+      let ahead = total - on;
+      const roomOn = roomAfter(before);
+      const roomAhead = parts[after]?.from_ms ?? 0;
+      if (on > roomOn) {
+        ahead += on - roomOn;
+        on = roomOn;
+      }
+      if (ahead > roomAhead) {
+        on = Math.min(on + (ahead - roomAhead), roomOn);
+        ahead = roomAhead;
+      }
+      later[before] = on;
+      earlier[after] = ahead;
+    }
+  });
+  const placed: (Placed | undefined)[] = parts.map(() => undefined);
+  let cursor = 0;
+  sequence.forEach((index, position) => {
+    const part = parts[index];
+    if (!part) {
+      return;
+    }
+    const item: Placed = {
+      kind: part.kind,
+      at_ms: position === 0 ? 0 : Math.max(0, cursor - crossfade),
+      from_ms: part.from_ms - (earlier[index] ?? 0),
+      to_ms: part.to_ms + (later[index] ?? 0),
+      over: false,
+    };
+    cursor = end(item);
+    placed[index] = item;
+  });
+  gaps.forEach((liners, gap) => {
+    let at = 0;
+    if (gap > 0) {
+      const index = sequence[gap - 1] ?? 0;
+      const hook = placed[index];
+      at = hook ? hook.at_ms + ((parts[index]?.to_ms ?? 0) - hook.from_ms) + DUCK_RAMP_MS : 0;
+    }
+    for (const index of liners) {
+      const part = parts[index];
+      if (!part) {
+        continue;
+      }
+      const item: Placed = { kind: part.kind, at_ms: at, from_ms: part.from_ms, to_ms: part.to_ms, over: true };
+      at = end(item);
+      placed[index] = item;
+    }
+  });
+  const all = placed.filter((item): item is Placed => item !== undefined);
+  return {
+    parts: all,
+    length_ms: Math.max(0, ...all.map(end)),
+    music_end_ms: Math.max(0, ...all.filter((item) => item.kind === "hook").map(end)),
+  };
+}
+
+/** How long the parts last together once mixed. */
+export function plannedLength(
+  parts: readonly LayoutPart[],
+  recipe: { crossfade_ms: number; liner_mode: string },
+): number {
+  return layout(parts, recipe).length_ms;
 }

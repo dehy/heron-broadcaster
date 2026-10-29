@@ -3935,6 +3935,14 @@ export interface components {
              * @default -10
              */
             duck_db: number;
+            /** @default linear */
+            fade_out_curve: components["schemas"]["FadeCurve"];
+            /**
+             * Format: int32
+             * @description No fade-out by default.
+             * @default 0
+             */
+            fade_out_ms: number;
             /**
              * Format: int32
              * @default 8000
@@ -3995,6 +4003,8 @@ export interface components {
              * @default {
              *       "crossfade_ms": 500,
              *       "duck_db": -10,
+             *       "fade_out_curve": "linear",
+             *       "fade_out_ms": 0,
              *       "hook_max_ms": 8000,
              *       "hook_min_ms": 4000,
              *       "hooks": 3,
@@ -4203,6 +4213,13 @@ export interface components {
              */
             from_ms: number;
             kind: components["schemas"]["PartKind"];
+            /**
+             * Format: int32
+             * @description A liner over the music: where in its gap the music passes from the
+             *     hook before to the hook after, from the middle; positive for more of
+             *     the liner over the hook before. See [`layout`].
+             */
+            shift_ms?: number;
             /** Format: int32 */
             to_ms: number;
             /** Format: int64 */
@@ -4225,6 +4242,11 @@ export interface components {
             from_ms: number;
             kind: components["schemas"]["PartKind"];
             path: string;
+            /**
+             * Format: int32
+             * @description A liner over the music: how its gap is shared, see `Part`.
+             */
+            shift_ms: number;
             title?: string | null;
             /** Format: int32 */
             to_ms: number;
@@ -4647,6 +4669,14 @@ export interface components {
              * @default -10
              */
             duck_db: number;
+            /** @default linear */
+            fade_out_curve: components["schemas"]["FadeCurve"];
+            /**
+             * Format: int32
+             * @description How long the music fades out at the end; 0 for no fade-out.
+             * @default 0
+             */
+            fade_out_ms: number;
             /**
              * Format: int32
              * @description Hooks longer than this are left out too: a hook is never cut.

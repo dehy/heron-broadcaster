@@ -14,7 +14,9 @@ use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use heron_core::library::TaskRequest;
-use heron_core::medley::{self, Candidate, LinerMode, LinerSlot, Liners, Part, PartKind, Recipe};
+use heron_core::medley::{
+    self, Candidate, FadeCurve, LinerMode, LinerSlot, Liners, Part, PartKind, Recipe,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, QueryBuilder};
 use utoipa::{IntoParams, ToSchema};
@@ -103,6 +105,9 @@ pub struct MedleyDefaults {
     pub liner_at_end: bool,
     pub liner_mode: LinerMode,
     pub duck_db: f64,
+    /// No fade-out by default.
+    pub fade_out_ms: u32,
+    pub fade_out_curve: FadeCurve,
 }
 
 impl Default for MedleyDefaults {
@@ -118,6 +123,8 @@ impl Default for MedleyDefaults {
             liner_at_end: recipe.liner_at_end,
             liner_mode: recipe.liner_mode,
             duck_db: recipe.duck_db,
+            fade_out_ms: recipe.fade_out_ms,
+            fade_out_curve: recipe.fade_out_curve,
         }
     }
 }
@@ -134,6 +141,8 @@ impl MedleyDefaults {
             liner_at_end: self.liner_at_end,
             liner_mode: self.liner_mode,
             duck_db: self.duck_db,
+            fade_out_ms: self.fade_out_ms,
+            fade_out_curve: self.fade_out_curve,
             ..Recipe::default()
         }
         .check_settings()
@@ -196,6 +205,8 @@ pub struct PartView {
     /// On the file's timeline.
     pub from_ms: u32,
     pub to_ms: u32,
+    /// A liner over the music: how its gap is shared, see `Part`.
+    pub shift_ms: i32,
     pub title: Option<String>,
     pub artist: Option<String>,
     pub path: String,
@@ -337,8 +348,8 @@ async fn find(pool: &MySqlPool, id: u64) -> ApiResult<Medley> {
 }
 
 async fn saved_parts(pool: &MySqlPool, id: u64) -> ApiResult<Vec<Part>> {
-    let rows: Vec<(String, u64, u32, u32)> = sqlx::query_as(
-        "SELECT CAST(kind AS CHAR), track_id, from_ms, to_ms FROM medley_parts
+    let rows: Vec<(String, u64, u32, u32, i32)> = sqlx::query_as(
+        "SELECT CAST(kind AS CHAR), track_id, from_ms, to_ms, shift_ms FROM medley_parts
          WHERE medley_id = ? ORDER BY position",
     )
     .bind(id)
@@ -346,7 +357,7 @@ async fn saved_parts(pool: &MySqlPool, id: u64) -> ApiResult<Vec<Part>> {
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(kind, track_id, from_ms, to_ms)| Part {
+        .map(|(kind, track_id, from_ms, to_ms, shift_ms)| Part {
             kind: if kind == "liner" {
                 PartKind::Liner
             } else {
@@ -355,6 +366,7 @@ async fn saved_parts(pool: &MySqlPool, id: u64) -> ApiResult<Vec<Part>> {
             track_id,
             from_ms,
             to_ms,
+            shift_ms,
         })
         .collect())
 }
@@ -383,6 +395,7 @@ async fn views(pool: &MySqlPool, parts: &[Part]) -> ApiResult<Vec<PartView>> {
                 track_id: part.track_id,
                 from_ms: part.from_ms,
                 to_ms: part.to_ms,
+                shift_ms: part.shift_ms,
                 title: title.clone(),
                 artist: artist.clone(),
                 path: path.clone(),
@@ -594,8 +607,9 @@ async fn duplicate_medley(
         .await?
         .last_insert_id();
     sqlx::query(
-        "INSERT INTO medley_parts (medley_id, position, kind, track_id, from_ms, to_ms)
-         SELECT ?, position, kind, track_id, from_ms, to_ms FROM medley_parts WHERE medley_id = ?",
+        "INSERT INTO medley_parts (medley_id, position, kind, track_id, from_ms, to_ms, shift_ms)
+         SELECT ?, position, kind, track_id, from_ms, to_ms, shift_ms
+         FROM medley_parts WHERE medley_id = ?",
     )
     .bind(copy)
     .bind(id)
@@ -738,7 +752,7 @@ async fn render_medley(
         .execute(&mut *tx)
         .await?;
     let mut query = QueryBuilder::new(
-        "INSERT INTO medley_parts (medley_id, position, kind, track_id, from_ms, to_ms) ",
+        "INSERT INTO medley_parts (medley_id, position, kind, track_id, from_ms, to_ms, shift_ms) ",
     );
     query.push_values(parts.iter().enumerate(), |mut row, (position, part)| {
         row.push_bind(id)
@@ -749,7 +763,8 @@ async fn render_medley(
             })
             .push_bind(part.track_id)
             .push_bind(part.from_ms)
-            .push_bind(part.to_ms);
+            .push_bind(part.to_ms)
+            .push_bind(part.shift_ms);
     });
     query.build().execute(&mut *tx).await?;
     tx.commit().await?;
@@ -819,12 +834,13 @@ async fn check_parts(pool: &MySqlPool, parts: &[Part]) -> ApiResult<()> {
             "a medley has at least one hook".to_owned(),
         ));
     }
-    if parts
-        .iter()
-        .any(|part| part.from_ms >= part.to_ms || part.length_ms() > MAX_PART_MS)
-    {
+    if parts.iter().any(|part| {
+        part.from_ms >= part.to_ms
+            || part.length_ms() > MAX_PART_MS
+            || part.shift_ms.unsigned_abs() > MAX_PART_MS
+    }) {
         return Err(ApiError::Invalid(format!(
-            "each part starts before it ends and lasts at most {} s",
+            "each part starts before it ends and lasts at most {} s, a liner moves at most as much",
             MAX_PART_MS / 1_000
         )));
     }

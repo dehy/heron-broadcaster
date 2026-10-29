@@ -37,6 +37,9 @@ struct PartRow {
     path: String,
     from_ms: u32,
     to_ms: u32,
+    shift_ms: i32,
+    /// The file's length, which the extensions under liners stop at.
+    duration_ms: Option<u32>,
     integrated_lufs: Option<f64>,
     true_peak_db: Option<f64>,
 }
@@ -73,29 +76,45 @@ async fn mix_rows(
             .unwrap_or_default()
     };
     let library = roots.library.clone();
+    let parts: Vec<Part> = rows
+        .iter()
+        .map(|row| Part {
+            kind: kind(&row.kind),
+            track_id: 0,
+            from_ms: row.from_ms,
+            to_ms: row.to_ms,
+            shift_ms: row.shift_ms,
+        })
+        .collect();
+    let lengths: Vec<Option<u32>> = rows.iter().map(|row| row.duration_ms).collect();
+    let layout = medley::layout(&recipe, &parts, &lengths);
     tokio::task::spawn_blocking(move || -> Result<Vec<f32>, String> {
         let mut parts = Vec::with_capacity(rows.len());
-        for row in &rows {
+        for (row, placed) in rows.iter().zip(&layout.parts) {
             let file = LibraryPath::from_stored(row.path.clone()).resolve(&library);
-            let samples = decode_span(&file, row.from_ms, row.to_ms)
+            let samples = decode_span(&file, placed.from_ms, placed.to_ms)
                 .map_err(|error| format!("{}: {error}", row.path))?;
             let mut playout = TrackPlayout::unanalyzed(row.to_ms);
             playout.integrated_lufs = row.integrated_lufs;
             playout.true_peak_db = row.true_peak_db;
             parts.push(PartAudio {
-                kind: if row.kind == "liner" {
-                    PartKind::Liner
-                } else {
-                    PartKind::Hook
-                },
+                kind: kind(&row.kind),
                 samples,
                 gain: db_to_gain(playout.gain_db(&settings.loudness)),
             });
         }
-        Ok(medley::mix(&recipe, &parts))
+        Ok(medley::mix(&recipe, &layout, &parts))
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+fn kind(kind: &str) -> PartKind {
+    if kind == "liner" {
+        PartKind::Liner
+    } else {
+        PartKind::Hook
+    }
 }
 
 fn duration_ms(audio: &[f32]) -> u64 {
@@ -110,8 +129,8 @@ pub async fn render(
 ) -> Result<RenderReport, String> {
     let recipe = recipe(pool, medley_id).await?;
     let rows: Vec<PartRow> = sqlx::query_as(
-        "SELECT CAST(p.kind AS CHAR) AS kind, t.path, p.from_ms, p.to_ms,
-                a.integrated_lufs, a.true_peak_db
+        "SELECT CAST(p.kind AS CHAR) AS kind, t.path, p.from_ms, p.to_ms, p.shift_ms,
+                t.duration_ms, a.integrated_lufs, a.true_peak_db
          FROM medley_parts p
          JOIN tracks t ON t.id = p.track_id
          LEFT JOIN track_analysis a ON a.track_id = t.id
@@ -166,15 +185,16 @@ pub async fn preview(
     let recipe = recipe(pool, medley_id).await?;
     let mut rows = Vec::with_capacity(parts.len());
     for part in parts {
-        let track: Option<(String, Option<f64>, Option<f64>)> = sqlx::query_as(
-            "SELECT t.path, a.integrated_lufs, a.true_peak_db FROM tracks t
+        type Row = (String, Option<u32>, Option<f64>, Option<f64>);
+        let track: Option<Row> = sqlx::query_as(
+            "SELECT t.path, t.duration_ms, a.integrated_lufs, a.true_peak_db FROM tracks t
              LEFT JOIN track_analysis a ON a.track_id = t.id WHERE t.id = ?",
         )
         .bind(part.track_id)
         .fetch_optional(pool)
         .await
         .map_err(|error| error.to_string())?;
-        let (path, integrated_lufs, true_peak_db) =
+        let (path, duration_ms, integrated_lufs, true_peak_db) =
             track.ok_or_else(|| format!("track {} no longer exists", part.track_id))?;
         rows.push(PartRow {
             kind: match part.kind {
@@ -185,6 +205,8 @@ pub async fn preview(
             path,
             from_ms: part.from_ms,
             to_ms: part.to_ms,
+            shift_ms: part.shift_ms,
+            duration_ms,
             integrated_lufs,
             true_peak_db,
         });
