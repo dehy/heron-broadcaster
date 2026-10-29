@@ -11,7 +11,7 @@ import { type PlainKey, number, rich, t } from "../i18n";
 import { WINDOW_FIELDS } from "../lib/rotation";
 import { Link } from "../lib/router";
 import { useCategories } from "./Clocks";
-import { FadeCurveSelect, useMedleySettings } from "./Medleys";
+import { DuckPlaceSelect, FadeCurveSelect, useMedleySettings } from "./Medleys";
 import { useAction, useCan } from "../lib/session";
 
 export function Settings() {
@@ -453,16 +453,44 @@ function MedleysCard() {
                     </Field>
                   )}
                   {defaults.liner_mode === "over" && (
-                    <Field label={t("medleys.duckRelease")} hint={t("medleys.duckReleaseHelp")}>
-                      <NumberInput
-                        value={defaults.duck_release_ms / 1000}
-                        min={0}
-                        max={5}
-                        step={0.1}
-                        disabled={disabled}
-                        onChange={(s) => setDefaults({ duck_release_ms: Math.round(s * 1000) })}
-                      />
-                    </Field>
+                    <>
+                      <Field label={t("medleys.duckAttackAt")}>
+                        <DuckPlaceSelect
+                          ramp="attack"
+                          value={defaults.duck_attack_at}
+                          disabled={disabled}
+                          onChange={(duck_attack_at) => setDefaults({ duck_attack_at })}
+                        />
+                      </Field>
+                      <Field label={t("medleys.duckAttack")}>
+                        <NumberInput
+                          value={defaults.duck_attack_ms / 1000}
+                          min={0}
+                          max={5}
+                          step={0.1}
+                          disabled={disabled}
+                          onChange={(s) => setDefaults({ duck_attack_ms: Math.round(s * 1000) })}
+                        />
+                      </Field>
+                      <Field label={t("medleys.duckReleaseAt")}>
+                        <DuckPlaceSelect
+                          ramp="release"
+                          value={defaults.duck_release_at}
+                          disabled={disabled}
+                          onChange={(duck_release_at) => setDefaults({ duck_release_at })}
+                        />
+                      </Field>
+                      <Field label={t("medleys.duckRelease")}>
+                        <NumberInput
+                          value={defaults.duck_release_ms / 1000}
+                          min={0}
+                          max={5}
+                          step={0.1}
+                          disabled={disabled}
+                          onChange={(s) => setDefaults({ duck_release_ms: Math.round(s * 1000) })}
+                        />
+                      </Field>
+                    </>
                   )}
                 </div>
                 <div className="row">

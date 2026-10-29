@@ -11,7 +11,7 @@ import { MedleyTimeline, SHIFT_STEP_MS, junctions } from "../components/MedleyTi
 import { useLabels } from "../components/SelectionActions";
 import { TaskState, useTask } from "../components/Task";
 import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, PageHead } from "../components/ui";
-import { number, rich, t } from "../i18n";
+import { type PlainKey, number, rich, t } from "../i18n";
 import { ago, duration, trackName } from "../lib/format";
 import { displayName, layout, linerSlot, medleyName, renderMonth } from "../lib/medley";
 import { type PlayerSource, useMedleyPlayer } from "../lib/medleyPlayer";
@@ -385,18 +385,48 @@ function RecipeCard({
                 </Field>
               )}
               {recipe.liner_mode === "over" && (
-                <Field label={t("medleys.duckRelease")} hint={t("medleys.duckReleaseHelp")}>
-                  <input
-                    className="input num"
-                    type="number"
-                    min={0}
-                    max={5}
-                    step={0.1}
-                    value={seconds(recipe.duck_release_ms)}
-                    disabled={disabled || !recipe.liners}
-                    onChange={(event) => set({ duck_release_ms: fromSeconds(event.target.value) })}
-                  />
-                </Field>
+                <>
+                  <Field label={t("medleys.duckAttackAt")}>
+                    <DuckPlaceSelect
+                      ramp="attack"
+                      value={recipe.duck_attack_at}
+                      disabled={disabled || !recipe.liners}
+                      onChange={(duck_attack_at) => set({ duck_attack_at })}
+                    />
+                  </Field>
+                  <Field label={t("medleys.duckAttack")}>
+                    <input
+                      className="input num"
+                      type="number"
+                      min={0}
+                      max={5}
+                      step={0.1}
+                      value={seconds(recipe.duck_attack_ms)}
+                      disabled={disabled || !recipe.liners}
+                      onChange={(event) => set({ duck_attack_ms: fromSeconds(event.target.value) })}
+                    />
+                  </Field>
+                  <Field label={t("medleys.duckReleaseAt")}>
+                    <DuckPlaceSelect
+                      ramp="release"
+                      value={recipe.duck_release_at}
+                      disabled={disabled || !recipe.liners}
+                      onChange={(duck_release_at) => set({ duck_release_at })}
+                    />
+                  </Field>
+                  <Field label={t("medleys.duckRelease")}>
+                    <input
+                      className="input num"
+                      type="number"
+                      min={0}
+                      max={5}
+                      step={0.1}
+                      value={seconds(recipe.duck_release_ms)}
+                      disabled={disabled || !recipe.liners}
+                      onChange={(event) => set({ duck_release_ms: fromSeconds(event.target.value) })}
+                    />
+                  </Field>
+                </>
               )}
             </div>
             <div className="row">
@@ -510,6 +540,46 @@ export function FadeCurveSelect({
       <option value="fast_then_slow">{t("medleys.curveFastThenSlow")}</option>
       <option value="slow_then_fast">{t("medleys.curveSlowThenFast")}</option>
       <option value="s_curve">{t("medleys.curveS")}</option>
+    </select>
+  );
+}
+
+/** Where the music goes down (`attack`), or comes back up (`release`), around a liner. */
+export function DuckPlaceSelect({
+  ramp,
+  value,
+  disabled,
+  onChange,
+}: {
+  ramp: "attack" | "release";
+  value: Recipe["duck_attack_at"];
+  disabled: boolean;
+  onChange: (place: Recipe["duck_attack_at"]) => void;
+}) {
+  const options: [Recipe["duck_attack_at"], PlainKey][] =
+    ramp === "attack"
+      ? [
+          ["outside", "medleys.duckBefore"],
+          ["across", "medleys.duckAcross"],
+          ["inside", "medleys.duckDuring"],
+        ]
+      : [
+          ["inside", "medleys.duckDuring"],
+          ["across", "medleys.duckAcross"],
+          ["outside", "medleys.duckAfter"],
+        ];
+  return (
+    <select
+      className="input"
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value as Recipe["duck_attack_at"])}
+    >
+      {options.map(([place, label]) => (
+        <option key={place} value={place}>
+          {t(label)}
+        </option>
+      ))}
     </select>
   );
 }

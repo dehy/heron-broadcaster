@@ -15,8 +15,72 @@ pub const CHANNELS: usize = 2;
 pub const EDGE_FADE_MS: u32 = 20;
 /// The music goes down under a liner (and back up) over this.
 pub const DUCK_RAMP_MS: u32 = 150;
-/// The longest time the music takes to come back up under a liner.
+/// The longest time the music takes to go down, or to come back up, under a
+/// liner.
 pub const MAX_DUCK_RELEASE_MS: u32 = 5_000;
+
+/// Where the music goes down, or comes back up, around a liner over it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema), schema(as = MedleyDuckPlace))]
+#[serde(rename_all = "snake_case")]
+pub enum DuckPlace {
+    /// Before the liner starts, or after it ends.
+    Outside,
+    /// Centred on the liner's start, or its end: a crossfade.
+    #[default]
+    Across,
+    /// After the liner starts, or before it ends.
+    Inside,
+}
+
+/// How the music goes down under the liners over it, and comes back up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ducking {
+    pub attack_ms: u32,
+    pub attack_at: DuckPlace,
+    pub release_ms: u32,
+    pub release_at: DuckPlace,
+}
+
+impl Ducking {
+    /// How much of the going down is before the liner.
+    pub fn before(&self) -> u32 {
+        match self.attack_at {
+            DuckPlace::Outside => self.attack_ms,
+            DuckPlace::Across => self.attack_ms / 2,
+            DuckPlace::Inside => 0,
+        }
+    }
+
+    /// How much of the coming back up is after the liner.
+    pub fn after(&self) -> u32 {
+        match self.release_at {
+            DuckPlace::Outside => self.release_ms,
+            DuckPlace::Across => self.release_ms / 2,
+            DuckPlace::Inside => 0,
+        }
+    }
+
+    /// For liners from `start` to `end` (ms): where the music starts going
+    /// down, is down, starts coming back up, and is back. What is inside
+    /// the liners never crosses: when they are too short, the two share them.
+    pub fn ramps(&self, start: u32, end: u32) -> [f64; 4] {
+        let (start, end) = (f64::from(start), f64::from(end));
+        let down_from = start - f64::from(self.before());
+        let mut down_to = down_from + f64::from(self.attack_ms);
+        let up_to = end + f64::from(self.after());
+        let mut up_from = up_to - f64::from(self.release_ms);
+        let inside_down = (down_to - start).max(0.0);
+        let inside_up = (end - up_from).max(0.0);
+        let room = (end - start).max(0.0);
+        if inside_down + inside_up > room && inside_down + inside_up > 0.0 {
+            let scale = room / (inside_down + inside_up);
+            down_to = down_to.min(start + inside_down * scale);
+            up_from = up_from.max(end - inside_up * scale);
+        }
+        [down_from, down_to.max(down_from), up_from.min(up_to), up_to]
+    }
+}
 /// The mix is scaled down when its peak would go over this.
 pub const PEAK_LIMIT: f32 = 0.98;
 
@@ -100,9 +164,13 @@ pub struct Recipe {
     pub liner_mode: LinerMode,
     /// How much the music goes down under a liner played over it.
     pub duck_db: f64,
-    /// How long before the end of a liner over the music the music starts
-    /// coming back up: it is at its full level as the liner ends.
+    /// How long the music takes to go down under a liner over it, and
+    /// where.
+    pub duck_attack_ms: u32,
+    pub duck_attack_at: DuckPlace,
+    /// How long the music takes to come back up, and where.
     pub duck_release_ms: u32,
+    pub duck_release_at: DuckPlace,
     /// How long the music fades in at the start; 0 for no fade-in.
     pub fade_in_ms: u32,
     pub fade_in_curve: FadeCurve,
@@ -127,7 +195,10 @@ impl Default for Recipe {
             liner_at_end: true,
             liner_mode: LinerMode::Between,
             duck_db: -10.0,
+            duck_attack_ms: 300,
+            duck_attack_at: DuckPlace::Across,
             duck_release_ms: 300,
+            duck_release_at: DuckPlace::Across,
             fade_in_ms: 0,
             fade_in_curve: FadeCurve::Linear,
             fade_out_ms: 0,
@@ -137,6 +208,16 @@ impl Default for Recipe {
 }
 
 impl Recipe {
+    /// How the music goes down under its liners over it.
+    pub fn ducking(&self) -> Ducking {
+        Ducking {
+            attack_ms: self.duck_attack_ms,
+            attack_at: self.duck_attack_at,
+            release_ms: self.duck_release_ms,
+            release_at: self.duck_release_at,
+        }
+    }
+
     /// Why the recipe cannot be built, if it cannot.
     pub fn check(&self) -> Result<(), String> {
         if self.category_ids.is_empty() {
@@ -166,9 +247,9 @@ impl Recipe {
         if !(-40.0..=0.0).contains(&self.duck_db) {
             return Err("ducking is between -40 and 0 dB".to_owned());
         }
-        if self.duck_release_ms > MAX_DUCK_RELEASE_MS {
+        if self.duck_attack_ms > MAX_DUCK_RELEASE_MS || self.duck_release_ms > MAX_DUCK_RELEASE_MS {
             return Err(format!(
-                "the music comes back up over at most {} s",
+                "the music goes down and comes back up over at most {} s",
                 MAX_DUCK_RELEASE_MS / 1_000
             ));
         }
@@ -610,9 +691,41 @@ pub struct Layout {
     /// How much the music goes down under a liner over it.
     #[serde(default)]
     pub duck_db: f64,
-    /// How long before a liner's end the music comes back up.
+    /// How the music went down and came back up; a layout saved before
+    /// these were set went down before the liners over 150 ms, and came
+    /// back up during them.
+    #[serde(default = "old_attack_ms")]
+    pub duck_attack_ms: u32,
+    #[serde(default = "old_attack_at")]
+    pub duck_attack_at: DuckPlace,
     #[serde(default)]
     pub duck_release_ms: u32,
+    #[serde(default = "old_release_at")]
+    pub duck_release_at: DuckPlace,
+}
+
+fn old_attack_ms() -> u32 {
+    DUCK_RAMP_MS
+}
+
+fn old_attack_at() -> DuckPlace {
+    DuckPlace::Outside
+}
+
+fn old_release_at() -> DuckPlace {
+    DuckPlace::Inside
+}
+
+impl Layout {
+    /// How the music went down and came back up.
+    pub fn ducking(&self) -> Ducking {
+        Ducking {
+            attack_ms: self.duck_attack_ms,
+            attack_at: self.duck_attack_at,
+            release_ms: self.duck_release_ms,
+            release_at: self.duck_release_at,
+        }
+    }
 }
 
 /// Lays the parts out on the medley's timeline: consecutive parts overlap
@@ -658,6 +771,10 @@ pub fn layout(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layou
             .map_or(u32::MAX, |length| length.saturating_sub(parts[index].to_ms))
     };
     let count = sequence.len();
+    // What the going down takes before the liners, and the coming back up
+    // after them: the hooks' spans stay clear of both.
+    let ducking = recipe.ducking();
+    let (pre, post) = (ducking.before(), ducking.after());
     for (gap, liners) in gaps.iter().enumerate() {
         if liners.is_empty() || count == 0 {
             continue;
@@ -665,19 +782,18 @@ pub fn layout(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layou
         let voice: u32 = liners.iter().map(|&i| parts[i].length_ms()).sum();
         if gap == 0 {
             let first = sequence[0];
-            // The music is back up as the liner ends: the span starts there.
-            earlier[first] = voice.min(parts[first].from_ms);
+            // The span starts once the music is back up.
+            earlier[first] = (voice + post).min(parts[first].from_ms);
         } else if gap == count {
             let last = sequence[count - 1];
-            later[last] = (voice + DUCK_RAMP_MS).min(room_after(last));
+            later[last] = (voice + pre).min(room_after(last));
         } else {
             let (before, after) = (sequence[gap - 1], sequence[gap]);
-            // The music goes down before the liners, and is back up as they end.
-            let total = voice + crossfade + DUCK_RAMP_MS;
+            let total = voice + crossfade + pre + post;
             let shift = i64::from(parts[liners[0]].shift_ms);
-            // Centred on the liners: the ramp down is before them, none after.
-            let mut on =
-                (i64::from(total + DUCK_RAMP_MS) / 2 + shift).clamp(0, i64::from(total)) as u32;
+            // Centred on the liners, whatever the ducking takes before and after them.
+            let mut on = ((i64::from(total) + i64::from(pre) - i64::from(post)) / 2 + shift)
+                .clamp(0, i64::from(total)) as u32;
             let mut ahead = total - on;
             let (room_on, room_ahead) = (room_after(before), parts[after].from_ms);
             if on > room_on {
@@ -731,7 +847,7 @@ pub fn layout(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layou
         } else {
             let index = sequence[gap - 1];
             placed[index].map_or(0, |hook| {
-                hook.at_ms + (parts[index].to_ms - hook.from_ms) + DUCK_RAMP_MS
+                hook.at_ms + (parts[index].to_ms - hook.from_ms) + pre
             })
         };
         for &index in liners {
@@ -769,14 +885,20 @@ pub fn layout(recipe: &Recipe, parts: &[Part], lengths: &[Option<u32>]) -> Layou
         fade_out_ms: recipe.fade_out_ms,
         fade_out_curve: recipe.fade_out_curve,
         duck_db: recipe.duck_db,
+        duck_attack_ms: recipe.duck_attack_ms,
+        duck_attack_at: recipe.duck_attack_at,
         duck_release_ms: recipe.duck_release_ms,
+        duck_release_at: recipe.duck_release_at,
         parts,
     }
 }
 
 /// When the music is lowered: the liners over it, those in a row (their
 /// ramps would meet) as one, from the first's start to the last's end.
-pub fn duck_windows(layout: &Layout, release_ms: u32) -> Vec<(u32, u32)> {
+pub fn duck_windows(layout: &Layout) -> Vec<(u32, u32)> {
+    let ducking = layout.ducking();
+    // A gap shorter than going down and back up takes: the music stays down.
+    let reach = ducking.attack_ms + ducking.release_ms;
     let mut liners: Vec<(u32, u32)> = layout
         .parts
         .iter()
@@ -787,7 +909,7 @@ pub fn duck_windows(layout: &Layout, release_ms: u32) -> Vec<(u32, u32)> {
     let mut windows: Vec<(u32, u32)> = Vec::new();
     for (start, end) in liners {
         match windows.last_mut() {
-            Some(last) if start < last.1 + DUCK_RAMP_MS + release_ms => last.1 = last.1.max(end),
+            Some(last) if start < last.1 + reach => last.1 = last.1.max(end),
             _ => windows.push((start, end)),
         }
     }
@@ -823,23 +945,18 @@ pub fn mix(recipe: &Recipe, layout: &Layout, audio: &[PartAudio]) -> Vec<f32> {
 
     let mut envelope = vec![1.0f32; total];
     let duck = 10f32.powf(recipe.duck_db as f32 / 20.0);
-    let ramp = ms_to_frames(DUCK_RAMP_MS).max(1);
-    for (start_ms, end_ms) in duck_windows(layout, recipe.duck_release_ms) {
-        let start = ms_to_frames(start_ms);
-        let end = ms_to_frames(end_ms).min(total);
-        // Back up over the release, before the end; never longer than the window.
-        let release = ms_to_frames(recipe.duck_release_ms)
-            .min(end.saturating_sub(start))
-            .max(1);
-        let up = end.saturating_sub(release);
-        let from = start.saturating_sub(ramp);
-        for (frame, level) in envelope.iter_mut().enumerate().take(end).skip(from) {
-            let gain = if frame < start {
-                // Down over `ramp` before the liner.
-                let t = (start - frame) as f32 / ramp as f32;
-                duck + (1.0 - duck) * t
-            } else if frame >= up {
-                let t = (frame - up) as f32 / release as f32;
+    let ducking = layout.ducking();
+    let frames_of = |ms: f64| (ms.max(0.0) * f64::from(SAMPLE_RATE) / 1_000.0) as usize;
+    for (start_ms, end_ms) in duck_windows(layout) {
+        let [down_from, down_to, up_from, up_to] = ducking.ramps(start_ms, end_ms);
+        let (down_from, down_to) = (frames_of(down_from), frames_of(down_to));
+        let (up_from, up_to) = (frames_of(up_from), frames_of(up_to).min(total));
+        for (frame, level) in envelope.iter_mut().enumerate().take(up_to).skip(down_from) {
+            let gain = if frame < down_to {
+                let t = (frame - down_from) as f32 / (down_to - down_from).max(1) as f32;
+                1.0 + (duck - 1.0) * t
+            } else if frame >= up_from {
+                let t = (frame - up_from) as f32 / (up_to - up_from).max(1) as f32;
                 duck + (1.0 - duck) * t
             } else {
                 duck
@@ -901,6 +1018,17 @@ mod tests {
         Recipe {
             category_ids: vec![1],
             ..Recipe::default()
+        }
+    }
+
+    /// Going down before the liners over 150 ms, coming back up during them:
+    /// how medleys were mixed before the placement could be chosen.
+    fn before_and_during() -> Recipe {
+        Recipe {
+            duck_attack_ms: 150,
+            duck_attack_at: DuckPlace::Outside,
+            duck_release_at: DuckPlace::Inside,
+            ..recipe()
         }
     }
 
@@ -1203,7 +1331,7 @@ mod tests {
             crossfade_ms: 200,
             liner_mode: LinerMode::Over,
             duck_db: -20.0,
-            ..recipe()
+            ..before_and_during()
         };
         // An 8 s hook, a 2 s liner, a 6 s hook.
         let parts = [
@@ -1306,7 +1434,7 @@ mod tests {
         let recipe = Recipe {
             crossfade_ms: 200,
             liner_mode: LinerMode::Over,
-            ..recipe()
+            ..before_and_during()
         };
         let parts = [
             part(PartKind::Liner, 0, 2_000),
@@ -1389,6 +1517,97 @@ mod tests {
     }
 
     #[test]
+    fn the_music_goes_down_and_comes_back_up_where_chosen() {
+        // Across the liner's start and end, the default: a crossfade.
+        let recipe = Recipe {
+            crossfade_ms: 200,
+            liner_mode: LinerMode::Over,
+            duck_db: -20.0,
+            ..recipe()
+        };
+        let parts = [
+            part(PartKind::Hook, 10_000, 18_000),
+            part(PartKind::Liner, 0, 2_000),
+            part(PartKind::Hook, 30_000, 36_000),
+        ];
+        let (layout, out) = mixed(&recipe, &parts, &[], 0.5, 0.0);
+        let [_, liner, second] = layout.parts[..] else {
+            panic!("three parts");
+        };
+        // Half of each ramp is outside the liner: the spans stay clear of it.
+        assert_eq!(liner.at_ms, 8_000 + 150);
+        assert_eq!(
+            second.at_ms + (30_000 - second.from_ms),
+            liner.end_ms() + 150
+        );
+        // Halfway down as the liner starts, halfway up as it ends.
+        let halfway = 0.5 * (1.0 + 0.1) / 2.0;
+        for ms in [liner.at_ms, liner.end_ms()] {
+            assert!(
+                (at(&out, ms) - halfway).abs() < 1e-2,
+                "{ms}: {}",
+                at(&out, ms)
+            );
+        }
+        assert!((at(&out, 7_990) - 0.5).abs() < 1e-6);
+        assert!((at(&out, liner.end_ms() + 160) - 0.5).abs() < 1e-6);
+
+        // Outside: before it starts and after it ends.
+        let outside = Ducking {
+            attack_ms: 300,
+            attack_at: DuckPlace::Outside,
+            release_ms: 300,
+            release_at: DuckPlace::Outside,
+        };
+        assert_eq!(
+            outside.ramps(1_000, 2_000),
+            [700.0, 1_000.0, 2_000.0, 2_300.0]
+        );
+        // Inside: during it, and sharing a liner too short for both.
+        let inside = Ducking {
+            attack_at: DuckPlace::Inside,
+            release_at: DuckPlace::Inside,
+            ..outside
+        };
+        assert_eq!(
+            inside.ramps(1_000, 2_000),
+            [1_000.0, 1_300.0, 1_700.0, 2_000.0]
+        );
+        assert_eq!(
+            inside.ramps(1_000, 1_400),
+            [1_000.0, 1_200.0, 1_200.0, 1_400.0]
+        );
+        assert_eq!((inside.before(), inside.after()), (0, 0));
+        let inside_layout = layout_of(
+            &Recipe {
+                duck_attack_at: DuckPlace::Inside,
+                duck_release_at: DuckPlace::Inside,
+                ..recipe
+            },
+            &parts,
+            &[],
+        );
+        assert_eq!(inside_layout.parts[1].at_ms, 8_000);
+    }
+
+    #[test]
+    fn layouts_saved_before_the_placement_keep_theirs() {
+        let saved: Layout = serde_json::from_str(
+            r#"{"parts":[],"length_ms":0,"music_end_ms":0,"duck_release_ms":300}"#,
+        )
+        .expect("an old layout");
+        assert_eq!(
+            saved.ducking(),
+            Ducking {
+                attack_ms: 150,
+                attack_at: DuckPlace::Outside,
+                release_ms: 300,
+                release_at: DuckPlace::Inside,
+            }
+        );
+    }
+
+    #[test]
     fn liners_in_a_row_keep_the_music_down() {
         let recipe = Recipe {
             crossfade_ms: 0,
@@ -1403,7 +1622,7 @@ mod tests {
             part(PartKind::Hook, 0, 10_000),
         ];
         let (layout, out) = mixed(&recipe, &parts, &[], 0.5, 0.0);
-        let windows = duck_windows(&layout, recipe.duck_release_ms);
+        let windows = duck_windows(&layout);
         assert_eq!(windows.len(), 1, "{windows:?}");
         // Where the first liner ends and the second starts: still down.
         let between = layout.parts[1].end_ms();

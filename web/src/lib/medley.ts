@@ -69,6 +69,46 @@ const EDGE_FADE_MS = 20;
 
 export type FadeCurve = "linear" | "fast_then_slow" | "slow_then_fast" | "s_curve";
 
+/** Where the music goes down, or comes back up, around a liner over it (DuckPlace). */
+export type DuckPlace = "outside" | "across" | "inside";
+
+/** How the music goes down under liners over it, and comes back up (Ducking). */
+export interface Ducking {
+  attack_ms: number;
+  attack_at: DuckPlace;
+  release_ms: number;
+  release_at: DuckPlace;
+}
+
+/** How much of the going down is before the liner. */
+export const duckBefore = (ducking: Ducking) =>
+  ducking.attack_at === "outside" ? ducking.attack_ms : ducking.attack_at === "across" ? Math.trunc(ducking.attack_ms / 2) : 0;
+
+/** How much of the coming back up is after the liner. */
+export const duckAfter = (ducking: Ducking) =>
+  ducking.release_at === "outside" ? ducking.release_ms : ducking.release_at === "across" ? Math.trunc(ducking.release_ms / 2) : 0;
+
+/**
+ * For liners from `start` to `stop`: where the music starts going down, is
+ * down, starts coming back up and is back (Ducking::ramps). What is inside
+ * the liners never crosses: when they are too short, the two share them.
+ */
+export function duckRamps(ducking: Ducking, start: number, stop: number): [number, number, number, number] {
+  const downFrom = start - duckBefore(ducking);
+  let downTo = downFrom + ducking.attack_ms;
+  const upTo = stop + duckAfter(ducking);
+  let upFrom = upTo - ducking.release_ms;
+  const insideDown = Math.max(0, downTo - start);
+  const insideUp = Math.max(0, stop - upFrom);
+  const room = Math.max(0, stop - start);
+  if (insideDown + insideUp > room && insideDown + insideUp > 0) {
+    const scale = room / (insideDown + insideUp);
+    downTo = Math.min(downTo, start + insideDown * scale);
+    upFrom = Math.max(upFrom, stop - insideUp * scale);
+  }
+  return [downFrom, Math.max(downTo, downFrom), Math.min(upFrom, upTo), upTo];
+}
+
 /** A fade-out's gain `t` of the way through it (FadeCurve::gain): 1 down to 0. */
 export function fadeGain(curve: FadeCurve, t: number): number {
   const x = Math.min(1, Math.max(0, t));
@@ -120,8 +160,20 @@ export interface Layout {
   fade_out_ms?: number;
   fade_out_curve?: FadeCurve;
   duck_db?: number;
+  /** A layout saved before these were set: down over 0.15 s before the liners, back up during them. */
+  duck_attack_ms?: number;
+  duck_attack_at?: DuckPlace;
   duck_release_ms?: number;
+  duck_release_at?: DuckPlace;
 }
+
+/** How the music went down and came back up in `medley`. */
+export const layoutDucking = (medley: Layout): Ducking => ({
+  attack_ms: medley.duck_attack_ms ?? DUCK_RAMP_MS,
+  attack_at: medley.duck_attack_at ?? "outside",
+  release_ms: medley.duck_release_ms ?? 0,
+  release_at: medley.duck_release_at ?? "inside",
+});
 
 interface MixRecipe {
   crossfade_ms: number;
@@ -131,8 +183,19 @@ interface MixRecipe {
   fade_out_ms?: number;
   fade_out_curve?: FadeCurve;
   duck_db?: number;
+  duck_attack_ms?: number;
+  duck_attack_at?: DuckPlace;
   duck_release_ms?: number;
+  duck_release_at?: DuckPlace;
 }
+
+/** How a recipe makes the music go down: 0.3 s across each end of the liners by default. */
+const recipeDucking = (recipe: MixRecipe): Ducking => ({
+  attack_ms: recipe.duck_attack_ms ?? 300,
+  attack_at: recipe.duck_attack_at ?? "across",
+  release_ms: recipe.duck_release_ms ?? 300,
+  release_at: recipe.duck_release_at ?? "across",
+});
 
 const end = (placed: Placed) => placed.at_ms + placed.to_ms - placed.from_ms;
 
@@ -165,6 +228,11 @@ export function layout(parts: readonly LayoutPart[], recipe: MixRecipe): Layout 
     return part ? part.to_ms - part.from_ms : 0;
   };
   const count = sequence.length;
+  // What the going down takes before the liners, and the coming back up
+  // after them: the hooks' spans stay clear of both.
+  const ducking = recipeDucking(recipe);
+  const pre = duckBefore(ducking);
+  const post = duckAfter(ducking);
   gaps.forEach((liners, gap) => {
     const first = liners[0];
     if (first === undefined || count === 0) {
@@ -173,19 +241,18 @@ export function layout(parts: readonly LayoutPart[], recipe: MixRecipe): Layout 
     const voice = liners.reduce((sum, index) => sum + length(index), 0);
     if (gap === 0) {
       const hook = sequence[0] ?? 0;
-      // The music is back up as the liner ends: the span starts there.
-      earlier[hook] = Math.min(voice, parts[hook]?.from_ms ?? 0);
+      // The span starts once the music is back up.
+      earlier[hook] = Math.min(voice + post, parts[hook]?.from_ms ?? 0);
     } else if (gap === count) {
       const hook = sequence[count - 1] ?? 0;
-      later[hook] = Math.min(voice + DUCK_RAMP_MS, roomAfter(hook));
+      later[hook] = Math.min(voice + pre, roomAfter(hook));
     } else {
       const before = sequence[gap - 1] ?? 0;
       const after = sequence[gap] ?? 0;
-      // The music goes down before the liners, and is back up as they end.
-      const total = voice + crossfade + DUCK_RAMP_MS;
+      const total = voice + crossfade + pre + post;
       const shift = parts[first]?.shift_ms ?? 0;
-      // Centred on the liners: the ramp down is before them, none after.
-      let on = Math.min(Math.max(Math.trunc((total + DUCK_RAMP_MS) / 2) + shift, 0), total);
+      // Centred on the liners, whatever the ducking takes before and after them.
+      let on = Math.min(Math.max(Math.trunc((total + pre - post) / 2) + shift, 0), total);
       let ahead = total - on;
       const roomOn = roomAfter(before);
       const roomAhead = parts[after]?.from_ms ?? 0;
@@ -236,7 +303,7 @@ export function layout(parts: readonly LayoutPart[], recipe: MixRecipe): Layout 
     if (gap > 0) {
       const index = sequence[gap - 1] ?? 0;
       const hook = placed[index];
-      at = hook ? hook.at_ms + ((parts[index]?.to_ms ?? 0) - hook.from_ms) + DUCK_RAMP_MS : 0;
+      at = hook ? hook.at_ms + ((parts[index]?.to_ms ?? 0) - hook.from_ms) + pre : 0;
     }
     for (const index of liners) {
       const part = parts[index];
@@ -268,13 +335,18 @@ export function layout(parts: readonly LayoutPart[], recipe: MixRecipe): Layout 
     fade_out_ms: recipe.fade_out_ms ?? 0,
     fade_out_curve: recipe.fade_out_curve ?? "linear",
     duck_db: recipe.duck_db ?? -10,
-    duck_release_ms: recipe.duck_release_ms ?? 300,
+    duck_attack_ms: ducking.attack_ms,
+    duck_attack_at: ducking.attack_at,
+    duck_release_ms: ducking.release_ms,
+    duck_release_at: ducking.release_at,
   };
 }
 
 /** When the music is lowered (heron_core::medley::duck_windows): liners in a row as one. */
 export function duckWindows(medley: Layout): [number, number][] {
-  const release = medley.duck_release_ms ?? 0;
+  // A gap shorter than going down and back up takes: the music stays down.
+  const ducking = layoutDucking(medley);
+  const reach = ducking.attack_ms + ducking.release_ms;
   const liners = medley.parts
     .filter((part) => part.over)
     .map((part): [number, number] => [part.at_ms, end(part)])
@@ -282,7 +354,7 @@ export function duckWindows(medley: Layout): [number, number][] {
   const windows: [number, number][] = [];
   for (const [start, stop] of liners) {
     const last = windows[windows.length - 1];
-    if (last && start < last[1] + DUCK_RAMP_MS + release) {
+    if (last && start < last[1] + reach) {
       last[1] = Math.max(last[1], stop);
     } else {
       windows.push([start, stop]);
@@ -316,17 +388,16 @@ export function levelAt(medley: Layout, index: number, at_ms: number): number {
   }
   const duck = 10 ** ((medley.duck_db ?? -10) / 20);
   let gain = 1;
+  const ducking = layoutDucking(medley);
   for (const [start, stop] of duckWindows(medley)) {
-    // Back up over the release, before the end; never longer than the window.
-    const release = Math.max(1, Math.min(medley.duck_release_ms ?? 0, stop - start));
-    const up = stop - release;
+    const [downFrom, downTo, upFrom, upTo] = duckRamps(ducking, start, stop);
     let here = 1;
-    if (at_ms < start && start - at_ms < DUCK_RAMP_MS) {
-      here = duck + (1 - duck) * ((start - at_ms) / DUCK_RAMP_MS);
-    } else if (at_ms >= start && at_ms < up) {
+    if (at_ms >= downFrom && at_ms < downTo) {
+      here = 1 + (duck - 1) * ((at_ms - downFrom) / Math.max(1, downTo - downFrom));
+    } else if (at_ms >= downTo && at_ms < upFrom) {
       here = duck;
-    } else if (at_ms >= up && at_ms < stop) {
-      here = duck + (1 - duck) * ((at_ms - up) / release);
+    } else if (at_ms >= upFrom && at_ms < upTo) {
+      here = duck + (1 - duck) * ((at_ms - upFrom) / Math.max(1, upTo - upFrom));
     }
     gain = Math.min(gain, here);
   }
