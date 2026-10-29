@@ -816,14 +816,14 @@ async fn render_medley(
 }
 
 /// The name a medley gets for these parts: after its hooks' artists or
-/// titles (as set), the month of now in the station's time zone, with
+/// titles (as set), the day of now in the station's time zone, with
 /// ` (2)`, ` (3)`… when another medley has it.
 async fn name_for(pool: &MySqlPool, id: u64, parts: &[Part]) -> ApiResult<String> {
     let settings = load_settings(pool).await?;
     let station: StationSettings = settings::load(pool, StationSettings::SETTINGS_NAME).await?;
-    let month = jiff::Timestamp::now()
+    let date = jiff::Timestamp::now()
         .to_zoned(station.time_zone())
-        .strftime("%Y-%m")
+        .strftime("%Y-%m-%d")
         .to_string();
     let hooks: Vec<Part> = parts
         .iter()
@@ -838,7 +838,7 @@ async fn name_for(pool: &MySqlPool, id: u64, parts: &[Part]) -> ApiResult<String
             NameFrom::Titles => view.title.as_deref(),
         })
         .collect();
-    let base = medley::name(&month, &names);
+    let base = medley::name(&date, &names);
     let mut name = base.clone();
     for number in 2.. {
         let taken: i64 =

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { displayName, duckRamps, fadeGain, layout, levelAt, linerSlot, medleyName, moveTo, plannedLength, renderMonth } from "./medley";
+import { displayName, duckRamps, fadeGain, layout, levelAt, linerSlot, medleyName, moveTo, plannedLength, renderDay } from "./medley";
 
 /** Down over 0.15 s before the liners, back up during them: as medleys were mixed before the placement could be chosen. */
 const beforeAndDuring = { duck_attack_ms: 150, duck_attack_at: "outside", duck_release_at: "inside" } as const;
@@ -54,30 +54,30 @@ describe("levelAt", () => {
 
 describe("medleyName", () => {
   it("lists each artist once, in order", () => {
-    expect(medleyName("2026-10", ["Helena", "Panic! At The Disco", "Mabel"])).toBe(
-      "Medley 2026-10 (Helena - Panic! At The Disco - Mabel)",
+    expect(medleyName("2026-10-29", ["Helena", "Panic! At The Disco", "Mabel"])).toBe(
+      "Medley 2026-10-29 (Helena - Panic! At The Disco - Mabel)",
     );
-    expect(medleyName("2026-10", ["Mabel", null, " ", "mabel", "Helena"])).toBe("Medley 2026-10 (Mabel - Helena)");
-    expect(medleyName("2026-11", [])).toBe("Medley 2026-11");
+    expect(medleyName("2026-10-29", ["Mabel", null, " ", "mabel", "Helena"])).toBe("Medley 2026-10-29 (Mabel - Helena)");
+    expect(medleyName("2026-11-02", [])).toBe("Medley 2026-11-02");
   });
 
   it("cuts a long list after the last name that fits", () => {
     const names = Array.from({ length: 30 }, (_, i) => `Artist number ${String(i + 1).padStart(2, "0")}`);
-    const name = medleyName("2026-10", names);
+    const name = medleyName("2026-10-29", names);
     expect([...name].length).toBeLessThanOrEqual(249);
     expect(name.endsWith(" - …)")).toBe(true);
-    const cut = medleyName("2026-10", ["x".repeat(400)]);
+    const cut = medleyName("2026-10-29", ["x".repeat(400)]);
     expect([...cut].length).toBe(249);
     expect(cut.endsWith("x…)")).toBe(true);
   });
 });
 
-describe("renderMonth", () => {
-  it("is the year and month in the station's zone", () => {
-    // 23:30 UTC on 31 October is already November in Paris.
+describe("renderDay", () => {
+  it("is the day in the station's zone", () => {
+    // 23:30 UTC on 31 October is already 1 November in Paris.
     const date = new Date(Date.UTC(2026, 9, 31, 23, 30));
-    expect(renderMonth(date, "UTC")).toBe("2026-10");
-    expect(renderMonth(date, "Europe/Paris")).toBe("2026-11");
+    expect(renderDay(date, "UTC")).toBe("2026-10-31");
+    expect(renderDay(date, "Europe/Paris")).toBe("2026-11-01");
   });
 });
 

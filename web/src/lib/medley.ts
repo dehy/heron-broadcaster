@@ -10,11 +10,11 @@ const NAME_CHARS = 249;
 
 /**
  * The name a medley gets at its render, as the API gives it: `Medley
- * 2026-10 (A - B - C)`, each artist (or title) once, the list cut with `…`
+ * 2026-10-29 (A - B - C)`, each artist (or title) once, the list cut with `…`
  * when too long. The API may add ` (2)` when another medley has it.
  */
-export function medleyName(month: string, names: readonly (string | null | undefined)[]): string {
-  const base = `Medley ${month}`;
+export function medleyName(date: string, names: readonly (string | null | undefined)[]): string {
+  const base = `Medley ${date}`;
   const seen = new Set<string>();
   const unique: string[] = [];
   for (const raw of names) {
@@ -39,11 +39,12 @@ export function medleyName(month: string, names: readonly (string | null | undef
   return `${base} (${[...(unique[0] ?? "")].slice(0, room).join("")}…)`;
 }
 
-/** Year and month of a date in the station's time zone: `2026-10`. */
-export function renderMonth(date: Date, zone: string | undefined = timeZone()): string {
-  const parts = new Intl.DateTimeFormat("en", { year: "numeric", month: "2-digit", timeZone: zone }).formatToParts(date);
+/** The day of a date in the station's time zone: `2026-10-29`. */
+export function renderDay(date: Date, zone: string | undefined = timeZone()): string {
+  const format = { year: "numeric", month: "2-digit", day: "2-digit", timeZone: zone } as const;
+  const parts = new Intl.DateTimeFormat("en", format).formatToParts(date);
   const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  return `${part("year")}-${part("month")}`;
+  return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
 /** A medley's name; a stand-in until its first render names it. */

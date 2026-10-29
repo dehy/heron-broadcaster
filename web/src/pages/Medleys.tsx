@@ -13,7 +13,7 @@ import { TaskState, useTask } from "../components/Task";
 import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, PageHead } from "../components/ui";
 import { type PlainKey, number, rich, t } from "../i18n";
 import { ago, duration, trackName } from "../lib/format";
-import { displayName, layout, linerSlot, medleyName, renderMonth } from "../lib/medley";
+import { displayName, layout, linerSlot, medleyName, renderDay } from "../lib/medley";
 import { type PlayerSource, useMedleyPlayer } from "../lib/medleyPlayer";
 import { Link, navigate } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
@@ -808,7 +808,7 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
   const nextName =
     plan || medley.name == null
       ? medleyName(
-          renderMonth(new Date()),
+          renderDay(new Date()),
           parts
             .filter((part) => part.kind === "hook")
             .map((part) => (settings.name_from === "titles" ? part.title : part.artist)),
