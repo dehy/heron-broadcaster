@@ -60,7 +60,9 @@ A song qualifies when it is enabled, its file is there, it is analyzed and audib
 
 The page has one player for the medley: the rendered medley, the preview of the version being edited, and each part on its own all play through it, so starting one stops the others. It has play / pause, stop, and the position over the length. While it plays, a vertical bar follows the position on the timeline (inside a part's block when a single part plays).
 
-Clicking a point of the timeline plays from there: the rendered medley, or, while a version is edited, its preview, mixed again first when the version changed since.
+Clicking a point of the timeline plays from there: the rendered medley, or, while a version is edited, its preview, mixed again first when the version, or the recipe saved, changed since.
+
+While a render runs, the page shows neither the timeline nor anything to play: the file and its layout are about to change. Each render is played from a new address, so the browser never plays a file it kept from a previous render.
 
 Outside editing, the timeline draws the medley **as it was rendered**: the librarian saves the layout it mixed (where each part starts, the span of its file played, the length and the fade-out) with the medley, so the bar follows what is heard even after the recipe changed. A medley rendered before that layout was saved, or whose file does not last as long as its layout (by more than a quarter of a second), shows today's layout with a warning: render it again for the two to match.
 
