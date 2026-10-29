@@ -105,12 +105,12 @@ pub fn preview_path(medley_id: u64) -> String {
 /// characters, and a medley named like another gets ` (2)`, ` (3)`… too.
 pub const NAME_CHARS: usize = 249;
 
-/// A medley's name: `Medley 2026-10 (A - B - C)`, `month` the year and
-/// month of its render, `names` its hooks' artists (or titles) in order.
+/// A medley's name: `Medley 2026-10-29 (A - B - C)`, `date` the day of its
+/// render, `names` its hooks' artists (or titles) in order.
 /// Each comes once (ignoring case), empty ones are left out, and the list
 /// ends with `…` after the last name that fits in [`NAME_CHARS`].
-pub fn name(month: &str, names: &[&str]) -> String {
-    let base = format!("Medley {month}");
+pub fn name(date: &str, names: &[&str]) -> String {
+    let base = format!("Medley {date}");
     let mut seen = HashSet::new();
     let names: Vec<&str> = names
         .iter()
@@ -1206,21 +1206,21 @@ mod tests {
     #[test]
     fn names_list_the_hooks_once_and_fit_a_title() {
         assert_eq!(
-            name("2026-10", &["Helena", "Panic! At The Disco", "Mabel"]),
-            "Medley 2026-10 (Helena - Panic! At The Disco - Mabel)"
+            name("2026-10-29", &["Helena", "Panic! At The Disco", "Mabel"]),
+            "Medley 2026-10-29 (Helena - Panic! At The Disco - Mabel)"
         );
         assert_eq!(
-            name("2026-10", &["Mabel", " ", "mabel", "Helena"]),
-            "Medley 2026-10 (Mabel - Helena)"
+            name("2026-10-29", &["Mabel", " ", "mabel", "Helena"]),
+            "Medley 2026-10-29 (Mabel - Helena)"
         );
-        assert_eq!(name("2026-11", &[]), "Medley 2026-11");
+        assert_eq!(name("2026-11-02", &[]), "Medley 2026-11-02");
         let many: Vec<String> = (1..=30).map(|i| format!("Artist number {i:02}")).collect();
         let many: Vec<&str> = many.iter().map(String::as_str).collect();
-        let long = name("2026-10", &many);
+        let long = name("2026-10-29", &many);
         assert!(long.chars().count() <= NAME_CHARS, "{long}");
         assert!(long.ends_with(" - …)"), "{long}");
         let huge = "x".repeat(400);
-        let cut = name("2026-10", &[&huge]);
+        let cut = name("2026-10-29", &[&huge]);
         assert_eq!(cut.chars().count(), NAME_CHARS);
         assert!(cut.ends_with("x…)"));
     }

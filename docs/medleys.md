@@ -90,14 +90,14 @@ The parts keep the spans chosen to be heard; the extensions are worked out at ea
 
 ## Names
 
-A medley is named when it is rendered: `Medley`, the year and month of the render (in the station's time zone), and the artists (or titles, as [set](#settings)) of its hooks in order, in their own case. For three hooks by Helena, Panic! At The Disco and Mabel:
+A medley is named when it is rendered: `Medley`, the date of the render (year, month and day, in the station's time zone), and the artists (or titles, as [set](#settings)) of its hooks in order, in their own case. For three hooks by Helena, Panic! At The Disco and Mabel:
 
-- by artist: `Medley 2026-10 (Helena - Panic! At The Disco - Mabel)`;
-- by title: `Medley 2026-10 (Mauvais garçon - High Hopes - Don't Call Me Up)`.
+- by artist: `Medley 2026-10-29 (Helena - Panic! At The Disco - Mabel)`;
+- by title: `Medley 2026-10-29 (Mauvais garçon - High Hopes - Don't Call Me Up)`.
 
 An artist (or title) that comes twice is named once; a hook without one is left out of the name. A name longer than a track title allows (255 characters) ends with `…` after the last name that fits. When another medley has the name already, ` (2)`, ` (3)`… is added.
 
-Until its first render a medley has no name: the page shows the name it would get. Rendering again after an edit names it again, and its track's title follows.
+Until its first render a medley has no name: the page shows the name it would get. Rendering again after an edit names it again, and its track's title follows; a medley named before the day was in its name gets it at its next render.
 
 ## On air
 
