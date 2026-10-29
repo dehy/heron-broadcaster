@@ -80,6 +80,14 @@ In development, `?lang=pseudo` on any page shows English accented, a third longe
 
 The layout works from phone width up: below 760 px the navigation moves to a menu, tables drop their secondary columns and cards stack.
 
+### Breadcrumb
+
+Above the title of every page that belongs to a section of the navigation, a breadcrumb says where it sits: the section (plain text, it has no page of its own), then the page, for instance `Library › Tracks` or `Station › Settings`. Pages outside a section (On air, Queue, History, Statistics, Account) have none.
+
+A page inside a page adds its own name, last and not a link: `Library › Tracks › Space Cowboy` on a track, `Programming › Clocks › Morning drive` (or `New clock`) on a clock, `Library › Medleys › …` on a medley. The link back to the list brings it back as it was left: the same search, filters, sort and page (they are in its address, remembered while the app stays open).
+
+The breadcrumb is built from the navigation's own list of pages, so a page added there gets one. It is a `nav` named *Breadcrumb*, its last item marked as the current page. Below 760 px, only the level above the page shows, as a back link (`‹ Tracks`), on pages inside a page.
+
 ## Development
 
 ```sh
