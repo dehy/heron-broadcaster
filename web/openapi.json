@@ -10345,6 +10345,12 @@
             "format": "double",
             "description": "How much the music goes down under a liner over it."
           },
+          "duck_release_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How long before a liner's end the music comes back up.",
+            "minimum": 0
+          },
           "fade_in_curve": {
             "$ref": "#/components/schemas/MedleyFadeCurve"
           },
@@ -10997,6 +11003,13 @@
             "format": "double",
             "default": -10.0
           },
+          "duck_release_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The music back up over the last 0.3 s of a liner by default.",
+            "default": 300,
+            "minimum": 0
+          },
           "fade_in_curve": {
             "$ref": "#/components/schemas/MedleyFadeCurve",
             "default": "linear"
@@ -11129,6 +11142,7 @@
             "default": {
               "crossfade_ms": 500,
               "duck_db": -10.0,
+              "duck_release_ms": 300,
               "fade_in_curve": "linear",
               "fade_in_ms": 0,
               "fade_out_curve": "linear",
@@ -12773,6 +12787,13 @@
             "format": "double",
             "description": "How much the music goes down under a liner played over it.",
             "default": -10.0
+          },
+          "duck_release_ms": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How long before the end of a liner over the music the music starts\ncoming back up: it is at its full level as the liner ends.",
+            "default": 300,
+            "minimum": 0
           },
           "fade_in_curve": {
             "$ref": "#/components/schemas/MedleyFadeCurve",

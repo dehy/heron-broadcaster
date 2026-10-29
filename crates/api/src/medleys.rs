@@ -105,6 +105,8 @@ pub struct MedleyDefaults {
     pub liner_at_end: bool,
     pub liner_mode: LinerMode,
     pub duck_db: f64,
+    /// The music back up over the last 0.3 s of a liner by default.
+    pub duck_release_ms: u32,
     /// No fade-in by default.
     pub fade_in_ms: u32,
     pub fade_in_curve: FadeCurve,
@@ -126,6 +128,7 @@ impl Default for MedleyDefaults {
             liner_at_end: recipe.liner_at_end,
             liner_mode: recipe.liner_mode,
             duck_db: recipe.duck_db,
+            duck_release_ms: recipe.duck_release_ms,
             fade_in_ms: recipe.fade_in_ms,
             fade_in_curve: recipe.fade_in_curve,
             fade_out_ms: recipe.fade_out_ms,
@@ -146,6 +149,7 @@ impl MedleyDefaults {
             liner_at_end: self.liner_at_end,
             liner_mode: self.liner_mode,
             duck_db: self.duck_db,
+            duck_release_ms: self.duck_release_ms,
             fade_in_ms: self.fade_in_ms,
             fade_in_curve: self.fade_in_curve,
             fade_out_ms: self.fade_out_ms,

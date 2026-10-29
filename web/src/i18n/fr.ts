@@ -642,6 +642,8 @@ const fr = {
   "medleys.linerMode": "Placement",
   "medleys.linerBetween": "Entre les hooks",
   "medleys.linerOver": "Par-dessus la musique (baissée)",
+  "medleys.duckRelease": "Remontée avant la fin du liner (s)",
+  "medleys.duckReleaseHelp": "La musique remonte pendant ce temps, et revient à son niveau plein quand le liner se termine.",
   "medleys.duck": "Musique sous un liner (dB)",
   "medleys.linerAtStart": "Un liner au début",
   "medleys.linerAtEnd": "Un liner à la fin",

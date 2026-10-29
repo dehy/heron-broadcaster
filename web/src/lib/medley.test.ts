@@ -42,6 +42,9 @@ describe("levelAt", () => {
     );
     expect(levelAt(over, 0, 8_700)).toBeCloseTo(0.1, 3);
     expect(levelAt(over, 0, 7_000)).toBe(1);
+    // Back up over the liner's last 0.3 s: halfway 0.15 s before its end.
+    expect(levelAt(over, 2, 10_000)).toBeCloseTo(0.1 + 0.9 * 0.5, 3);
+    expect(levelAt(over, 2, 10_160)).toBe(1);
     expect(fadeGain("s_curve", 0.5)).toBeCloseTo(0.5, 6);
   });
 });
@@ -111,18 +114,18 @@ describe("layout", () => {
   it("puts liners over the music between whole hooks, half each", () => {
     const { parts: [first, liner, second] = [], length_ms } = layout(hooks, over);
     expect([first?.from_ms, first?.to_ms]).toEqual([10_000, 19_250]);
-    expect([second?.from_ms, second?.to_ms, second?.at_ms]).toEqual([28_750, 36_000, 9_050]);
+    expect([second?.from_ms, second?.to_ms, second?.at_ms]).toEqual([28_900, 36_000, 9_050]);
     expect(liner?.at_ms).toBe(8_150);
-    expect(length_ms).toBe(9_050 + 7_250);
+    expect(length_ms).toBe(9_050 + 7_100);
   });
 
   it("shares the gap as the liner says, within the files", () => {
     const shifted = hooks.map((part, i) => (i === 1 ? { ...part, shift_ms: 500 } : part));
     const moved = layout(shifted, over).parts;
-    expect([moved[0]?.to_ms, moved[2]?.from_ms, moved[1]?.at_ms]).toEqual([19_750, 29_250, 8_150]);
+    expect([moved[0]?.to_ms, moved[2]?.from_ms, moved[1]?.at_ms]).toEqual([19_750, 29_400, 8_150]);
     const short = hooks.map((part, i) => (i === 0 ? { ...part, duration_ms: 18_500 } : part));
     const cut = layout(short, over).parts;
-    expect([cut[0]?.to_ms, cut[2]?.from_ms]).toEqual([18_500, 28_000]);
+    expect([cut[0]?.to_ms, cut[2]?.from_ms]).toEqual([18_500, 28_150]);
   });
 
   it("moves parts: overlaps more or less, liners over the music move over it", () => {
@@ -166,8 +169,8 @@ describe("layout", () => {
       ],
       over,
     );
-    expect([hook?.at_ms, hook?.from_ms, hook?.to_ms]).toEqual([0, 2_850, 10_150]);
+    expect([hook?.at_ms, hook?.from_ms, hook?.to_ms]).toEqual([0, 3_000, 10_150]);
     expect(opening?.at_ms).toBe(0);
-    expect(closing?.at_ms).toBe(9_000 - 2_850 + 150);
+    expect(closing?.at_ms).toBe(9_000 - 3_000 + 150);
   });
 });
