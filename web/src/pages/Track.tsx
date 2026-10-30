@@ -46,6 +46,7 @@ import {
 import { number, rich, t } from "../i18n";
 import { ago, bytes, dateTime, db, duration, parseDuration, trackName } from "../lib/format";
 import { endingLabel } from "../lib/labels";
+import { withNextStart } from "../lib/nextStart";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 import { DeleteQuestion, bitrate } from "./Library";
@@ -296,18 +297,10 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
       color: "var(--accent)",
       end: true,
       row: 1,
-      // Not draggable when the track never crossfades.
-      ...(canEdit && crossfades && {
-        // Dragging it sets a fixed crossfade for this track.
-        onDrag: (ms: number) =>
-          setDraft((d) => ({
-            ...d,
-            crossfade: {
-              ...d.crossfade,
-              mode: "fixed",
-              fixed_ms: Math.max(0, Math.round((cueOut - Math.min(ms, cueOut)) / 100) * 100),
-            },
-          })),
+      // Dragging it sets a fixed crossfade for this track; a short track
+      // always follows back to back.
+      ...(canEdit && !shortTrack && {
+        onDrag: (ms: number) => setDraft((d) => withNextStart(d, ms, cueOut)),
       }),
     });
   }
@@ -645,6 +638,8 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
           dirty={dirty}
           hasOverrides={hasOverrides}
           shortTrack={shortTrack}
+          cueOut={cueOut}
+          mixPoint={mixPoint}
           intro={intro}
           setIntro={setIntro}
           hook={hook}
@@ -872,6 +867,8 @@ function OverridesCard({
   dirty,
   hasOverrides,
   shortTrack,
+  cueOut,
+  mixPoint,
   intro,
   setIntro,
   hook,
@@ -900,6 +897,10 @@ function OverridesCard({
   dirty: boolean;
   hasOverrides: boolean;
   shortTrack: boolean;
+  /** The cue-out, with the draft applied. */
+  cueOut: number;
+  /** Where the next track starts, with the draft applied; null: back to back. */
+  mixPoint: number | null;
   onSave: () => void;
   onRevert: () => void;
   onClear: () => void;
@@ -956,6 +957,33 @@ function OverridesCard({
               placeholder={analysis?.cue_out_ms ?? track.duration_ms ?? 0}
               disabled={disabled}
               onChange={(ms) => setDraft((d) => ({ ...d, cue_out_ms: ms }))}
+            />
+          </Field>
+          <Field
+            label={t("transition.nextStarts")}
+            hint={
+              shortTrack
+                ? t("track.nextStartsShort")
+                : mixPoint === null
+                  ? t("track.nextStartsNow", { value: t("track.backToBackAt", { at: duration(cueOut, true) }) })
+                  : t("track.nextStartsNow", { value: duration(mixPoint, true) })
+            }
+          >
+            <CueInput
+              value={
+                draft.crossfade?.mode === "fixed" && draft.crossfade.fixed_ms != null && draft.crossfade.crossfade !== false
+                  ? Math.max(0, cueOut - draft.crossfade.fixed_ms)
+                  : null
+              }
+              placeholder={mixPoint ?? cueOut}
+              disabled={disabled || shortTrack}
+              onChange={(ms) =>
+                setDraft((d) =>
+                  ms === null
+                    ? { ...d, crossfade: { ...d.crossfade, mode: null, fixed_ms: null } }
+                    : withNextStart(d, ms, cueOut),
+                )
+              }
             />
           </Field>
           <Field label={t("track.gapKiller")} hint={t("track.gapKillerHelp")}>
