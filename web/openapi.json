@@ -19868,6 +19868,17 @@
           "to_track_id"
         ],
         "properties": {
+          "from_overrides": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TrackOverrides",
+                "description": "Overrides of the outgoing track to try; its own when missing."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "from_track_id": {
             "type": "integer",
             "format": "int64",
@@ -19878,6 +19889,17 @@
               {
                 "$ref": "#/components/schemas/PlayoutSettings",
                 "description": "Settings to try; the stored ones when missing."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to_overrides": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TrackOverrides",
+                "description": "Overrides of the incoming track to try; its own when missing."
               },
               {
                 "type": "null"

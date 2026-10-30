@@ -7009,9 +7009,11 @@ export interface components {
             overlap_ms: number;
         };
         TransitionRequest: {
+            from_overrides?: components["schemas"]["TrackOverrides"] | null;
             /** Format: int64 */
             from_track_id: number;
             settings?: components["schemas"]["PlayoutSettings"] | null;
+            to_overrides?: components["schemas"]["TrackOverrides"] | null;
             /** Format: int64 */
             to_track_id: number;
         };

@@ -795,7 +795,7 @@ async fn get_track(
         .into_keys()
         .collect();
     let markers = crate::import::markers(&state.pool, id).await?;
-    let playout = station.queue.playout(id).await?;
+    let playout = station.queue.playout(id, None).await?;
     let settings: PlayoutSettings =
         settings::load_for(&state.pool, station.id(), PlayoutSettings::SETTINGS_NAME).await?;
     Ok(Json(TrackDetail {
@@ -1138,6 +1138,12 @@ pub struct TransitionRequest {
     pub to_track_id: u64,
     /// Settings to try; the stored ones when missing.
     pub settings: Option<PlayoutSettings>,
+    /// Overrides of the outgoing track to try; its own when missing.
+    #[serde(default)]
+    pub from_overrides: Option<TrackOverrides>,
+    /// Overrides of the incoming track to try; its own when missing.
+    #[serde(default)]
+    pub to_overrides: Option<TrackOverrides>,
 }
 
 /// A gain ramp, in ms on its track's own timeline.
@@ -1179,8 +1185,14 @@ async fn preview_transition(
             settings::load_for(&state.pool, station.id(), PlayoutSettings::SETTINGS_NAME).await?
         }
     };
-    let outgoing = station.queue.playout(request.from_track_id).await?;
-    let incoming = station.queue.playout(request.to_track_id).await?;
+    let outgoing = station
+        .queue
+        .playout(request.from_track_id, request.from_overrides.as_ref())
+        .await?;
+    let incoming = station
+        .queue
+        .playout(request.to_track_id, request.to_overrides.as_ref())
+        .await?;
     let transition = plan_transition(&outgoing, &incoming, &settings.crossfade);
     let ramp = |ramp: heron_core::playout::Ramp| RampView {
         start_ms: ramp.start_ms,

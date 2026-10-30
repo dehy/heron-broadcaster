@@ -1216,6 +1216,21 @@ async fn library_tracks_overrides_and_categories() {
     assert_eq!(status, StatusCode::OK, "{preview}");
     // Tracks under 20 s play back to back.
     assert_eq!(preview["overlap_ms"], 0);
+    // Overrides not saved yet, for a track's page.
+    let cue_out = preview["outgoing"]["cue_out_ms"].as_u64().unwrap();
+    let (status, tried) = admin
+        .send(
+            Method::POST,
+            "/playout/transition",
+            json!({"from_track_id": station.tracks[0], "to_track_id": id,
+                   "from_overrides": {"cue_out_ms": cue_out - 1000},
+                   "to_overrides": {"cue_in_ms": 500}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{tried}");
+    assert_eq!(tried["outgoing"]["cue_out_ms"], cue_out - 1000);
+    assert_eq!(tried["incoming"]["cue_in_ms"], 500);
+    assert_eq!(tried["next_start_ms"], cue_out - 1000);
 
     let (status, _) = admin
         .send(
