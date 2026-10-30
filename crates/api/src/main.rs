@@ -348,6 +348,9 @@ mod tests {
             "artist_suggestions",
             "artists",
             "categories",
+            "category_stations",
+            "medley_stations",
+            "restriction_stations",
             "clock_schedule",
             "clock_slots",
             "clocks",
@@ -440,7 +443,10 @@ mod tests {
             "INSERT INTO settings (name, value) VALUES
                  ('station', '{\"timezone\": \"Europe/Paris\"}'),
                  ('playout', '{}'), ('queue', '{\"autofill\": false, \"min_queued\": 4}'),
-                 ('library', '{}');
+                 ('library', '{}'),
+                 ('medleys', '{\"category_id\": 9, \"name_from\": \"titles\"}');
+             INSERT INTO categories (id, name) VALUES (9, 'Medleys');
+             INSERT INTO medleys (id, recipe) VALUES (5, '{}');
              INSERT INTO clocks (id, name) VALUES (7, 'Morning');
              INSERT INTO clock_schedule (day_of_week, hour, clock_id) VALUES (1, 6, 7);
              INSERT INTO play_history (title, started_at, deck, source)
@@ -498,12 +504,34 @@ mod tests {
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(moved, ["playout", "queue", "station"]);
-        let shared: Vec<String> = sqlx::query_scalar("SELECT name FROM settings ORDER BY name")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
-        assert_eq!(shared, ["library"]);
+        assert_eq!(moved, ["medley_categories", "playout", "queue", "station"]);
+        let shared: Vec<(String, String)> =
+            sqlx::query_as("SELECT name, CAST(value AS CHAR) FROM settings ORDER BY name")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            shared,
+            [
+                ("library".to_owned(), "{}".to_owned()),
+                (
+                    "medleys".to_owned(),
+                    r#"{"name_from": "titles"}"#.to_owned()
+                )
+            ]
+        );
+        let medleys = medleys::categories_of(&pool, 1).await.unwrap();
+        assert_eq!(medleys.category_id, Some(9));
+        // Categories and medleys are the first station's.
+        let tags: (i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM category_stations WHERE category_id = 9 AND station_id = 1),
+                    (SELECT COUNT(*) FROM medley_stations WHERE medley_id = 5 AND station_id = 1),
+                    (SELECT COUNT(*) FROM restriction_stations)",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(tags, (1, 1, 0));
         let queue: settings::QueueSettings =
             settings::load_for(&pool, 1, settings::QueueSettings::SETTINGS_NAME)
                 .await

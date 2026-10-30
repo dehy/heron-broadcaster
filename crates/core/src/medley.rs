@@ -141,7 +141,8 @@ pub fn name(date: &str, names: &[&str]) -> String {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct Recipe {
-    /// Categories the songs come from.
+    /// Categories the songs come from; none: every category the medley's
+    /// stations can use.
     pub category_ids: Vec<u64>,
     /// Only the songs with this label, when set.
     pub label_id: Option<u64>,
@@ -218,11 +219,9 @@ impl Recipe {
         }
     }
 
-    /// Why the recipe cannot be built, if it cannot.
+    /// Why the recipe cannot be built, if it cannot. No categories means
+    /// every category the medley's stations can use.
     pub fn check(&self) -> Result<(), String> {
-        if self.category_ids.is_empty() {
-            return Err("pick at least one category for the songs".to_owned());
-        }
         self.check_settings()
     }
 
@@ -1035,7 +1034,8 @@ mod tests {
     #[test]
     fn recipes_are_checked() {
         assert!(recipe().check().is_ok());
-        assert!(Recipe::default().check().is_err(), "no category");
+        // No category: every category of the medley's stations.
+        assert!(Recipe::default().check().is_ok());
         for wrong in [
             Recipe {
                 hooks: 1,

@@ -7,17 +7,19 @@
 //! what its picker opens on.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use heron_rotation::SeparationOverrides;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use sqlx::MySqlPool;
+use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{ApiError, ApiResult, ErrorBody, is_duplicate, is_still_used};
+use crate::stations::Station;
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -45,6 +47,8 @@ pub struct Category {
     /// Windows this category overrides; the others follow the rotation
     /// settings (clock slots can override them again).
     pub separation: SeparationOverrides,
+    /// The stations it is used on, by ID.
+    pub station_ids: Vec<u64>,
 }
 
 type CategoryRow = (
@@ -57,10 +61,11 @@ type CategoryRow = (
     i64,
     i64,
     Option<String>,
+    Option<String>,
 );
 
 fn category(
-    (id, name, color, type_id, type_name, fx_player, tracks, total_ms, separation): CategoryRow,
+    (id, name, color, type_id, type_name, fx_player, tracks, total_ms, separation, stations): CategoryRow,
 ) -> Category {
     Category {
         id,
@@ -72,6 +77,11 @@ fn category(
         tracks,
         total_ms,
         separation: crate::rotation::overrides(separation.as_deref()),
+        station_ids: stations
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|id| id.parse().ok())
+            .collect(),
     }
 }
 
@@ -90,6 +100,17 @@ pub struct CategoryInput {
     /// None overridden by default.
     #[serde(default)]
     pub separation: SeparationOverrides,
+    /// The stations it is used on, at least one: the station it is made on
+    /// when left out on creation, kept when left out on a change.
+    #[serde(default)]
+    pub station_ids: Option<Vec<u64>>,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CategoriesQuery {
+    /// Only the categories this station can use.
+    pub station_id: Option<u64>,
 }
 
 /// Overrides as stored: `NULL` for none.
@@ -148,7 +169,9 @@ const SELECT: &str = "SELECT c.id, c.name, c.color, c.type_id, ct.name, c.fx_pla
             LEFT JOIN track_analysis a ON a.track_id = t.id
             LEFT JOIN track_overrides o ON o.track_id = t.id
             WHERE tc.category_id = c.id AND t.deleted_at IS NULL) AS total_ms,
-           CAST(c.separation AS CHAR)
+           CAST(c.separation AS CHAR),
+           (SELECT CAST(GROUP_CONCAT(cs.station_id ORDER BY cs.station_id) AS CHAR)
+            FROM category_stations cs WHERE cs.category_id = c.id)
     FROM categories c LEFT JOIN category_types ct ON ct.id = c.type_id";
 
 fn conflict(error: sqlx::Error) -> ApiError {
@@ -161,16 +184,23 @@ fn conflict(error: sqlx::Error) -> ApiError {
     }
 }
 
-#[utoipa::path(get, path = "/categories", tag = "categories",
+#[utoipa::path(get, path = "/categories", tag = "categories", params(CategoriesQuery),
     responses((status = 200, body = Vec<Category>), (status = "4XX", body = ErrorBody)))]
 async fn list_categories(
     _user: CurrentUser,
     State(state): State<AppState>,
+    Query(query): Query<CategoriesQuery>,
 ) -> ApiResult<Json<Vec<Category>>> {
-    let rows: Vec<CategoryRow> =
-        sqlx::query_as(sqlx::AssertSqlSafe(format!("{SELECT} ORDER BY c.name")))
-            .fetch_all(&state.pool)
-            .await?;
+    let rows: Vec<CategoryRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "{SELECT}
+         WHERE ? IS NULL OR EXISTS (SELECT 1 FROM category_stations cs
+                                    WHERE cs.category_id = c.id AND cs.station_id = ?)
+         ORDER BY c.name"
+    )))
+    .bind(query.station_id)
+    .bind(query.station_id)
+    .fetch_all(&state.pool)
+    .await?;
     Ok(Json(rows.into_iter().map(category).collect()))
 }
 
@@ -198,11 +228,18 @@ async fn get_category(
 async fn create_category(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(input): Json<CategoryInput>,
 ) -> ApiResult<(StatusCode, Json<Category>)> {
     user.require(Role::Operator)?;
     let (name, color) = input.check()?;
     let separation = separation_json(&input.separation)?;
+    let station_ids = input
+        .station_ids
+        .clone()
+        .unwrap_or_else(|| vec![station.id()]);
+    check_stations(&state, &station_ids)?;
+    let mut tx = state.pool.begin().await?;
     let id = sqlx::query(
         "INSERT INTO categories (name, color, type_id, fx_player, separation) VALUES (?, ?, ?, ?, ?)",
     )
@@ -211,16 +248,20 @@ async fn create_category(
     .bind(input.type_id)
     .bind(input.fx_player)
     .bind(separation)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await
     .map_err(conflict)?
     .last_insert_id();
+    write_stations(&mut tx, id, &station_ids).await?;
+    tx.commit().await?;
+    state.stations.wake_all();
     let Json(category) = get_category(user, State(state), Path(id)).await?;
     Ok((StatusCode::CREATED, Json(category)))
 }
 
-/// Renames, recolors a category, changes its type, its separation or
-/// whether the FX player offers it. Operators and admins.
+/// Renames, recolors a category, changes its type, its separation, its
+/// stations or whether the FX player offers it. Untagging a station that
+/// uses it is refused, listing what uses it. Operators and admins.
 #[utoipa::path(put, path = "/categories/{id}", tag = "categories",
     params(("id" = u64, Path)), request_body = CategoryInput,
     responses((status = 200, body = Category), (status = "4XX", body = ErrorBody)))]
@@ -233,6 +274,28 @@ async fn update_category(
     user.require(Role::Operator)?;
     let (name, color) = input.check()?;
     let separation = separation_json(&input.separation)?;
+    let before: Vec<u64> =
+        sqlx::query_scalar("SELECT station_id FROM category_stations WHERE category_id = ?")
+            .bind(id)
+            .fetch_all(&state.pool)
+            .await?;
+    if let Some(station_ids) = &input.station_ids {
+        check_stations(&state, station_ids)?;
+        for removed in before.iter().filter(|s| !station_ids.contains(s)) {
+            let uses = uses(&state.pool, *removed, id).await?;
+            if !uses.is_empty() {
+                let code = state
+                    .stations
+                    .get(*removed)
+                    .map_or_else(|| removed.to_string(), |station| station.code());
+                return Err(ApiError::Conflict(format!(
+                    "{code} still uses this category: {}",
+                    uses.join(", ")
+                )));
+            }
+        }
+    }
+    let mut tx = state.pool.begin().await?;
     sqlx::query(
         "UPDATE categories SET name = ?, color = ?, type_id = ?, fx_player = ?, separation = ?
          WHERE id = ?",
@@ -243,10 +306,132 @@ async fn update_category(
     .bind(input.fx_player)
     .bind(separation)
     .bind(id)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await
     .map_err(conflict)?;
+    if let Some(station_ids) = &input.station_ids {
+        write_stations(&mut tx, id, station_ids).await?;
+    }
+    tx.commit().await?;
+    if input.station_ids.is_some() {
+        state.stations.wake_all();
+    }
     get_category(user, State(state), Path(id)).await
+}
+
+fn check_stations(state: &AppState, station_ids: &[u64]) -> ApiResult<()> {
+    if station_ids.is_empty() {
+        return Err(ApiError::Invalid(
+            "a category is used on at least one station".to_owned(),
+        ));
+    }
+    if let Some(id) = station_ids
+        .iter()
+        .find(|id| state.stations.get(**id).is_none())
+    {
+        return Err(ApiError::Invalid(format!("no station {id}")));
+    }
+    Ok(())
+}
+
+async fn write_stations(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    category_id: u64,
+    station_ids: &[u64],
+) -> ApiResult<()> {
+    sqlx::query("DELETE FROM category_stations WHERE category_id = ?")
+        .bind(category_id)
+        .execute(&mut **tx)
+        .await?;
+    for station_id in station_ids {
+        sqlx::query("INSERT IGNORE INTO category_stations (category_id, station_id) VALUES (?, ?)")
+            .bind(category_id)
+            .bind(station_id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Refuses a category a station cannot use: one that does not exist or is
+/// not tagged with it.
+pub async fn check_offered(pool: &MySqlPool, station_id: u64, category_id: u64) -> ApiResult<()> {
+    let exists: Option<bool> = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM category_stations
+                        WHERE category_id = c.id AND station_id = ?) <> 0
+         FROM categories c WHERE c.id = ?",
+    )
+    .bind(station_id)
+    .bind(category_id)
+    .fetch_optional(pool)
+    .await?;
+    match exists {
+        None => Err(ApiError::Invalid(format!("no category {category_id}"))),
+        Some(false) => Err(ApiError::Invalid(format!(
+            "category {category_id} is not used on this station"
+        ))),
+        Some(true) => Ok(()),
+    }
+}
+
+/// What makes a station use a category: its clocks, the restrictions that
+/// apply to it, its fallback category, its medley categories, the recipes
+/// of its medleys.
+pub async fn uses(pool: &MySqlPool, station_id: u64, category_id: u64) -> ApiResult<Vec<String>> {
+    let mut uses = Vec::new();
+    let clocks: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT c.name FROM clock_slots s JOIN clocks c ON c.id = s.clock_id
+         WHERE c.station_id = ? AND s.category_id = ? ORDER BY c.name",
+    )
+    .bind(station_id)
+    .bind(category_id)
+    .fetch_all(pool)
+    .await?;
+    uses.extend(clocks.into_iter().map(|name| format!("clock {name}")));
+    let restrictions: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM restrictions r
+         WHERE ((r.target = 'category' AND r.target_id = ?)
+                OR (JSON_VALUE(r.rule, '$.kind') = 'not_after'
+                    AND JSON_VALUE(r.rule, '$.category_id') = ?))
+           AND (NOT EXISTS (SELECT 1 FROM restriction_stations rs WHERE rs.restriction_id = r.id)
+                OR EXISTS (SELECT 1 FROM restriction_stations rs
+                           WHERE rs.restriction_id = r.id AND rs.station_id = ?))",
+    )
+    .bind(category_id)
+    .bind(category_id)
+    .bind(station_id)
+    .fetch_one(pool)
+    .await?;
+    if restrictions > 0 {
+        uses.push(format!("{restrictions} restriction(s)"));
+    }
+    let rotation: heron_rotation::RotationSettings = crate::settings::load_for(
+        pool,
+        station_id,
+        heron_rotation::RotationSettings::SETTINGS_NAME,
+    )
+    .await?;
+    if rotation.fallback_category_id == Some(category_id) {
+        uses.push("the fallback category".to_owned());
+    }
+    let medleys = crate::medleys::categories_of(pool, station_id).await?;
+    if medleys.ids().any(|id| id == category_id) {
+        uses.push("the medley settings".to_owned());
+    }
+    let recipes: Vec<(u64, Option<String>)> = sqlx::query_as(
+        "SELECT m.id, m.name FROM medleys m JOIN medley_stations ms ON ms.medley_id = m.id
+         WHERE ms.station_id = ? AND JSON_CONTAINS(m.recipe, ?, '$.category_ids')
+         ORDER BY m.id",
+    )
+    .bind(station_id)
+    .bind(category_id.to_string())
+    .fetch_all(pool)
+    .await?;
+    uses.extend(recipes.into_iter().map(|(id, name)| match name {
+        Some(name) => format!("medley {name}"),
+        None => format!("medley {id}"),
+    }));
+    Ok(uses)
 }
 
 /// Deletes a category and its restrictions; its tracks stay in the
@@ -295,6 +480,7 @@ mod tests {
             type_id: None,
             fx_player: false,
             separation: SeparationOverrides::default(),
+            station_ids: None,
         };
         assert_eq!(
             input(" Gold ", Some("#FFAA00")).check().unwrap(),

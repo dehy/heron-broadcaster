@@ -264,8 +264,9 @@ export interface paths {
         };
         get: operations["get_category"];
         /**
-         * Renames, recolors a category, changes its type, its separation or
-         *     whether the FX player offers it. Operators and admins.
+         * Renames, recolors a category, changes its type, its separation, its
+         *     stations or whether the FX player offers it. Untagging a station that
+         *     uses it is refused, listing what uses it. Operators and admins.
          */
         put: operations["update_category"];
         post?: never;
@@ -1653,11 +1654,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The medley settings. */
+        /**
+         * A station's medley settings: its categories, and the shared naming and
+         *     defaults.
+         */
         get: operations["get_settings"];
         /**
-         * Replaces the medley settings (missing fields take the defaults). Tracks
-         *     already rendered keep their categories. Operators and admins.
+         * Replaces a station's medley categories and the shared naming and
+         *     defaults (missing fields take the defaults). Its categories must be
+         *     tagged with the station. Tracks already rendered keep their categories.
+         *     Operators and admins.
          */
         put: operations["put_settings"];
         post?: never;
@@ -2563,6 +2569,32 @@ export interface paths {
          *     Operators and admins.
          */
         put: operations["put_eq_on_station"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stations/{station_id}/settings/medleys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A station's medley settings: its categories, and the shared naming and
+         *     defaults.
+         */
+        get: operations["get_settings_on_station"];
+        /**
+         * Replaces a station's medley categories and the shared naming and
+         *     defaults (missing fields take the defaults). Its categories must be
+         *     tagged with the station. Tracks already rendered keep their categories.
+         *     Operators and admins.
+         */
+        put: operations["put_settings_on_station"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3559,6 +3591,8 @@ export interface components {
              *     settings (clock slots can override them again).
              */
             separation: components["schemas"]["SeparationOverrides"];
+            /** @description The stations it is used on, by ID. */
+            station_ids: number[];
             /**
              * Format: int64
              * @description How long its tracks last together, in ms: what is played of each
@@ -3592,6 +3626,11 @@ export interface components {
             name: string;
             /** @description None overridden by default. */
             separation?: components["schemas"]["SeparationOverrides"];
+            /**
+             * @description The stations it is used on, at least one: the station it is made on
+             *     when left out on creation, kept when left out on a change.
+             */
+            station_ids?: number[] | null;
             /**
              * Format: int64
              * @description A category type; none by default.
@@ -4811,6 +4850,8 @@ export interface components {
             /** Format: int64 */
             rendered_at_unix_ms?: number | null;
             rendered_layout?: components["schemas"]["Layout"] | null;
+            /** @description The stations it plays on; the first is the one its liners come from. */
+            station_ids: number[];
             task_error?: string | null;
             /**
              * Format: int64
@@ -4909,6 +4950,11 @@ export interface components {
         MedleyFadeCurve: "linear" | "fast_then_slow" | "slow_then_fast" | "s_curve";
         MedleyInput: {
             recipe?: components["schemas"]["Recipe"];
+            /**
+             * @description The stations it plays on, the first one first: the station it is
+             *     made on when left out on creation, kept when left out on a change.
+             */
+            station_ids?: number[] | null;
         };
         /** @description Parts picked from the recipe, not saved. */
         MedleyPlan: {
@@ -4920,7 +4966,10 @@ export interface components {
              */
             qualified: number;
         };
-        /** @description What every medley shares, and the recipe of a new one. */
+        /**
+         * @description A station's medley settings: its own categories, and what every medley
+         *     shares (naming and the recipe of a new one).
+         */
         MedleySettings: {
             /**
              * Format: int64
@@ -5630,7 +5679,8 @@ export interface components {
         /** @description How a medley is built. */
         Recipe: {
             /**
-             * @description Categories the songs come from.
+             * @description Categories the songs come from; none: every category the medley's
+             *     stations can use.
              * @default []
              */
             category_ids: number[];
@@ -5753,6 +5803,11 @@ export interface components {
             enabled?: boolean;
             note?: string | null;
             rule: components["schemas"]["Rule"];
+            /**
+             * @description The stations it applies to, empty for every station: every station
+             *     when left out on creation, kept when left out on a change.
+             */
+            station_ids?: number[] | null;
             target: components["schemas"]["Target"];
         };
         RestrictionView: {
@@ -5761,6 +5816,8 @@ export interface components {
             id: number;
             note?: string | null;
             rule: components["schemas"]["Rule"];
+            /** @description The stations it applies to; empty: every station. */
+            station_ids: number[];
             target: components["schemas"]["Target"];
             /** @description The track (`artist – title`), artist or category, for people. */
             target_name?: string | null;
@@ -7502,7 +7559,10 @@ export interface operations {
     };
     list_categories: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only the categories this station can use. */
+                station_id?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9131,7 +9191,10 @@ export interface operations {
     };
     list_medleys: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only the medleys of this station. */
+                station_id?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10252,6 +10315,8 @@ export interface operations {
                 /** @description `track`, `artist` or `category`. */
                 target?: string;
                 target_id?: number;
+                /** @description Only those that apply to this station. */
+                station_id?: number;
             };
             header?: never;
             path?: never;
@@ -12926,6 +12991,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EqSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_settings_on_station: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The station's ID */
+                station_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MedleySettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_settings_on_station: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The station's ID */
+                station_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MedleySettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MedleySettings"];
                 };
             };
             "4XX": {

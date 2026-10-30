@@ -108,10 +108,13 @@ pub async fn load_library(pool: &MySqlPool, station_id: u64) -> ApiResult<Librar
             .or_default()
             .push(Member { track, weight });
     }
-    let rows: Vec<(u64, String, Option<String>)> =
-        sqlx::query_as("SELECT id, name, CAST(separation AS CHAR) FROM categories")
-            .fetch_all(pool)
-            .await?;
+    let rows: Vec<(u64, String, Option<String>)> = sqlx::query_as(
+        "SELECT c.id, c.name, CAST(c.separation AS CHAR) FROM categories c
+             JOIN category_stations cs ON cs.category_id = c.id AND cs.station_id = ?",
+    )
+    .bind(station_id)
+    .fetch_all(pool)
+    .await?;
     let categories = rows
         .into_iter()
         .map(|(id, name, separation)| Category {
@@ -169,9 +172,15 @@ pub async fn load_library(pool: &MySqlPool, station_id: u64) -> ApiResult<Librar
     };
 
     let rows: Vec<(u64, String, u64, String)> = sqlx::query_as(
-        "SELECT id, CAST(target AS CHAR), target_id, CAST(rule AS CHAR)
-         FROM restrictions WHERE enabled ORDER BY id",
+        "SELECT r.id, CAST(r.target AS CHAR), r.target_id, CAST(r.rule AS CHAR)
+         FROM restrictions r
+         WHERE r.enabled
+           AND (NOT EXISTS (SELECT 1 FROM restriction_stations rs WHERE rs.restriction_id = r.id)
+                OR EXISTS (SELECT 1 FROM restriction_stations rs
+                           WHERE rs.restriction_id = r.id AND rs.station_id = ?))
+         ORDER BY r.id",
     )
+    .bind(station_id)
     .fetch_all(pool)
     .await?;
     let mut restrictions = Vec::with_capacity(rows.len());

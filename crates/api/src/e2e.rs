@@ -4684,3 +4684,299 @@ async fn two_stations_play_at_once() {
     assert_eq!(admin.get("/stations").await.as_array().unwrap().len(), 1);
     station.stop().await;
 }
+
+/// Categories, restrictions and medleys are tagged with the stations they
+/// are used on: a station only offers its own, untagging a station that
+/// uses one is refused, and a medley's track follows its stations.
+#[tokio::test(flavor = "multi_thread")]
+async fn categories_restrictions_and_medleys_follow_their_stations() {
+    let Some(mut station) = Station::start().await else {
+        return;
+    };
+    let (_engine, _state_dir, second_url, grpc) = start_engine(station.library.path(), None).await;
+    station.tasks.push(grpc);
+    let admin = station.signed_in("admin").await;
+    let first = admin.get("/stations").await[0]["id"].as_u64().unwrap();
+    let (status, created) = admin
+        .send(
+            Method::POST,
+            "/stations",
+            json!({"name": "Hits 80", "code": "hits80", "engine_url": second_url}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let second = created["id"].as_u64().unwrap();
+    // Nothing queued but what the test queues.
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/queue",
+            json!({"autofill": false, "min_queued": 3}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Categories: shared by both, the first station's (by default), the
+    // second's.
+    let mut ids = Vec::new();
+    for body in [
+        json!({"name": "80s", "color": null, "station_ids": [first, second]}),
+        json!({"name": "Hits gold", "color": null}),
+        json!({"name": "80s gold", "color": null, "station_ids": [second]}),
+    ] {
+        let (status, category) = admin.send(Method::POST, "/categories", body).await;
+        assert_eq!(status, StatusCode::CREATED, "{category}");
+        ids.push(category["id"].as_u64().unwrap());
+    }
+    let (eighties, gold, eighties_gold) = (ids[0], ids[1], ids[2]);
+    assert_eq!(
+        admin.get(&format!("/categories/{gold}")).await["station_ids"],
+        json!([first])
+    );
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/categories",
+            json!({"name": "Nowhere", "color": null, "station_ids": []}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let offered = |categories: Value| -> Vec<u64> {
+        categories
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|category| category["id"].as_u64().unwrap())
+            .collect()
+    };
+    assert_eq!(
+        offered(admin.get(&format!("/categories?station_id={second}")).await),
+        [eighties, eighties_gold]
+    );
+
+    // A station's clocks only take its categories.
+    let clock = |category: u64| json!({"name": "Hour", "slots": [{"category_id": category}]});
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            &format!("/stations/{second}/clocks"),
+            clock(gold),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, body) = admin
+        .send(
+            Method::POST,
+            &format!("/stations/{second}/clocks"),
+            clock(eighties_gold),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    // Untagging a station that uses the category is refused.
+    let retag =
+        |stations: Value| json!({"name": "80s gold", "color": null, "station_ids": stations});
+    let (status, body) = admin
+        .send(
+            Method::PUT,
+            &format!("/categories/{eighties_gold}"),
+            retag(json!([first])),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["message"].as_str().unwrap().contains("clock Hour"),
+        "{body}"
+    );
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/categories/{eighties_gold}"),
+            retag(json!([first, second])),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Restrictions apply to the stations they name, all by default.
+    let (status, restriction) = admin
+        .send(
+            Method::POST,
+            "/restrictions",
+            json!({"target": {"kind": "category", "id": eighties},
+                   "rule": {"kind": "daypart", "mode": "ban", "days": [1], "start_hour": 3,
+                            "end_hour": 4},
+                   "station_ids": [second]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{restriction}");
+    assert_eq!(restriction["station_ids"], json!([second]));
+    let applies = |station_id: u64| {
+        let admin = &admin;
+        async move {
+            admin
+                .get(&format!("/restrictions?station_id={station_id}"))
+                .await
+                .as_array()
+                .unwrap()
+                .len()
+        }
+    };
+    assert_eq!((applies(first).await, applies(second).await), (0, 1));
+    let (status, body) = admin
+        .send(
+            Method::PUT,
+            &format!("/categories/{eighties}"),
+            json!({"name": "80s", "color": null, "station_ids": [first]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    // Medleys: a station needs its medleys' category; each station has its own.
+    let medley = |stations: Value| json!({"recipe": {"category_ids": [], "hooks": 2}, "station_ids": stations});
+    let (status, _) = admin
+        .send(Method::POST, "/medleys", medley(json!([second])))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/stations/{second}/settings/medleys"),
+            json!({"category_id": gold}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "not the second's");
+    for (path, category) in [
+        (
+            format!("/stations/{second}/settings/medleys"),
+            eighties_gold,
+        ),
+        ("/settings/medleys".to_owned(), gold),
+    ] {
+        let (status, body) = admin
+            .send(
+                Method::PUT,
+                &path,
+                json!({"category_id": category, "name_from": "titles"}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    assert_eq!(
+        admin
+            .get(&format!("/stations/{second}/settings/medleys"))
+            .await["category_id"],
+        eighties_gold
+    );
+    assert_eq!(admin.get("/settings/medleys").await["category_id"], gold);
+    assert_eq!(
+        admin
+            .get(&format!("/stations/{second}/settings/medleys"))
+            .await["name_from"],
+        "titles"
+    );
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/medleys",
+            json!({"recipe": {"category_ids": [gold], "hooks": 2}, "station_ids": [second]}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a category of another station"
+    );
+    let (status, made) = admin
+        .send(Method::POST, "/medleys", medley(json!([second])))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let medley_id = made["id"].as_u64().unwrap();
+    assert_eq!(made["station_ids"], json!([second]));
+    let listed = |station_id: u64| {
+        let admin = &admin;
+        async move {
+            admin
+                .get(&format!("/medleys?station_id={station_id}"))
+                .await
+                .as_array()
+                .unwrap()
+                .len()
+        }
+    };
+    assert_eq!((listed(first).await, listed(second).await), (0, 1));
+
+    // The rendered track follows the medley's stations into their categories.
+    let pool = &station.db.pool;
+    let track = station.tracks[4];
+    sqlx::query("UPDATE medleys SET track_id = ? WHERE id = ?")
+        .bind(track)
+        .bind(medley_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let categories = || async {
+        sqlx::query_scalar::<_, u64>(
+            "SELECT category_id FROM track_categories WHERE track_id = ? ORDER BY category_id",
+        )
+        .bind(track)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    };
+    let (status, body) = admin
+        .send(
+            Method::PUT,
+            &format!("/medleys/{medley_id}"),
+            medley(json!([second, first])),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(categories().await, [gold, eighties_gold]);
+    // Out of the first station: refused while it waits in its queue.
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/queue",
+            json!({"track_ids": [track], "position": 0}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    eventually(
+        "the medley in the queue",
+        Duration::from_secs(5),
+        || async {
+            let queue = admin.get("/queue").await;
+            waiting_tracks(&queue).contains(&track).then_some(())
+        },
+    )
+    .await;
+    let (status, body) = admin
+        .send(
+            Method::PUT,
+            &format!("/medleys/{medley_id}"),
+            medley(json!([second])),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, _) = admin.request(Method::DELETE, "/queue", None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    eventually(
+        "the medley out of the queue",
+        Duration::from_secs(5),
+        || async {
+            let queue = admin.get("/queue").await;
+            (!waiting_tracks(&queue).contains(&track)).then_some(())
+        },
+    )
+    .await;
+    let (status, body) = admin
+        .send(
+            Method::PUT,
+            &format!("/medleys/{medley_id}"),
+            medley(json!([second])),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(categories().await, [eighties_gold]);
+    station.stop().await;
+}

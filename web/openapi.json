@@ -628,6 +628,19 @@
           "categories"
         ],
         "operationId": "list_categories",
+        "parameters": [
+          {
+            "name": "station_id",
+            "in": "query",
+            "description": "Only the categories this station can use.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -733,7 +746,7 @@
         "tags": [
           "categories"
         ],
-        "summary": "Renames, recolors a category, changes its type, its separation or\nwhether the FX player offers it. Operators and admins.",
+        "summary": "Renames, recolors a category, changes its type, its separation, its\nstations or whether the FX player offers it. Untagging a station that\nuses it is refused, listing what uses it. Operators and admins.",
         "operationId": "update_category",
         "parameters": [
           {
@@ -2950,6 +2963,19 @@
         ],
         "summary": "Every medley, by name.",
         "operationId": "list_medleys",
+        "parameters": [
+          {
+            "name": "station_id",
+            "in": "query",
+            "description": "Only the medleys of this station.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -4413,6 +4439,17 @@
               "format": "int64",
               "minimum": 0
             }
+          },
+          {
+            "name": "station_id",
+            "in": "query",
+            "description": "Only those that apply to this station.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -4943,7 +4980,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "The medley settings.",
+        "summary": "A station's medley settings: its categories, and the shared naming and\ndefaults.",
         "operationId": "get_settings",
         "responses": {
           "200": {
@@ -4970,7 +5007,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Replaces the medley settings (missing fields take the defaults). Tracks\nalready rendered keep their categories. Operators and admins.",
+        "summary": "Replaces a station's medley categories and the shared naming and\ndefaults (missing fields take the defaults). Its categories must be\ntagged with the station. Tracks already rendered keep their categories.\nOperators and admins.",
         "operationId": "put_settings",
         "requestBody": {
           "content": {
@@ -8175,6 +8212,94 @@
         }
       }
     },
+    "/api/v1/stations/{station_id}/settings/medleys": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "A station's medley settings: its categories, and the shared naming and\ndefaults.",
+        "operationId": "get_settings_on_station",
+        "parameters": [
+          {
+            "name": "station_id",
+            "in": "path",
+            "description": "The station's ID",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MedleySettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Replaces a station's medley categories and the shared naming and\ndefaults (missing fields take the defaults). Its categories must be\ntagged with the station. Tracks already rendered keep their categories.\nOperators and admins.",
+        "operationId": "put_settings_on_station",
+        "parameters": [
+          {
+            "name": "station_id",
+            "in": "path",
+            "description": "The station's ID",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MedleySettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MedleySettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/stations/{station_id}/settings/playout": {
       "get": {
         "tags": [
@@ -11256,7 +11381,8 @@
           "fx_player",
           "tracks",
           "total_ms",
-          "separation"
+          "separation",
+          "station_ids"
         ],
         "properties": {
           "color": {
@@ -11281,6 +11407,15 @@
           "separation": {
             "$ref": "#/components/schemas/SeparationOverrides",
             "description": "Windows this category overrides; the others follow the rotation\nsettings (clock slots can override them again)."
+          },
+          "station_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "The stations it is used on, by ID."
           },
           "total_ms": {
             "type": "integer",
@@ -11350,6 +11485,18 @@
           "separation": {
             "$ref": "#/components/schemas/SeparationOverrides",
             "description": "None overridden by default."
+          },
+          "station_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "The stations it is used on, at least one: the station it is made on\nwhen left out on creation, kept when left out on a change."
           },
           "type_id": {
             "type": [
@@ -14188,7 +14335,8 @@
         "required": [
           "id",
           "recipe",
-          "parts"
+          "parts",
+          "station_ids"
         ],
         "properties": {
           "id": {
@@ -14237,6 +14385,15 @@
                 "type": "null"
               }
             ]
+          },
+          "station_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "The stations it plays on; the first is the one its liners come from."
           },
           "task_error": {
             "type": [
@@ -14392,6 +14549,18 @@
         "properties": {
           "recipe": {
             "$ref": "#/components/schemas/Recipe"
+          },
+          "station_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "The stations it plays on, the first one first: the station it is\nmade on when left out on creation, kept when left out on a change."
           }
         },
         "additionalProperties": false
@@ -14420,7 +14589,7 @@
       },
       "MedleySettings": {
         "type": "object",
-        "description": "What every medley shares, and the recipe of a new one.",
+        "description": "A station's medley settings: its own categories, and what every medley\nshares (naming and the recipe of a new one).",
         "properties": {
           "category_id": {
             "type": [
@@ -16081,7 +16250,7 @@
               "format": "int64",
               "minimum": 0
             },
-            "description": "Categories the songs come from.",
+            "description": "Categories the songs come from; none: every category the medley's\nstations can use.",
             "default": []
           },
           "crossfade_ms": {
@@ -16282,6 +16451,18 @@
           "rule": {
             "$ref": "#/components/schemas/Rule"
           },
+          "station_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "The stations it applies to, empty for every station: every station\nwhen left out on creation, kept when left out on a change."
+          },
           "target": {
             "$ref": "#/components/schemas/Target"
           }
@@ -16294,7 +16475,8 @@
           "id",
           "target",
           "rule",
-          "enabled"
+          "enabled",
+          "station_ids"
         ],
         "properties": {
           "enabled": {
@@ -16313,6 +16495,15 @@
           },
           "rule": {
             "$ref": "#/components/schemas/Rule"
+          },
+          "station_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "The stations it applies to; empty: every station."
           },
           "target": {
             "$ref": "#/components/schemas/Target"

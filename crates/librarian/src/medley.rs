@@ -59,6 +59,7 @@ async fn recipe(pool: &MySqlPool, medley_id: u64) -> Result<Recipe, String> {
 /// Decodes the parts and mixes them, off the async runtime.
 async fn mix_rows(
     pool: &MySqlPool,
+    medley_id: u64,
     roots: &Roots,
     recipe: Recipe,
     rows: Vec<PartRow>,
@@ -67,12 +68,15 @@ async fn mix_rows(
         return Err("the medley has no parts: build it first".to_owned());
     }
     let settings: PlayoutSettings = {
-        // The first station's crossfades, until a medley has stations (M13).
+        // Its first station's crossfades: one file for all its stations.
         let json: Option<String> = sqlx::query_scalar(
-            "SELECT CAST(value AS CHAR) FROM station_settings
-             WHERE name = ? AND station_id = (SELECT MIN(id) FROM stations)",
+            "SELECT CAST(s.value AS CHAR) FROM station_settings s
+             JOIN medley_stations ms ON ms.station_id = s.station_id
+             WHERE s.name = ? AND ms.medley_id = ?
+             ORDER BY ms.position LIMIT 1",
         )
         .bind(PlayoutSettings::SETTINGS_NAME)
+        .bind(medley_id)
         .fetch_optional(pool)
         .await
         .map_err(|error| error.to_string())?;
@@ -148,7 +152,7 @@ pub async fn render(
     .await
     .map_err(|error| error.to_string())?;
     let count = rows.len();
-    let (audio, layout) = mix_rows(pool, roots, recipe, rows).await?;
+    let (audio, layout) = mix_rows(pool, medley_id, roots, recipe, rows).await?;
     let layout = serde_json::to_string(&layout).map_err(|error| error.to_string())?;
     let duration_ms = duration_ms(&audio);
 
@@ -223,7 +227,7 @@ pub async fn preview(
             true_peak_db,
         });
     }
-    let (audio, _) = mix_rows(pool, roots, recipe, rows).await?;
+    let (audio, _) = mix_rows(pool, medley_id, roots, recipe, rows).await?;
     let duration_ms = duration_ms(&audio);
     let path = medley::preview_path(medley_id);
     let target = roots.library.join(&path);

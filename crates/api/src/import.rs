@@ -1043,6 +1043,13 @@ async fn category(
             }
         })?
         .last_insert_id();
+    // The first station's, until an import chooses its stations.
+    sqlx::query(
+        "INSERT INTO category_stations (category_id, station_id) SELECT ?, MIN(id) FROM stations",
+    )
+    .bind(id)
+    .execute(&mut **tx)
+    .await?;
     summary.categories_created.push(name.to_owned());
     Ok(id)
 }
