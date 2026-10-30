@@ -4,6 +4,7 @@
 // overrides, categories, programming details and labels, analysis, file
 // and plays, and its tags edited.
 
+import { PlaysByStation } from "../components/Stations";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -1302,6 +1303,9 @@ function PlaysCard({ track }: { track: TrackDetail }) {
         </span>
       }
     >
+      <div style={{ padding: "0.5rem 1rem 0" }}>
+        <PlaysByStation plays={track.plays} />
+      </div>
       {plays.isError && <ErrorView error={plays.error} />}
       {plays.data?.length === 0 && <Empty>{t("track.neverPlayed")}</Empty>}
       <ul className="list">

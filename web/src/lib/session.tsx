@@ -6,6 +6,7 @@ import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/
 import { createContext, useContext } from "react";
 import { type Role, type User, can, errorMessage, fetchMe } from "../api";
 import { useToast } from "../components/ui";
+import { stationRole, useStation } from "./station";
 
 export const ME_KEY = ["me"] as const;
 
@@ -24,9 +25,21 @@ export function useUser(): User {
   return user;
 }
 
-/** Whether the signed-in user's role allows what `needed` can do. */
+/** Whether a page is one of a station's: its actions follow the role on that station. */
+export const StationScope = createContext(false);
+
+/**
+ * Whether the signed-in user's role allows what `needed` can do: their role
+ * on the station shown on a station's pages, their shared role elsewhere.
+ */
 export function useCan(needed: Role): boolean {
-  return can(useContext(UserContext)?.role, needed);
+  const user = useContext(UserContext);
+  const onStationPage = useContext(StationScope);
+  const station = useStation();
+  if (!user) {
+    return false;
+  }
+  return can(onStationPage ? stationRole(user, station) : user.role, needed);
 }
 
 /**

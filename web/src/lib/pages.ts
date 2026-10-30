@@ -11,14 +11,17 @@ export interface Page {
   label: PlainKey;
   icon: IconName;
   section?: PlainKey;
+  /** Admins only: of the station shown for a station's page, shared admins otherwise. */
   admin?: boolean;
+  /** One of a station's pages: it shows the chosen station, and its actions follow the role there. */
+  station?: boolean;
 }
 
 export const PAGES: Page[] = [
-  { path: "/", label: "nav.onAir", icon: "air" },
-  { path: "/queue", label: "nav.queue", icon: "queue" },
-  { path: "/history", label: "nav.history", icon: "history" },
-  { path: "/statistics", label: "nav.statistics", icon: "chart" },
+  { path: "/", label: "nav.onAir", icon: "air", station: true },
+  { path: "/queue", label: "nav.queue", icon: "queue", station: true },
+  { path: "/history", label: "nav.history", icon: "history", station: true },
+  { path: "/statistics", label: "nav.statistics", icon: "chart", station: true },
   { path: "/library", label: "nav.tracks", icon: "library", section: "nav.library" },
   { path: "/buffer", label: "nav.buffer", icon: "upload" },
   { path: "/labels", label: "nav.labels", icon: "label" },
@@ -27,16 +30,17 @@ export const PAGES: Page[] = [
   { path: "/review", label: "nav.review", icon: "review" },
   { path: "/trash", label: "nav.trash", icon: "trash" },
   { path: "/import", label: "nav.import", icon: "upload", admin: true },
-  { path: "/clocks", label: "nav.clocks", icon: "clock", section: "nav.programming" },
-  { path: "/schedule", label: "nav.schedule", icon: "calendar" },
+  { path: "/clocks", label: "nav.clocks", icon: "clock", section: "nav.programming", station: true },
+  { path: "/schedule", label: "nav.schedule", icon: "calendar", station: true },
   { path: "/categories", label: "nav.categories", icon: "tag" },
   { path: "/restrictions", label: "nav.restrictions", icon: "ban" },
-  { path: "/rotation", label: "nav.rotation", icon: "log" },
-  { path: "/playout", label: "nav.playout", icon: "fade", section: "nav.station" },
-  { path: "/eq", label: "nav.eq", icon: "eq" },
-  { path: "/outputs", label: "nav.outputs", icon: "output" },
-  { path: "/settings", label: "nav.settings", icon: "settings" },
-  { path: "/webhooks", label: "nav.webhooks", icon: "bolt", admin: true },
+  { path: "/rotation", label: "nav.rotation", icon: "log", station: true },
+  { path: "/playout", label: "nav.playout", icon: "fade", section: "nav.station", station: true },
+  { path: "/eq", label: "nav.eq", icon: "eq", station: true },
+  { path: "/outputs", label: "nav.outputs", icon: "output", station: true },
+  { path: "/settings", label: "nav.settings", icon: "settings", station: true },
+  { path: "/webhooks", label: "nav.webhooks", icon: "bolt", admin: true, station: true },
+  { path: "/stations", label: "nav.stations", icon: "air", admin: true },
   { path: "/users", label: "nav.users", icon: "users", admin: true },
 ];
 

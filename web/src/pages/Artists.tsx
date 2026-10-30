@@ -5,6 +5,7 @@
 // linked automatically when they only differ by case, accents or spaces;
 // anything else is linked here.
 
+import { PlaysByStation } from "../components/Stations";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { type Artist, api, done, query, unwrap } from "../api";
@@ -227,6 +228,13 @@ function ArtistDialog({ id, onClose }: { id: number; onClose: () => void }) {
             <div className="row">
               <span className="muted">
                 {t("common.tracks", { count: data.tracks })}
+                {data.plays && (
+                  <>
+                    {" · "}
+                    {t("track.playCount", { count: data.plays.play_count })}{" "}
+                    <PlaysByStation plays={data.plays} />
+                  </>
+                )}
                 {data.musicbrainz_id && (
                   <>
                     {" · "}

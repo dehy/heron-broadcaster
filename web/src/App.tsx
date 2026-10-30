@@ -2,14 +2,20 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
-import { api, done, errorMessage, fetchStatus, unwrap } from "./api";
+import { api, can, done, errorMessage, fetchStatus, unwrap } from "./api";
 import { Banner, Icon, Loading, Logo } from "./components/ui";
 import { type PlainKey, rich, setLanguage, t, toSetting, useLanguage } from "./i18n";
 import { setTimeZone } from "./lib/format";
-import { PAGES, isCurrent } from "./lib/pages";
+import { PAGES, isCurrent, placeOf } from "./lib/pages";
 import { startLive, stopLive, useLive } from "./lib/live";
 import { Link, match, navigate, useLocation } from "./lib/router";
-import { ME_KEY, UserContext, useCan, useMeQuery } from "./lib/session";
+import { ME_KEY, StationScope, UserContext, useCan, useMeQuery, useUser } from "./lib/session";
+import {
+  chooseStation,
+  initialStation,
+  stationRole,
+  useStation,
+} from "./lib/station";
 import { applyFullWidth, applyTheme, storedFullWidth, storedTheme } from "./lib/theme";
 import { Account } from "./pages/Account";
 import { Artists } from "./pages/Artists";
@@ -32,6 +38,7 @@ import { Review } from "./pages/Review";
 import { Rotation } from "./pages/Rotation";
 import { Schedule } from "./pages/Schedule";
 import { Settings } from "./pages/Settings";
+import { Stations } from "./pages/Stations";
 import { Statistics } from "./pages/Statistics";
 import { Track } from "./pages/Track";
 import { Trash } from "./pages/Trash";
@@ -52,7 +59,7 @@ export function App() {
       applyTheme(user.theme);
       applyFullWidth(user.full_width);
       void setLanguage(toSetting(user.language));
-      startLive();
+      // The live WebSocket opens once the station shown is known (Shell).
     } else if (user === null) {
       stopLive();
     }
@@ -138,6 +145,8 @@ function route(pathname: string): ReactNode {
       return <Webhooks />;
     case "/users":
       return <Users />;
+    case "/stations":
+      return <Stations />;
     case "/account":
       return <Account />;
     default:
@@ -153,7 +162,21 @@ function Shell() {
   const { pathname } = useLocation();
   const [navOpen, setNavOpen] = useState(false);
   const isAdmin = useCan("admin");
+  const me = useUser();
   const client = useQueryClient();
+  const stations = useQuery({
+    queryKey: ["stations"],
+    queryFn: () => unwrap(api.GET("/api/v1/stations")),
+  });
+  const station = useStation();
+  // The station the pages show: the one chosen last, or the first.
+  useEffect(() => {
+    const list = stations.data;
+    if (list && (station === null || !list.some((s) => s.id === station))) {
+      chooseStation(initialStation(me.id, list));
+    }
+  }, [stations.data, station, me.id]);
+  const isStationAdmin = can(stationRole(me, station), "admin");
   const user = client.getQueryData<{ username: string }>(ME_KEY);
   const review = useQuery({
     queryKey: ["review-count"],
@@ -168,14 +191,32 @@ function Shell() {
   });
   const readyCount =
     buffer.data?.groups.reduce((sum, group) => sum + group.files.filter((f) => f.status === "ready").length, 0) ?? 0;
-  const station = useQuery({
-    queryKey: ["settings", "station"],
+  const zone = useQuery({
+    queryKey: ["settings", "station", station],
     queryFn: () => unwrap(api.GET("/api/v1/settings/station")),
+    enabled: station !== null,
   });
   // Before the pages render, so they write times in station time.
-  if (station.data) {
-    setTimeZone(station.data.timezone);
+  if (zone.data) {
+    setTimeZone(zone.data.timezone);
   }
+  // The live WebSocket is the station's: opened again for each station.
+  useEffect(() => {
+    if (station !== null) {
+      stopLive();
+      startLive();
+    }
+  }, [station]);
+  const switchTo = (id: number) => {
+    chooseStation(id);
+    // Every query of the old station is another station's now.
+    client.removeQueries({
+      predicate: (query) => query.queryKey[0] !== ME_KEY[0] && query.queryKey[0] !== "stations",
+    });
+  };
+  const visible = (page: (typeof PAGES)[number]) =>
+    !page.admin || (page.station ? isStationAdmin : isAdmin);
+  const scope = placeOf(pathname)?.page.station ?? false;
 
   useEffect(() => {
     setNavOpen(false);
@@ -199,8 +240,24 @@ function Shell() {
         <Link to="/" className="brand">
           <Logo /> Heron
         </Link>
+        {(stations.data?.length ?? 0) > 1 && (
+          <label className="station-switcher">
+            <span className="visually-hidden">{t("stations.switch")}</span>
+            <select
+              className="input"
+              value={station ?? ""}
+              onChange={(event) => switchTo(Number(event.target.value))}
+            >
+              {stations.data?.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.code}){s.enabled ? "" : ` · ${t("stations.disabled")}`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <nav className="nav">
-          {PAGES.filter((page) => !page.admin || isAdmin).map((page) => {
+          {PAGES.filter(visible).map((page) => {
             const heading = page.section !== undefined && page.section !== section;
             if (page.section) {
               section = page.section;
@@ -263,8 +320,14 @@ function Shell() {
           <OnAirBadge />
         </div>
         <main className="content">
-          <Warnings />
-          {route(pathname)}
+          {station === null ? (
+            <Loading label={t("app.contacting")} />
+          ) : (
+            <StationScope.Provider value={scope} key={station}>
+              <Warnings />
+              {route(pathname)}
+            </StationScope.Provider>
+          )}
         </main>
       </div>
     </div>

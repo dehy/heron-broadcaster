@@ -3,6 +3,7 @@
 // The library: search, filters, sorting, pages, the columns shown, and
 // actions on a selection (queue, labels, categories, programming, tags).
 
+import { useStations } from "../components/Stations";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
@@ -141,6 +142,7 @@ function filtersOf(search: URLSearchParams, q: string) {
     labels_all: text("labels_all"),
     labels_any: text("labels_any"),
     labels_none: text("labels_none"),
+    station_id: whole("station"),
     never_played: search.get("never_played") === "true" ? true : undefined,
     not_played_days: whole("not_played_days"),
     added_days: whole("added_days"),
@@ -155,6 +157,7 @@ function filtersOf(search: URLSearchParams, q: string) {
 
 /** Filters of the URL beyond search, show and category. */
 const MORE_FILTERS = [
+  "station",
   "labels_all",
   "labels_any",
   "labels_none",
@@ -687,6 +690,7 @@ function MoreFilters({
       </span>
     </label>
   );
+  const stations = useStations();
   const choice = (name: string, title: string, values: string[]) => (
     <label className="field">
       <span>{title}</span>
@@ -704,6 +708,19 @@ function MoreFilters({
   return (
     <div className="card-body stack">
       <div className="filters-grid">
+        {stations.length > 1 && (
+          <label className="field">
+            <span>{t("library.playsOn")}</span>
+            <select className="input" value={value("station")} onChange={(event) => set("station", event.target.value)}>
+              <option value="">{t("stations.all")}</option>
+              {stations.map((station) => (
+                <option key={station.id} value={station.id}>
+                  {station.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {labels.length > 0 && (
           <>
             {labelSelect("labels_any", t("library.labelsAny"))}
