@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { User } from "../api";
-import { codes, firstStation, onStation, perStation, stationRole } from "./station";
+import { codes, firstStation, onStation, perStation, stationRole, toStation } from "./station";
 
 describe("perStation", () => {
   it("knows a station's routes, as the API does", () => {
@@ -56,5 +56,25 @@ describe("stations", () => {
     expect(stationRole(user, 1)).toBeUndefined();
     expect(stationRole(user, null)).toBe("viewer");
     expect(stationRole({ ...user, role: "admin" }, 1)).toBe("admin");
+  });
+});
+
+describe("toStation", () => {
+  it("keeps the method, headers and body of what it sends to a station", async () => {
+    const request = new Request("http://heron/api/v1/outputs/3", {
+      method: "PUT",
+      headers: { "X-Requested-With": "heron-web", "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    const sent = await toStation(request, 2);
+    expect(sent?.url).toBe("http://heron/api/v1/stations/2/outputs/3");
+    expect(sent?.method).toBe("PUT");
+    expect(sent?.headers.get("x-requested-with")).toBe("heron-web");
+    expect(await sent?.json()).toEqual({ enabled: false });
+  });
+
+  it("leaves the shared routes alone", async () => {
+    const request = new Request("http://heron/api/v1/tracks", { method: "POST", body: "{}" });
+    expect(await toStation(request, 2)).toBeUndefined();
   });
 });

@@ -5,7 +5,7 @@
 
 import createClient from "openapi-fetch";
 import { type PlainKey, t } from "../i18n";
-import { currentStation, onStation } from "../lib/station";
+import { currentStation, toStation } from "../lib/station";
 import type { components, paths } from "./schema";
 
 export type Schemas = components["schemas"];
@@ -73,8 +73,7 @@ export const api = createClient<paths>({
 // A station's routes go to the station the pages show.
 api.use({
   onRequest({ request }) {
-    const url = onStation(request.url, currentStation());
-    return url === request.url ? undefined : new Request(url, request);
+    return toStation(request, currentStation());
   },
 });
 

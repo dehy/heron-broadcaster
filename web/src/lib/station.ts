@@ -55,6 +55,29 @@ export function onStation(url: string, id: number | null): string {
   return `${prefix}stations/${id}/${rest}`;
 }
 
+/**
+ * `request` sent to station `id`'s route, with its body; `undefined` when it
+ * is not one of a station's routes. `new Request(url, request)` would lose
+ * the body: browsers refuse a stream body, or send none.
+ */
+export async function toStation(request: Request, id: number | null): Promise<Request | undefined> {
+  const url = onStation(request.url, id);
+  if (url === request.url) {
+    return undefined;
+  }
+  const body = request.method === "GET" || request.method === "HEAD" ? null : await request.arrayBuffer();
+  return new Request(url, {
+    method: request.method,
+    headers: request.headers,
+    body,
+    credentials: request.credentials,
+    cache: request.cache,
+    redirect: request.redirect,
+    referrer: request.referrer,
+    signal: request.signal,
+  });
+}
+
 // The chosen station, kept per user in the browser.
 let current: number | null = null;
 let userId: number | null = null;
