@@ -6,7 +6,7 @@ Medleys are made under *Library › Medleys* (operators and admins; viewers can 
 
 ## Settings
 
-What every medley shares is set once, under *Settings › Medleys* (operators and admins):
+What every medley shares is set once, under *Settings › Medleys* (operators and admins). The category and the liners are **each station's**: a medley goes into the category of each of its [stations](#stations), and takes its liners from its first station's. Naming and defaults are shared by every station.
 
 | | |
 |---|---|
@@ -21,7 +21,7 @@ Medleys made before these settings existed each had their own category and liner
 
 | | |
 |---|---|
-| **Songs** | The categories the hooks come from, optionally only the tracks with a label |
+| **Songs** | The categories the hooks come from: every category its stations can use when none is chosen, or some of them; optionally only the tracks with a label |
 | **Hooks** | How many (2 to 30), their order (as picked, by year, by BPM), and their length, a filter: only hooks lasting between the shortest and the longest qualify; a hook is never cut, but can be shortened by hand while editing |
 | **Crossfade** | Between two parts |
 | **Liners** | On or off; placed every *N* hooks, optionally also at the start and at the end; **between** the hooks (they take their own time) or **over** the music (the hooks around them play longer, the music lowered under them by the ducking level; where and how fast it goes down and comes back up is set, see [Liners over the music](#liners-over-the-music)) |
@@ -109,15 +109,19 @@ A medley track **sends no metadata**: while it plays, the stream servers, the pu
 
 ## Deleting
 
+## Stations
+
+A medley is tagged with the stations it plays on, one or several ([Several stations](stations.md#medleys)); a new one with the station it is made on. Its rendered track goes into the medleys' category of each of its stations, and its liners come from its first station's liner categories, in its one file. A station that has no medleys' category cannot be tagged. Untagging a station is refused while the medley waits in that station's queue; its track then leaves that station's category, unless another of its stations uses the same category.
+
 Deleting a medley removes its recipe; its rendered track stays in the library (delete it from the track list if it is no longer wanted). A song leaving the library does not change a rendered medley: it is used again only when the medley is built again.
 
 ## API
 
 | | |
 |---|---|
-| `GET /medleys`, `POST /medleys` | The medleys, with their name (`null` until rendered), recipe, parts, track and last render; a new medley (`{"recipe"}`) |
-| `GET`, `PUT`, `DELETE /medleys/{id}` | One medley; its recipe |
-| `GET`, `PUT /settings/medleys` | The [settings](#settings): `category_id`, `liner_category_id`, `opening_liner_category_id`, `closing_liner_category_id`, `name_from` (`artists` or `titles`), `defaults` (a recipe without its songs) |
+| `GET /medleys`, `POST /medleys` | The medleys (`station_id`: only those of a station), with their name (`null` until rendered), recipe, parts, track, last render and `station_ids` (the first is the one its liners come from); a new medley (`{"recipe", "station_ids"}`, the first station when left out) |
+| `GET`, `PUT`, `DELETE /medleys/{id}` | One medley; its recipe and its stations (kept when `station_ids` is left out) |
+| `GET`, `PUT /settings/medleys` | The [settings](#settings) of a station (`/stations/{id}/settings/medleys`; without the prefix, the first station's): its `category_id`, `liner_category_id`, `opening_liner_category_id`, `closing_liner_category_id`, and the shared `name_from` (`artists` or `titles`) and `defaults` (a recipe without its songs) |
 | `POST /medleys/{id}/plan` | Picks the parts (writes nothing): `{"parts": [{"kind": "hook" or "liner", "track_id", "from_ms", "to_ms", …}], "qualified"}`; `409` once the medley is rendered |
 | `POST /medleys/{id}/duplicate` | A new medley with the same recipe and parts, not rendered |
 | `POST /medleys/{id}/pick` | One more part of a kind, other than the tracks given (`{"kind", "exclude": [track IDs], "slot"}`), to replace one; for a liner, `slot` is `start`, `end` or `between` (the default), where the liner goes |
