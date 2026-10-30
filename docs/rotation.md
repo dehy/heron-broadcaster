@@ -125,7 +125,9 @@ The rule listeners notice least is relaxed first, and each rule is **halved befo
 
 ### Rules across stations
 
-With [several stations](stations.md#rules-across-stations), a station can also keep the artists, titles and tracks it plays apart from what other stations played or will play, each within its own window. They are relaxed with the station's own rule of the same kind.
+With [several stations](stations.md#rules-across-stations), a station can also keep the artists, titles and tracks it plays apart from what other stations played or will play, each within its own window (`across` in the `rotation` settings: `artist_min`, `title_min`, `track_min`, 0 for off, and `station_ids`, the stations it looks at, all the others when empty). The window looks both ways: plays of the other stations before the pick, and their queued tracks at their planned times, before or after it.
+
+They are relaxed with the station's own rule of the same kind: artist halved at step 3 and dropped at step 4, title at 5 and 6, track at 7 and 8; they are off in the fallback category (steps 9 and 10) and in slots with enforce rules off. The selection log counts the tracks they held back (`blocked.across`) and names, for the least recently played of them, the station and the play or planned track that held it back (`held_elsewhere`). A simulation takes the other stations' history and queues as they are, and its audit checks the picks against them too (`across_stations` violations).
 
 ### Scheduling
 
