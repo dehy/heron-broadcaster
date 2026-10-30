@@ -123,6 +123,10 @@ The rule listeners notice least is relaxed first, and each rule is **halved befo
 
 **Why artist before title** (the handoff proposed title first): repeating an artist within two hours is common and accepted on radio, while hearing the same song again, even in another version, is a clear repeat to listeners.
 
+### Rules across stations
+
+With [several stations](stations.md#rules-across-stations), a station can also keep the artists, titles and tracks it plays apart from what other stations played or will play, each within its own window. They are relaxed with the station's own rule of the same kind.
+
 ### Scheduling
 
 Clocks are assigned per hour and day of week (`clock_schedule` in the [data model](data-model.md)), in the **station's time zone** (`station` settings, an IANA name such as `Europe/Paris`; the server's `TZ`, or UTC, by default). When the clocks go back, the repeated hour runs its clock again; when they go forward, the skipped hour is skipped.

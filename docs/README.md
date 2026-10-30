@@ -23,6 +23,7 @@ The name comes from "air on" sounding like *héron* (French for heron): keeping 
 | [Medleys](medleys.md) | Medleys built from song hooks and liners: the recipe, building, rendering to a library file |
 | [Library management](library.md) | Incoming folder, buffer zone and uploads, identification, tags, layout, journaled moves, organize, trash and undo |
 | [Encoders and outputs](outputs.md) | Encoder selection, multiple outputs, Icecast, Shoutcast, HLS |
+| [Several stations](stations.md) | One Heron for several stations: shared library, categories and medleys tagged with stations, plays per station, rules across stations, roles per station, one engine per station |
 | [Listener statistics](statistics.md) | Listeners per day, hour, output and track from the stream servers, sessions, privacy, CSV export |
 
 ## Technical design
@@ -44,5 +45,5 @@ The name comes from "air on" sounding like *héron* (French for heron): keeping 
 
 | Document | Contents |
 |---|---|
-| [Roadmap](roadmap/README.md) | Milestones M0 to M11, dependencies and acceptance criteria |
+| [Roadmap](roadmap/README.md) | Milestones M0 to M13, dependencies and acceptance criteria |
 | [Open questions](open-questions.md) | Decisions still to be made |
