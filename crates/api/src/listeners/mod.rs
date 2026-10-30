@@ -27,6 +27,7 @@ use crate::app::AppState;
 use crate::auth::CurrentUser;
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::settings::{self, StationSettings, StatisticsSettings};
+use crate::stations::Station;
 
 /// The longest range of minute samples in one request.
 const MAX_SAMPLE_RANGE_MS: i64 = 8 * 86_400_000;
@@ -55,13 +56,26 @@ pub struct ListenersNow {
 /// Each output's listeners at the last minute, and the station's.
 #[utoipa::path(get, path = "/listeners/now", tag = "listeners",
     responses((status = 200, body = ListenersNow), (status = "4XX", body = ErrorBody)))]
-async fn now(_user: CurrentUser, State(state): State<AppState>) -> Json<ListenersNow> {
-    let outputs = state.listeners.last();
+async fn now(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    station: Station,
+) -> ApiResult<Json<ListenersNow>> {
+    let ids: Vec<u64> = sqlx::query_scalar("SELECT id FROM outputs WHERE station_id = ?")
+        .bind(station.id())
+        .fetch_all(&state.pool)
+        .await?;
+    let outputs: Vec<OutputListeners> = state
+        .listeners
+        .last()
+        .into_iter()
+        .filter(|output| ids.contains(&output.output_id))
+        .collect();
     let read: Vec<u32> = outputs.iter().filter_map(|o| o.listeners).collect();
-    Json(ListenersNow {
+    Ok(Json(ListenersNow {
         total: (!read.is_empty()).then(|| read.iter().sum()),
         outputs,
-    })
+    }))
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -90,6 +104,7 @@ pub struct MinuteSample {
 async fn samples(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Query(query): Query<SamplesQuery>,
 ) -> ApiResult<Json<Vec<MinuteSample>>> {
     if query.to_unix_ms < query.from_unix_ms
@@ -102,9 +117,12 @@ async fn samples(
     let mut sql = sqlx::QueryBuilder::new(
         "SELECT CAST(UNIX_TIMESTAMP(sampled_at) * 1000 AS SIGNED) AS at_unix_ms,
                 CAST(SUM(listeners) AS UNSIGNED) AS listeners
-         FROM listener_samples WHERE sampled_at >= FROM_UNIXTIME(",
+         FROM listener_samples
+         WHERE output_id IN (SELECT id FROM outputs WHERE station_id = ",
     );
-    sql.push_bind(query.from_unix_ms as f64 / 1_000.0)
+    sql.push_bind(station.id())
+        .push(") AND sampled_at >= FROM_UNIXTIME(")
+        .push_bind(query.from_unix_ms as f64 / 1_000.0)
         .push(") AND sampled_at <= FROM_UNIXTIME(")
         .push_bind(query.to_unix_ms as f64 / 1_000.0)
         .push(")");
@@ -206,6 +224,7 @@ type TotalRow = (
 
 async fn total_rows(
     state: &AppState,
+    station: &Station,
     from: Date,
     to: Date,
     output_id: Option<u64>,
@@ -214,9 +233,11 @@ async fn total_rows(
     let mut sql = sqlx::QueryBuilder::new(
         "SELECT CAST(day AS CHAR), hour, minutes, peak, average, listening_hours, sessions,
                 session_s, distinct_listeners
-         FROM listener_totals WHERE day >= ",
+         FROM listener_totals WHERE station_id = ",
     );
-    sql.push_bind(from.to_string())
+    sql.push_bind(station.id())
+        .push(" AND day >= ")
+        .push_bind(from.to_string())
         .push(" AND day <= ")
         .push_bind(to.to_string());
     match output_id {
@@ -318,12 +339,14 @@ fn group_totals(rows: Vec<TotalRow>, grouping: Grouping) -> Vec<PeriodTotals> {
 async fn days(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Query(query): Query<PeriodQuery>,
 ) -> ApiResult<Response> {
     let (from, to) = period(&query.from, &query.to)?;
     let grouping = query.group.unwrap_or_default();
     let rows = total_rows(
         &state,
+        &station,
         from,
         to,
         query.output_id,
@@ -401,10 +424,11 @@ fn hours_from(rows: Vec<TotalRow>) -> Vec<HourOfDay> {
 async fn hours_of_day(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Query(query): Query<HoursQuery>,
 ) -> ApiResult<Response> {
     let (from, to) = period(&query.from, &query.to)?;
-    let hours = hours_from(total_rows(&state, from, to, query.output_id, true).await?);
+    let hours = hours_from(total_rows(&state, &station, from, to, query.output_id, true).await?);
     Ok(match query.format.unwrap_or_default() {
         Format::Json => Json(hours).into_response(),
         Format::Csv => csv_response(
@@ -470,6 +494,7 @@ type TrackRow = (
 async fn tracks(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Query(query): Query<TracksQuery>,
 ) -> ApiResult<Response> {
     let (from, to) = period(&query.from, &query.to)?;
@@ -477,15 +502,16 @@ async fn tracks(
     if !(1..=500).contains(&limit) {
         return Err(ApiError::BadRequest("limit is 1 to 500".to_owned()));
     }
-    let station: StationSettings =
-        settings::load(&state.pool, StationSettings::SETTINGS_NAME).await?;
-    let tz = station.time_zone();
+    let settings: StationSettings =
+        settings::load_for(&state.pool, station.id(), StationSettings::SETTINGS_NAME).await?;
+    let tz = settings.time_zone();
     let statistics: StatisticsSettings =
         settings::load(&state.pool, StatisticsSettings::SETTINGS_NAME).await?;
     let (start, _) = totals::day_bounds(from, &tz);
     let (_, end) = totals::day_bounds(to, &tz);
     let mut tracks = track_listeners(
         &state.pool,
+        station.id(),
         (start, end),
         statistics.min_session_s,
         query.min_plays.unwrap_or(3),
@@ -504,6 +530,7 @@ async fn tracks(
 /// The tracks played between two times (Unix ms), by departure rate.
 pub async fn track_listeners(
     pool: &sqlx::MySqlPool,
+    station_id: u64,
     (start, end): (i64, i64),
     min_session_s: u32,
     min_plays: u32,
@@ -516,21 +543,26 @@ pub async fn track_listeners(
                 CAST(SUM(p.start_l) AS SIGNED), CAST(SUM(p.dep) AS SIGNED),
                 CAST(MAX(p.lists) AS SIGNED)
          FROM (SELECT h.track_id,
-                 (SELECT SUM(s.listeners) FROM listener_samples s
-                  WHERE s.sampled_at = TIMESTAMP(DATE_FORMAT(h.started_at, '%Y-%m-%d %H:%i:00')))
+                 (SELECT SUM(s.listeners) FROM listener_samples s JOIN outputs o ON o.id = s.output_id
+                  WHERE o.station_id = h.station_id
+                    AND s.sampled_at = TIMESTAMP(DATE_FORMAT(h.started_at, '%Y-%m-%d %H:%i:00')))
                    AS start_l,
-                 (SELECT SUM(s.listeners) FROM listener_samples s
-                  WHERE s.sampled_at = TIMESTAMP(DATE_FORMAT(h.ended_at, '%Y-%m-%d %H:%i:00')))
+                 (SELECT SUM(s.listeners) FROM listener_samples s JOIN outputs o ON o.id = s.output_id
+                  WHERE o.station_id = h.station_id
+                    AND s.sampled_at = TIMESTAMP(DATE_FORMAT(h.ended_at, '%Y-%m-%d %H:%i:00')))
                    AS end_l,
-                 (SELECT MAX(s.sessions) FROM listener_samples s
-                  WHERE s.sampled_at = TIMESTAMP(DATE_FORMAT(h.started_at, '%Y-%m-%d %H:%i:00')))
+                 (SELECT MAX(s.sessions) FROM listener_samples s JOIN outputs o ON o.id = s.output_id
+                  WHERE o.station_id = h.station_id
+                    AND s.sampled_at = TIMESTAMP(DATE_FORMAT(h.started_at, '%Y-%m-%d %H:%i:00')))
                    AS lists,
-                 (SELECT COUNT(*) FROM listener_sessions x
-                  WHERE x.ended_at >= h.started_at - INTERVAL 30 SECOND
+                 (SELECT COUNT(*) FROM listener_sessions x JOIN outputs o ON o.id = x.output_id
+                  WHERE o.station_id = h.station_id
+                    AND x.ended_at >= h.started_at - INTERVAL 30 SECOND
                     AND x.ended_at < h.ended_at - INTERVAL 30 SECOND
                     AND x.duration_s >= ? AND NOT x.split) AS dep
                FROM play_history h
-               WHERE h.deck <> 'fx' AND h.track_id IS NOT NULL AND h.ended_at IS NOT NULL
+               WHERE h.station_id = ? AND h.deck <> 'fx' AND h.track_id IS NOT NULL
+                 AND h.ended_at IS NOT NULL
                  AND h.started_at >= FROM_UNIXTIME(?) AND h.started_at < FROM_UNIXTIME(?)) p
          JOIN tracks t ON t.id = p.track_id
          WHERE p.start_l IS NOT NULL
@@ -538,6 +570,7 @@ pub async fn track_listeners(
          HAVING COUNT(*) >= ?",
     )
     .bind(min_session_s)
+    .bind(station_id)
     .bind(start as f64 / 1_000.0)
     .bind(end as f64 / 1_000.0)
     .bind(min_plays)
@@ -605,6 +638,7 @@ pub struct PlayerListening {
 async fn players(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Query(query): Query<PlayersQuery>,
 ) -> ApiResult<Json<Vec<PlayerListening>>> {
     let (from, to) = period(&query.from, &query.to)?;
@@ -617,9 +651,12 @@ async fn players(
     let mut sql = sqlx::QueryBuilder::new(
         "SELECT user_agent, COUNT(*) AS sessions,
                 CAST(SUM(duration_s) / 3600 AS DOUBLE) AS listening_hours
-         FROM listener_sessions WHERE day >= ",
+         FROM listener_sessions
+         WHERE output_id IN (SELECT id FROM outputs WHERE station_id = ",
     );
-    sql.push_bind(from.to_string())
+    sql.push_bind(station.id())
+        .push(") AND day >= ")
+        .push_bind(from.to_string())
         .push(" AND day <= ")
         .push_bind(to.to_string())
         .push(" AND duration_s >= ")

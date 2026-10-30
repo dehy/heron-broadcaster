@@ -694,8 +694,12 @@ async fn apply(
         .iter()
         .map(|choice| (choice.id, choice.clone()))
         .collect();
-    let playout: PlayoutSettings =
-        settings::load(&state.pool, PlayoutSettings::SETTINGS_NAME).await?;
+    let playout: PlayoutSettings = settings::load_for(
+        &state.pool,
+        state.stations.first().id(),
+        PlayoutSettings::SETTINGS_NAME,
+    )
+    .await?;
 
     let mut tx = state.pool.begin().await?;
     let import_id = sqlx::query("INSERT INTO track_imports (created_by, summary) VALUES (?, '{}')")
@@ -893,7 +897,7 @@ async fn apply(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    state.queue.wake();
+    state.stations.wake_all();
     tracing::info!(user = %user.username, import_id, tracks = summary.tracks, "tracks imported");
     Ok(Json(find_import(&state, import_id).await?))
 }
@@ -1157,7 +1161,7 @@ async fn undo(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    state.queue.wake();
+    state.stations.wake_all();
     tracing::info!(user = %user.username, import_id = id, "import undone");
     Ok(Json(find_import(&state, id).await?))
 }

@@ -19,6 +19,7 @@ use utoipa_axum::routes;
 use crate::app::AppState;
 use crate::engine::{DeckName, PlayerState, unix_ms};
 use crate::error::{ApiError, ApiResult, ErrorBody};
+use crate::stations::Station;
 
 /// What plays on air.
 #[derive(Clone, Debug, PartialEq, Serialize, ToSchema)]
@@ -138,10 +139,11 @@ const NO_METADATA: &str = "(EXISTS (SELECT 1 FROM track_categories tc
     responses((status = 200, body = NowPlaying)))]
 async fn now_playing(
     State(state): State<AppState>,
+    station: Station,
 ) -> ([(header::HeaderName, &'static str); 1], Json<NowPlaying>) {
     let now = unix_ms(SystemTime::now());
     let mut jingle = false;
-    let track = state.engine.state().borrow().as_ref().and_then(|player| {
+    let track = station.engine.state().borrow().as_ref().and_then(|player| {
         player
             .decks
             .iter()
@@ -164,10 +166,12 @@ async fn now_playing(
     });
     let track = match track {
         Some(track) => Some(track),
-        None if jingle => last_song(&state, now).await.unwrap_or_else(|error| {
-            tracing::warn!(%error, "cannot read the last song");
-            None
-        }),
+        None if jingle => last_song(&state, &station, now)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "cannot read the last song");
+                None
+            }),
         None => None,
     };
     (
@@ -185,10 +189,10 @@ async fn now_playing(
 #[utoipa::path(get, path = "/public/queue", tag = "public", security(()),
     responses((status = 200, body = PublicQueue)))]
 async fn public_queue(
-    State(state): State<AppState>,
+    station: Station,
 ) -> ([(header::HeaderName, &'static str); 1], Json<PublicQueue>) {
     let now = unix_ms(SystemTime::now());
-    let upcoming = state
+    let upcoming = station
         .engine
         .state()
         .borrow()
@@ -216,6 +220,7 @@ async fn public_queue(
     responses((status = 200, body = Vec<PublicPlay>), (status = "4XX", body = ErrorBody)))]
 async fn public_history(
     State(state): State<AppState>,
+    station: Station,
     Query(query): Query<PublicHistoryQuery>,
 ) -> ApiResult<(
     [(header::HeaderName, &'static str); 1],
@@ -231,9 +236,11 @@ async fn public_history(
                 CAST(UNIX_TIMESTAMP(h.started_at) * 1000 AS SIGNED) AS started_at_unix_ms,
                 CAST(UNIX_TIMESTAMP(h.ended_at) * 1000 AS SIGNED) AS ended_at_unix_ms
          FROM play_history h LEFT JOIN tracks t ON t.id = h.track_id
-         WHERE h.deck <> 'fx' AND NOT ",
+         WHERE h.deck <> 'fx' AND h.station_id = ",
     );
-    sql.push(NO_METADATA);
+    sql.push_bind(station.id())
+        .push(" AND NOT ")
+        .push(NO_METADATA);
     if let Some(before) = query.before {
         sql.push(" AND h.started_at < FROM_UNIXTIME(")
             .push_bind(before as f64 / 1_000.0)
@@ -247,7 +254,11 @@ async fn public_history(
 
 /// The last song (a track that sends metadata) that played on the decks,
 /// shown while a jingle plays. Its position may be past its end: it ended.
-async fn last_song(state: &AppState, now: u64) -> ApiResult<Option<PublicTrack>> {
+async fn last_song(
+    state: &AppState,
+    station: &Station,
+    now: u64,
+) -> ApiResult<Option<PublicTrack>> {
     type Row = (
         Option<String>,
         Option<String>,
@@ -259,9 +270,10 @@ async fn last_song(state: &AppState, now: u64) -> ApiResult<Option<PublicTrack>>
         "SELECT COALESCE(h.artist, t.artist), COALESCE(h.title, t.title), t.album,
                     CAST(UNIX_TIMESTAMP(h.started_at) * 1000 AS SIGNED), t.duration_ms
              FROM play_history h LEFT JOIN tracks t ON t.id = h.track_id
-             WHERE h.deck <> 'fx' AND NOT {NO_METADATA}
+             WHERE h.deck <> 'fx' AND h.station_id = ? AND NOT {NO_METADATA}
              ORDER BY h.started_at DESC, h.id DESC LIMIT 1"
     )))
+    .bind(station.id())
     .fetch_optional(&state.pool)
     .await?;
     Ok(row.map(|(artist, title, album, started, duration_ms)| {

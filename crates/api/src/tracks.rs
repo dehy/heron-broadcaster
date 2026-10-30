@@ -25,6 +25,7 @@ use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::settings::{self, ProgrammingSettings};
+use crate::stations::Station;
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -702,6 +703,7 @@ pub struct TrackDetail {
 async fn get_track(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
 ) -> ApiResult<Json<TrackDetail>> {
     let context = ListContext::load(&state.pool).await?;
@@ -762,9 +764,9 @@ async fn get_track(
         .into_keys()
         .collect();
     let markers = crate::import::markers(&state.pool, id).await?;
-    let playout = state.queue.playout(id).await?;
+    let playout = station.queue.playout(id).await?;
     let settings: PlayoutSettings =
-        settings::load(&state.pool, PlayoutSettings::SETTINGS_NAME).await?;
+        settings::load_for(&state.pool, station.id(), PlayoutSettings::SETTINGS_NAME).await?;
     Ok(Json(TrackDetail {
         summary,
         file,
@@ -842,6 +844,7 @@ pub struct TrackPatch {
 async fn patch_track(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
     Json(patch): Json<TrackPatch>,
 ) -> ApiResult<Json<TrackDetail>> {
@@ -853,7 +856,7 @@ async fn patch_track(
             .execute(&state.pool)
             .await?;
     }
-    get_track(user, State(state), Path(id)).await
+    get_track(user, State(state), station, Path(id)).await
 }
 
 /// Replaces the track's overrides: cue points, Gap Killer, crossfade.
@@ -907,7 +910,7 @@ async fn put_overrides(
         }
         other => other?,
     };
-    state.queue.wake();
+    state.stations.wake_all();
     Ok(Json(load_overrides(&state, id).await?))
 }
 
@@ -925,7 +928,7 @@ async fn delete_overrides(
         .bind(id)
         .execute(&state.pool)
         .await?;
-    state.queue.wake();
+    state.stations.wake_all();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -965,7 +968,7 @@ async fn put_intro(
     .execute(&state.pool)
     .await?;
     // Queued entries of the track follow.
-    state.queue.wake();
+    state.stations.wake_all();
     let markers = crate::import::markers(&state.pool, id).await?;
     Ok(Json(markers.unwrap_or_default()))
 }
@@ -1135,14 +1138,17 @@ pub struct TransitionPreview {
 async fn preview_transition(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(request): Json<TransitionRequest>,
 ) -> ApiResult<Json<TransitionPreview>> {
     let settings = match request.settings {
         Some(settings) => settings,
-        None => settings::load(&state.pool, PlayoutSettings::SETTINGS_NAME).await?,
+        None => {
+            settings::load_for(&state.pool, station.id(), PlayoutSettings::SETTINGS_NAME).await?
+        }
     };
-    let outgoing = state.queue.playout(request.from_track_id).await?;
-    let incoming = state.queue.playout(request.to_track_id).await?;
+    let outgoing = station.queue.playout(request.from_track_id).await?;
+    let incoming = station.queue.playout(request.to_track_id).await?;
     let transition = plan_transition(&outgoing, &incoming, &settings.crossfade);
     let ramp = |ramp: heron_core::playout::Ramp| RampView {
         start_ms: ramp.start_ms,

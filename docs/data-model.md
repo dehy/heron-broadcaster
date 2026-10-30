@@ -65,7 +65,7 @@ See [Several stations](stations.md) ([M13](roadmap/m13-several-stations.md)).
 
 | Table | Columns |
 |---|---|
-| `stations` | id, name, code (unique), time_zone, engine_url, enabled, position |
+| `stations` | id, name, code (unique), engine_url (none: `HERON_ENGINE_URL`, the first station), enabled, position; its time zone is in its `station` settings |
 | `category_stations` | category_id, station_id — the stations a category is used on |
 | `medley_stations` | medley_id, station_id, position (0: the medley's first station) |
 | `restriction_stations` | restriction_id, station_id — none: every station |

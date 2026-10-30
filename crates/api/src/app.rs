@@ -21,17 +21,15 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::auth::{Passwords, SESSION_COOKIE};
-use crate::engine::EngineLink;
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::library::{Library, LibraryStatus};
 use crate::listeners::Collector;
-use crate::queue::QueueManager;
-use crate::sync::ConfigSync;
+use crate::stations::Stations;
 use crate::webhooks::Webhooks;
 use crate::{
     artists, categories, category_types, clocks, eq, history, import, labels, librarian, listeners,
     live, medleys, outputs, player, public, restrictions, rotation, selection, settings, staging,
-    tracks, users, webhooks,
+    stations, tracks, users, webhooks,
 };
 
 pub const SERVICE: &str = "heron-api";
@@ -41,17 +39,14 @@ pub struct AppState {
     pub pool: MySqlPool,
     pub health: DatabaseHealth,
     pub library: Arc<Library>,
-    pub engine: Arc<EngineLink>,
-    pub queue: Arc<QueueManager>,
-    pub sync: Arc<ConfigSync>,
+    /// Every station's engine, queue manager and configuration sync.
+    pub stations: Arc<Stations>,
     pub passwords: Arc<Passwords>,
     /// The buffer zone, as mounted in this container (read-write).
     pub staging: Arc<std::path::PathBuf>,
     pub webhooks: Arc<Webhooks>,
     /// Listener statistics from the stream servers.
     pub listeners: Arc<Collector>,
-    /// Deck EQ settings as they change, for the live WebSockets.
-    pub eq_changes: tokio::sync::broadcast::Sender<heron_core::EqSettings>,
 }
 
 #[derive(OpenApi)]
@@ -80,7 +75,8 @@ pub struct AppState {
         (name = "artists", description = "Artists, their names and similar artists"),
         (name = "rotation", description = "Clocks, the schedule, restrictions, the selection log and simulations"),
         (name = "history", description = "What was played"),
-        (name = "settings", description = "Station settings"),
+        (name = "stations", description = "The stations, each with its own engine and programming"),
+        (name = "settings", description = "Settings: shared ones, and each station's own"),
         (name = "outputs", description = "Encoder profiles and outputs"),
         (name = "listeners", description = "Listener statistics, from the stream servers"),
         (name = "live", description = "Live state over a WebSocket"),
@@ -111,6 +107,7 @@ fn api() -> OpenApiRouter<AppState> {
         .routes(routes!(status))
         .routes(routes!(library_status))
         .merge(users::router())
+        .merge(stations::router())
         .merge(player::router())
         .merge(tracks::router())
         .merge(selection::router())
@@ -136,11 +133,69 @@ fn api() -> OpenApiRouter<AppState> {
 }
 
 /// The OpenAPI document, as served.
+///
+/// Each route of a station is documented twice: under
+/// `/api/v1/stations/{station_id}/…`, and as the single-station route that
+/// serves the first station (`/api/v1/queue`…). The public routes are also
+/// documented under `/api/v1/public/stations/{code}/…`.
 pub fn openapi() -> utoipa::openapi::OpenApi {
+    use utoipa::openapi::path::{Operation, ParameterBuilder, ParameterIn};
+    use utoipa::openapi::{ObjectBuilder, Required, Type};
+
     let (_, mut openapi) = OpenApiRouter::<AppState>::with_openapi(ApiDoc::openapi())
         .nest("/api/v1", api())
         .split_for_parts();
     openapi.info.version = env!("CARGO_PKG_VERSION").to_owned();
+    let mut added = Vec::new();
+    for (path, item) in &openapi.paths.paths {
+        let (station_path, name, kind, description) = if stations::per_station_path(path) {
+            let rest = path.trim_start_matches("/api/v1/");
+            (
+                format!("/api/v1/stations/{{station_id}}/{rest}"),
+                "station_id",
+                Type::Integer,
+                "The station's ID",
+            )
+        } else if let Some(rest) = stations::public_path(path) {
+            (
+                format!("/api/v1/public/stations/{{code}}/{rest}"),
+                "code",
+                Type::String,
+                "The station's code",
+            )
+        } else {
+            continue;
+        };
+        let parameter = ParameterBuilder::new()
+            .name(name)
+            .parameter_in(ParameterIn::Path)
+            .required(Required::True)
+            .description(Some(description))
+            .schema(Some(ObjectBuilder::new().schema_type(kind)))
+            .build();
+        let mut item = item.clone();
+        let operations: [&mut Option<Operation>; 8] = [
+            &mut item.get,
+            &mut item.put,
+            &mut item.post,
+            &mut item.delete,
+            &mut item.options,
+            &mut item.head,
+            &mut item.patch,
+            &mut item.trace,
+        ];
+        for operation in operations.into_iter().flatten() {
+            if let Some(id) = &mut operation.operation_id {
+                id.push_str("_on_station");
+            }
+            operation
+                .parameters
+                .get_or_insert_with(Vec::new)
+                .insert(0, parameter.clone().into());
+        }
+        added.push((station_path, item));
+    }
+    openapi.paths.paths.extend(added);
     openapi
 }
 
@@ -149,7 +204,8 @@ pub fn router(state: AppState) -> Router {
         .nest("/api/v1", api())
         .split_for_parts();
     let document = Arc::new(openapi());
-    router
+    let stations = Arc::clone(&state.stations);
+    let router = router
         .route(
             "/api/v1/openapi.json",
             axum::routing::get(move || {
@@ -157,7 +213,12 @@ pub fn router(state: AppState) -> Router {
                 async move { Json(document.as_ref().clone()) }
             }),
         )
-        .with_state(state)
+        .with_state(state);
+    // Routing happens after the station's prefix is taken off the path.
+    let rewritten = tower::ServiceExt::map_request(router, move |request| {
+        stations::rewrite(&stations, request)
+    });
+    Router::new().fallback_service(rewritten)
 }
 
 #[derive(Serialize, ToSchema)]
@@ -187,7 +248,7 @@ async fn status(State(state): State<AppState>) -> Json<Status> {
         service: SERVICE,
         version: env!("CARGO_PKG_VERSION"),
         database,
-        engine: if state.engine.is_connected() {
+        engine: if state.stations.first().engine.is_connected() {
             "ok"
         } else {
             "unavailable"
@@ -249,5 +310,8 @@ mod tests {
             }
         }
         assert!(document["paths"]["/api/v1/live"]["get"].is_object());
+        assert!(document["paths"]["/api/v1/stations/{station_id}/queue"]["get"].is_object());
+        assert!(document["paths"]["/api/v1/public/stations/{code}/now-playing"]["get"].is_object());
+        assert!(document["paths"]["/api/v1/stations/{station_id}/tracks"].is_null());
     }
 }

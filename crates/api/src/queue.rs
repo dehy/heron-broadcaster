@@ -36,6 +36,7 @@ const NOTHING_TO_PICK: Duration = Duration::from_secs(30);
 pub struct QueueManager {
     pool: MySqlPool,
     engine: Arc<EngineLink>,
+    station_id: u64,
     wake: Notify,
     /// Rotation could pick nothing: no new try before then.
     idle_until: Mutex<Option<Instant>>,
@@ -179,10 +180,11 @@ impl TrackRow {
 }
 
 impl QueueManager {
-    pub fn new(pool: MySqlPool, engine: Arc<EngineLink>) -> Arc<Self> {
+    pub fn new(pool: MySqlPool, engine: Arc<EngineLink>, station_id: u64) -> Arc<Self> {
         Arc::new(Self {
             pool,
             engine,
+            station_id,
             wake: Notify::new(),
             idle_until: Mutex::new(None),
         })
@@ -277,7 +279,7 @@ impl QueueManager {
     /// Adds the tracks rotation picks until `min_queued` are waiting.
     async fn fill(&self, state: &PlayerState) -> ApiResult<()> {
         let settings: QueueSettings =
-            settings::load(&self.pool, QueueSettings::SETTINGS_NAME).await?;
+            settings::load_for(&self.pool, self.station_id, QueueSettings::SETTINGS_NAME).await?;
         // A cued fallback track gives way to anything queued.
         let waiting = state
             .waiting()
@@ -287,12 +289,12 @@ impl QueueManager {
         if !settings.autofill || missing == 0 || self.idle() {
             return Ok(());
         }
-        let library = rotation::load_library(&self.pool).await?;
+        let library = rotation::load_library(&self.pool, self.station_id).await?;
         let now = rotation::now_ms();
-        let history = rotation::load_history(&self.pool, &library, now).await?;
+        let history = rotation::load_history(&self.pool, self.station_id, &library, now).await?;
         let (planned, mut at) = rotation::planned_starts(state, now);
         let mut history = rotation::with_queue(&self.pool, &library, history, &planned).await?;
-        let mut last = rotation::last_position(&self.pool).await?;
+        let mut last = rotation::last_position(&self.pool, self.station_id).await?;
         let mut rng = Rng::new(rotation::seed());
         let mut picks = Vec::new();
         for _ in 0..missing {
@@ -327,7 +329,7 @@ impl QueueManager {
         let entry_ids = self.engine.enqueue(tracks, None).await?;
         for (pick, entry_id) in picks.iter().zip(&entry_ids) {
             let entry = (state.engine_started_at_unix_ms, *entry_id);
-            rotation::record_pick(&self.pool, pick, Some(entry)).await?;
+            rotation::record_pick(&self.pool, self.station_id, pick, Some(entry)).await?;
         }
         tracing::info!(
             tracks = ids.len(),

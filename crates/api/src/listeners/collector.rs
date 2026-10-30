@@ -99,6 +99,12 @@ fn seconds(ms: i64) -> f64 {
     ms as f64 / 1_000.0
 }
 
+async fn station_ids(pool: &MySqlPool) -> ApiResult<Vec<u64>> {
+    Ok(sqlx::query_scalar("SELECT id FROM stations ORDER BY id")
+        .fetch_all(pool)
+        .await?)
+}
+
 fn truncate(text: &str, chars: usize) -> String {
     text.chars().take(chars).collect()
 }
@@ -170,11 +176,12 @@ impl Collector {
         }
     }
 
-    async fn targets(&self) -> ApiResult<Vec<Target>> {
+    async fn targets(&self, station_id: u64) -> ApiResult<Vec<Target>> {
         let rows: Vec<(u64, String, String, String, Option<String>)> = sqlx::query_as(
             "SELECT id, name, CAST(kind AS CHAR), CAST(config AS CHAR), CAST(statistics AS CHAR)
-             FROM outputs WHERE enabled ORDER BY id",
+             FROM outputs WHERE enabled AND station_id = ? ORDER BY id",
         )
+        .bind(station_id)
         .fetch_all(&self.pool)
         .await?;
         let mut targets = Vec::new();
@@ -200,14 +207,45 @@ impl Collector {
         Ok(targets)
     }
 
-    /// Reads every server and records the minute of `now_ms`.
+    /// Reads every station's servers and records the minute of `now_ms`.
     pub async fn poll(&self, now_ms: i64) -> ApiResult<()> {
-        let station: StationSettings =
-            settings::load(&self.pool, StationSettings::SETTINGS_NAME).await?;
-        let tz = station.time_zone();
         let statistics: StatisticsSettings =
             settings::load(&self.pool, StatisticsSettings::SETTINGS_NAME).await?;
-        let targets = self.targets().await?;
+        let mut last = Vec::new();
+        let mut earliest_today: Option<Date> = None;
+        for station_id in station_ids(&self.pool).await? {
+            let today = self
+                .poll_station(station_id, now_ms, &statistics, &mut last)
+                .await?;
+            earliest_today = Some(earliest_today.map_or(today, |earliest| earliest.min(today)));
+        }
+        // Today's key is all the next sessions need: keys of earlier days
+        // go, so that days cannot be linked. Stations in other time zones
+        // may still be on the day before.
+        if let Some(today) = earliest_today {
+            sqlx::query("DELETE FROM listener_day_keys WHERE day < ?")
+                .bind(today.to_string())
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Ok(mut stored) = self.last.write() {
+            *stored = last;
+        }
+        Ok(())
+    }
+
+    /// Reads a station's servers. Returns the station's day.
+    async fn poll_station(
+        &self,
+        station_id: u64,
+        now_ms: i64,
+        statistics: &StatisticsSettings,
+        last: &mut Vec<OutputListeners>,
+    ) -> ApiResult<Date> {
+        let station: StationSettings =
+            settings::load_for(&self.pool, station_id, StationSettings::SETTINGS_NAME).await?;
+        let tz = station.time_zone();
+        let targets = self.targets(station_id).await?;
 
         // One status request per server, every listener list at once.
         let mut requests = JoinSet::new();
@@ -254,7 +292,6 @@ impl Collector {
         let (today_start, _) = totals::day_bounds(today, &tz);
         let day_key = self.day_key(today).await?;
         let mut days = BTreeSet::from([today]);
-        let mut last = Vec::new();
         for target in targets {
             let mut now = OutputListeners {
                 output_id: target.id,
@@ -324,18 +361,10 @@ impl Collector {
         }
 
         for day in days {
-            self.recompute(day, &tz, statistics.min_session_s).await?;
+            self.recompute(station_id, day, &tz, statistics.min_session_s)
+                .await?;
         }
-        // Today's key is all the next sessions need: keys of earlier days
-        // go, so that days cannot be linked.
-        sqlx::query("DELETE FROM listener_day_keys WHERE day < ?")
-            .bind(today.to_string())
-            .execute(&self.pool)
-            .await?;
-        if let Ok(mut stored) = self.last.write() {
-            *stored = last;
-        }
-        Ok(())
+        Ok(today)
     }
 
     /// The day's key, made the first time it is needed.
@@ -474,16 +503,24 @@ impl Collector {
         Ok(())
     }
 
-    /// Recomputes a day's totals from its samples and sessions. A day
-    /// without samples (purged, or before statistics) keeps its totals.
-    pub async fn recompute(&self, day: Date, tz: &TimeZone, min_session_s: u32) -> ApiResult<()> {
+    /// Recomputes a station's day totals from its samples and sessions. A
+    /// day without samples (purged, or before statistics) keeps its totals.
+    pub async fn recompute(
+        &self,
+        station_id: u64,
+        day: Date,
+        tz: &TimeZone,
+        min_session_s: u32,
+    ) -> ApiResult<()> {
         let (start, end) = totals::day_bounds(day, tz);
         let samples: Vec<(u64, i64, u32, bool)> = sqlx::query_as(
-            "SELECT output_id, CAST(UNIX_TIMESTAMP(sampled_at) * 1000 AS SIGNED), listeners,
-                    sessions
-             FROM listener_samples
-             WHERE sampled_at >= FROM_UNIXTIME(?) AND sampled_at < FROM_UNIXTIME(?)",
+            "SELECT s.output_id, CAST(UNIX_TIMESTAMP(s.sampled_at) * 1000 AS SIGNED), s.listeners,
+                    s.sessions
+             FROM listener_samples s JOIN outputs o ON o.id = s.output_id
+             WHERE o.station_id = ?
+               AND s.sampled_at >= FROM_UNIXTIME(?) AND s.sampled_at < FROM_UNIXTIME(?)",
         )
+        .bind(station_id)
         .bind(seconds(start))
         .bind(seconds(end))
         .fetch_all(&self.pool)
@@ -501,11 +538,13 @@ impl Collector {
             })
             .collect();
         let spans: Vec<(u64, Vec<u8>, i64, i64, u32)> = sqlx::query_as(
-            "SELECT output_id, listener_key,
-                    CAST(UNIX_TIMESTAMP(started_at) * 1000 AS SIGNED),
-                    CAST(UNIX_TIMESTAMP(last_seen_at) * 1000 AS SIGNED), duration_s
-             FROM listener_sessions WHERE day = ?",
+            "SELECT s.output_id, s.listener_key,
+                    CAST(UNIX_TIMESTAMP(s.started_at) * 1000 AS SIGNED),
+                    CAST(UNIX_TIMESTAMP(s.last_seen_at) * 1000 AS SIGNED), s.duration_s
+             FROM listener_sessions s JOIN outputs o ON o.id = s.output_id
+             WHERE o.station_id = ? AND s.day = ?",
         )
+        .bind(station_id)
         .bind(day.to_string())
         .fetch_all(&self.pool)
         .await?;
@@ -522,22 +561,24 @@ impl Collector {
             })
             .collect();
         let rows = totals::day_totals(&samples, &spans, tz, min_session_s);
-        self.store(day, &rows).await
+        self.store(station_id, day, &rows).await
     }
 
-    async fn store(&self, day: Date, rows: &[Total]) -> ApiResult<()> {
+    async fn store(&self, station_id: u64, day: Date, rows: &[Total]) -> ApiResult<()> {
         let mut tx = self.pool.begin().await?;
-        sqlx::query("DELETE FROM listener_totals WHERE day = ?")
+        sqlx::query("DELETE FROM listener_totals WHERE station_id = ? AND day = ?")
+            .bind(station_id)
             .bind(day.to_string())
             .execute(&mut *tx)
             .await?;
         if !rows.is_empty() {
             let mut insert = sqlx::QueryBuilder::new(
-                "INSERT INTO listener_totals (output_id, day, hour, minutes, peak, average,
-                     listening_hours, sessions, session_s, distinct_listeners) ",
+                "INSERT INTO listener_totals (station_id, output_id, day, hour, minutes, peak,
+                     average, listening_hours, sessions, session_s, distinct_listeners) ",
             );
             insert.push_values(rows, |mut values, row| {
                 values
+                    .push_bind(station_id)
                     .push_bind(row.output_id)
                     .push_bind(day.to_string())
                     .push_bind(row.hour)
@@ -555,26 +596,30 @@ impl Collector {
         Ok(())
     }
 
-    /// Recomputes every day whose samples and sessions are all still kept.
+    /// Recomputes every day whose samples and sessions are all still kept,
+    /// on every station.
     async fn recompute_kept(&self, now_ms: i64) -> ApiResult<()> {
-        let station: StationSettings =
-            settings::load(&self.pool, StationSettings::SETTINGS_NAME).await?;
-        let tz = station.time_zone();
         let statistics: StatisticsSettings =
             settings::load(&self.pool, StatisticsSettings::SETTINGS_NAME).await?;
         let cutoff = now_ms - i64::from(statistics.retention_days) * 86_400_000;
-        let today = totals::day_of(now_ms, &tz);
-        let mut day = totals::day_of(cutoff, &tz);
-        let mut days = 0;
-        while day <= today {
-            if totals::day_bounds(day, &tz).0 >= cutoff {
-                self.recompute(day, &tz, statistics.min_session_s).await?;
-                days += 1;
+        for station_id in station_ids(&self.pool).await? {
+            let station: StationSettings =
+                settings::load_for(&self.pool, station_id, StationSettings::SETTINGS_NAME).await?;
+            let tz = station.time_zone();
+            let today = totals::day_of(now_ms, &tz);
+            let mut day = totals::day_of(cutoff, &tz);
+            let mut days = 0;
+            while day <= today {
+                if totals::day_bounds(day, &tz).0 >= cutoff {
+                    self.recompute(station_id, day, &tz, statistics.min_session_s)
+                        .await?;
+                    days += 1;
+                }
+                let Ok(next) = day.tomorrow() else { break };
+                day = next;
             }
-            let Ok(next) = day.tomorrow() else { break };
-            day = next;
+            tracing::info!(station = station_id, days, "listener totals recomputed");
         }
-        tracing::info!(days, "listener totals recomputed");
         Ok(())
     }
 

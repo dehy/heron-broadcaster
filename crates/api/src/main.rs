@@ -34,6 +34,7 @@ mod rotation;
 mod selection;
 mod settings;
 mod staging;
+mod stations;
 mod sync;
 mod tracks;
 mod users;
@@ -187,38 +188,32 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     }
 
     let library = Arc::new(Library::new(pool.clone(), cli.library_dir));
-    let engine = engine::EngineLink::new(&cli.engine_url)
-        .with_context(|| format!("invalid engine URL {}", cli.engine_url))?;
-    let queue = queue::QueueManager::new(pool.clone(), Arc::clone(&engine));
-    let sync = sync::ConfigSync::new(pool.clone(), Arc::clone(&engine));
-
-    let mut tasks = engine.spawn();
-    let history_events = engine.events();
-    let webhook_events = engine.events();
     let webhooks = webhooks::Webhooks::new(pool.clone()).context("cannot set up webhooks")?;
+    let stations = stations::Stations::start(
+        pool.clone(),
+        cli.engine_url,
+        std::env::var("HERON_STATION_NAME").ok(),
+        Arc::clone(&webhooks),
+    )
+    .await
+    .context("cannot start the stations")?;
     let listeners =
         listeners::Collector::new(pool.clone()).context("cannot set up listener statistics")?;
-    tasks.push(tokio::spawn(library.clone().run(ScanOptions {
-        interval: Duration::from_secs(cli.scan_interval.max(60)),
-        watch: cli.library_watch,
-        settle: Duration::from_secs(cli.import_settle),
-    })));
-    tasks.push(tokio::spawn(
-        history::HistoryRecorder::new(pool.clone()).run(history_events),
-    ));
-    tasks.push(tokio::spawn(Arc::clone(&webhooks).dispatch(webhook_events)));
-    tasks.push(tokio::spawn(
-        Arc::clone(&webhooks).watch_queue(engine.state()),
-    ));
-    tasks.push(tokio::spawn(Arc::clone(&webhooks).send_loop()));
+
+    let mut tasks = vec![
+        tokio::spawn(library.clone().run(ScanOptions {
+            interval: Duration::from_secs(cli.scan_interval.max(60)),
+            watch: cli.library_watch,
+            settle: Duration::from_secs(cli.import_settle),
+        })),
+        tokio::spawn(Arc::clone(&webhooks).send_loop()),
+    ];
     tasks.push(tokio::spawn(Arc::clone(&listeners).run()));
-    tasks.push(tokio::spawn(Arc::clone(&queue).run()));
     tasks.push(tokio::spawn(artists::run_linker(
         pool.clone(),
-        Arc::clone(&queue),
+        Arc::clone(&stations),
     )));
     tasks.push(tokio::spawn(medleys::run_linker(pool.clone())));
-    tasks.push(tokio::spawn(Arc::clone(&sync).run()));
     tasks.push(tokio::spawn(users::purge_sessions(pool.clone())));
 
     let health = DatabaseHealth(pool.clone());
@@ -226,14 +221,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         pool: pool.clone(),
         health: health.clone(),
         library,
-        engine,
-        queue,
-        sync,
+        stations,
         passwords: Arc::new(Passwords::default()),
         staging: Arc::new(cli.staging_dir),
         webhooks,
         listeners,
-        eq_changes: tokio::sync::broadcast::channel(16).0,
     };
     let router = app::router(state).merge(heron_service::ops_router(SERVICE, metrics, health));
 
@@ -370,6 +362,8 @@ mod tests {
             "rotation_picks",
             "sessions",
             "settings",
+            "station_settings",
+            "stations",
             "track_analysis",
             "track_artists",
             "track_categories",
@@ -418,5 +412,121 @@ mod tests {
         assert!(duplicate.is_err());
         tx.rollback().await.unwrap();
         db.drop().await;
+    }
+
+    /// An existing Heron upgrades to one station holding all it had: its
+    /// clocks, schedule, history, selection log, outputs, webhooks,
+    /// listener totals and per-station settings.
+    #[tokio::test]
+    async fn an_existing_heron_becomes_its_first_station() {
+        const STATIONS: i64 = 20261117000000;
+        let Ok(admin_url) = std::env::var("HERON_TEST_DATABASE_URL") else {
+            return;
+        };
+        let admin_url = admin_url.trim_end_matches('/').to_owned();
+        let name = format!("heron_upgrade_{}", std::process::id());
+        let admin = sqlx::MySqlPool::connect(&admin_url).await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE `{name}`")))
+            .execute(&admin)
+            .await
+            .unwrap();
+        let pool = sqlx::MySqlPool::connect(&format!("{admin_url}/{name}"))
+            .await
+            .unwrap();
+
+        // A Heron of one station, before M13.
+        MIGRATOR.run_to(STATIONS - 1, &pool).await.unwrap();
+        sqlx::raw_sql(
+            "INSERT INTO settings (name, value) VALUES
+                 ('station', '{\"timezone\": \"Europe/Paris\"}'),
+                 ('playout', '{}'), ('queue', '{\"autofill\": false, \"min_queued\": 4}'),
+                 ('library', '{}');
+             INSERT INTO clocks (id, name) VALUES (7, 'Morning');
+             INSERT INTO clock_schedule (day_of_week, hour, clock_id) VALUES (1, 6, 7);
+             INSERT INTO play_history (title, started_at, deck, source)
+                 VALUES ('Song', NOW(6), 'a', 'rotation');
+             INSERT INTO rotation_picks (planned_at, step, explanation)
+                 VALUES (NOW(6), 0, '{}');
+             INSERT INTO outputs (name, kind, encoder_profile_id, config)
+                 SELECT 'Main', 'icecast', MIN(id), '{}' FROM encoder_profiles;
+             INSERT INTO webhooks (name, url, events, secret)
+                 VALUES ('Site', 'https://example.org/hook', '[]', 'whsec');
+             INSERT INTO listener_totals (output_id, day, minutes, peak, average, listening_hours)
+                 VALUES (NULL, '2026-10-01', 60, 3, 1.5, 1.5);",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        MIGRATOR.run(&pool).await.unwrap();
+
+        let stations: Vec<(u64, String, String, Option<String>, bool)> =
+            sqlx::query_as("SELECT id, name, code, engine_url, enabled FROM stations")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            stations,
+            [(1, String::new(), "main".to_owned(), None, true)]
+        );
+        for table in [
+            "clocks",
+            "clock_schedule",
+            "play_history",
+            "rotation_picks",
+            "outputs",
+            "webhooks",
+            "listener_totals",
+        ] {
+            let elsewhere: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM {table} WHERE station_id <> 1"
+            )))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            let first: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM {table} WHERE station_id = 1"
+            )))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!((first, elsewhere), (1, 0), "{table}");
+        }
+        let moved: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM station_settings WHERE station_id = 1 ORDER BY name",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(moved, ["playout", "queue", "station"]);
+        let shared: Vec<String> = sqlx::query_scalar("SELECT name FROM settings ORDER BY name")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(shared, ["library"]);
+        let queue: settings::QueueSettings =
+            settings::load_for(&pool, 1, settings::QueueSettings::SETTINGS_NAME)
+                .await
+                .unwrap();
+        assert_eq!((queue.autofill, queue.min_queued), (false, 4));
+
+        // The API names the station from HERON_STATION_NAME.
+        let webhooks = webhooks::Webhooks::new(pool.clone()).unwrap();
+        let stations = stations::Stations::start(
+            pool.clone(),
+            "http://127.0.0.1:9".to_owned(),
+            Some("Hits".to_owned()),
+            webhooks,
+        )
+        .await
+        .unwrap();
+        assert_eq!(stations.first().info().name, "Hits");
+        drop(stations);
+
+        pool.close().await;
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP DATABASE `{name}`")))
+            .execute(&admin)
+            .await
+            .unwrap();
     }
 }

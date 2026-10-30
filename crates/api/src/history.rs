@@ -30,6 +30,7 @@ use crate::app::AppState;
 use crate::auth::CurrentUser;
 use crate::engine::{DeckName, EndReason, LinkEvent, PlayerState, QueueEntry, TrackEvent, unix_ms};
 use crate::error::{ApiError, ApiResult, ErrorBody};
+use crate::stations::Station;
 
 /// A recorded play may be matched with what is on air if their start
 /// times are this close.
@@ -41,6 +42,8 @@ pub struct HistoryRecorder {
     /// `engine_started_at`.
     open: HashMap<u64, u64>,
     engine_started_at: u64,
+    /// The station whose engine this records.
+    station_id: u64,
 }
 
 fn seconds(unix_ms: u64) -> f64 {
@@ -57,11 +60,12 @@ fn source_text(source: PlaySource) -> &'static str {
 }
 
 impl HistoryRecorder {
-    pub fn new(pool: MySqlPool) -> Self {
+    pub fn new(pool: MySqlPool, station_id: u64) -> Self {
         Self {
             pool,
             open: HashMap::new(),
             engine_started_at: 0,
+            station_id,
         }
     }
 
@@ -135,9 +139,10 @@ impl HistoryRecorder {
             None => None,
         };
         let id = sqlx::query(
-            "INSERT INTO play_history (track_id, artist, title, started_at, deck, source)
-             VALUES (?, ?, ?, FROM_UNIXTIME(?), ?, ?)",
+            "INSERT INTO play_history (station_id, track_id, artist, title, started_at, deck, source)
+             VALUES (?, ?, ?, ?, FROM_UNIXTIME(?), ?, ?)",
         )
+        .bind(self.station_id)
         .bind(track_id)
         .bind(&track.artist)
         .bind(&track.title)
@@ -161,9 +166,10 @@ impl HistoryRecorder {
     async fn link_pick(&self, play_id: u64, entry_id: u64) -> ApiResult<()> {
         let linked = sqlx::query(
             "UPDATE rotation_picks SET play_id = ?
-             WHERE engine_started_at = ? AND entry_id = ? AND play_id IS NULL",
+             WHERE station_id = ? AND engine_started_at = ? AND entry_id = ? AND play_id IS NULL",
         )
         .bind(play_id)
+        .bind(self.station_id)
         .bind(self.engine_started_at)
         .bind(entry_id)
         .execute(&self.pool)
@@ -187,7 +193,8 @@ impl HistoryRecorder {
     /// Plays lower the track's weights, requests raise them.
     async fn reweigh(&self, track_id: u64, source: PlaySource) -> ApiResult<()> {
         let settings: RotationSettings =
-            crate::settings::load(&self.pool, RotationSettings::SETTINGS_NAME).await?;
+            crate::settings::load_for(&self.pool, self.station_id, RotationSettings::SETTINGS_NAME)
+                .await?;
         let factor = match source {
             PlaySource::Request => settings.weights.request_factor,
             PlaySource::Rotation | PlaySource::Manual => settings.weights.play_factor,
@@ -230,11 +237,12 @@ impl HistoryRecorder {
             // another, resumes the track on air on whichever deck is free.
             let open: Option<u64> = sqlx::query_scalar(
                 "SELECT id FROM play_history
-                 WHERE ended_at IS NULL AND track_id <=> ? AND title <=> ?
+                 WHERE station_id = ? AND ended_at IS NULL AND track_id <=> ? AND title <=> ?
                    AND (deck = 'fx') = ?
                    AND ABS(TIMESTAMPDIFF(MICROSECOND, started_at, FROM_UNIXTIME(?))) < ?
                  ORDER BY started_at DESC LIMIT 1",
             )
+            .bind(self.station_id)
             .bind(entry.track.track_id)
             .bind(&entry.track.title)
             .bind(deck.deck == DeckName::Fx)
@@ -249,10 +257,12 @@ impl HistoryRecorder {
             self.open.insert(entry.entry_id, id);
             keep.push(id);
         }
-        let open_rows: Vec<u64> =
-            sqlx::query_scalar("SELECT id FROM play_history WHERE ended_at IS NULL")
-                .fetch_all(&self.pool)
-                .await?;
+        let open_rows: Vec<u64> = sqlx::query_scalar(
+            "SELECT id FROM play_history WHERE station_id = ? AND ended_at IS NULL",
+        )
+        .bind(self.station_id)
+        .fetch_all(&self.pool)
+        .await?;
         let mut closed = 0;
         for id in open_rows.into_iter().filter(|id| !keep.contains(id)) {
             // Ended while the API was away: when exactly is unknown.
@@ -320,6 +330,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 async fn list_history(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Query(query): Query<HistoryQuery>,
 ) -> ApiResult<Json<Vec<Play>>> {
     let limit = query.limit.unwrap_or(50);
@@ -333,8 +344,9 @@ async fn list_history(
                 CAST(UNIX_TIMESTAMP(h.ended_at) * 1000 AS SIGNED) AS ended_at_unix_ms,
                 h.played_ms, CAST(h.end_reason AS CHAR) AS end_reason,
                 CAST(h.deck AS CHAR) AS deck, CAST(h.source AS CHAR) AS source
-         FROM play_history h LEFT JOIN tracks t ON t.id = h.track_id WHERE TRUE",
+         FROM play_history h LEFT JOIN tracks t ON t.id = h.track_id WHERE h.station_id = ",
     );
+    sql.push_bind(station.id());
     if let Some(before) = query.before {
         sql.push(" AND h.started_at < FROM_UNIXTIME(")
             .push_bind(before as f64 / 1_000.0)
@@ -424,7 +436,7 @@ mod tests {
         let Some(db) = ScratchDatabase::create().await else {
             return;
         };
-        let mut recorder = HistoryRecorder::new(db.pool.clone());
+        let mut recorder = HistoryRecorder::new(db.pool.clone(), 1);
         let now = unix_ms(SystemTime::now());
 
         // The first engine plays "Release" on deck B, started 60 s ago.
@@ -435,8 +447,8 @@ mod tests {
         recorder.reconcile(&first).await.unwrap();
         // And "Tesla" on deck A had started before, still open.
         sqlx::query(
-            "INSERT INTO play_history (title, started_at, deck, source)
-             VALUES ('Tesla', FROM_UNIXTIME(?), 'a', 'rotation')",
+            "INSERT INTO play_history (station_id, title, started_at, deck, source)
+             VALUES (1, 'Tesla', FROM_UNIXTIME(?), 'a', 'rotation')",
         )
         .bind(seconds(now - 400_000))
         .execute(&db.pool)

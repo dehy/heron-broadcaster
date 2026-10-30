@@ -12,7 +12,7 @@ A **station** has:
 |---|---|
 | **Name** | Shown in the web UI, e.g. `Hits`, `Hits 80` |
 | **Code** | Short, unique, lowercase letters, digits and `-` (e.g. `hits`, `hits80`): shown in badges next to categories and medleys, used in the API's public routes. Can be changed; the API refers to stations by ID |
-| **Time zone** | Its clocks, schedule, restrictions and statistics follow it (the `station` settings of one station today) |
+| **Time zone** | Its clocks, schedule, restrictions and statistics follow it: its `station` settings |
 | **Engine** | The engine that puts it on air: one engine per station ([Engines](#engines)) |
 | **Enabled** | A disabled station is not fed: its engine plays on with what it has queued, then its fallback directory |
 
@@ -108,7 +108,7 @@ A medley is **tagged with the stations it plays on**, like a category: one, seve
 
 - Its rendered track goes into the **rendered medleys' category of each of its stations** (a `medleys` setting of each station), so each station's clocks and FX player find it there. A station without that category set cannot be tagged.
 - Its songs come from **every category its stations can use**, by default; its recipe can narrow them to some categories (only `Hits gold`, or only `80s gold`), as today. The recipe only offers categories tagged with at least one of its stations.
-- Its liners come from the liner categories of **its first station** (the one it was made on, shown first): a medley tagged `hits` and `hits80` says `hits`'s name in its liners on both. *(Open question: see the [milestone](roadmap/m13-several-stations.md#questions).)*
+- Its liners come from the liner categories of **its first station** (the one it was made on, shown first): a medley tagged `hits` and `hits80` says `hits`'s name in its liners on both.
 - The stations' codes show as badges in the medley list and on its page; the list can be filtered by station.
 - Untagging a station is refused while the medley waits in that station's queue; its track leaves that station's rendered medleys' category.
 
@@ -138,7 +138,7 @@ An existing user keeps their role, as their shared role and their role on the fi
 - Track and artist answers carry their plays and last play per station and in total.
 - **Public endpoints** per station: `/api/v1/public/stations/{code}/now-playing`, `/queue`, `/history`.
 - **Webhooks** belong to a station; their deliveries carry the station's code.
-- **Live WebSocket:** each message carries its station; a client subscribes to the stations it shows.
+- **Live WebSocket:** one per station, `/api/v1/stations/{id}/live` (`/api/v1/live` for the first station).
 - **Compatibility:** the routes of a single station (`/queue`, `/player`, `/public/now-playing`…) keep answering, for the first station, until the next major version, so existing scripts and station websites keep working.
 
 ## Web UI

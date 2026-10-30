@@ -11,6 +11,7 @@
 //! part of the engine's configuration: changing them does not reconnect.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -29,6 +30,7 @@ use crate::engine::OutputStatus;
 use crate::error::{ApiError, ApiResult, ErrorBody, is_duplicate, is_still_used};
 use crate::listeners::collector::StoredStatistics;
 use crate::settings::some_or_null;
+use crate::stations::Station;
 
 /// Settings never sent back to clients.
 const SECRET_KEYS: [&str; 1] = ["password"];
@@ -169,8 +171,12 @@ fn parse_json(text: Option<String>) -> serde_json::Value {
 type ProfileRow = (u64, String, String, Option<u16>, u32, u8, Option<String>);
 type OutputRow = (u64, String, String, u64, String, bool, bool);
 
-/// The whole configuration, in the shape the engine takes.
-pub async fn load_config(executor: &mut sqlx::MySqlConnection) -> ApiResult<OutputsConfig> {
+/// The configuration in the shape the engine takes: every encoder profile,
+/// and the outputs of one station, or of all with `None`.
+pub async fn load_config(
+    executor: &mut sqlx::MySqlConnection,
+    station_id: Option<u64>,
+) -> ApiResult<OutputsConfig> {
     let profiles: Vec<ProfileRow> = sqlx::query_as(
         "SELECT id, name, CAST(encoder AS CHAR), bitrate_kbps, sample_rate, channels,
                 CAST(options AS CHAR)
@@ -181,8 +187,10 @@ pub async fn load_config(executor: &mut sqlx::MySqlConnection) -> ApiResult<Outp
     let outputs: Vec<OutputRow> = sqlx::query_as(
         "SELECT id, name, CAST(kind AS CHAR), encoder_profile_id, CAST(config AS CHAR),
                 metadata_enabled, enabled
-         FROM outputs ORDER BY id",
+         FROM outputs WHERE station_id = ? OR ? IS NULL ORDER BY id",
     )
+    .bind(station_id)
+    .bind(station_id)
     .fetch_all(&mut *executor)
     .await?;
     let encoder_profiles = profiles
@@ -231,13 +239,26 @@ fn validate(config: &OutputsConfig) -> ApiResult<()> {
     heron_outputs::Outputs::validate(config).map_err(|error| ApiError::Invalid(error.to_string()))
 }
 
-/// Saves a change made in `tx` if the resulting configuration is valid,
-/// and tells the engine.
-async fn commit(state: &AppState, mut tx: Transaction<'_, MySql>) -> ApiResult<()> {
-    let config = load_config(&mut tx).await?;
-    validate(&config)?;
+/// Saves a change made in `tx` if the resulting configuration of each
+/// station is valid, and tells the engines: one station's for a change to
+/// its outputs, every station's for a change to the encoder profiles.
+async fn commit(
+    state: &AppState,
+    station: Option<&Station>,
+    mut tx: Transaction<'_, MySql>,
+) -> ApiResult<()> {
+    let stations = match station {
+        Some(station) => vec![Arc::clone(&station.0)],
+        None => state.stations.all(),
+    };
+    for station in &stations {
+        let config = load_config(&mut tx, Some(station.id())).await?;
+        validate(&config)?;
+    }
     tx.commit().await?;
-    state.sync.changed();
+    for station in stations {
+        station.sync.changed();
+    }
     Ok(())
 }
 
@@ -295,10 +316,14 @@ fn output_view(
     }
 }
 
-/// The statistics settings of every output.
-async fn statistics(state: &AppState) -> ApiResult<HashMap<u64, StoredStatistics>> {
+/// The statistics settings of a station's outputs.
+async fn statistics(
+    state: &AppState,
+    station: &Station,
+) -> ApiResult<HashMap<u64, StoredStatistics>> {
     let rows: Vec<(u64, Option<String>)> =
-        sqlx::query_as("SELECT id, CAST(statistics AS CHAR) FROM outputs")
+        sqlx::query_as("SELECT id, CAST(statistics AS CHAR) FROM outputs WHERE station_id = ?")
+            .bind(station.id())
             .fetch_all(&state.pool)
             .await?;
     Ok(rows
@@ -355,9 +380,9 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_output, update_output, delete_output))
 }
 
-async fn current(state: &AppState) -> ApiResult<OutputsConfig> {
+async fn current(state: &AppState, station: Option<&Station>) -> ApiResult<OutputsConfig> {
     let mut connection = state.pool.acquire().await?;
-    load_config(&mut connection).await
+    load_config(&mut connection, station.map(|station| station.id())).await
 }
 
 #[utoipa::path(get, path = "/encoder-profiles", tag = "outputs",
@@ -366,7 +391,7 @@ async fn list_profiles(
     _user: CurrentUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<EncoderProfileView>>> {
-    let config = current(&state).await?;
+    let config = current(&state, None).await?;
     let profiles = config
         .encoder_profiles
         .iter()
@@ -384,7 +409,7 @@ async fn get_profile(
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> ApiResult<Json<EncoderProfileView>> {
-    let config = current(&state).await?;
+    let config = current(&state, None).await?;
     let profile = config
         .encoder_profiles
         .iter()
@@ -420,7 +445,7 @@ async fn create_profile(
     .await
     .map_err(|error| duplicate_or(error, "encoder profile"))?
     .last_insert_id();
-    commit(&state, tx).await?;
+    commit(&state, None, tx).await?;
     tracing::info!(user = %user.username, id, %name, "encoder profile created");
     let Json(view) = get_profile(user, State(state), Path(id)).await?;
     Ok((StatusCode::CREATED, Json(view)))
@@ -458,7 +483,7 @@ async fn update_profile(
     if updated.rows_affected() == 0 && !row_exists(&mut tx, "encoder_profiles", id).await? {
         return Err(ApiError::not_found("encoder profile"));
     }
-    commit(&state, tx).await?;
+    commit(&state, None, tx).await?;
     tracing::info!(user = %user.username, id, %name, "encoder profile changed");
     get_profile(user, State(state), Path(id)).await
 }
@@ -488,13 +513,13 @@ async fn delete_profile(
     if deleted.rows_affected() == 0 {
         return Err(ApiError::not_found("encoder profile"));
     }
-    commit(&state, tx).await?;
+    commit(&state, None, tx).await?;
     tracing::info!(user = %user.username, id, "encoder profile deleted");
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn statuses(state: &AppState) -> Vec<OutputStatus> {
-    state
+fn statuses(station: &Station) -> Vec<OutputStatus> {
+    station
         .engine
         .state()
         .borrow()
@@ -509,10 +534,11 @@ fn statuses(state: &AppState) -> Vec<OutputStatus> {
 async fn list_outputs(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
 ) -> ApiResult<Json<Vec<OutputView>>> {
-    let config = current(&state).await?;
-    let statuses = statuses(&state);
-    let mut statistics = statistics(&state).await?;
+    let config = current(&state, Some(&station)).await?;
+    let statuses = statuses(&station);
+    let mut statistics = statistics(&state, &station).await?;
     let outputs = config
         .outputs
         .into_iter()
@@ -531,16 +557,20 @@ async fn list_outputs(
 async fn get_output(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
 ) -> ApiResult<Json<OutputView>> {
-    let config = current(&state).await?;
+    let config = current(&state, Some(&station)).await?;
     let output = config
         .outputs
         .into_iter()
         .find(|output| output.id == id)
         .ok_or_else(|| ApiError::not_found("output"))?;
-    let status = statuses(&state).into_iter().find(|s| s.id == id);
-    let stored = statistics(&state).await?.remove(&id).unwrap_or_default();
+    let status = statuses(&station).into_iter().find(|s| s.id == id);
+    let stored = statistics(&state, &station)
+        .await?
+        .remove(&id)
+        .unwrap_or_default();
     Ok(Json(output_view(output, status, stored)))
 }
 
@@ -552,6 +582,7 @@ async fn get_output(
 async fn create_output(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(input): Json<OutputInput>,
 ) -> ApiResult<(StatusCode, Json<OutputView>)> {
     user.require(Role::Admin)?;
@@ -565,10 +596,11 @@ async fn create_output(
         .merge(StoredStatistics::default());
     let mut tx = state.pool.begin().await?;
     let id = sqlx::query(
-        "INSERT INTO outputs (name, kind, encoder_profile_id, config, statistics,
+        "INSERT INTO outputs (station_id, name, kind, encoder_profile_id, config, statistics,
                               metadata_enabled, enabled)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
+    .bind(station.id())
     .bind(&name)
     .bind(enum_text(input.kind))
     .bind(input.encoder_profile_id)
@@ -586,9 +618,9 @@ async fn create_output(
         }
     })?
     .last_insert_id();
-    commit(&state, tx).await?;
-    tracing::info!(user = %user.username, id, %name, "output created");
-    let Json(view) = get_output(user, State(state), Path(id)).await?;
+    commit(&state, Some(&station), tx).await?;
+    tracing::info!(user = %user.username, id, %name, station = %station.code(), "output created");
+    let Json(view) = get_output(user, State(state), station, Path(id)).await?;
     Ok((StatusCode::CREATED, Json(view)))
 }
 
@@ -600,6 +632,7 @@ async fn create_output(
 async fn update_output(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
     Json(mut input): Json<OutputInput>,
 ) -> ApiResult<Json<OutputView>> {
@@ -611,9 +644,10 @@ async fn update_output(
     let mut tx = state.pool.begin().await?;
     let stored: Option<(String, Option<String>)> = sqlx::query_as(
         "SELECT CAST(config AS CHAR), CAST(statistics AS CHAR) FROM outputs
-         WHERE id = ? FOR UPDATE",
+         WHERE id = ? AND station_id = ? FOR UPDATE",
     )
     .bind(id)
+    .bind(station.id())
     .fetch_optional(&mut *tx)
     .await?;
     let Some((stored, stored_statistics)) = stored else {
@@ -647,9 +681,9 @@ async fn update_output(
             duplicate_or(error, "output")
         }
     })?;
-    commit(&state, tx).await?;
+    commit(&state, Some(&station), tx).await?;
     tracing::info!(user = %user.username, id, %name, "output changed");
-    get_output(user, State(state), Path(id)).await
+    get_output(user, State(state), station, Path(id)).await
 }
 
 /// Deletes an output; the engine stops streaming to it. Admins only.
@@ -659,18 +693,20 @@ async fn update_output(
 async fn delete_output(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
 ) -> ApiResult<StatusCode> {
     user.require(Role::Admin)?;
     let mut tx = state.pool.begin().await?;
-    let deleted = sqlx::query("DELETE FROM outputs WHERE id = ?")
+    let deleted = sqlx::query("DELETE FROM outputs WHERE id = ? AND station_id = ?")
         .bind(id)
+        .bind(station.id())
         .execute(&mut *tx)
         .await?;
     if deleted.rows_affected() == 0 {
         return Err(ApiError::not_found("output"));
     }
-    commit(&state, tx).await?;
+    commit(&state, Some(&station), tx).await?;
     tracing::info!(user = %user.username, id, "output deleted");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -692,9 +728,13 @@ async fn row_exists(
 /// the API manages the engine (stations set up with `heron-engine ctl`
 /// before M4). Profile IDs are kept when they are free or identical, so
 /// outputs keep streaming. Returns whether anything was copied.
-pub async fn adopt(pool: &sqlx::MySqlPool, engine: &OutputsConfig) -> ApiResult<bool> {
+pub async fn adopt(
+    pool: &sqlx::MySqlPool,
+    station_id: u64,
+    engine: &OutputsConfig,
+) -> ApiResult<bool> {
     let mut tx = pool.begin().await?;
-    let stored = load_config(&mut tx).await?;
+    let stored = load_config(&mut tx, Some(station_id)).await?;
     if !stored.outputs.is_empty() || engine.outputs.is_empty() {
         return Ok(false);
     }
@@ -741,11 +781,19 @@ pub async fn adopt(pool: &sqlx::MySqlPool, engine: &OutputsConfig) -> ApiResult<
         let Some(profile_id) = profile_ids.get(&output.encoder_profile_id) else {
             continue;
         };
+        // Another station's output may have the same ID.
+        let id_taken = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM outputs WHERE id = ?")
+            .bind(output.id)
+            .fetch_one(&mut *tx)
+            .await?
+            > 0;
         sqlx::query(
-            "INSERT INTO outputs (id, name, kind, encoder_profile_id, config, metadata_enabled, enabled)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO outputs (id, station_id, name, kind, encoder_profile_id, config,
+                                  metadata_enabled, enabled)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(output.id)
+        .bind((!id_taken).then_some(output.id))
+        .bind(station_id)
         .bind(&output.name)
         .bind(enum_text(output.kind))
         .bind(profile_id)

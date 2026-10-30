@@ -90,7 +90,8 @@ async fn dry_run_apply_and_undo() {
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO play_history (track_id, started_at, deck, source) VALUES (?, NOW(6), 'a', 'rotation')",
+        "INSERT INTO play_history (station_id, track_id, started_at, deck, source)
+         VALUES (1, ?, NOW(6), 'a', 'rotation')",
     )
     .bind(ids[0])
     .execute(pool)

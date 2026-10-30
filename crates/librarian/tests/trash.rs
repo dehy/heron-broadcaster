@@ -78,8 +78,8 @@ async fn delete_restore_and_purge() {
         .await
         .unwrap();
         sqlx::query(
-            "INSERT INTO play_history (track_id, artist, title, started_at, deck, source)
-             VALUES (?, 'Band', ?, NOW(6), 'a', 'rotation')",
+            "INSERT INTO play_history (station_id, track_id, artist, title, started_at, deck, source)
+             VALUES (1, ?, 'Band', ?, NOW(6), 'a', 'rotation')",
         )
         .bind(id)
         .bind(format!("Song {id}"))

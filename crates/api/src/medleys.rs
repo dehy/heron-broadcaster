@@ -820,7 +820,12 @@ async fn render_medley(
 /// ` (2)`, ` (3)`… when another medley has it.
 async fn name_for(pool: &MySqlPool, id: u64, parts: &[Part]) -> ApiResult<String> {
     let settings = load_settings(pool).await?;
-    let station: StationSettings = settings::load(pool, StationSettings::SETTINGS_NAME).await?;
+    // The first station's time zone, until a medley has stations (M13).
+    let first: u64 = sqlx::query_scalar("SELECT MIN(id) FROM stations")
+        .fetch_one(pool)
+        .await?;
+    let station: StationSettings =
+        settings::load_for(pool, first, StationSettings::SETTINGS_NAME).await?;
     let date = jiff::Timestamp::now()
         .to_zoned(station.time_zone())
         .strftime("%Y-%m-%d")

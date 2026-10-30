@@ -8,12 +8,12 @@ Raise these when they become relevant instead of guessing.
 | Name of the analysis service: `heron-analyzer` was chosen as a working name. | [M0](roadmap/m0-foundations.md) |
 | Silence ceiling: −50 dBFS trims inaudible fade-ins but also quiet deliberate intros (Pink Floyd's wind, Yes' nature sounds, 23–27 s). −60 dBFS keeps most of them. Which default? | [M1](roadmap/m1-import-analysis.md) |
 | Opus and HE-AAC decoding, not supported by Symphonia: add libopus (BSD) and an HE-AAC-capable decoder, or report them as unsupported. | [M2](roadmap/m2-engine-core.md) |
-| Liners of a medley tagged with several stations: its first station's (proposed), or one rendered file per station with its own liners. | [M13](roadmap/m13-several-stations.md#questions) |
 
 ## Resolved
 
 | Question | Answer | Recorded in |
 |---|---|---|
+| Liners of a medley tagged with several stations. | **Its first station's**: one rendered file, with the liners of the station it was made on, played as it is on its other stations. | [Several stations](stations.md#medleys) |
 | Listener statistics: how long to keep sessions, the minimum session length that counts as a listener, and whether reports follow an audience-measurement standard. | **Sessions (and minute samples) kept 90 days**, a setting; daily and hourly totals kept. **1 min minimum**, a setting. **No standard**: the measures are defined in the docs, with a CSV export. | [Listener statistics](statistics.md) |
 | Authentication model: local users only, or OIDC as well? | **Local users only for now.** OIDC may come later. | [Decisions](decisions.md#decisions-made-after-the-handoff) |
 | Does the analysis worker stay inside `heron-api` or become its own service? | **Its own modular service** (`heron-analyzer`). | [Decisions](decisions.md#decisions-made-after-the-handoff), [Architecture](architecture.md) |
