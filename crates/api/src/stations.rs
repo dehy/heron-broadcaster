@@ -69,18 +69,42 @@ const PUBLIC: [&str; 3] = ["now-playing", "queue", "history"];
 pub struct StationInfo {
     pub id: u64,
     pub name: String,
-    /// Short and unique: lowercase letters, digits and `-`.
+    /// Short and unique: lowercase letters and digits. Set once for the
+    /// stations after the first: it names their engine's variable.
     pub code: String,
-    /// The engine's gRPC address; missing for the first station, whose
-    /// engine is `HERON_ENGINE_URL`.
-    pub engine_url: Option<String>,
     /// A disabled station is not fed: its engine plays what it has
     /// queued, then its fallback directory.
     pub enabled: bool,
     pub position: u32,
+    /// The variable of `heron-api`'s environment that holds its engine's
+    /// gRPC address: `HERON_ENGINE_URL` for the first station,
+    /// `HERON_ENGINE_URL_<CODE>` for the others.
+    #[sqlx(skip)]
+    pub engine_variable: String,
+    /// Whether that variable is set: a station without it is off the air.
+    #[sqlx(skip)]
+    pub engine_configured: bool,
 }
 
-const COLUMNS: &str = "id, name, code, engine_url, enabled, position";
+const COLUMNS: &str = "id, name, code, enabled, position";
+
+/// The first station's engine variable.
+const FIRST_ENGINE_VARIABLE: &str = "HERON_ENGINE_URL";
+
+/// The engine variable of a station after the first.
+pub fn engine_variable(code: &str) -> String {
+    format!("{FIRST_ENGINE_VARIABLE}_{}", code.to_ascii_uppercase())
+}
+
+/// The engines of the stations after the first, from the environment:
+/// `HERON_ENGINE_URL_<CODE>` to its address.
+pub fn engines_from_env() -> BTreeMap<String, String> {
+    let prefix = format!("{FIRST_ENGINE_VARIABLE}_");
+    std::env::vars()
+        .filter(|(name, url)| name.starts_with(&prefix) && !url.trim().is_empty())
+        .map(|(name, url)| (name, url.trim().to_owned()))
+        .collect()
+}
 
 /// What runs for one station.
 pub struct StationRuntime {
@@ -114,7 +138,7 @@ impl StationRuntime {
             .clone()
     }
 
-    /// Stops its tasks: the station was deleted, or its engine changed.
+    /// Stops its tasks: the station was deleted, enabled or disabled.
     fn stop(&self) {
         for task in self
             .tasks
@@ -134,6 +158,10 @@ pub struct Stations {
     pool: MySqlPool,
     /// The first station's engine (`HERON_ENGINE_URL`).
     default_engine_url: String,
+    /// The other stations' engines, by variable (`HERON_ENGINE_URL_<CODE>`).
+    engines: RwLock<BTreeMap<String, String>>,
+    /// The first station: the lowest ID, which never changes.
+    first_id: u64,
     webhooks: Arc<Webhooks>,
     running: RwLock<BTreeMap<u64, Arc<StationRuntime>>>,
 }
@@ -144,6 +172,7 @@ impl Stations {
     pub async fn start(
         pool: MySqlPool,
         default_engine_url: String,
+        engines: BTreeMap<String, String>,
         default_name: Option<String>,
         webhooks: Arc<Webhooks>,
     ) -> ApiResult<Arc<Self>> {
@@ -155,44 +184,86 @@ impl Stations {
             .bind(name)
             .execute(&pool)
             .await?;
+        let all = list_by_id(&pool).await?;
+        let first_id = all.first().map_or(1, |station| station.id);
         let stations = Arc::new_cyclic(|me| Self {
             me: me.clone(),
             pool,
             default_engine_url,
+            engines: RwLock::new(engines),
+            first_id,
             webhooks,
             running: RwLock::new(BTreeMap::new()),
         });
-        // A station whose engine address is invalid does not stop the
+        // A station whose engine is not set or invalid does not stop the
         // others; the first station's (HERON_ENGINE_URL) does.
-        for (n, info) in list_by_id(&stations.pool).await?.into_iter().enumerate() {
-            let code = info.code.clone();
-            if let Err(error) = stations.run(info) {
-                if n == 0 {
-                    return Err(error);
+        for info in all {
+            let id = info.id;
+            match stations.runtime(info) {
+                Ok(Some(runtime)) => {
+                    stations
+                        .running
+                        .write()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .insert(id, runtime);
                 }
-                tracing::error!(station = %code, %error, "cannot start the station");
+                Ok(None) => {}
+                Err(error) if id == first_id => return Err(error),
+                Err(error) => tracing::error!(%error, "cannot start the station"),
             }
         }
         Ok(stations)
     }
 
-    fn run(&self, info: StationInfo) -> ApiResult<()> {
-        let id = info.id;
-        let runtime = self.runtime(info)?;
-        self.running
+    /// Sets the engine of the station with that code, as its variable would
+    /// when `heron-api` starts: for tests.
+    #[cfg(test)]
+    pub fn set_engine(&self, code: &str, url: &str) {
+        self.engines
             .write()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(id, runtime);
-        Ok(())
+            .insert(engine_variable(code), url.to_owned());
     }
 
-    fn runtime(&self, info: StationInfo) -> ApiResult<Arc<StationRuntime>> {
-        let url = info
-            .engine_url
-            .clone()
-            .unwrap_or_else(|| self.default_engine_url.clone());
-        let engine = EngineLink::new(&url)
-            .map_err(|error| ApiError::Invalid(format!("invalid engine address {url}: {error}")))?;
+    /// `info` with its engine variable, and whether it is set.
+    pub fn describe(&self, mut info: StationInfo) -> StationInfo {
+        if info.id == self.first_id {
+            info.engine_variable = FIRST_ENGINE_VARIABLE.to_owned();
+            info.engine_configured = true;
+        } else {
+            info.engine_variable = engine_variable(&info.code);
+            info.engine_configured = self
+                .engines
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key(&info.engine_variable);
+        }
+        info
+    }
+
+    /// What runs for a station; none while its engine variable is not set.
+    fn runtime(&self, info: StationInfo) -> ApiResult<Option<Arc<StationRuntime>>> {
+        let info = self.describe(info);
+        let url = if info.id == self.first_id {
+            self.default_engine_url.clone()
+        } else {
+            let engines = self.engines.read().unwrap_or_else(PoisonError::into_inner);
+            let Some(url) = engines.get(&info.engine_variable) else {
+                tracing::warn!(
+                    station = %info.code,
+                    variable = %info.engine_variable,
+                    "the station is off the air: its engine variable is not set"
+                );
+                return Ok(None);
+            };
+            url.clone()
+        };
+        let engine = EngineLink::new(&url).map_err(|error| {
+            ApiError::Invalid(format!(
+                "{}: invalid engine address {url}: {error}",
+                info.engine_variable
+            ))
+        })?;
         let queue = QueueManager::new(
             self.pool.clone(),
             Arc::clone(&engine),
@@ -215,7 +286,7 @@ impl Stations {
             tasks.push(tokio::spawn(Arc::clone(&queue).run()));
         }
         tracing::info!(station = %info.code, engine = %url, enabled = info.enabled, "station started");
-        Ok(Arc::new(StationRuntime {
+        Ok(Some(Arc::new(StationRuntime {
             id: info.id,
             info: RwLock::new(info),
             engine,
@@ -223,11 +294,12 @@ impl Stations {
             sync,
             eq_changes: broadcast::channel(16).0,
             tasks: Mutex::new(tasks),
-        }))
+        })))
     }
 
-    /// Restarts a station after it changed, starts a new one, or stops a
-    /// deleted one.
+    /// Restarts a station after it was enabled or disabled, starts a new
+    /// one, or stops a deleted one. A station whose engine cannot start is
+    /// left off the air, with the reason logged.
     pub async fn reload(&self, id: u64) -> ApiResult<()> {
         let info: Option<StationInfo> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {COLUMNS} FROM stations WHERE id = ?"
@@ -243,15 +315,26 @@ impl Stations {
             return Ok(());
         };
         if let Some(current) = running.get(&id) {
-            let before = current.info();
-            // A rename, a new code or position keeps what runs.
-            if before.engine_url == info.engine_url && before.enabled == info.enabled {
-                *current.info.write().unwrap_or_else(PoisonError::into_inner) = info;
+            // A rename, the first station's new code or a position keeps
+            // what runs.
+            if current.info().enabled == info.enabled {
+                *current.info.write().unwrap_or_else(PoisonError::into_inner) = self.describe(info);
                 return Ok(());
             }
         }
-        let runtime = self.runtime(info)?;
-        if let Some(old) = running.insert(id, runtime) {
+        let code = info.code.clone();
+        let runtime = match self.runtime(info) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                tracing::error!(station = %code, %error, "cannot start the station");
+                None
+            }
+        };
+        let old = match runtime {
+            Some(runtime) => running.insert(id, runtime),
+            None => running.remove(&id),
+        };
+        if let Some(old) = old {
             old.stop();
         }
         Ok(())
@@ -429,9 +512,8 @@ pub fn router() -> OpenApiRouter<AppState> {
 pub struct StationRequest {
     pub name: String,
     pub code: String,
-    /// The engine's gRPC address, e.g. `http://heron-engine-2:50051`.
-    /// Required, except for the first station (`HERON_ENGINE_URL`).
-    pub engine_url: Option<String>,
+    /// Set once for the stations after the first: their engine's variable
+    /// is `HERON_ENGINE_URL_<CODE>`.
     #[serde(default = "enabled")]
     pub enabled: bool,
     #[serde(default)]
@@ -442,7 +524,7 @@ fn enabled() -> bool {
     true
 }
 
-fn check(request: &StationRequest) -> ApiResult<(String, String, Option<String>)> {
+fn check(request: &StationRequest) -> ApiResult<(String, String)> {
     let name = request.name.trim();
     if name.is_empty() {
         return Err(ApiError::Invalid("a station needs a name".to_owned()));
@@ -452,27 +534,13 @@ fn check(request: &StationRequest) -> ApiResult<(String, String, Option<String>)
         && code.len() <= MAX_CODE_LENGTH
         && code
             .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
     if !valid {
         return Err(ApiError::Invalid(format!(
-            "a station code is 1 to {MAX_CODE_LENGTH} lowercase letters, digits and -"
+            "a station code is 1 to {MAX_CODE_LENGTH} lowercase letters and digits"
         )));
     }
-    let engine_url = request
-        .engine_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|url| !url.is_empty())
-        .map(str::to_owned);
-    if let Some(url) = &engine_url {
-        let parsed: Result<Uri, _> = url.parse();
-        if !parsed.is_ok_and(|uri| uri.scheme().is_some() && uri.host().is_some()) {
-            return Err(ApiError::Invalid(format!(
-                "{url} is not an engine address, e.g. http://heron-engine:50051"
-            )));
-        }
-    }
-    Ok((name.to_owned(), code.to_owned(), engine_url))
+    Ok((name.to_owned(), code.to_owned()))
 }
 
 fn conflict(error: sqlx::Error, code: &str) -> ApiError {
@@ -490,7 +558,11 @@ async fn list_stations(
     user: CurrentUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<StationInfo>>> {
-    let mut stations = list(&state.pool).await?;
+    let mut stations: Vec<StationInfo> = list(&state.pool)
+        .await?
+        .into_iter()
+        .map(|station| state.stations.describe(station))
+        .collect();
     if user.role != Role::Admin {
         let seen: Vec<u64> = sqlx::query_scalar(
             "SELECT station_id FROM user_station_roles WHERE user_id = ? AND role <> 'none'",
@@ -503,7 +575,8 @@ async fn list_stations(
     Ok(Json(stations))
 }
 
-/// Adds a station (admins). Its engine is a new service of the deployment.
+/// Adds a station (admins). Its engine is a new service of the deployment,
+/// whose address is `HERON_ENGINE_URL_<CODE>` in `heron-api`'s environment.
 #[utoipa::path(post, path = "/stations", tag = "stations",
     request_body = StationRequest,
     responses((status = 201, body = StationInfo), (status = "4XX", body = ErrorBody)))]
@@ -513,27 +586,21 @@ async fn create_station(
     Json(request): Json<StationRequest>,
 ) -> ApiResult<(StatusCode, Json<StationInfo>)> {
     user.require(Role::Admin)?;
-    let (name, code, engine_url) = check(&request)?;
-    if engine_url.is_none() {
-        return Err(ApiError::Invalid(
-            "a new station needs the address of its own engine".to_owned(),
-        ));
-    }
-    let id = sqlx::query(
-        "INSERT INTO stations (name, code, engine_url, enabled, position) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind(&name)
-    .bind(&code)
-    .bind(&engine_url)
-    .bind(request.enabled)
-    .bind(request.position)
-    .execute(&state.pool)
-    .await
-    .map_err(|error| conflict(error, &code))?
-    .last_insert_id();
+    let (name, code) = check(&request)?;
+    let id =
+        sqlx::query("INSERT INTO stations (name, code, enabled, position) VALUES (?, ?, ?, ?)")
+            .bind(&name)
+            .bind(&code)
+            .bind(request.enabled)
+            .bind(request.position)
+            .execute(&state.pool)
+            .await
+            .map_err(|error| conflict(error, &code))?
+            .last_insert_id();
     state.stations.reload(id).await?;
     tracing::info!(station = %code, by = %user.username, "station added");
-    Ok((StatusCode::CREATED, Json(fetch(&state.pool, id).await?)))
+    let station = state.stations.describe(fetch(&state.pool, id).await?);
+    Ok((StatusCode::CREATED, Json(station)))
 }
 
 async fn fetch(pool: &MySqlPool, id: u64) -> ApiResult<StationInfo> {
@@ -561,11 +628,12 @@ async fn get_station_info(
     {
         return Err(ApiError::NotFound(format!("station {id} not found")));
     }
-    Ok(Json(fetch(&state.pool, id).await?))
+    Ok(Json(state.stations.describe(fetch(&state.pool, id).await?)))
 }
 
-/// Renames a station, changes its code, engine or position, enables or
-/// disables it (admins).
+/// Renames a station, changes its position, enables or disables it
+/// (admins). Only the first station's code can change: the others' names
+/// their engine's variable.
 #[utoipa::path(put, path = "/stations/{id}", tag = "stations",
     params(("id" = u64, Path)), request_body = StationRequest,
     responses((status = 200, body = StationInfo), (status = "4XX", body = ErrorBody)))]
@@ -576,12 +644,15 @@ async fn update_station(
     Json(request): Json<StationRequest>,
 ) -> ApiResult<Json<StationInfo>> {
     user.require(Role::Admin)?;
-    let (name, code, engine_url) = check(&request)?;
+    let (name, code) = check(&request)?;
     let first = state.stations.first().id() == id;
-    if engine_url.is_none() && !first {
-        return Err(ApiError::Invalid(
-            "a station needs the address of its own engine".to_owned(),
-        ));
+    let before = fetch(&state.pool, id).await?;
+    if !first && before.code != code {
+        return Err(ApiError::Conflict(format!(
+            "the code of {} cannot change: it names its engine's variable, {}",
+            before.code,
+            engine_variable(&before.code)
+        )));
     }
     if !request.enabled && first {
         return Err(ApiError::Invalid(
@@ -589,12 +660,10 @@ async fn update_station(
         ));
     }
     let updated = sqlx::query(
-        "UPDATE stations SET name = ?, code = ?, engine_url = ?, enabled = ?, position = ?
-         WHERE id = ?",
+        "UPDATE stations SET name = ?, code = ?, enabled = ?, position = ? WHERE id = ?",
     )
     .bind(&name)
     .bind(&code)
-    .bind(&engine_url)
     .bind(request.enabled)
     .bind(request.position)
     .bind(id)
@@ -602,11 +671,10 @@ async fn update_station(
     .await
     .map_err(|error| conflict(error, &code))?
     .rows_affected();
-    let station = fetch(&state.pool, id).await?;
     if updated > 0 {
         state.stations.reload(id).await?;
     }
-    Ok(Json(station))
+    Ok(Json(state.stations.describe(fetch(&state.pool, id).await?)))
 }
 
 /// Deletes a station and its history and statistics (admins). Refused
@@ -674,5 +742,11 @@ mod tests {
         assert!(per_station("settings/medleys"));
         assert!(!per_station("tracks/1"));
         assert!(!per_station("stations"));
+    }
+
+    #[test]
+    fn engine_variables() {
+        assert_eq!(engine_variable("hits80"), "HERON_ENGINE_URL_HITS80");
+        assert_eq!(engine_variable("fh90"), "HERON_ENGINE_URL_FH90");
     }
 }

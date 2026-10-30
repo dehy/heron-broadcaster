@@ -144,6 +144,7 @@ impl Station {
         let stations = stations::Stations::start(
             pool.clone(),
             grpc_url,
+            std::collections::BTreeMap::new(),
             Some("Test".to_owned()),
             Arc::clone(&webhooks),
         )
@@ -4485,6 +4486,7 @@ async fn two_stations_play_at_once() {
     };
     let (_engine, _state_dir, second_url, grpc) = start_engine(station.library.path(), None).await;
     station.tasks.push(grpc);
+    station.state.stations.set_engine("hits80", &second_url);
     let admin = station.signed_in("admin").await;
     let viewer = station.signed_in("viewer").await;
 
@@ -4492,32 +4494,63 @@ async fn two_stations_play_at_once() {
     let stations = admin.get("/stations").await;
     assert_eq!(stations[0]["code"], "main", "{stations}");
     assert_eq!(stations[0]["name"], "Test");
-    assert_eq!(stations[0]["engine_url"], Value::Null);
+    assert_eq!(stations[0]["engine_variable"], "HERON_ENGINE_URL");
+    assert_eq!(stations[0]["engine_configured"], true);
 
-    // Admins add a station with its own engine.
-    let request = json!({"name": "Hits 80", "code": "hits80", "engine_url": second_url});
+    // A station whose engine variable is not set stays off the air.
+    let (status, waiting) = admin
+        .send(
+            Method::POST,
+            "/stations",
+            json!({"name": "Hits 90", "code": "hits90"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{waiting}");
+    assert_eq!(waiting["engine_variable"], "HERON_ENGINE_URL_HITS90");
+    assert_eq!(waiting["engine_configured"], false);
+    let waiting = waiting["id"].as_u64().unwrap();
+    let (status, _) = admin
+        .request(Method::GET, &format!("/stations/{waiting}/player"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/stations/{waiting}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Admins add a station with its own engine, set in the environment.
+    let request = json!({"name": "Hits 80", "code": "hits80"});
     let (status, _) = viewer
         .send(Method::POST, "/stations", request.clone())
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     for (bad, why) in [
+        (json!({"name": "X", "code": "Hits 80"}), "code"),
+        (json!({"name": "X", "code": "hits-80"}), "no - in codes"),
         (
-            json!({"name": "X", "code": "Hits 80", "engine_url": second_url}),
-            "code",
+            json!({"name": "X", "code": "x", "engine_url": "http://x:1"}),
+            "no engine field",
         ),
-        (json!({"name": "X", "code": "x"}), "no engine"),
-        (
-            json!({"name": "X", "code": "main", "engine_url": second_url}),
-            "taken code",
-        ),
+        (json!({"name": "X", "code": "main"}), "taken code"),
     ] {
         let (status, body) = admin.send(Method::POST, "/stations", bad).await;
         assert!(status.is_client_error(), "{why}: {status} {body}");
     }
     let (status, created) = admin.send(Method::POST, "/stations", request).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["engine_configured"], true);
     let second = created["id"].as_u64().unwrap();
     let first = stations[0]["id"].as_u64().unwrap();
+
+    // Its code names its engine's variable: it cannot change.
+    let (status, body) = admin
+        .send(
+            Method::PUT,
+            &format!("/stations/{second}"),
+            json!({"name": "Hits 80", "code": "hits8"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
 
     // Both queues fill and both stations go on air.
     for id in [first, second] {
@@ -4695,13 +4728,14 @@ async fn categories_restrictions_and_medleys_follow_their_stations() {
     };
     let (_engine, _state_dir, second_url, grpc) = start_engine(station.library.path(), None).await;
     station.tasks.push(grpc);
+    station.state.stations.set_engine("hits80", &second_url);
     let admin = station.signed_in("admin").await;
     let first = admin.get("/stations").await[0]["id"].as_u64().unwrap();
     let (status, created) = admin
         .send(
             Method::POST,
             "/stations",
-            json!({"name": "Hits 80", "code": "hits80", "engine_url": second_url}),
+            json!({"name": "Hits 80", "code": "hits80"}),
         )
         .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
@@ -4991,6 +5025,7 @@ async fn rules_across_stations_and_plays_per_station() {
     };
     let (_engine, _state_dir, second_url, grpc) = start_engine(station.library.path(), None).await;
     station.tasks.push(grpc);
+    station.state.stations.set_engine("hits80", &second_url);
     let admin = station.signed_in("admin").await;
     let first = admin.get("/stations").await[0]["id"].as_u64().unwrap();
     // Before the second station starts: nothing it picks escapes the rule.
@@ -4999,7 +5034,7 @@ async fn rules_across_stations_and_plays_per_station() {
         .send(
             Method::POST,
             "/stations",
-            json!({"name": "Hits 80", "code": "hits80", "engine_url": second_url, "enabled": false}),
+            json!({"name": "Hits 80", "code": "hits80", "enabled": false}),
         )
         .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
@@ -5023,7 +5058,7 @@ async fn rules_across_stations_and_plays_per_station() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let request = json!({"name": "Hits 80", "code": "hits80", "engine_url": second_url});
+    let request = json!({"name": "Hits 80", "code": "hits80"});
     let (status, _) = admin
         .send(Method::PUT, &format!("/stations/{second}"), request)
         .await;
@@ -5180,13 +5215,14 @@ async fn roles_per_station() {
     };
     let (_engine, _state_dir, second_url, grpc) = start_engine(station.library.path(), None).await;
     station.tasks.push(grpc);
+    station.state.stations.set_engine("hits80", &second_url);
     let admin = station.signed_in("admin").await;
     let first = admin.get("/stations").await[0]["id"].as_u64().unwrap();
     let (status, created) = admin
         .send(
             Method::POST,
             "/stations",
-            json!({"name": "Hits 80", "code": "hits80", "engine_url": second_url}),
+            json!({"name": "Hits 80", "code": "hits80"}),
         )
         .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");

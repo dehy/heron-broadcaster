@@ -11,9 +11,9 @@ A **station** has:
 | Field | |
 |---|---|
 | **Name** | Shown in the web UI, e.g. `Hits`, `Hits 80` |
-| **Code** | Short, unique, lowercase letters, digits and `-` (e.g. `hits`, `hits80`): shown in badges next to categories and medleys, used in the API's public routes. Can be changed; the API refers to stations by ID |
+| **Code** | Short and unique, lowercase letters and digits (e.g. `hits`, `hits80`): shown in badges next to categories and medleys, used in the API's public routes, and names the variable of its engine's address. Set once for the stations after the first; the first station's can be changed |
 | **Time zone** | Its clocks, schedule, restrictions and statistics follow it: its `station` settings |
-| **Engine** | The engine that puts it on air: one engine per station ([Engines](#engines)) |
+| **Engine** | The engine that puts it on air, one per station: its address is in `heron-api`'s environment, not in the database ([Engines](#engines)) |
 | **Enabled** | A disabled station is not fed: its engine plays on with what it has queued, then its fallback directory |
 
 Admins create, rename and disable stations. A station is deleted only once nothing refers to it but its history and statistics, which go with it.
@@ -129,7 +129,7 @@ An existing user keeps their role, as their shared role and their role on the fi
 
 **One engine per station.** Each has its own queue, decks, outputs, state volume and relay, and is upgraded with its own [hot handover](handover.md). A station's engine plays on with what it has queued when the API stops, as today.
 
-- The API knows each station's engine address (a station field, set by admins; the first station's comes from `HERON_ENGINE_URL` as today) and runs one queue manager per enabled station.
+- The API reads each station's engine address from its environment: `HERON_ENGINE_URL` for the first station, as today, and `HERON_ENGINE_URL_<CODE>` for each other one, its code in capitals (`HERON_ENGINE_URL_HITS80` for `hits80`). It runs one queue manager per enabled station. A station whose variable is not set stays off the air; the Stations page says which variable it waits for. The environment is read when `heron-api` starts: Compose starts it again when its variables change.
 - A new station's engine is a new service of the deployment, with its own state volume: with Docker Compose, a second `heron-engine` service in a `docker-compose.override.yml`, then `docker compose up -d`. [Upgrading](upgrading.md) upgrades each engine in turn.
 - Metrics carry the station's code as a label.
 
@@ -147,7 +147,7 @@ An existing user keeps their role, as their shared role and their role on the fi
 ## Web UI
 
 - A **station switcher** at the top of the menu, when there is more than one station the user can see: the On air, Queue, History, programming and station pages show the chosen station, kept per user. Library pages are shared and show the station badges.
-- **Stations** page (admins): create, rename, change the code, the engine address, enable or disable.
+- **Stations** page (admins): create, rename, enable or disable, and see each station's engine variable and whether it is set.
 - **Users**: a role per station.
 - Track and artist pages show plays per station and in total.
 

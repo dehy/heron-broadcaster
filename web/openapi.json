@@ -5931,7 +5931,7 @@
         "tags": [
           "stations"
         ],
-        "summary": "Adds a station (admins). Its engine is a new service of the deployment.",
+        "summary": "Adds a station (admins). Its engine is a new service of the deployment,\nwhose address is `HERON_ENGINE_URL_<CODE>` in `heron-api`'s environment.",
         "operationId": "create_station",
         "requestBody": {
           "content": {
@@ -6008,7 +6008,7 @@
         "tags": [
           "stations"
         ],
-        "summary": "Renames a station, changes its code, engine or position, enables or\ndisables it (admins).",
+        "summary": "Renames a station, changes its position, enables or disables it\n(admins). Only the first station's code can change: the others' names\ntheir engine's variable.",
         "operationId": "update_station",
         "parameters": [
           {
@@ -17989,23 +17989,26 @@
           "name",
           "code",
           "enabled",
-          "position"
+          "position",
+          "engine_variable",
+          "engine_configured"
         ],
         "properties": {
           "code": {
             "type": "string",
-            "description": "Short and unique: lowercase letters, digits and `-`."
+            "description": "Short and unique: lowercase letters and digits. Set once for the\nstations after the first: it names their engine's variable."
           },
           "enabled": {
             "type": "boolean",
             "description": "A disabled station is not fed: its engine plays what it has\nqueued, then its fallback directory."
           },
-          "engine_url": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The engine's gRPC address; missing for the first station, whose\nengine is `HERON_ENGINE_URL`."
+          "engine_configured": {
+            "type": "boolean",
+            "description": "Whether that variable is set: a station without it is off the air."
+          },
+          "engine_variable": {
+            "type": "string",
+            "description": "The variable of `heron-api`'s environment that holds its engine's\ngRPC address: `HERON_ENGINE_URL` for the first station,\n`HERON_ENGINE_URL_<CODE>` for the others."
           },
           "id": {
             "type": "integer",
@@ -18059,14 +18062,8 @@
             "type": "string"
           },
           "enabled": {
-            "type": "boolean"
-          },
-          "engine_url": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The engine's gRPC address, e.g. `http://heron-engine-2:50051`.\nRequired, except for the first station (`HERON_ENGINE_URL`)."
+            "type": "boolean",
+            "description": "Set once for the stations after the first: their engine's variable\nis `HERON_ENGINE_URL_<CODE>`."
           },
           "name": {
             "type": "string"

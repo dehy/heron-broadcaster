@@ -36,7 +36,7 @@ describe("stations", () => {
     id,
     code,
     name: code,
-    engine_url: null,
+    engine_variable: "HERON_ENGINE_URL", engine_configured: true,
     enabled: true,
     position: 0,
   });

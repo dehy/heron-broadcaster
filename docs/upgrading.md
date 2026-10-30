@@ -74,30 +74,38 @@ To go back to the previous version, run the script with it. Migrations are not u
 
 ### Several stations
 
-Each station has its own engine ([Several stations](stations.md#engines)): a second station is a second engine service, with its own state volume and its own relay, added in a `docker-compose.override.yml` next to `docker-compose.yml`:
+Each station has its own engine ([Several stations](stations.md#engines)). To add a station, here with the code `hits80`:
 
-```yaml
-services:
-  heron-engine-2:
-    extends: { file: docker-compose.yml, service: heron-engine }
-    volumes:
-      - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
-      - ${HERON_FALLBACK_DIR:-./data/fallback}:/var/lib/heron/fallback:ro
-      - engine-2-state:/var/lib/heron/engine
-      - engine-2-relay:/run/heron/relay
-  heron-relay-2:
-    extends: { file: docker-compose.yml, service: heron-relay }
-    volumes:
-      - engine-2-relay:/run/heron/relay
+1. Add its engine, with its own state volume and its own relay, and its address in `heron-api`'s environment, in a `docker-compose.override.yml` next to `docker-compose.yml`. The variable is `HERON_ENGINE_URL_` followed by the code in capitals:
 
-volumes:
-  engine-2-state:
-  engine-2-relay:
-```
+   ```yaml
+   services:
+     heron-engine-hits80:
+       extends: { file: docker-compose.yml, service: heron-engine }
+       volumes:
+         - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
+         - ${HERON_FALLBACK_DIR:-./data/fallback}:/var/lib/heron/fallback:ro
+         - engine-hits80-state:/var/lib/heron/engine
+         - engine-hits80-relay:/run/heron/relay
+     heron-relay-hits80:
+       extends: { file: docker-compose.yml, service: heron-relay }
+       volumes:
+         - engine-hits80-relay:/run/heron/relay
+     heron-api:
+       environment:
+         HERON_ENGINE_URL_HITS80: http://heron-engine-hits80:50051
 
-Start it with `docker compose up -d`, then add the station on the **Stations** page (or `POST /api/v1/stations`) with the engine address `http://heron-engine-2:50051`. The first station keeps `HERON_ENGINE_URL`.
+   volumes:
+     engine-hits80-state:
+     engine-hits80-relay:
+   ```
 
-`scripts/upgrade.sh` hands over `heron-engine` only: the other stations' engines restart with `docker compose up -d --no-deps heron-engine-2` (a cold restart of a few seconds, which the fallback mount covers), until the script hands each of them over too.
+2. `docker compose up -d`: the new engine and its relay start, and `heron-api` starts again with the new variable (the first station's engine is not touched).
+3. On the **Stations** page (or `POST /api/v1/stations`), add the station with the code `hits80`. It goes on air at once, with nothing scheduled yet: give it its categories, clocks, schedule and outputs.
+
+The code names the variable, so it cannot be changed once the station exists. The first station keeps `HERON_ENGINE_URL`.
+
+`scripts/upgrade.sh` hands over `heron-engine` only: the other stations' engines restart with `docker compose up -d --no-deps heron-engine-hits80` (a cold restart of a few seconds, which the fallback mount covers), until the script hands each of them over too.
 
 ## Docker Swarm
 
