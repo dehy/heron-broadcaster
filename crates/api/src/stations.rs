@@ -129,6 +129,8 @@ impl StationRuntime {
 
 /// Every station's runtime.
 pub struct Stations {
+    /// For the queue managers, which look at the other stations' queues.
+    me: std::sync::Weak<Stations>,
     pool: MySqlPool,
     /// The first station's engine (`HERON_ENGINE_URL`).
     default_engine_url: String,
@@ -153,7 +155,8 @@ impl Stations {
             .bind(name)
             .execute(&pool)
             .await?;
-        let stations = Arc::new(Self {
+        let stations = Arc::new_cyclic(|me| Self {
+            me: me.clone(),
             pool,
             default_engine_url,
             webhooks,
@@ -190,7 +193,12 @@ impl Stations {
             .unwrap_or_else(|| self.default_engine_url.clone());
         let engine = EngineLink::new(&url)
             .map_err(|error| ApiError::Invalid(format!("invalid engine address {url}: {error}")))?;
-        let queue = QueueManager::new(self.pool.clone(), Arc::clone(&engine), info.id);
+        let queue = QueueManager::new(
+            self.pool.clone(),
+            Arc::clone(&engine),
+            info.id,
+            self.me.clone(),
+        );
         let sync = ConfigSync::new(self.pool.clone(), Arc::clone(&engine), info.id);
         let mut tasks = engine.spawn();
         tasks.push(tokio::spawn(

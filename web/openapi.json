@@ -9317,6 +9317,17 @@
             }
           },
           {
+            "name": "station_id",
+            "in": "query",
+            "description": "Count plays on this station only: play counts, last played, their\nsort, `never_played` and `not_played_days`. Every station's when\nleft out.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
             "name": "never_played",
             "in": "query",
             "description": "Tracks never played.",
@@ -10905,6 +10916,70 @@
   },
   "components": {
     "schemas": {
+      "AcrossStations": {
+        "type": "object",
+        "description": "What a station keeps apart from the other stations' plays and queues.",
+        "properties": {
+          "artist_min": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The same artist (or a similar one) within, in minutes; 0: off.",
+            "default": 0,
+            "minimum": 0
+          },
+          "station_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/u64"
+            },
+            "description": "The stations it looks at; all the others when empty.",
+            "default": []
+          },
+          "title_min": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The same title (any version) within.",
+            "default": 0,
+            "minimum": 0
+          },
+          "track_min": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The same track within.",
+            "default": 0,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "AcrossWindows": {
+        "type": "object",
+        "description": "Windows across stations (`docs/stations.md#rules-across-stations`):\nanother station's play or planned track holds a track back within them,\nbefore or after it. 0 turns a rule off; all are off by default.",
+        "properties": {
+          "artist_min": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The same artist (or a similar one).",
+            "default": 0,
+            "minimum": 0
+          },
+          "title_min": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The same title (any version).",
+            "default": 0,
+            "minimum": 0
+          },
+          "track_min": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The same track.",
+            "default": 0,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "AnalysisQueueStatus": {
         "type": "object",
         "required": [
@@ -11054,6 +11129,17 @@
             "items": {
               "$ref": "#/components/schemas/ArtistName"
             }
+          },
+          "plays": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Plays",
+                "description": "Plays and last play in total and per station; only on\n`GET /artists/{id}`."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "similar": {
             "type": "array",
@@ -11286,6 +11372,12 @@
           "album"
         ],
         "properties": {
+          "across": {
+            "type": "integer",
+            "format": "int32",
+            "description": "By the rules across stations (and by none of the station's own).",
+            "minimum": 0
+          },
           "album": {
             "type": "integer",
             "format": "int32",
@@ -12661,6 +12753,10 @@
           "skipped_slots"
         ],
         "properties": {
+          "across": {
+            "$ref": "#/components/schemas/AcrossWindows",
+            "description": "Windows across stations applied at this step."
+          },
           "at_unix_ms": {
             "type": "integer",
             "format": "int64",
@@ -12712,6 +12808,17 @@
           },
           "enforce_rules": {
             "type": "boolean"
+          },
+          "held_elsewhere": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HeldElsewhere",
+                "description": "Of the tracks the rules across stations held back with the windows\nas configured, the least recently played, and what held it back."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_played_unix_ms": {
             "type": [
@@ -12845,6 +12952,37 @@
           "upload",
           "incoming"
         ]
+      },
+      "HeldElsewhere": {
+        "type": "object",
+        "description": "A track another station's play or planned track held back.",
+        "required": [
+          "track_id",
+          "rule",
+          "station_id",
+          "at_unix_ms",
+          "planned"
+        ],
+        "properties": {
+          "at_unix_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the other station played it, or plans to (Unix ms)."
+          },
+          "planned": {
+            "type": "boolean",
+            "description": "In the other station's queue, not played yet."
+          },
+          "rule": {
+            "$ref": "#/components/schemas/SeparationRule"
+          },
+          "station_id": {
+            "$ref": "#/components/schemas/u64"
+          },
+          "track_id": {
+            "$ref": "#/components/schemas/u64"
+          }
+        }
       },
       "HookInput": {
         "type": "object",
@@ -15744,6 +15882,35 @@
         },
         "additionalProperties": false
       },
+      "Plays": {
+        "type": "object",
+        "description": "Plays that count of a track or an artist: on every station, and on each.",
+        "required": [
+          "play_count",
+          "stations"
+        ],
+        "properties": {
+          "last_played_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "play_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "stations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StationPlays"
+            },
+            "description": "The stations it played on, by ID."
+          }
+        }
+      },
       "Preferences": {
         "type": "object",
         "description": "What to change; what is left out stays as it is.",
@@ -16703,6 +16870,16 @@
         "type": "object",
         "description": "Station-wide rotation settings, stored under the `rotation` settings name.",
         "properties": {
+          "across": {
+            "$ref": "#/components/schemas/AcrossStations",
+            "description": "Rules across stations: off by default.",
+            "default": {
+              "artist_min": 0,
+              "station_ids": [],
+              "title_min": 0,
+              "track_min": 0
+            }
+          },
           "fallback_category_id": {
             "oneOf": [
               {
@@ -17835,6 +18012,32 @@
           }
         }
       },
+      "StationPlays": {
+        "type": "object",
+        "required": [
+          "station_id",
+          "play_count"
+        ],
+        "properties": {
+          "last_played_at_unix_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "play_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "station_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "StationRequest": {
         "type": "object",
         "required": [
@@ -18570,7 +18773,8 @@
               "overrides",
               "tag_overrides",
               "playout",
-              "categories"
+              "categories",
+              "plays"
             ],
             "properties": {
               "analysis": {
@@ -18644,6 +18848,10 @@
               },
               "playout": {
                 "$ref": "#/components/schemas/EffectivePlayout"
+              },
+              "plays": {
+                "$ref": "#/components/schemas/Plays",
+                "description": "Plays and last play in total and per station."
               },
               "tag_overrides": {
                 "type": "array",
@@ -19319,6 +19527,15 @@
               "null"
             ]
           },
+          "station_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Count plays on this station only: play counts, last played, their\nsort, `never_played` and `not_played_days`. Every station's when\nleft out.",
+            "minimum": 0
+          },
           "year_max": {
             "type": [
               "integer",
@@ -19950,6 +20167,46 @@
               },
               "type_id": {
                 "$ref": "#/components/schemas/u64"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Closer to another station's play or planned track than the windows\nacross stations allow at its step.",
+            "required": [
+              "pick",
+              "rule",
+              "station_id",
+              "other_unix_ms",
+              "window_min",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "across_stations"
+                ]
+              },
+              "other_unix_ms": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "pick": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "rule": {
+                "$ref": "#/components/schemas/SeparationRule"
+              },
+              "station_id": {
+                "$ref": "#/components/schemas/u64"
+              },
+              "window_min": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
               }
             }
           }

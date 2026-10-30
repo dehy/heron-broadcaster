@@ -131,6 +131,71 @@ impl Windows {
     }
 }
 
+/// Windows across stations (`docs/stations.md#rules-across-stations`):
+/// another station's play or planned track holds a track back within them,
+/// before or after it. 0 turns a rule off; all are off by default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct AcrossWindows {
+    /// The same artist (or a similar one).
+    pub artist_min: u32,
+    /// The same title (any version).
+    pub title_min: u32,
+    /// The same track.
+    pub track_min: u32,
+}
+
+impl AcrossWindows {
+    pub const OFF: Self = Self {
+        artist_min: 0,
+        title_min: 0,
+        track_min: 0,
+    };
+
+    /// Relaxed with the station's own rule of the same kind: artist halved
+    /// at step 3 and dropped at 4, title at 5 and 6, track at 7 and 8.
+    pub fn at_step(self, step: u8) -> Self {
+        let mut windows = self;
+        if step >= 3 {
+            windows.artist_min /= 2;
+        }
+        if step >= 4 {
+            windows.artist_min = 0;
+        }
+        if step >= 5 {
+            windows.title_min /= 2;
+        }
+        if step >= 6 {
+            windows.title_min = 0;
+        }
+        if step >= 7 {
+            windows.track_min /= 2;
+        }
+        if step >= 8 {
+            windows.track_min = 0;
+        }
+        windows
+    }
+
+    pub fn longest_min(&self) -> u32 {
+        self.artist_min.max(self.title_min).max(self.track_min)
+    }
+
+    pub fn is_off(&self) -> bool {
+        self.longest_min() == 0
+    }
+
+    pub fn check(&self) -> Result<(), String> {
+        if self.longest_min() > MAX_WINDOW_MIN {
+            return Err(format!(
+                "windows across stations are at most {MAX_WINDOW_MIN} minutes"
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// What a relaxation step relaxes, for people.
 pub fn describe_step(step: u8) -> &'static str {
     match step {
@@ -170,6 +235,28 @@ mod tests {
         assert_eq!(at(8), (0, 0, 0, 60));
         assert_eq!(at(9), (0, 0, 0, 60));
         assert_eq!(at(10), (0, 0, 0, 0));
+    }
+
+    #[test]
+    fn windows_across_stations_relax_with_the_station_s_own() {
+        let across = AcrossWindows {
+            artist_min: 30,
+            title_min: 60,
+            track_min: 120,
+        };
+        let at = |step| {
+            let w = across.at_step(step);
+            (w.artist_min, w.title_min, w.track_min)
+        };
+        assert_eq!(at(0), (30, 60, 120));
+        assert_eq!(at(2), (30, 60, 120));
+        assert_eq!(at(3), (15, 60, 120));
+        assert_eq!(at(4), (0, 60, 120));
+        assert_eq!(at(5), (0, 30, 120));
+        assert_eq!(at(6), (0, 0, 120));
+        assert_eq!(at(7), (0, 0, 60));
+        assert_eq!(at(8), (0, 0, 0));
+        assert!(AcrossWindows::default().is_off());
     }
 
     #[test]

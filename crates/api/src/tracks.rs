@@ -101,6 +101,10 @@ pub struct TrackQuery {
     pub labels_any: Option<String>,
     /// Tracks with none of these labels.
     pub labels_none: Option<String>,
+    /// Count plays on this station only: play counts, last played, their
+    /// sort, `never_played` and `not_played_days`. Every station's when
+    /// left out.
+    pub station_id: Option<u64>,
     /// Tracks never played.
     pub never_played: Option<bool>,
     /// Tracks not played for this many days (including those never played).
@@ -185,16 +189,28 @@ pub struct TrackPage {
     pub total: u64,
 }
 
-/// What the track list takes from the programming settings.
+/// What the track list takes from the programming settings, and the
+/// station whose plays it counts (every station's when none).
+#[derive(Clone)]
 pub(crate) struct ListContext {
     settings: ProgrammingSettings,
+    station_id: Option<u64>,
 }
 
 impl ListContext {
     pub async fn load(pool: &sqlx::MySqlPool) -> ApiResult<Self> {
         Ok(Self {
             settings: settings::load(pool, ProgrammingSettings::SETTINGS_NAME).await?,
+            station_id: None,
         })
+    }
+
+    /// Counting the plays of one station.
+    fn on_station(&self, station_id: Option<u64>) -> Self {
+        Self {
+            settings: self.settings.clone(),
+            station_id,
+        }
     }
 
     /// `SELECT` and `FROM` of track summaries.
@@ -230,9 +246,12 @@ impl ListContext {
               LEFT JOIN track_programming p ON p.track_id = t.id
               LEFT JOIN (SELECT track_id, COUNT(*) AS plays, MAX(started_at) AS last_played
                          FROM play_history
-                         WHERE track_id IS NOT NULL AND deck <> 'fx'
-                           AND (played_ms >= ",
+                         WHERE track_id IS NOT NULL AND deck <> 'fx'",
         );
+        if let Some(station_id) = self.station_id {
+            query.push(" AND station_id = ").push_bind(station_id);
+        }
+        query.push(" AND (played_ms >= ");
         let min_play_s = self.settings.min_play_s;
         query.push_bind(min_play_s * 1000);
         // Still playing, or its end was missed: it counts once long enough.
@@ -471,6 +490,15 @@ impl ListContext {
 
     /// The tracks matching `params`, a page at a time.
     pub async fn page(&self, pool: &sqlx::MySqlPool, params: &TrackQuery) -> ApiResult<TrackPage> {
+        let context = self.on_station(params.station_id);
+        context.page_on_station(pool, params).await
+    }
+
+    async fn page_on_station(
+        &self,
+        pool: &sqlx::MySqlPool,
+        params: &TrackQuery,
+    ) -> ApiResult<TrackPage> {
         let limit = params.limit.unwrap_or(50);
         if !(1..=500).contains(&limit) {
             return Err(ApiError::BadRequest("limit is 1 to 500".to_owned()));
@@ -527,9 +555,10 @@ impl ListContext {
         params: &TrackQuery,
         max: usize,
     ) -> ApiResult<Vec<u64>> {
+        let context = self.on_station(params.station_id);
         let mut query = QueryBuilder::new("SELECT t.id");
-        self.push_from(&mut query);
-        self.push_filters(&mut query, params)?;
+        context.push_from(&mut query);
+        context.push_filters(&mut query, params)?;
         query
             .push(" ORDER BY t.id LIMIT ")
             .push_bind(max as u64 + 1);
@@ -693,6 +722,8 @@ pub struct TrackDetail {
     pub playout: EffectivePlayout,
     pub categories: Vec<TrackCategory>,
     pub identification: Option<TrackIdentification>,
+    /// Plays and last play in total and per station.
+    pub plays: crate::history::Plays,
 }
 
 /// A track with its details, analysis, overrides, categories and
@@ -785,6 +816,7 @@ async fn get_track(
         },
         categories,
         identification,
+        plays: crate::history::plays(&state.pool, crate::history::PlaysOf::Track(id)).await?,
     }))
 }
 

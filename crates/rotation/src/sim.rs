@@ -12,7 +12,8 @@ use crate::restrict::{Subject, forbidding};
 use crate::rules::{FALLBACK_STEP, LAST_STEP};
 use crate::select::SeparationRule;
 use crate::{
-    CategoryId, Explanation, History, Library, Play, Position, Rng, TrackId, Windows, next,
+    AcrossWindows, CategoryId, Elsewhere, Explanation, History, Library, Play, Position, Rng,
+    TrackId, Windows, next,
 };
 
 /// Shortest length a simulated track is counted for.
@@ -51,6 +52,15 @@ pub enum Violation {
     },
     /// Right after a track of a type that never plays twice in a row.
     InARow { pick: u32, type_id: crate::TypeId },
+    /// Closer to another station's play or planned track than the windows
+    /// across stations allow at its step.
+    AcrossStations {
+        pick: u32,
+        rule: SeparationRule,
+        station_id: crate::StationId,
+        other_unix_ms: i64,
+        window_min: u32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -114,7 +124,8 @@ pub fn simulate(
     for pick in &picks {
         steps[usize::from(pick.explanation.step.min(LAST_STEP))] += 1;
     }
-    let violations = audit(library, &before, &picks);
+    let mut violations = audit(library, &before, &picks);
+    violations.extend(audit_across(library, history.elsewhere(), &picks));
     Simulation {
         start_unix_ms: start_ms,
         end_unix_ms: end,
@@ -257,6 +268,65 @@ pub fn audit(library: &Library, before: &[Play], picks: &[SimulatedPick]) -> Vec
     violations
 }
 
+/// The windows across stations a pick must respect, from its slot and step.
+fn expected_across(library: &Library, explanation: &Explanation) -> AcrossWindows {
+    if explanation.step >= FALLBACK_STEP || !explanation.enforce_rules {
+        return AcrossWindows::OFF;
+    }
+    library.settings.across.windows().at_step(explanation.step)
+}
+
+/// Checks each pick against the other stations' plays and planned tracks
+/// (`elsewhere`), before or after it, with the windows across stations as
+/// relaxed at its step.
+pub fn audit_across(
+    library: &Library,
+    elsewhere: &[Elsewhere],
+    picks: &[SimulatedPick],
+) -> Vec<Violation> {
+    let mut violations = Vec::new();
+    for (index, pick) in picks.iter().enumerate() {
+        let Some(track) = library.tracks.get(&pick.track_id) else {
+            continue;
+        };
+        let windows = expected_across(library, &pick.explanation);
+        let at = pick.start_unix_ms;
+        for other in elsewhere {
+            let play = &other.play;
+            let gap = (at - play.start_ms).abs();
+            let same_key = |a: &Option<String>, b: &Option<String>| a.is_some() && a == b;
+            let same_artist = track
+                .artists
+                .iter()
+                .any(|a| play.artists.iter().any(|b| library.same_artist(*a, *b)));
+            for (rule, same, window_min) in [
+                (
+                    SeparationRule::Track,
+                    play.track == Some(track.id),
+                    windows.track_min,
+                ),
+                (
+                    SeparationRule::Title,
+                    same_key(&track.title_key, &play.title_key),
+                    windows.title_min,
+                ),
+                (SeparationRule::Artist, same_artist, windows.artist_min),
+            ] {
+                if same && gap < i64::from(window_min) * 60_000 {
+                    violations.push(Violation::AcrossStations {
+                        pick: u32::try_from(index).unwrap_or(u32::MAX),
+                        rule,
+                        station_id: other.station_id,
+                        other_unix_ms: play.start_ms,
+                        window_min,
+                    });
+                }
+            }
+        }
+    }
+    violations
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -353,8 +423,175 @@ mod tests {
                 last_played_unix_ms: None,
                 weight: 1.0,
                 skipped_slots: vec![],
+                across: AcrossWindows::OFF,
+                held_elsewhere: None,
             },
         }
+    }
+
+    fn with_across(mut library: Library, artist_min: u32) -> Library {
+        library.settings.across = crate::AcrossStations {
+            artist_min,
+            ..crate::AcrossStations::default()
+        };
+        library
+    }
+
+    fn elsewhere(track: &crate::Track, at: i64, planned: bool) -> Elsewhere {
+        Elsewhere {
+            station_id: 2,
+            planned,
+            play: Play::of(track, at),
+        }
+    }
+
+    /// Another station's play or planned track, before or after a pick,
+    /// within the window across stations at its step.
+    #[test]
+    fn picks_are_audited_against_other_stations() {
+        let library = with_across(library(), 30);
+        let noon = 12 * 60 * MIN;
+        // Artist 10 (track 1) on station 2 at noon; similar artist 11 is track 2.
+        let others = [elsewhere(&library.tracks[&1], noon, false)];
+        let across = |track, at, step| {
+            audit_across(&library, &others, &[pick(&library, track, at, step)])
+                .into_iter()
+                .map(|violation| match violation {
+                    Violation::AcrossStations {
+                        rule, station_id, ..
+                    } => (rule, station_id),
+                    other => panic!("{other:?}"),
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(across(1, noon + 10 * MIN, 0), [(SeparationRule::Artist, 2)]);
+        assert_eq!(
+            across(1, noon - 10 * MIN, 0),
+            [(SeparationRule::Artist, 2)],
+            "planned after"
+        );
+        assert_eq!(
+            across(2, noon + 10 * MIN, 0),
+            [(SeparationRule::Artist, 2)],
+            "similar"
+        );
+        assert!(across(1, noon + 40 * MIN, 0).is_empty());
+        // Halved at step 3, dropped at 4.
+        assert!(across(1, noon + 20 * MIN, 3).is_empty());
+        assert_eq!(across(1, noon + 10 * MIN, 3).len(), 1);
+        assert!(across(1, noon + 10 * MIN, 4).is_empty());
+        let off = audit_across(
+            &with_across(library.clone(), 0),
+            &others,
+            &[pick(&library, 1, noon, 0)],
+        );
+        assert!(off.is_empty());
+    }
+
+    /// Two stations sharing a library, each planning in turn with the
+    /// other's plays: over a week, an artist never plays on both within 30
+    /// minutes unless the later of the two picks logged that rule relaxed.
+    #[test]
+    fn two_stations_keep_their_artists_apart_for_a_week() {
+        let tracks: Vec<crate::Track> = (1..=120)
+            .map(|id| crate::Track {
+                id,
+                title_key: Some(format!("title {id}")),
+                album_key: None,
+                artists: vec![100 + id % 60],
+                categories: vec![],
+                length_ms: 200_000,
+            })
+            .collect();
+        let library = Library::new(
+            LibraryParts {
+                tracks,
+                settings: crate::RotationSettings {
+                    across: crate::AcrossStations {
+                        artist_min: 30,
+                        title_min: 30,
+                        track_min: 60,
+                        station_ids: vec![],
+                    },
+                    ..crate::RotationSettings::default()
+                },
+                ..LibraryParts::default()
+            },
+            TimeZone::UTC,
+        );
+        let start = 1_700_000_000_000;
+        let end = start + 7 * 24 * 60 * MIN;
+        let mut rng = Rng::new(7);
+        let mut histories = [History::default(), History::default()];
+        let mut at = [start, start + 90_000];
+        let mut picks: [Vec<SimulatedPick>; 2] = [Vec::new(), Vec::new()];
+        while at[0] < end || at[1] < end {
+            let me = usize::from(at[1] < at[0]);
+            let other = 1 - me;
+            let elsewhere = picks[other]
+                .iter()
+                .rev()
+                .take_while(|pick| pick.start_unix_ms > at[me] - 120 * MIN)
+                .map(|pick| Elsewhere {
+                    station_id: other as u64 + 1,
+                    planned: pick.start_unix_ms > at[me],
+                    play: Play::of(&library.tracks[&pick.track_id], pick.start_unix_ms),
+                })
+                .collect();
+            let history = std::mem::take(&mut histories[me]).with_elsewhere(elsewhere);
+            let pick = next(&library, &history, at[me], None, &mut rng).unwrap();
+            let track = &library.tracks[&pick.track];
+            histories[me] = history;
+            histories[me].push(Play::of(track, at[me]));
+            picks[me].push(SimulatedPick {
+                track_id: pick.track,
+                start_unix_ms: at[me],
+                length_ms: track.length_ms,
+                explanation: pick.explanation,
+            });
+            at[me] += i64::from(track.length_ms);
+            histories[me].forget_before(at[me] - library.horizon_ms());
+        }
+        assert!(picks[0].len() > 3_000 && picks[1].len() > 3_000);
+        let mut relaxed = 0;
+        for me in 0..2 {
+            let other = 1 - me;
+            for (index, pick) in picks[me].iter().enumerate() {
+                // The other station's plays planned before this pick: of
+                // two picks, the later one is the one that answers.
+                let from = picks[other]
+                    .partition_point(|o| o.start_unix_ms <= pick.start_unix_ms - 120 * MIN);
+                let to = picks[other].partition_point(|o| o.start_unix_ms < pick.start_unix_ms);
+                let before: Vec<Elsewhere> = picks[other][from..to]
+                    .iter()
+                    .map(|o| Elsewhere {
+                        station_id: other as u64 + 1,
+                        planned: false,
+                        play: Play::of(&library.tracks[&o.track_id], o.start_unix_ms),
+                    })
+                    .collect();
+                let violations = audit_across(&library, &before, std::slice::from_ref(pick));
+                assert!(
+                    violations.is_empty(),
+                    "station {me} pick {index}: {violations:?}"
+                );
+                relaxed += u32::from(pick.explanation.step > 0);
+            }
+        }
+        // 120 tracks of 60 artists hold: almost nothing is relaxed.
+        assert!(relaxed < 100, "{relaxed} relaxed picks");
+        let held: u32 = picks
+            .iter()
+            .flatten()
+            .map(|pick| pick.explanation.blocked.across)
+            .sum();
+        assert!(held > 0, "the rules across stations held nothing back");
+        assert!(
+            picks
+                .iter()
+                .flatten()
+                .any(|pick| pick.explanation.held_elsewhere.is_some())
+        );
     }
 
     fn rules(violations: &[Violation]) -> Vec<SeparationRule> {

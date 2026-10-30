@@ -4980,3 +4980,192 @@ async fn categories_restrictions_and_medleys_follow_their_stations() {
     assert_eq!(categories().await, [eighties_gold]);
     station.stop().await;
 }
+
+/// A station keeps the artists it plays apart from another station's plays
+/// and queue, and says so in its selection log; plays are counted per
+/// station and in total.
+#[tokio::test(flavor = "multi_thread")]
+async fn rules_across_stations_and_plays_per_station() {
+    let Some(mut station) = Station::start().await else {
+        return;
+    };
+    let (_engine, _state_dir, second_url, grpc) = start_engine(station.library.path(), None).await;
+    station.tasks.push(grpc);
+    let admin = station.signed_in("admin").await;
+    let first = admin.get("/stations").await[0]["id"].as_u64().unwrap();
+    // Before the second station starts: nothing it picks escapes the rule.
+    let rotation = admin.get("/settings/rotation").await;
+    let (status, created) = admin
+        .send(
+            Method::POST,
+            "/stations",
+            json!({"name": "Hits 80", "code": "hits80", "engine_url": second_url, "enabled": false}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let second = created["id"].as_u64().unwrap();
+    let mut across = rotation.clone();
+    across["across"] = json!({"track_min": 30, "station_ids": [second]});
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/stations/{second}/settings/rotation"),
+            across.clone(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "not itself");
+    across["across"] = json!({"track_min": 30});
+    let (status, body) = admin
+        .send(
+            Method::PUT,
+            &format!("/stations/{second}/settings/rotation"),
+            across,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let request = json!({"name": "Hits 80", "code": "hits80", "engine_url": second_url});
+    let (status, _) = admin
+        .send(Method::PUT, &format!("/stations/{second}"), request)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Five tracks, all played or queued by the first station within 30
+    // minutes: the second station's picks are held back, then relaxed.
+    let pick = eventually(
+        "a pick held back by the first station",
+        Duration::from_secs(20),
+        || async {
+            let picks = admin
+                .get(&format!("/stations/{second}/rotation/picks"))
+                .await;
+            picks
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|pick| pick["explanation"]["held_elsewhere"].is_object())
+                .cloned()
+        },
+    )
+    .await;
+    let explanation = &pick["explanation"];
+    assert_eq!(
+        explanation["held_elsewhere"]["station_id"], first,
+        "{explanation}"
+    );
+    assert_eq!(explanation["held_elsewhere"]["rule"], "track");
+    assert!(
+        explanation["blocked"]["across"].as_u64() > Some(0),
+        "{explanation}"
+    );
+    // Relaxed with the station's own track rule: halved at step 7.
+    let relaxed = eventually("a relaxed pick", Duration::from_secs(20), || async {
+        let picks = admin
+            .get(&format!("/stations/{second}/rotation/picks"))
+            .await;
+        picks
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|pick| pick["explanation"]["step"].as_u64() >= Some(7))
+            .cloned()
+    })
+    .await;
+    assert!(
+        relaxed["explanation"]["across"]["track_min"].as_u64() < Some(30),
+        "{relaxed}"
+    );
+    // The first station looks at nobody: nothing is held there.
+    let first_picks = admin
+        .get(&format!("/stations/{first}/rotation/picks"))
+        .await;
+    assert!(
+        first_picks
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|pick| pick["explanation"]["blocked"]["across"] == 0)
+    );
+    // A simulation of the second station is audited against the first's.
+    let (status, simulation) = admin
+        .send(
+            Method::POST,
+            &format!("/stations/{second}/rotation/simulate"),
+            json!({"hours": 1, "seed": 3}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{simulation}");
+    assert_eq!(simulation["simulation"]["violations"], json!([]));
+
+    // Plays per station, and in total.
+    let track = eventually(
+        "a track played on both",
+        Duration::from_secs(30),
+        || async {
+            let rows: Vec<(u64,)> = sqlx::query_as(
+                "SELECT track_id FROM play_history WHERE track_id IS NOT NULL
+             GROUP BY track_id HAVING COUNT(DISTINCT station_id) = 2 LIMIT 1",
+            )
+            .fetch_all(&station.db.pool)
+            .await
+            .unwrap();
+            rows.first().map(|row| row.0)
+        },
+    )
+    .await;
+    // Plays count once they are long enough (30 s by default): count them all.
+    let mut programming = admin.get("/settings/programming").await;
+    programming["min_play_s"] = json!(0);
+    let (status, _) = admin
+        .send(Method::PUT, "/settings/programming", programming)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let detail = admin.get(&format!("/tracks/{track}")).await;
+    let plays = &detail["plays"];
+    let stations: Vec<u64> = plays["stations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["station_id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(stations, [first, second], "{plays}");
+    let per_station: u64 = plays["stations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["play_count"].as_u64().unwrap())
+        .sum();
+    assert_eq!(plays["play_count"].as_u64(), Some(per_station));
+    let count_on = |station_id: Option<u64>| {
+        let admin = &admin;
+        async move {
+            let query = station_id.map_or_else(String::new, |id| format!("&station_id={id}"));
+            let page = admin.get(&format!("/tracks?limit=50{query}")).await;
+            page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["id"].as_u64() == Some(track))
+                .map(|item| item["play_count"].as_u64().unwrap())
+                .unwrap()
+        }
+    };
+    let total = count_on(None).await;
+    let on_second = count_on(Some(second)).await;
+    assert!(on_second > 0 && on_second < total, "{on_second} of {total}");
+    crate::artists::link_pending(&station.db.pool)
+        .await
+        .unwrap();
+    let artist: u64 =
+        sqlx::query_scalar("SELECT artist_id FROM track_artists WHERE track_id = ? LIMIT 1")
+            .bind(track)
+            .fetch_one(&station.db.pool)
+            .await
+            .unwrap();
+    let artist = admin.get(&format!("/artists/{artist}")).await;
+    assert_eq!(
+        artist["plays"]["stations"].as_array().unwrap().len(),
+        2,
+        "{artist}"
+    );
+    station.stop().await;
+}

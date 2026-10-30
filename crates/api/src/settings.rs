@@ -651,6 +651,16 @@ async fn put_rotation_settings(
 ) -> ApiResult<Json<RotationSettings>> {
     user.require(Role::Operator)?;
     settings.check().map_err(ApiError::Invalid)?;
+    if let Some(id) = settings
+        .across
+        .station_ids
+        .iter()
+        .find(|id| **id == station.id() || state.stations.get(**id).is_none())
+    {
+        return Err(ApiError::Invalid(format!(
+            "station {id} is not another station"
+        )));
+    }
     if let Some(id) = settings.fallback_category_id {
         crate::categories::check_offered(&state.pool, station.id(), id).await?;
     }

@@ -319,6 +319,72 @@ pub struct HistoryQuery {
     pub limit: Option<u32>,
 }
 
+/// Plays that count of a track or an artist: on every station, and on each.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, ToSchema)]
+pub struct Plays {
+    pub play_count: u64,
+    pub last_played_at_unix_ms: Option<i64>,
+    /// The stations it played on, by ID.
+    pub stations: Vec<StationPlays>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, ToSchema)]
+pub struct StationPlays {
+    pub station_id: u64,
+    pub play_count: u64,
+    pub last_played_at_unix_ms: Option<i64>,
+}
+
+/// Whose plays.
+pub enum PlaysOf {
+    Track(u64),
+    Artist(u64),
+}
+
+/// The plays that count (FX player aside, at least the programming
+/// settings' `min_play_s`, as the track list counts them), per station.
+pub async fn plays(pool: &MySqlPool, of: PlaysOf) -> ApiResult<Plays> {
+    let settings: crate::settings::ProgrammingSettings =
+        crate::settings::load(pool, crate::settings::ProgrammingSettings::SETTINGS_NAME).await?;
+    let (filter, id) = match of {
+        PlaysOf::Track(id) => ("h.track_id = ?", id),
+        PlaysOf::Artist(id) => (
+            "h.track_id IN (SELECT ta.track_id FROM track_artists ta WHERE ta.artist_id = ?)",
+            id,
+        ),
+    };
+    let rows: Vec<(u64, i64, Option<i64>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT h.station_id, COUNT(*),
+                CAST(UNIX_TIMESTAMP(MAX(h.started_at)) * 1000 AS SIGNED)
+         FROM play_history h
+         WHERE {filter} AND h.deck <> 'fx'
+           AND (h.played_ms >= ? OR (h.played_ms IS NULL
+                                     AND h.started_at <= NOW(6) - INTERVAL ? SECOND))
+         GROUP BY h.station_id ORDER BY h.station_id"
+    )))
+    .bind(id)
+    .bind(settings.min_play_s * 1000)
+    .bind(settings.min_play_s)
+    .fetch_all(pool)
+    .await?;
+    let stations: Vec<StationPlays> = rows
+        .into_iter()
+        .map(|(station_id, count, last)| StationPlays {
+            station_id,
+            play_count: u64::try_from(count).unwrap_or(0),
+            last_played_at_unix_ms: last,
+        })
+        .collect();
+    Ok(Plays {
+        play_count: stations.iter().map(|s| s.play_count).sum(),
+        last_played_at_unix_ms: stations
+            .iter()
+            .filter_map(|s| s.last_played_at_unix_ms)
+            .max(),
+        stations,
+    })
+}
+
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new().routes(routes!(list_history))
 }

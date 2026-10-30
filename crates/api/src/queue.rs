@@ -37,6 +37,8 @@ pub struct QueueManager {
     pool: MySqlPool,
     engine: Arc<EngineLink>,
     station_id: u64,
+    /// The other stations, for the rules across stations.
+    stations: std::sync::Weak<crate::stations::Stations>,
     wake: Notify,
     /// Rotation could pick nothing: no new try before then.
     idle_until: Mutex<Option<Instant>>,
@@ -180,11 +182,17 @@ impl TrackRow {
 }
 
 impl QueueManager {
-    pub fn new(pool: MySqlPool, engine: Arc<EngineLink>, station_id: u64) -> Arc<Self> {
+    pub fn new(
+        pool: MySqlPool,
+        engine: Arc<EngineLink>,
+        station_id: u64,
+        stations: std::sync::Weak<crate::stations::Stations>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             pool,
             engine,
             station_id,
+            stations,
             wake: Notify::new(),
             idle_until: Mutex::new(None),
         })
@@ -292,6 +300,15 @@ impl QueueManager {
         let library = rotation::load_library(&self.pool, self.station_id).await?;
         let now = rotation::now_ms();
         let history = rotation::load_history(&self.pool, self.station_id, &library, now).await?;
+        let history = match self.stations.upgrade() {
+            Some(stations) => {
+                let elsewhere =
+                    rotation::load_elsewhere(&self.pool, &stations, self.station_id, &library, now)
+                        .await?;
+                history.with_elsewhere(elsewhere)
+            }
+            None => history,
+        };
         let (planned, mut at) = rotation::planned_starts(state, now);
         let mut history = rotation::with_queue(&self.pool, &library, history, &planned).await?;
         let mut last = rotation::last_position(&self.pool, self.station_id).await?;
