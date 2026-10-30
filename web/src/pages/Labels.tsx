@@ -11,7 +11,7 @@ import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, Modal, Pag
 import { number, rich, t } from "../i18n";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
-import { COLORS } from "./Categories";
+import { COLORS } from "../lib/colors";
 
 /** Queries a change of labels touches. */
 const LABELS: string[][] = [["labels"], ["tracks"], ["track"]];

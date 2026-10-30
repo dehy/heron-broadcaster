@@ -17,6 +17,7 @@ import {
   unwrap,
 } from "../api";
 import { FadeEditor } from "../components/FadeEditor";
+import { NewCategory } from "../components/NewCategory";
 import { TaskState, useTask } from "../components/Task";
 import {
   LabelChip,
@@ -1217,6 +1218,11 @@ function CategoriesCard({ track, canEdit }: { track: TrackDetail; canEdit: boole
               ))}
             </select>
           </label>
+        )}
+        {canEdit && (
+          <NewCategory
+            onCreated={(created) => save.mutate([...current, { category_id: created.id, weight: 1 }])}
+          />
         )}
       </div>
     </Card>

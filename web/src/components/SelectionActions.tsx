@@ -12,6 +12,7 @@ import { type PlainKey, rich, t } from "../i18n";
 import { Link } from "../lib/router";
 import { useAction } from "../lib/session";
 import { Field, Modal, Segmented } from "./ui";
+import { NewCategory } from "./NewCategory";
 
 export type Selection = Schemas["TrackSelection"];
 export type TagField = Schemas["TagField"];
@@ -271,6 +272,7 @@ export function CategoryDialog({ open, onClose, selection, files, tracks }: Targ
             ))}
           </select>
         </Field>
+        {mode === "add" && <NewCategory onCreated={(created) => setCategory(String(created.id))} />}
         {mode === "add" && (
           <Field label={t("track.weight")} hint={t("selection.weightHint")}>
             <input
