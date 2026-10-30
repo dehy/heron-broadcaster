@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use crate::restrict::{Subject, forbidding};
 use crate::rules::{AcrossWindows, FALLBACK_STEP, LAST_STEP, Windows, describe_step};
 use crate::{
-    ArtistId, CategoryId, ClockId, Elsewhere, History, Library, Method, Position, Rng, StationId,
-    Track, TrackId,
+    ArtistId, CategoryId, ClockId, Elsewhere, History, Library, Method, Position, Rng, ScheduleId,
+    StationId, Track, TrackId,
 };
 
 /// The next track, where it sits in the clock and why it was picked.
@@ -29,6 +29,13 @@ pub struct Pick {
 pub struct Explanation {
     /// When the track is planned to start (Unix ms).
     pub at_unix_ms: i64,
+    /// The schedule playing at `at_unix_ms`: the default one, or another
+    /// during its periods. Missing in picks logged before schedules had
+    /// periods.
+    #[serde(default)]
+    pub schedule_id: Option<ScheduleId>,
+    #[serde(default)]
+    pub schedule_name: Option<String>,
     /// Missing when no clock is scheduled: the whole library rotates.
     pub clock_id: Option<ClockId>,
     pub clock_name: Option<String>,
@@ -477,6 +484,8 @@ fn fill(
         let (track, weight) = choose(method, &candidates, history, rng);
         let explanation = Explanation {
             at_unix_ms: at_ms,
+            schedule_id: None,
+            schedule_name: None,
             clock_id: None,
             clock_name: None,
             slot: None,
@@ -525,6 +534,12 @@ pub fn next(
     let into_hour = (i64::from(local.minute()) * 60 + i64::from(local.second())) * 1_000
         + i64::from(local.millisecond());
     let hour_start = at_ms - into_hour;
+    let schedule = library.schedule_at(&local);
+    let named = |mut explanation: Explanation| {
+        explanation.schedule_id = Some(schedule.id);
+        explanation.schedule_name = Some(schedule.name.clone());
+        explanation
+    };
     let Some(clock) = library.clock_at(&local) else {
         let slot = SlotCall {
             call: Call::new(library, None, None),
@@ -534,7 +549,7 @@ pub fn next(
         return fill(library, history, at_ms, &slot, rng).map(|(track, explanation)| Pick {
             track,
             position: None,
-            explanation,
+            explanation: named(explanation),
         });
     };
     let count = clock.slots.len();
@@ -577,6 +592,7 @@ pub fn next(
                 explanation.clock_name = Some(clock.name.clone());
                 explanation.slot = Some(index);
                 explanation.skipped_slots = skipped;
+                let explanation = named(explanation);
                 return Some(Pick {
                     track,
                     position: Some(Position {
@@ -659,6 +675,7 @@ mod tests {
                 // Every hour of 1970-01-01 (a Thursday) but 02:00.
                 schedule: Schedule {
                     hours: HashMap::from_iter((0..24).filter(|h| *h != 2).map(|h| ((4, h), 1))),
+                    ..Schedule::default()
                 },
                 ..LibraryParts::default()
             },

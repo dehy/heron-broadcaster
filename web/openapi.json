@@ -4707,8 +4707,8 @@
         "tags": [
           "rotation"
         ],
-        "summary": "Which clock runs when; hours left out rotate the whole library.",
-        "operationId": "get_schedule",
+        "summary": "The default schedule's hours; hours left out rotate the whole library.",
+        "operationId": "get_default",
         "responses": {
           "200": {
             "content": {
@@ -4737,8 +4737,8 @@
         "tags": [
           "rotation"
         ],
-        "summary": "Replaces the whole schedule. Operators and admins.",
-        "operationId": "put_schedule",
+        "summary": "Replaces the default schedule's whole week. Operators and admins.",
+        "operationId": "put_default",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4765,6 +4765,192 @@
               }
             }
           },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedules": {
+      "get": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Lists the station's schedules, the one playing now and the next change.",
+        "operationId": "list_schedules",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedules"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Adds a schedule, empty or a copy of another's hours. Operators and admins.",
+        "operationId": "create_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSchedule"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedules/{id}": {
+      "get": {
+        "tags": [
+          "rotation"
+        ],
+        "operationId": "get_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Replaces a schedule's hours and periods, and renames it. Operators and\nadmins.",
+        "operationId": "update_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "rotation"
+        ],
+        "summary": "Deletes a schedule other than the default one. Operators and admins.",
+        "operationId": "delete_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
           "4XX": {
             "content": {
               "application/json": {
@@ -8032,8 +8218,8 @@
         "tags": [
           "rotation"
         ],
-        "summary": "Which clock runs when; hours left out rotate the whole library.",
-        "operationId": "get_schedule_on_station",
+        "summary": "The default schedule's hours; hours left out rotate the whole library.",
+        "operationId": "get_default_on_station",
         "parameters": [
           {
             "name": "station_id",
@@ -8073,8 +8259,8 @@
         "tags": [
           "rotation"
         ],
-        "summary": "Replaces the whole schedule. Operators and admins.",
-        "operationId": "put_schedule_on_station",
+        "summary": "Replaces the default schedule's whole week. Operators and admins.",
+        "operationId": "put_default_on_station",
         "parameters": [
           {
             "name": "station_id",
@@ -12844,6 +13030,23 @@
             "description": "Of them, forbidden by restrictions.",
             "minimum": 0
           },
+          "schedule_id": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/u64",
+                "description": "The schedule playing at `at_unix_ms`: the default one, or another\nduring its periods. Missing in picks logged before schedules had\nperiods."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schedule_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "skipped_slots": {
             "type": "array",
             "items": {
@@ -14900,6 +15103,27 @@
         },
         "additionalProperties": false
       },
+      "NewSchedule": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "copy_from": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "A schedule of the station whose hours the new one starts with.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "NewToken": {
         "type": "object",
         "required": [
@@ -14978,6 +15202,26 @@
           }
         },
         "additionalProperties": false
+      },
+      "NextChange": {
+        "type": "object",
+        "description": "When the schedule playing changes next.",
+        "required": [
+          "at",
+          "schedule_id"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "description": "Station time.",
+            "example": "2026-12-01T00:00:00"
+          },
+          "schedule_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
       },
       "NowPlaying": {
         "type": "object",
@@ -15434,6 +15678,31 @@
           },
           "new_password": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Period": {
+        "type": "object",
+        "description": "When a schedule other than the default one plays.",
+        "required": [
+          "start",
+          "end"
+        ],
+        "properties": {
+          "end": {
+            "type": "string",
+            "description": "Station time, on the hour, excluded.",
+            "example": "2027-01-01T00:00:00"
+          },
+          "every_year": {
+            "type": "boolean",
+            "description": "Every year on these days and hours (the years are ignored); the\nrange may run over the new year."
+          },
+          "start": {
+            "type": "string",
+            "description": "Station time, on the hour.",
+            "example": "2026-12-01T00:00:00"
           }
         },
         "additionalProperties": false
@@ -17115,9 +17384,110 @@
           }
         }
       },
+      "ScheduleSummary": {
+        "type": "object",
+        "description": "A schedule, without its hours.",
+        "required": [
+          "id",
+          "name",
+          "is_default",
+          "periods",
+          "hours"
+        ],
+        "properties": {
+          "hours": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Hours of the week it paints with a clock.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string",
+            "description": "Empty for the default schedule."
+          },
+          "periods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Period"
+            },
+            "description": "When it plays; empty for the default schedule."
+          }
+        }
+      },
+      "ScheduleUpdate": {
+        "type": "object",
+        "required": [
+          "hours"
+        ],
+        "properties": {
+          "hours": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduledHour"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Ignored for the default schedule."
+          },
+          "periods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Period"
+            },
+            "description": "Refused on the default schedule."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ScheduleView": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "is_default",
+          "periods",
+          "hours"
+        ],
+        "properties": {
+          "hours": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduledHour"
+            }
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "periods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Period"
+            }
+          }
+        }
+      },
       "ScheduledHour": {
         "type": "object",
-        "description": "The clock running at an hour of the week.",
         "required": [
           "day_of_week",
           "hour",
@@ -17143,6 +17513,39 @@
           }
         },
         "additionalProperties": false
+      },
+      "Schedules": {
+        "type": "object",
+        "required": [
+          "schedules",
+          "active_id"
+        ],
+        "properties": {
+          "active_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The schedule playing now.",
+            "minimum": 0
+          },
+          "next_change": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NextChange",
+                "description": "Within the next 400 days; missing when nothing changes."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schedules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleSummary"
+            },
+            "description": "The default schedule first, then the others by name."
+          }
+        }
       },
       "SelectionResult": {
         "type": "object",

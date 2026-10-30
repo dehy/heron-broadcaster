@@ -133,6 +133,15 @@ They are relaxed with the station's own rule of the same kind: artist halved at 
 
 Clocks are assigned per hour and day of week (`clock_schedule` in the [data model](data-model.md)), in the **station's time zone** (`station` settings, an IANA name such as `Europe/Paris`; the server's `TZ`, or UTC, by default). When the clocks go back, the repeated hour runs its clock again; when they go forward, the skipped hour is skipped.
 
+A station has **several schedules** ([M14](roadmap/m14-schedules.md)), each a week of hours painted with clocks, and **one plays at a time**:
+
+- The **default schedule** plays unless another one's period says otherwise. It cannot be deleted and has no periods. An existing station's schedule became its default schedule; a new station starts with an empty one.
+- Another schedule plays during its **periods**: from a date and hour to a date and hour, in station time, the end excluded (1 December 00:00 to 1 January 00:00 is the whole of December). Periods start and end on the hour. A period can come back **every year**: the years are ignored, and the range may run over the new year.
+- When periods overlap, the one that **started last** plays: a New Year's Eve evening from 31 December 20:00 inside the Christmas period plays its own schedule, then Christmas comes back until its end.
+- An hour the playing schedule leaves empty rotates the whole library, as an hour without a clock: it does **not** fall back on the default schedule. A new schedule can start as a copy of another, so that only the hours that change need painting.
+- Each pick in the selection log names the schedule it came from (`schedule_id`, `schedule_name` in its explanation), and simulations follow the periods.
+- A track picked ahead for the next hour is picked from the schedule playing at its planned start: the change happens at the hour, like a change of clock.
+
 ## Rotation model
 
 - Rotation is a **pure function** of (library, play history, rules, current clock, current time), in the `heron-rotation` crate.

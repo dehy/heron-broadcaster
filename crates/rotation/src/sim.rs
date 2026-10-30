@@ -390,6 +390,7 @@ mod tests {
                     hours: (1..=7)
                         .flat_map(|d| (0..24).map(move |h| ((d, h), 1)))
                         .collect(),
+                    ..Schedule::default()
                 },
                 ..LibraryParts::default()
             },
@@ -405,6 +406,8 @@ mod tests {
             length_ms: 200_000,
             explanation: Explanation {
                 at_unix_ms: at,
+                schedule_id: None,
+                schedule_name: None,
                 clock_id: Some(1),
                 clock_name: None,
                 slot: Some(0),

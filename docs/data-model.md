@@ -72,7 +72,7 @@ See [Several stations](stations.md) ([M13](roadmap/m13-several-stations.md)).
 | `user_station_roles` | user_id, station_id, role (none, viewer, operator, admin); `users.role` is the shared role |
 | `station_settings` | station_id, name, JSON value: the per-station settings groups (`station`, `playout`, `eq`, `queue`, `engine`, `rotation`, and `medley_categories`: the medleys' category and liner categories) |
 
-`station_id` is added to `clocks`, `clock_schedule`, `rotation_picks`, `play_history`, `outputs`, `webhooks` and `listener_totals`. The first station gets every existing row.
+`station_id` is added to `clocks`, `clock_schedule` (replaced by `schedule_id` in [M14](roadmap/m14-schedules.md): each station's schedule became its default schedule), `rotation_picks`, `play_history`, `outputs`, `webhooks` and `listener_totals`. The first station gets every existing row.
 
 ## Categories
 
@@ -112,7 +112,9 @@ Targets are not foreign keys: restrictions on a deleted category go with it, mer
 |---|---|
 | `clocks` | id, name, looping (carries on across hours instead of starting over at each hour) |
 | `clock_slots` | clock_id, position, category_id, selection_method (least_recently_played, random, weighted), enforce_rules, separation (JSON: the windows it overrides) |
-| `clock_schedule` | day_of_week (ISO: 1 = Monday), hour (station time), clock_id |
+| `schedules` | id, station_id, name (unique for the station), is_default (one per station) — see [Rotation – Scheduling](rotation.md#scheduling) |
+| `schedule_periods` | id, schedule_id (not the default one), starts_at, ends_at (station time, on the hour, the end excluded), every_year (the years are ignored; the range may run over the new year) |
+| `clock_schedule` | schedule_id, day_of_week (ISO: 1 = Monday), hour (station time), clock_id |
 | `rotation_picks` | id, track_id, planned_at, clock_id, slot, hour_start, category_id, step, explanation (JSON, see [Rotation](rotation.md#rotation-model)), engine_started_at and entry_id (the engine's queue entry), play_id — the selection log |
 
 ## History
@@ -181,6 +183,8 @@ artists *──* artists          (through artist_similar, artist_suggestions)
 restrictions *──1 tracks | artists | categories
 clocks 1──* clock_slots *──1 categories
 clock_schedule *──1 clocks
+clock_schedule *──1 schedules 1──* schedule_periods
+schedules *──1 stations
 rotation_picks *──1 tracks, 0..1 play_history
 outputs 1──* listener_samples, listener_sessions, listener_totals
 play_history *──1 tracks

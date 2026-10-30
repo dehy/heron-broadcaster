@@ -1575,12 +1575,51 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Which clock runs when; hours left out rotate the whole library. */
-        get: operations["get_schedule"];
-        /** Replaces the whole schedule. Operators and admins. */
-        put: operations["put_schedule"];
+        /** The default schedule's hours; hours left out rotate the whole library. */
+        get: operations["get_default"];
+        /** Replaces the default schedule's whole week. Operators and admins. */
+        put: operations["put_default"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lists the station's schedules, the one playing now and the next change. */
+        get: operations["list_schedules"];
+        put?: never;
+        /** Adds a schedule, empty or a copy of another's hours. Operators and admins. */
+        post: operations["create_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schedules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_schedule"];
+        /**
+         * Replaces a schedule's hours and periods, and renames it. Operators and
+         *     admins.
+         */
+        put: operations["update_schedule"];
+        post?: never;
+        /** Deletes a schedule other than the default one. Operators and admins. */
+        delete: operations["delete_schedule"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2547,10 +2586,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Which clock runs when; hours left out rotate the whole library. */
-        get: operations["get_schedule_on_station"];
-        /** Replaces the whole schedule. Operators and admins. */
-        put: operations["put_schedule_on_station"];
+        /** The default schedule's hours; hours left out rotate the whole library. */
+        get: operations["get_default_on_station"];
+        /** Replaces the default schedule's whole week. Operators and admins. */
+        put: operations["put_default_on_station"];
         post?: never;
         delete?: never;
         options?: never;
@@ -4228,6 +4267,8 @@ export interface components {
              * @description Of them, forbidden by restrictions.
              */
             restricted: number;
+            schedule_id?: components["schemas"]["u64"] | null;
+            schedule_name?: string | null;
             /** @description Slots passed over because nothing could be picked, even relaxed. */
             skipped_slots: components["schemas"]["SkippedSlot"][];
             /**
@@ -5146,6 +5187,14 @@ export interface components {
             /** @description What the files are, for people (`Album 2024`, the dropped folder). */
             name: string;
         };
+        NewSchedule: {
+            /**
+             * Format: int64
+             * @description A schedule of the station whose hours the new one starts with.
+             */
+            copy_from?: number | null;
+            name: string;
+        };
         NewToken: {
             /**
              * Format: int32
@@ -5176,6 +5225,16 @@ export interface components {
              */
             station_roles?: components["schemas"]["StationRole"][] | null;
             username: string;
+        };
+        /** @description When the schedule playing changes next. */
+        NextChange: {
+            /**
+             * @description Station time.
+             * @example 2026-12-01T00:00:00
+             */
+            at: string;
+            /** Format: int64 */
+            schedule_id: number;
         };
         NowPlaying: {
             now?: components["schemas"]["PublicTrack"] | null;
@@ -5341,6 +5400,24 @@ export interface components {
         PasswordChange: {
             current_password: string;
             new_password: string;
+        };
+        /** @description When a schedule other than the default one plays. */
+        Period: {
+            /**
+             * @description Station time, on the hour, excluded.
+             * @example 2027-01-01T00:00:00
+             */
+            end: string;
+            /**
+             * @description Every year on these days and hours (the years are ignored); the
+             *     range may run over the new year.
+             */
+            every_year?: boolean;
+            /**
+             * @description Station time, on the hour.
+             * @example 2026-12-01T00:00:00
+             */
+            start: string;
         };
         /** @description The totals of a period. */
         PeriodTotals: {
@@ -6090,7 +6167,36 @@ export interface components {
             /** Format: int64 */
             updated: number;
         };
-        /** @description The clock running at an hour of the week. */
+        /** @description A schedule, without its hours. */
+        ScheduleSummary: {
+            /**
+             * Format: int32
+             * @description Hours of the week it paints with a clock.
+             */
+            hours: number;
+            /** Format: int64 */
+            id: number;
+            is_default: boolean;
+            /** @description Empty for the default schedule. */
+            name: string;
+            /** @description When it plays; empty for the default schedule. */
+            periods: components["schemas"]["Period"][];
+        };
+        ScheduleUpdate: {
+            hours: components["schemas"]["ScheduledHour"][];
+            /** @description Ignored for the default schedule. */
+            name?: string | null;
+            /** @description Refused on the default schedule. */
+            periods?: components["schemas"]["Period"][];
+        };
+        ScheduleView: {
+            hours: components["schemas"]["ScheduledHour"][];
+            /** Format: int64 */
+            id: number;
+            is_default: boolean;
+            name: string;
+            periods: components["schemas"]["Period"][];
+        };
         ScheduledHour: {
             /** Format: int64 */
             clock_id: number;
@@ -6104,6 +6210,16 @@ export interface components {
              * @description 0 to 23, station time.
              */
             hour: number;
+        };
+        Schedules: {
+            /**
+             * Format: int64
+             * @description The schedule playing now.
+             */
+            active_id: number;
+            next_change?: components["schemas"]["NextChange"] | null;
+            /** @description The default schedule first, then the others by name. */
+            schedules: components["schemas"]["ScheduleSummary"][];
         };
         /** @description What an action on a selection did. */
         SelectionResult: {
@@ -10650,7 +10766,7 @@ export interface operations {
             };
         };
     };
-    get_schedule: {
+    get_default: {
         parameters: {
             query?: never;
             header?: never;
@@ -10677,7 +10793,7 @@ export interface operations {
             };
         };
     };
-    put_schedule: {
+    put_default: {
         parameters: {
             query?: never;
             header?: never;
@@ -10697,6 +10813,153 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ScheduledHour"][];
                 };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_schedules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedules"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewSchedule"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleUpdate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             "4XX": {
                 headers: {
@@ -13027,7 +13290,7 @@ export interface operations {
             };
         };
     };
-    get_schedule_on_station: {
+    get_default_on_station: {
         parameters: {
             query?: never;
             header?: never;
@@ -13057,7 +13320,7 @@ export interface operations {
             };
         };
     };
-    put_schedule_on_station: {
+    put_default_on_station: {
         parameters: {
             query?: never;
             header?: never;

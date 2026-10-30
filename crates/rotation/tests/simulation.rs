@@ -289,6 +289,7 @@ fn station() -> Station {
             restrictions,
             clocks: vec![day, night],
             schedule,
+            schedules: Vec::new(),
             settings: RotationSettings {
                 fallback_category_id: Some(GOLD),
                 ..RotationSettings::default()

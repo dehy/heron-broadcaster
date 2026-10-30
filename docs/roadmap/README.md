@@ -26,6 +26,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | M11 | [More encoders, sinks & live DJ](m11-sinks-live-dj.md) | M3 | Not started |
 | M12 | [Configuration backups](m12-config-backups.md) | M4 | Not started |
 | M13 | [Several stations](m13-several-stations.md) | M6, M7, M7b, M8 | In progress |
+| M14 | [Several schedules](m14-schedules.md) | M6, M13 (the schedule per station) | Done ([#102](https://github.com/dehy/heron-broadcaster/pull/102)) |
 
 ## Dependency graph
 
@@ -40,6 +41,6 @@ M0 ─► M1 ─┬─► M1b
                   │       ├─► M7
                   │       ├─► M7b
                   │       ├─► M12
-                  │       └─► M13 (also after M6, M7, M7b, M8)
+                  │       └─► M13 (also after M6, M7, M7b, M8) ─► M14
                   └─► M9 ─► M10
 ```

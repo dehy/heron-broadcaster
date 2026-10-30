@@ -49,8 +49,17 @@ function Where({ explanation }: { explanation: Explanation }) {
   const name = (id: number | null | undefined) =>
     id === null || id === undefined ? undefined : categories.data?.find((c) => c.id === id)?.name;
   const slotCategory = name(explanation.slot_category_id) ?? explanation.category_name ?? t("rotationPage.wholeLibrary");
+  // The default schedule has no name: only the others are named.
+  const schedule = explanation.schedule_name ? (
+    <span className="muted"> · {t("rotationPage.schedule", { name: explanation.schedule_name })}</span>
+  ) : null;
   if (explanation.clock_id === null || explanation.clock_id === undefined) {
-    return <span className="muted">{t("rotationPage.noClock")}</span>;
+    return (
+      <span>
+        <span className="muted">{t("rotationPage.noClock")}</span>
+        {schedule}
+      </span>
+    );
   }
   return (
     <span>
@@ -62,6 +71,7 @@ function Where({ explanation }: { explanation: Explanation }) {
       {explanation.step >= 9 && (
         <span className="muted"> → {explanation.category_name ?? t("rotationPage.wholeLibrary")}</span>
       )}
+      {schedule}
     </span>
   );
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Clocks (clockwheels) and the weekly schedule.
+//! Clocks (clockwheels); the schedules are in `schedules`.
 //!
 //! A clock is an ordered list of slots; each slot calls a category, with a
 //! selection method, an enforce-rules flag and separation overrides. The
@@ -34,7 +34,6 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_clocks, create_clock))
         .routes(routes!(get_clock, update_clock, delete_clock))
         .routes(routes!(preview_clock))
-        .routes(routes!(get_schedule, put_schedule))
 }
 
 /// How a slot calls its category.
@@ -448,106 +447,6 @@ async fn preview_clock(
         duration_ms,
         runs_per_hour,
     }))
-}
-
-/// The clock running at an hour of the week.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ScheduledHour {
-    /// ISO 8601: 1 = Monday … 7 = Sunday.
-    pub day_of_week: u8,
-    /// 0 to 23, station time.
-    pub hour: u8,
-    pub clock_id: u64,
-}
-
-/// Which clock runs when; hours left out rotate the whole library.
-#[utoipa::path(get, path = "/schedule", tag = "rotation",
-    responses((status = 200, body = Vec<ScheduledHour>), (status = "4XX", body = ErrorBody)))]
-async fn get_schedule(
-    _user: CurrentUser,
-    State(state): State<AppState>,
-    station: Station,
-) -> ApiResult<Json<Vec<ScheduledHour>>> {
-    let rows: Vec<(u8, u8, u64)> = sqlx::query_as(
-        "SELECT day_of_week, hour, clock_id FROM clock_schedule WHERE station_id = ?
-         ORDER BY day_of_week, hour",
-    )
-    .bind(station.id())
-    .fetch_all(&state.pool)
-    .await?;
-    Ok(Json(
-        rows.into_iter()
-            .map(|(day_of_week, hour, clock_id)| ScheduledHour {
-                day_of_week,
-                hour,
-                clock_id,
-            })
-            .collect(),
-    ))
-}
-
-/// Replaces the whole schedule. Operators and admins.
-#[utoipa::path(put, path = "/schedule", tag = "rotation",
-    request_body = Vec<ScheduledHour>,
-    responses((status = 200, body = Vec<ScheduledHour>), (status = "4XX", body = ErrorBody)))]
-async fn put_schedule(
-    user: CurrentUser,
-    State(state): State<AppState>,
-    station: Station,
-    Json(hours): Json<Vec<ScheduledHour>>,
-) -> ApiResult<Json<Vec<ScheduledHour>>> {
-    user.require(Role::Operator)?;
-    let mut seen = std::collections::HashSet::new();
-    for hour in &hours {
-        if !(1..=7).contains(&hour.day_of_week) || hour.hour > 23 {
-            return Err(ApiError::Invalid(
-                "days are 1 to 7 and hours 0 to 23".to_owned(),
-            ));
-        }
-        if !seen.insert((hour.day_of_week, hour.hour)) {
-            return Err(ApiError::Invalid(format!(
-                "day {} hour {} is scheduled twice",
-                hour.day_of_week, hour.hour
-            )));
-        }
-    }
-    let clocks: std::collections::HashSet<u64> =
-        sqlx::query_scalar("SELECT id FROM clocks WHERE station_id = ?")
-            .bind(station.id())
-            .fetch_all(&state.pool)
-            .await?
-            .into_iter()
-            .collect();
-    if let Some(hour) = hours.iter().find(|hour| !clocks.contains(&hour.clock_id)) {
-        return Err(ApiError::Invalid(format!("no clock {}", hour.clock_id)));
-    }
-    let mut tx = state.pool.begin().await?;
-    sqlx::query("DELETE FROM clock_schedule WHERE station_id = ?")
-        .bind(station.id())
-        .execute(&mut *tx)
-        .await?;
-    for hour in &hours {
-        sqlx::query(
-            "INSERT INTO clock_schedule (station_id, day_of_week, hour, clock_id) VALUES (?, ?, ?, ?)",
-        )
-            .bind(station.id())
-            .bind(hour.day_of_week)
-            .bind(hour.hour)
-            .bind(hour.clock_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| {
-                if is_still_used(&error) {
-                    ApiError::Invalid(format!("no clock {}", hour.clock_id))
-                } else {
-                    error.into()
-                }
-            })?;
-    }
-    tx.commit().await?;
-    tracing::info!(user = %user.username, hours = hours.len(), "schedule changed");
-    get_schedule(user, State(state), station).await
 }
 
 #[cfg(test)]

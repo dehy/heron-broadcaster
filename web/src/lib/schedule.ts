@@ -77,3 +77,47 @@ export function copyDay(grid: Grid, from: number, to: readonly number[]): Grid {
   }
   return next;
 }
+
+// Periods (docs/web.md › Schedules and periods): station time, on the hour.
+
+/** A period's start or end, split for a date input and an hour picker. */
+export interface DateHour {
+  /** `YYYY-MM-DD`. */
+  date: string;
+  hour: number;
+}
+
+/** `2026-12-01T06:00:00` → `{date: "2026-12-01", hour: 6}`. */
+export function splitCivil(text: string): DateHour {
+  const [date = "", time = ""] = text.split("T");
+  return { date, hour: Number(time.slice(0, 2)) || 0 };
+}
+
+/** `{date: "2026-12-01", hour: 6}` → `2026-12-01T06:00:00`. */
+export function joinCivil({ date, hour }: DateHour): string {
+  return `${date}T${String(hour).padStart(2, "0")}:00:00`;
+}
+
+/** A station time written for people, without the year when it comes back every year. */
+export function civilLabel(text: string, everyYear: boolean, locale: string): string {
+  const [date = "", time = ""] = text.split("T");
+  const [year, month, day] = date.split("-").map(Number);
+  const hour = Number(time.slice(0, 2)) || 0;
+  const at = new Date(Date.UTC(year ?? 1970, (month ?? 1) - 1, day ?? 1, hour));
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "long",
+    ...(everyYear ? {} : { year: "numeric" }),
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(at);
+}
+
+/** Why a period would be refused, or null: the API's rules, checked before saving. */
+export function periodProblem(period: { start: string; end: string; every_year?: boolean }): "empty" | "backwards" | null {
+  if (period.every_year) {
+    return period.start.slice(5) === period.end.slice(5) ? "empty" : null;
+  }
+  return period.end <= period.start ? "backwards" : null;
+}
