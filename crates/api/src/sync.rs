@@ -55,6 +55,7 @@ pub struct SyncStatus {
 pub struct ConfigSync {
     pool: MySqlPool,
     engine: Arc<EngineLink>,
+    station_id: u64,
     wake: Notify,
     status: watch::Sender<SyncStatus>,
 }
@@ -80,10 +81,11 @@ async fn new_engine(
 }
 
 impl ConfigSync {
-    pub fn new(pool: MySqlPool, engine: Arc<EngineLink>) -> Arc<Self> {
+    pub fn new(pool: MySqlPool, engine: Arc<EngineLink>, station_id: u64) -> Arc<Self> {
         Arc::new(Self {
             pool,
             engine,
+            station_id,
             wake: Notify::new(),
             status: watch::channel(SyncStatus {
                 state: SyncState::Unknown,
@@ -162,12 +164,14 @@ impl ConfigSync {
         };
 
         let management: EngineManagement =
-            settings::load(&self.pool, EngineManagement::SETTINGS_NAME).await?;
+            settings::load_for(&self.pool, self.station_id, EngineManagement::SETTINGS_NAME)
+                .await?;
         if !management.managed {
             self.adopt(&engine_playout, engine_eq.as_ref(), &engine_outputs)
                 .await?;
-            settings::save(
+            settings::save_for(
                 &self.pool,
+                self.station_id,
                 EngineManagement::SETTINGS_NAME,
                 &EngineManagement { managed: true },
             )
@@ -175,7 +179,7 @@ impl ConfigSync {
         }
 
         let playout: PlayoutSettings =
-            settings::load(&self.pool, PlayoutSettings::SETTINGS_NAME).await?;
+            settings::load_for(&self.pool, self.station_id, PlayoutSettings::SETTINGS_NAME).await?;
         if playout != engine_playout {
             let json = serde_json::to_string(&playout)
                 .map_err(|error| ApiError::Internal(error.to_string()))?;
@@ -184,7 +188,8 @@ impl ConfigSync {
         }
 
         if let Some(engine_eq) = engine_eq {
-            let eq: EqSettings = settings::load(&self.pool, EqSettings::SETTINGS_NAME).await?;
+            let eq: EqSettings =
+                settings::load_for(&self.pool, self.station_id, EqSettings::SETTINGS_NAME).await?;
             if eq != engine_eq {
                 let json = serde_json::to_string(&eq)
                     .map_err(|error| ApiError::Internal(error.to_string()))?;
@@ -194,7 +199,7 @@ impl ConfigSync {
         }
 
         let mut connection = self.pool.acquire().await?;
-        let outputs = outputs::load_config(&mut connection).await?;
+        let outputs = outputs::load_config(&mut connection, Some(self.station_id)).await?;
         drop(connection);
         if outputs != engine_outputs {
             let json = serde_json::to_string(&outputs)
@@ -214,17 +219,25 @@ impl ConfigSync {
         eq: Option<&EqSettings>,
         outputs: &OutputsConfig,
     ) -> ApiResult<()> {
-        if !settings::exists(&self.pool, PlayoutSettings::SETTINGS_NAME).await? {
-            settings::save(&self.pool, PlayoutSettings::SETTINGS_NAME, playout).await?;
+        if !settings::exists_for(&self.pool, self.station_id, PlayoutSettings::SETTINGS_NAME)
+            .await?
+        {
+            settings::save_for(
+                &self.pool,
+                self.station_id,
+                PlayoutSettings::SETTINGS_NAME,
+                playout,
+            )
+            .await?;
             tracing::info!("copied the engine's playout settings into the database");
         }
         if let Some(eq) = eq
-            && !settings::exists(&self.pool, EqSettings::SETTINGS_NAME).await?
+            && !settings::exists_for(&self.pool, self.station_id, EqSettings::SETTINGS_NAME).await?
         {
-            settings::save(&self.pool, EqSettings::SETTINGS_NAME, eq).await?;
+            settings::save_for(&self.pool, self.station_id, EqSettings::SETTINGS_NAME, eq).await?;
             tracing::info!("copied the engine's deck EQ into the database");
         }
-        outputs::adopt(&self.pool, outputs).await?;
+        outputs::adopt(&self.pool, self.station_id, outputs).await?;
         Ok(())
     }
 }

@@ -29,6 +29,7 @@ use utoipa_axum::routes;
 use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{ApiError, ApiResult, ErrorBody};
+use crate::stations::Station;
 
 /// The queue manager. Until rotation and clockwheels (M6), it keeps the
 /// engine's queue filled with the least recently played tracks.
@@ -284,16 +285,25 @@ impl EngineManagement {
     pub const SETTINGS_NAME: &'static str = "engine";
 }
 
-/// Reads a settings group; its defaults when it was never saved.
-pub async fn load<T: DeserializeOwned + Default>(
-    executor: impl sqlx::MySqlExecutor<'_>,
-    name: &str,
-) -> ApiResult<T> {
-    let value: Option<String> =
-        sqlx::query_scalar("SELECT CAST(value AS CHAR) FROM settings WHERE name = ?")
-            .bind(name)
-            .fetch_optional(executor)
-            .await?;
+/// The settings groups each station has its own of, in `station_settings`
+/// (docs/stations.md#settings). The others are shared, in `settings`.
+pub const PER_STATION: [&str; 6] = ["station", "playout", "eq", "queue", "engine", "rotation"];
+
+fn shared(name: &str) {
+    debug_assert!(
+        !PER_STATION.contains(&name),
+        "{name} settings belong to a station: use load_for and save_for"
+    );
+}
+
+fn per_station(name: &str) {
+    debug_assert!(
+        PER_STATION.contains(&name),
+        "{name} settings are shared: use load and save"
+    );
+}
+
+fn parse<T: DeserializeOwned + Default>(name: &str, value: Option<String>) -> ApiResult<T> {
     match value {
         None => Ok(T::default()),
         Some(json) => serde_json::from_str(&json)
@@ -301,15 +311,69 @@ pub async fn load<T: DeserializeOwned + Default>(
     }
 }
 
-/// Whether a settings group was ever saved.
-pub async fn exists(pool: &MySqlPool, name: &str) -> ApiResult<bool> {
-    Ok(
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM settings WHERE name = ?")
-            .bind(name)
-            .fetch_one(pool)
-            .await?
-            > 0,
+/// Reads a station's settings group; its defaults when it was never saved.
+pub async fn load_for<T: DeserializeOwned + Default>(
+    executor: impl sqlx::MySqlExecutor<'_>,
+    station_id: u64,
+    name: &str,
+) -> ApiResult<T> {
+    per_station(name);
+    let value: Option<String> = sqlx::query_scalar(
+        "SELECT CAST(value AS CHAR) FROM station_settings WHERE station_id = ? AND name = ?",
     )
+    .bind(station_id)
+    .bind(name)
+    .fetch_optional(executor)
+    .await?;
+    parse(name, value)
+}
+
+/// Whether a station's settings group was ever saved.
+pub async fn exists_for(pool: &MySqlPool, station_id: u64, name: &str) -> ApiResult<bool> {
+    per_station(name);
+    Ok(sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM station_settings WHERE station_id = ? AND name = ?",
+    )
+    .bind(station_id)
+    .bind(name)
+    .fetch_one(pool)
+    .await?
+        > 0)
+}
+
+pub async fn save_for<T: Serialize>(
+    executor: impl sqlx::MySqlExecutor<'_>,
+    station_id: u64,
+    name: &str,
+    value: &T,
+) -> ApiResult<()> {
+    per_station(name);
+    let json = serde_json::to_string(value)
+        .map_err(|error| ApiError::Internal(format!("{name} settings: {error}")))?;
+    sqlx::query(
+        "INSERT INTO station_settings (station_id, name, value) VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE value = VALUES(value)",
+    )
+    .bind(station_id)
+    .bind(name)
+    .bind(json)
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+/// Reads a shared settings group; its defaults when it was never saved.
+pub async fn load<T: DeserializeOwned + Default>(
+    executor: impl sqlx::MySqlExecutor<'_>,
+    name: &str,
+) -> ApiResult<T> {
+    shared(name);
+    let value: Option<String> =
+        sqlx::query_scalar("SELECT CAST(value AS CHAR) FROM settings WHERE name = ?")
+            .bind(name)
+            .fetch_optional(executor)
+            .await?;
+    parse(name, value)
 }
 
 pub async fn save<T: Serialize>(
@@ -317,6 +381,7 @@ pub async fn save<T: Serialize>(
     name: &str,
     value: &T,
 ) -> ApiResult<()> {
+    shared(name);
     let json = serde_json::to_string(value)
         .map_err(|error| ApiError::Internal(format!("{name} settings: {error}")))?;
     sqlx::query(
@@ -348,9 +413,10 @@ pub fn router() -> OpenApiRouter<AppState> {
 async fn get_playout(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
 ) -> ApiResult<Json<PlayoutSettings>> {
     Ok(Json(
-        load(&state.pool, PlayoutSettings::SETTINGS_NAME).await?,
+        load_for(&state.pool, station.id(), PlayoutSettings::SETTINGS_NAME).await?,
     ))
 }
 
@@ -362,13 +428,20 @@ async fn get_playout(
 async fn put_playout(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(settings): Json<PlayoutSettings>,
 ) -> ApiResult<Json<PlayoutSettings>> {
     user.require(Role::Admin)?;
     check_playout(&settings)?;
-    save(&state.pool, PlayoutSettings::SETTINGS_NAME, &settings).await?;
+    save_for(
+        &state.pool,
+        station.id(),
+        PlayoutSettings::SETTINGS_NAME,
+        &settings,
+    )
+    .await?;
     tracing::info!(user = %user.username, "playout settings changed");
-    state.sync.changed();
+    station.sync.changed();
     Ok(Json(settings))
 }
 
@@ -510,8 +583,11 @@ async fn patch_library(
 async fn get_queue_settings(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
 ) -> ApiResult<Json<QueueSettings>> {
-    Ok(Json(load(&state.pool, QueueSettings::SETTINGS_NAME).await?))
+    Ok(Json(
+        load_for(&state.pool, station.id(), QueueSettings::SETTINGS_NAME).await?,
+    ))
 }
 
 /// Replaces the queue manager settings. Operators and admins.
@@ -521,6 +597,7 @@ async fn get_queue_settings(
 async fn put_queue_settings(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(settings): Json<QueueSettings>,
 ) -> ApiResult<Json<QueueSettings>> {
     user.require(Role::Operator)?;
@@ -529,8 +606,14 @@ async fn put_queue_settings(
             "min_queued is between 1 and 50".to_owned(),
         ));
     }
-    save(&state.pool, QueueSettings::SETTINGS_NAME, &settings).await?;
-    state.queue.wake();
+    save_for(
+        &state.pool,
+        station.id(),
+        QueueSettings::SETTINGS_NAME,
+        &settings,
+    )
+    .await?;
+    station.queue.wake();
     Ok(Json(settings))
 }
 
@@ -540,9 +623,10 @@ async fn put_queue_settings(
 async fn get_rotation_settings(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
 ) -> ApiResult<Json<RotationSettings>> {
     Ok(Json(
-        load(&state.pool, RotationSettings::SETTINGS_NAME).await?,
+        load_for(&state.pool, station.id(), RotationSettings::SETTINGS_NAME).await?,
     ))
 }
 
@@ -554,6 +638,7 @@ async fn get_rotation_settings(
 async fn put_rotation_settings(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(settings): Json<RotationSettings>,
 ) -> ApiResult<Json<RotationSettings>> {
     user.require(Role::Operator)?;
@@ -567,7 +652,13 @@ async fn put_rotation_settings(
             return Err(ApiError::Invalid(format!("no category {id}")));
         }
     }
-    save(&state.pool, RotationSettings::SETTINGS_NAME, &settings).await?;
+    save_for(
+        &state.pool,
+        station.id(),
+        RotationSettings::SETTINGS_NAME,
+        &settings,
+    )
+    .await?;
     tracing::info!(user = %user.username, ?settings, "rotation settings changed");
     Ok(Json(settings))
 }
@@ -577,9 +668,10 @@ async fn put_rotation_settings(
 async fn get_station(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
 ) -> ApiResult<Json<StationSettings>> {
     Ok(Json(
-        load(&state.pool, StationSettings::SETTINGS_NAME).await?,
+        load_for(&state.pool, station.id(), StationSettings::SETTINGS_NAME).await?,
     ))
 }
 
@@ -590,6 +682,7 @@ async fn get_station(
 async fn put_station(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(settings): Json<StationSettings>,
 ) -> ApiResult<Json<StationSettings>> {
     user.require(Role::Admin)?;
@@ -599,7 +692,13 @@ async fn put_station(
             settings.timezone
         ))
     })?;
-    save(&state.pool, StationSettings::SETTINGS_NAME, &settings).await?;
+    save_for(
+        &state.pool,
+        station.id(),
+        StationSettings::SETTINGS_NAME,
+        &settings,
+    )
+    .await?;
     tracing::info!(user = %user.username, timezone = %settings.timezone, "station settings changed");
     Ok(Json(settings))
 }

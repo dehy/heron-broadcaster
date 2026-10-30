@@ -42,13 +42,13 @@ fn artists_key(artist: &str, title: &str) -> String {
 }
 
 /// Links the tracks whose tags changed, until none is left, every few seconds.
-pub async fn run_linker(pool: MySqlPool, queue: std::sync::Arc<crate::queue::QueueManager>) {
+pub async fn run_linker(pool: MySqlPool, stations: std::sync::Arc<crate::stations::Stations>) {
     loop {
         match link_pending(&pool).await {
             Ok(0) => {}
             Ok(linked) => {
                 tracing::info!(tracks = linked, "linked tracks to their artists");
-                queue.wake();
+                stations.wake_all();
                 if linked as u32 == LINK_BATCH {
                     continue;
                 }
@@ -585,7 +585,7 @@ async fn merge_artist(
     }
     tx.commit().await?;
     tracing::info!(user = %user.username, keep, gone, "artists merged");
-    state.queue.wake();
+    state.stations.wake_all();
     artist(&state.pool, keep).await.map(Json)
 }
 
@@ -659,7 +659,7 @@ async fn move_name(
     .execute(&state.pool)
     .await?;
     tracing::info!(user = %user.username, name = %name, from, to, "artist name moved");
-    state.queue.wake();
+    state.stations.wake_all();
     artist(&state.pool, to).await.map(Json)
 }
 
@@ -705,7 +705,7 @@ async fn add_similar(
 ) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
     link_similar(&state.pool, id, other, true).await?;
-    state.queue.wake();
+    state.stations.wake_all();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -798,7 +798,7 @@ async fn review_suggestion(
     let (artist, other) = found.ok_or_else(|| ApiError::not_found("suggestion"))?;
     if review.accept {
         link_similar(&state.pool, artist, other, true).await?;
-        state.queue.wake();
+        state.stations.wake_all();
     }
     sqlx::query("UPDATE artist_suggestions SET status = ? WHERE id = ?")
         .bind(if review.accept {

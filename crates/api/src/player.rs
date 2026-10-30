@@ -4,7 +4,7 @@
 //! operators. Reading is open to every role.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::Path;
 use axum::http::StatusCode;
 use heron_core::PlaySource;
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,7 @@ use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
 use crate::engine::{Levels, PlayerState, QueueEntry};
 use crate::error::{ApiError, ApiResult, ErrorBody};
+use crate::stations::Station;
 use crate::sync::SyncStatus;
 
 pub fn router() -> OpenApiRouter<AppState> {
@@ -43,8 +44,8 @@ pub struct EngineStatus {
 
 #[utoipa::path(get, path = "/engine", tag = "player",
     responses((status = 200, body = EngineStatus), (status = "4XX", body = ErrorBody)))]
-async fn engine_status(_user: CurrentUser, State(state): State<AppState>) -> Json<EngineStatus> {
-    let started_at = state
+async fn engine_status(_user: CurrentUser, station: Station) -> Json<EngineStatus> {
+    let started_at = station
         .engine
         .state()
         .borrow()
@@ -53,7 +54,7 @@ async fn engine_status(_user: CurrentUser, State(state): State<AppState>) -> Jso
     Json(EngineStatus {
         connected: started_at.is_some(),
         started_at_unix_ms: started_at,
-        config: state.sync.status(),
+        config: station.sync.status(),
     })
 }
 
@@ -61,27 +62,24 @@ async fn engine_status(_user: CurrentUser, State(state): State<AppState>) -> Jso
 #[utoipa::path(get, path = "/player", tag = "player",
     responses((status = 200, body = PlayerState), (status = "4XX", body = ErrorBody),
               (status = 503, body = ErrorBody, description = "Engine unreachable")))]
-async fn get_player(
-    _user: CurrentUser,
-    State(state): State<AppState>,
-) -> ApiResult<Json<PlayerState>> {
-    Ok(Json(state.engine.fetch_state().await?))
+async fn get_player(_user: CurrentUser, station: Station) -> ApiResult<Json<PlayerState>> {
+    Ok(Json(station.engine.fetch_state().await?))
 }
 
 /// Peak and RMS levels (dBFS) of the master bus and each deck.
 #[utoipa::path(get, path = "/player/levels", tag = "player",
     responses((status = 200, body = Levels), (status = "4XX", body = ErrorBody),
               (status = 503, body = ErrorBody, description = "Engine unreachable")))]
-async fn get_levels(_user: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<Levels>> {
-    Ok(Json(state.engine.fetch_levels().await?))
+async fn get_levels(_user: CurrentUser, station: Station) -> ApiResult<Json<Levels>> {
+    Ok(Json(station.engine.fetch_levels().await?))
 }
 
 /// Fades out the track on air and starts the next one.
 #[utoipa::path(post, path = "/player/skip", tag = "player",
     responses((status = 204), (status = "4XX", body = ErrorBody), (status = 503, body = ErrorBody)))]
-async fn skip(user: CurrentUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+async fn skip(user: CurrentUser, station: Station) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
-    state.engine.skip().await?;
+    station.engine.skip().await?;
     tracing::info!(user = %user.username, "skip");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -89,18 +87,18 @@ async fn skip(user: CurrentUser, State(state): State<AppState>) -> ApiResult<Sta
 /// Fades out and holds the decks; the stream goes on with silence.
 #[utoipa::path(post, path = "/player/pause", tag = "player",
     responses((status = 204), (status = "4XX", body = ErrorBody), (status = 503, body = ErrorBody)))]
-async fn pause(user: CurrentUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+async fn pause(user: CurrentUser, station: Station) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
-    state.engine.pause().await?;
+    station.engine.pause().await?;
     tracing::info!(user = %user.username, "pause");
     Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(post, path = "/player/resume", tag = "player",
     responses((status = 204), (status = "4XX", body = ErrorBody), (status = 503, body = ErrorBody)))]
-async fn resume(user: CurrentUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+async fn resume(user: CurrentUser, station: Station) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
-    state.engine.resume().await?;
+    station.engine.resume().await?;
     tracing::info!(user = %user.username, "resume");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -124,25 +122,25 @@ pub struct PlayFxResponse {
               (status = 503, body = ErrorBody)))]
 async fn play_fx(
     user: CurrentUser,
-    State(state): State<AppState>,
+    station: Station,
     Json(request): Json<PlayFxRequest>,
 ) -> ApiResult<Json<PlayFxResponse>> {
     user.require(Role::Operator)?;
-    let mut tracks = state
+    let mut tracks = station
         .queue
         .tracks(&[request.track_id], PlaySource::Manual)
         .await?;
     let track = tracks.pop().ok_or_else(|| ApiError::not_found("track"))?;
-    let entry_id = state.engine.play_fx(track).await?;
+    let entry_id = station.engine.play_fx(track).await?;
     Ok(Json(PlayFxResponse { entry_id }))
 }
 
 /// Fades out the FX player.
 #[utoipa::path(delete, path = "/player/fx", tag = "player",
     responses((status = 204), (status = "4XX", body = ErrorBody), (status = 503, body = ErrorBody)))]
-async fn stop_fx(user: CurrentUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+async fn stop_fx(user: CurrentUser, station: Station) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
-    state.engine.stop_fx().await?;
+    station.engine.stop_fx().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -150,11 +148,8 @@ async fn stop_fx(user: CurrentUser, State(state): State<AppState>) -> ApiResult<
 #[utoipa::path(get, path = "/queue", tag = "queue",
     responses((status = 200, body = Vec<QueueEntry>), (status = "4XX", body = ErrorBody),
               (status = 503, body = ErrorBody)))]
-async fn get_queue(
-    _user: CurrentUser,
-    State(state): State<AppState>,
-) -> ApiResult<Json<Vec<QueueEntry>>> {
-    let player = state.engine.fetch_state().await?;
+async fn get_queue(_user: CurrentUser, station: Station) -> ApiResult<Json<Vec<QueueEntry>>> {
+    let player = station.engine.fetch_state().await?;
     Ok(Json(player.waiting().cloned().collect()))
 }
 
@@ -180,7 +175,7 @@ pub struct EnqueueResponse {
               (status = 503, body = ErrorBody)))]
 async fn enqueue(
     user: CurrentUser,
-    State(state): State<AppState>,
+    station: Station,
     Json(request): Json<EnqueueRequest>,
 ) -> ApiResult<Json<EnqueueResponse>> {
     user.require(Role::Operator)?;
@@ -189,11 +184,11 @@ async fn enqueue(
             "queue 1 to 500 tracks at a time".to_owned(),
         ));
     }
-    let tracks = state
+    let tracks = station
         .queue
         .tracks(&request.track_ids, PlaySource::Manual)
         .await?;
-    let entry_ids = state.engine.enqueue(tracks, request.position).await?;
+    let entry_ids = station.engine.enqueue(tracks, request.position).await?;
     tracing::info!(user = %user.username, tracks = ?request.track_ids, "queued");
     Ok(Json(EnqueueResponse { entry_ids }))
 }
@@ -202,9 +197,9 @@ async fn enqueue(
 /// autofill, when on, queues new tracks).
 #[utoipa::path(delete, path = "/queue", tag = "queue",
     responses((status = 204), (status = "4XX", body = ErrorBody), (status = 503, body = ErrorBody)))]
-async fn clear_queue(user: CurrentUser, State(state): State<AppState>) -> ApiResult<StatusCode> {
+async fn clear_queue(user: CurrentUser, station: Station) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
-    state.engine.clear().await?;
+    station.engine.clear().await?;
     tracing::info!(user = %user.username, "queue cleared");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -215,11 +210,11 @@ async fn clear_queue(user: CurrentUser, State(state): State<AppState>) -> ApiRes
     responses((status = 204), (status = "4XX", body = ErrorBody), (status = 503, body = ErrorBody)))]
 async fn remove_entry(
     user: CurrentUser,
-    State(state): State<AppState>,
+    station: Station,
     Path(entry_id): Path<u64>,
 ) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
-    state.engine.remove(entry_id).await?;
+    station.engine.remove(entry_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -236,11 +231,14 @@ pub struct MoveRequest {
     responses((status = 204), (status = "4XX", body = ErrorBody), (status = 503, body = ErrorBody)))]
 async fn move_entry(
     user: CurrentUser,
-    State(state): State<AppState>,
+    station: Station,
     Path(entry_id): Path<u64>,
     Json(request): Json<MoveRequest>,
 ) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
-    state.engine.move_entry(entry_id, request.position).await?;
+    station
+        .engine
+        .move_entry(entry_id, request.position)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }

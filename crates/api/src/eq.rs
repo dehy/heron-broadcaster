@@ -18,6 +18,7 @@ use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{ApiError, ApiResult, ErrorBody, is_duplicate};
 use crate::settings;
+use crate::stations::Station;
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -29,9 +30,13 @@ pub fn router() -> OpenApiRouter<AppState> {
 /// Both deck EQs.
 #[utoipa::path(get, path = "/settings/eq", tag = "settings",
     responses((status = 200, body = EqSettings), (status = "4XX", body = ErrorBody)))]
-async fn get_eq(_user: CurrentUser, State(state): State<AppState>) -> ApiResult<Json<EqSettings>> {
+async fn get_eq(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    station: Station,
+) -> ApiResult<Json<EqSettings>> {
     Ok(Json(
-        settings::load(&state.pool, EqSettings::SETTINGS_NAME).await?,
+        settings::load_for(&state.pool, station.id(), EqSettings::SETTINGS_NAME).await?,
     ))
 }
 
@@ -44,21 +49,22 @@ async fn get_eq(_user: CurrentUser, State(state): State<AppState>) -> ApiResult<
 async fn put_eq(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(eq): Json<EqSettings>,
 ) -> ApiResult<Json<EqSettings>> {
     user.require(Role::Operator)?;
     eq.check().map_err(ApiError::Invalid)?;
-    settings::save(&state.pool, EqSettings::SETTINGS_NAME, &eq).await?;
+    settings::save_for(&state.pool, station.id(), EqSettings::SETTINGS_NAME, &eq).await?;
     // Nobody listening is fine.
-    let _ = state.eq_changes.send(eq);
+    let _ = station.eq_changes.send(eq);
     let json = serde_json::to_string(&eq).map_err(|error| ApiError::Internal(error.to_string()))?;
     // Saved either way: the configuration sync pushes it when the engine
     // is back, and reports a refusal.
-    match state.engine.set_eq_settings(json).await {
+    match station.engine.set_eq_settings(json).await {
         Ok(()) | Err(ApiError::EngineUnavailable) => {}
         Err(error) => {
             tracing::warn!(%error, "the engine refused the deck EQ");
-            state.sync.changed();
+            station.sync.changed();
         }
     }
     Ok(Json(eq))

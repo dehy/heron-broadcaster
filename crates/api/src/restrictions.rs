@@ -203,7 +203,7 @@ async fn create_restriction(
     .await?
     .last_insert_id();
     tracing::info!(user = %user.username, restriction = id, "restriction added");
-    state.queue.wake();
+    state.stations.wake_all();
     Ok((StatusCode::CREATED, Json(find(&state, id).await?)))
 }
 
@@ -236,7 +236,7 @@ async fn update_restriction(
         // Unchanged, or missing.
         find(&state, id).await?;
     }
-    state.queue.wake();
+    state.stations.wake_all();
     Ok(Json(find(&state, id).await?))
 }
 
@@ -257,6 +257,6 @@ async fn delete_restriction(
     if deleted.rows_affected() == 0 {
         return Err(ApiError::not_found("restriction"));
     }
-    state.queue.wake();
+    state.stations.wake_all();
     Ok(StatusCode::NO_CONTENT)
 }

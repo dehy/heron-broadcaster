@@ -23,7 +23,7 @@ use tokio_tungstenite::tungstenite;
 use crate::app::{self, AppState};
 use crate::auth::{Passwords, Role};
 use crate::library::Library;
-use crate::{engine, history, queue, sync, users, webhooks};
+use crate::{engine, stations, users, webhooks};
 
 /// Tracks short enough to see several play during a test.
 const TRACK_SECONDS: f64 = 3.0;
@@ -55,6 +55,34 @@ fn write_wav(path: &Path, seconds: f64, freq: f64) {
         writer.write_sample(value as i16).unwrap();
     }
     writer.finalize().unwrap();
+}
+
+/// An engine in this process, reached over gRPC on a free port, with its
+/// own state directory: its configuration saved before it starts, as `ctl`
+/// left it.
+async fn start_engine(
+    library: &Path,
+    config: Option<EngineConfig>,
+) -> (Arc<Engine>, TempDir, String, tokio::task::JoinHandle<()>) {
+    let state_dir = tempfile::tempdir().unwrap();
+    if let Some(config) = config {
+        config.save(state_dir.path()).unwrap();
+    }
+    let engine = Engine::start(
+        EngineOptions::new(library.to_path_buf(), state_dir.path().to_path_buf()),
+        tokio::runtime::Handle::current(),
+    )
+    .unwrap();
+    let grpc = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let grpc_addr = grpc.local_addr().unwrap();
+    let service = EngineService::server(Arc::clone(&engine));
+    let task = tokio::spawn(async move {
+        let _ = tonic::transport::Server::builder()
+            .add_service(service)
+            .serve_with_incoming(TcpListenerStream::new(grpc))
+            .await;
+    });
+    (engine, state_dir, format!("http://{grpc_addr}"), task)
 }
 
 impl Station {
@@ -103,61 +131,36 @@ impl Station {
             tracks.push(id);
         }
 
-        let state_dir = tempfile::tempdir().unwrap();
         let staging = tempfile::tempdir().unwrap();
-        if let Some(config) = engine_config {
-            config.save(state_dir.path()).unwrap();
-        }
-        let engine = Engine::start(
-            EngineOptions::new(library.path().to_path_buf(), state_dir.path().to_path_buf()),
-            tokio::runtime::Handle::current(),
-        )
-        .unwrap();
-        let grpc = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let grpc_addr = grpc.local_addr().unwrap();
-        let service = EngineService::server(Arc::clone(&engine));
-        let mut tasks = vec![tokio::spawn(async move {
-            let _ = tonic::transport::Server::builder()
-                .add_service(service)
-                .serve_with_incoming(TcpListenerStream::new(grpc))
-                .await;
-        })];
+        let (engine, state_dir, grpc_url, grpc_task) =
+            start_engine(library.path(), engine_config).await;
+        let mut tasks = vec![grpc_task];
 
-        let link = engine::EngineLink::new(&format!("http://{grpc_addr}")).unwrap();
-        let queue = queue::QueueManager::new(pool.clone(), Arc::clone(&link));
-        let sync = sync::ConfigSync::new(pool.clone(), Arc::clone(&link));
-        let history_events = link.events();
-        let webhook_events = link.events();
         let webhooks = webhooks::Webhooks::with_backoff(
             pool.clone(),
             webhooks::Backoff(vec![Duration::from_millis(200); 2]),
         )
         .unwrap();
-        tasks.extend(link.spawn());
-        tasks.push(tokio::spawn(
-            history::HistoryRecorder::new(pool.clone()).run(history_events),
-        ));
-        tasks.push(tokio::spawn(Arc::clone(&webhooks).dispatch(webhook_events)));
-        tasks.push(tokio::spawn(
-            Arc::clone(&webhooks).watch_queue(link.state()),
-        ));
+        let stations = stations::Stations::start(
+            pool.clone(),
+            grpc_url,
+            Some("Test".to_owned()),
+            Arc::clone(&webhooks),
+        )
+        .await
+        .unwrap();
         tasks.push(tokio::spawn(Arc::clone(&webhooks).send_loop()));
-        tasks.push(tokio::spawn(Arc::clone(&queue).run()));
-        tasks.push(tokio::spawn(Arc::clone(&sync).run()));
 
         let state = AppState {
             pool: pool.clone(),
             health: DatabaseHealth(pool.clone()),
             library: Arc::new(Library::new(pool.clone(), library.path().to_path_buf())),
-            engine: link,
-            queue,
-            sync,
+            stations,
             passwords: Arc::new(Passwords::default()),
             staging: Arc::new(staging.path().to_path_buf()),
             webhooks,
             // Driven by the tests, minute by minute.
             listeners: crate::listeners::Collector::new(pool.clone()).unwrap(),
-            eq_changes: tokio::sync::broadcast::channel(16).0,
         };
         let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = http.local_addr().unwrap();
@@ -555,7 +558,7 @@ async fn settings_and_outputs_reach_the_engine() {
         "playout settings in the engine",
         Duration::from_secs(5),
         || async {
-            let config = station.state.engine.config().await.ok()?;
+            let config = station.state.stations.first().engine.config().await.ok()?;
             config
                 .playout_settings_json
                 .contains("\"min_track_ms\":30000")
@@ -624,7 +627,7 @@ async fn settings_and_outputs_reach_the_engine() {
         "the output in the engine",
         Duration::from_secs(10),
         || async {
-            let config = station.state.engine.config().await.ok()?;
+            let config = station.state.stations.first().engine.config().await.ok()?;
             config.outputs_json.contains("hackme").then_some(())
         },
     )
@@ -645,7 +648,7 @@ async fn settings_and_outputs_reach_the_engine() {
         "the changed output in the engine",
         Duration::from_secs(10),
         || async {
-            let config = station.state.engine.config().await.ok()?;
+            let config = station.state.stations.first().engine.config().await.ok()?;
             (config.outputs_json.contains("/other") && config.outputs_json.contains("hackme"))
                 .then_some(())
         },
@@ -676,7 +679,7 @@ async fn settings_and_outputs_reach_the_engine() {
         "the output gone from the engine",
         Duration::from_secs(10),
         || async {
-            let config = station.state.engine.config().await.ok()?;
+            let config = station.state.stations.first().engine.config().await.ok()?;
             (!config.outputs_json.contains("hackme")).then_some(())
         },
     )
@@ -741,7 +744,7 @@ async fn listener_statistics_through_the_api() {
         "the output in the engine",
         Duration::from_secs(10),
         || async {
-            let config = station.state.engine.config().await.ok()?;
+            let config = station.state.stations.first().engine.config().await.ok()?;
             config
                 .outputs_json
                 .contains("hackme")
@@ -768,7 +771,15 @@ async fn listener_statistics_through_the_api() {
     );
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(
-        station.state.engine.config().await.unwrap().outputs_json,
+        station
+            .state
+            .stations
+            .first()
+            .engine
+            .config()
+            .await
+            .unwrap()
+            .outputs_json,
         pushed
     );
     let (_, removed) = admin
@@ -822,9 +833,9 @@ async fn listener_statistics_through_the_api() {
         (Some(id), "2026-10-25", None, 720, 20, 8.0, Some(50)),
     ] {
         sqlx::query(
-            "INSERT INTO listener_totals (output_id, day, hour, minutes, peak, average,
+            "INSERT INTO listener_totals (station_id, output_id, day, hour, minutes, peak, average,
                  listening_hours, sessions, session_s, distinct_listeners)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(output_id)
         .bind(day)
@@ -1336,7 +1347,14 @@ async fn adopts_outputs_configured_on_the_engine() {
     assert_eq!(eq["music"]["gains_db"][0], 2.0);
 
     // Same IDs: the engine kept its configuration as it was.
-    let config = station.state.engine.config().await.unwrap();
+    let config = station
+        .state
+        .stations
+        .first()
+        .engine
+        .config()
+        .await
+        .unwrap();
     let outputs: heron_core::OutputsConfig = serde_json::from_str(&config.outputs_json).unwrap();
     assert_eq!(outputs.outputs, engine_config.outputs.outputs);
     station.stop().await;
@@ -2082,8 +2100,9 @@ async fn track_details_labels_programming_and_tags() {
         (c, "a", None, 60),
     ] {
         sqlx::query(
-            "INSERT INTO play_history (track_id, title, started_at, ended_at, played_ms, deck, source)
-             VALUES (?, 'x', NOW(6) - INTERVAL ? SECOND,
+            "INSERT INTO play_history (station_id, track_id, title, started_at, ended_at, played_ms,
+                                       deck, source)
+             VALUES (1, ?, 'x', NOW(6) - INTERVAL ? SECOND,
                      IF(? IS NULL, NULL, NOW(6) - INTERVAL ? SECOND), ?, ?, 'manual')",
         )
         .bind(track)
@@ -3185,7 +3204,7 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
 
     // Every track change the engine reports reaches the receiver within a
     // second, signed; a skip is reported as such.
-    let mut events = station.state.engine.events();
+    let mut events = station.state.stations.first().engine.events();
     let mut expected = Vec::new();
     let mut got = Vec::new();
     let mut skipped = false;
@@ -4341,7 +4360,14 @@ async fn deck_eq_and_presets() {
         }
     }
     assert_eq!(eq_message.expect("an eq message")["settings"], settings);
-    let config = station.state.engine.config().await.unwrap();
+    let config = station
+        .state
+        .stations
+        .first()
+        .engine
+        .config()
+        .await
+        .unwrap();
     let engine_eq: Value = serde_json::from_str(&config.eq_settings_json).unwrap();
     assert_eq!(engine_eq, settings);
     assert_eq!(admin.get("/settings/eq").await, settings);
@@ -4446,5 +4472,215 @@ async fn deck_eq_and_presets() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     // The EQ keeps what was loaded.
     assert_eq!(admin.get("/settings/eq").await, settings);
+    station.stop().await;
+}
+
+/// Two stations, each with its own engine, play at once from the same
+/// library, each with its own clocks, queue and history; the routes of a
+/// single station still serve the first.
+#[tokio::test(flavor = "multi_thread")]
+async fn two_stations_play_at_once() {
+    let Some(mut station) = Station::start().await else {
+        return;
+    };
+    let (_engine, _state_dir, second_url, grpc) = start_engine(station.library.path(), None).await;
+    station.tasks.push(grpc);
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+
+    // The first station is the existing one, named from the deployment.
+    let stations = admin.get("/stations").await;
+    assert_eq!(stations[0]["code"], "main", "{stations}");
+    assert_eq!(stations[0]["name"], "Test");
+    assert_eq!(stations[0]["engine_url"], Value::Null);
+
+    // Admins add a station with its own engine.
+    let request = json!({"name": "Hits 80", "code": "hits80", "engine_url": second_url});
+    let (status, _) = viewer
+        .send(Method::POST, "/stations", request.clone())
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    for (bad, why) in [
+        (
+            json!({"name": "X", "code": "Hits 80", "engine_url": second_url}),
+            "code",
+        ),
+        (json!({"name": "X", "code": "x"}), "no engine"),
+        (
+            json!({"name": "X", "code": "main", "engine_url": second_url}),
+            "taken code",
+        ),
+    ] {
+        let (status, body) = admin.send(Method::POST, "/stations", bad).await;
+        assert!(status.is_client_error(), "{why}: {status} {body}");
+    }
+    let (status, created) = admin.send(Method::POST, "/stations", request).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let second = created["id"].as_u64().unwrap();
+    let first = stations[0]["id"].as_u64().unwrap();
+
+    // Both queues fill and both stations go on air.
+    for id in [first, second] {
+        eventually("both stations on air", Duration::from_secs(15), || async {
+            let player = admin.get(&format!("/stations/{id}/player")).await;
+            player["decks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|deck| deck["on_air"] == true)
+                .then_some(())
+        })
+        .await;
+    }
+    // A track queued on one station; the single-station routes are the
+    // first station's.
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            &format!("/stations/{second}/queue"),
+            json!({"track_ids": [station.tracks[0]], "position": 0}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/queue",
+            json!({"track_ids": [station.tracks[2]], "position": 0}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let next = |queue: Value| queue[0]["track"]["track_id"].as_u64();
+    assert_eq!(
+        next(admin.get(&format!("/stations/{second}/queue")).await),
+        Some(station.tracks[0])
+    );
+    assert_eq!(
+        next(admin.get(&format!("/stations/{first}/queue")).await),
+        Some(station.tracks[2])
+    );
+    assert_eq!(next(admin.get("/queue").await), Some(station.tracks[2]));
+
+    // Each station has its own clocks and schedule.
+    let (status, clock) = admin
+        .send(
+            Method::POST,
+            &format!("/stations/{second}/clocks"),
+            json!({"name": "Eighties", "slots": []}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{clock}");
+    let clock_id = clock["id"].as_u64().unwrap();
+    assert!(admin.get("/clocks").await.as_array().unwrap().is_empty());
+    assert_eq!(
+        admin.get(&format!("/stations/{second}/clocks")).await[0]["id"],
+        clock_id
+    );
+    let (status, _) = admin
+        .send(Method::GET, &format!("/clocks/{clock_id}"), Value::Null)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let hour = json!([{"day_of_week": 1, "hour": 6, "clock_id": clock_id}]);
+    let (status, _) = admin.send(Method::PUT, "/schedule", hour.clone()).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = admin
+        .send(Method::PUT, &format!("/stations/{second}/schedule"), hour)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Settings of a station are its own; shared ones are not under a station.
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/stations/{second}/settings/queue"),
+            json!({"autofill": true, "min_queued": 5}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_ne!(admin.get("/settings/queue").await["min_queued"], 5);
+    let (status, _) = admin
+        .request(
+            Method::GET,
+            &format!("/stations/{second}/settings/library"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = admin
+        .request(Method::GET, &format!("/stations/{second}/tracks"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = admin
+        .request(Method::GET, "/stations/999/queue", None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Plays are recorded per station.
+    let pool = &station.db.pool;
+    eventually(
+        "plays on both stations",
+        Duration::from_secs(15),
+        || async {
+            let counts: Vec<(u64, i64)> = sqlx::query_as(
+            "SELECT station_id, COUNT(*) FROM play_history GROUP BY station_id ORDER BY station_id",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap();
+            (counts.len() == 2).then_some(())
+        },
+    )
+    .await;
+    let history = admin.get(&format!("/stations/{second}/history")).await;
+    let in_db: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM play_history WHERE station_id = ?")
+        .bind(second)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(history.as_array().unwrap().len() as i64 <= in_db);
+
+    // Public routes per station, by code.
+    let anonymous = station.client();
+    anonymous.get("/public/stations/hits80/now-playing").await;
+    anonymous.get("/public/stations/main/queue").await;
+    let (status, _) = anonymous
+        .request(Method::GET, "/public/stations/nope/now-playing", None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A station is deleted only once nothing but its history is left.
+    let (status, body) = admin
+        .request(Method::DELETE, &format!("/stations/{second}"), None)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/stations/{first}"), None)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/stations/{second}/schedule"),
+            json!([]),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = admin
+        .request(
+            Method::DELETE,
+            &format!("/stations/{second}/clocks/{clock_id}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = admin
+        .request(Method::DELETE, &format!("/stations/{second}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let (status, _) = admin
+        .request(Method::GET, &format!("/stations/{second}/queue"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(admin.get("/stations").await.as_array().unwrap().len(), 1);
     station.stop().await;
 }

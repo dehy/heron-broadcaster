@@ -25,6 +25,7 @@ use crate::auth::{CurrentUser, Role};
 use crate::categories::separation_json;
 use crate::error::{ApiError, ApiResult, ErrorBody, is_duplicate, is_still_used};
 use crate::rotation::{self, overrides};
+use crate::stations::Station;
 
 const MAX_SLOTS: usize = 100;
 
@@ -93,21 +94,25 @@ impl ClockInput {
     }
 }
 
-async fn clocks(state: &AppState, id: Option<u64>) -> ApiResult<Vec<ClockView>> {
+async fn clocks(state: &AppState, station: &Station, id: Option<u64>) -> ApiResult<Vec<ClockView>> {
     let rows: Vec<(u64, String, bool, i64)> = sqlx::query_as(
         "SELECT c.id, c.name, c.looping,
                 (SELECT COUNT(*) FROM clock_schedule s WHERE s.clock_id = c.id)
-         FROM clocks c WHERE ? IS NULL OR c.id = ? ORDER BY c.name",
+         FROM clocks c WHERE c.station_id = ? AND (? IS NULL OR c.id = ?) ORDER BY c.name",
     )
+    .bind(station.id())
     .bind(id)
     .bind(id)
     .fetch_all(&state.pool)
     .await?;
     let slots: Vec<(u64, u64, String, bool, Option<String>)> = sqlx::query_as(
-        "SELECT clock_id, category_id, CAST(selection_method AS CHAR), enforce_rules,
-                CAST(separation AS CHAR)
-         FROM clock_slots WHERE ? IS NULL OR clock_id = ? ORDER BY clock_id, position",
+        "SELECT s.clock_id, s.category_id, CAST(s.selection_method AS CHAR), s.enforce_rules,
+                CAST(s.separation AS CHAR)
+         FROM clock_slots s JOIN clocks c ON c.id = s.clock_id
+         WHERE c.station_id = ? AND (? IS NULL OR s.clock_id = ?)
+         ORDER BY s.clock_id, s.position",
     )
+    .bind(station.id())
     .bind(id)
     .bind(id)
     .fetch_all(&state.pool)
@@ -138,8 +143,9 @@ async fn clocks(state: &AppState, id: Option<u64>) -> ApiResult<Vec<ClockView>> 
 async fn list_clocks(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
 ) -> ApiResult<Json<Vec<ClockView>>> {
-    clocks(&state, None).await.map(Json)
+    clocks(&state, &station, None).await.map(Json)
 }
 
 #[utoipa::path(get, path = "/clocks/{id}", tag = "rotation",
@@ -148,9 +154,10 @@ async fn list_clocks(
 async fn get_clock(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
 ) -> ApiResult<Json<ClockView>> {
-    clocks(&state, Some(id))
+    clocks(&state, &station, Some(id))
         .await?
         .pop()
         .map(Json)
@@ -207,12 +214,14 @@ async fn write_slots(
 async fn create_clock(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(input): Json<ClockInput>,
 ) -> ApiResult<(StatusCode, Json<ClockView>)> {
     user.require(Role::Operator)?;
     let name = input.check()?;
     let mut tx = state.pool.begin().await?;
-    let id = sqlx::query("INSERT INTO clocks (name, looping) VALUES (?, ?)")
+    let id = sqlx::query("INSERT INTO clocks (station_id, name, looping) VALUES (?, ?, ?)")
+        .bind(station.id())
         .bind(name)
         .bind(input.looping)
         .execute(&mut *tx)
@@ -221,7 +230,7 @@ async fn create_clock(
         .last_insert_id();
     write_slots(&mut tx, id, &input.slots).await?;
     tx.commit().await?;
-    let Json(clock) = get_clock(user, State(state), Path(id)).await?;
+    let Json(clock) = get_clock(user, State(state), station, Path(id)).await?;
     Ok((StatusCode::CREATED, Json(clock)))
 }
 
@@ -232,16 +241,19 @@ async fn create_clock(
 async fn update_clock(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
     Json(input): Json<ClockInput>,
 ) -> ApiResult<Json<ClockView>> {
     user.require(Role::Operator)?;
     let name = input.check()?;
     let mut tx = state.pool.begin().await?;
-    let exists: Option<u64> = sqlx::query_scalar("SELECT id FROM clocks WHERE id = ? FOR UPDATE")
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let exists: Option<u64> =
+        sqlx::query_scalar("SELECT id FROM clocks WHERE id = ? AND station_id = ? FOR UPDATE")
+            .bind(id)
+            .bind(station.id())
+            .fetch_optional(&mut *tx)
+            .await?;
     if exists.is_none() {
         return Err(ApiError::not_found("clock"));
     }
@@ -255,7 +267,7 @@ async fn update_clock(
     write_slots(&mut tx, id, &input.slots).await?;
     tx.commit().await?;
     tracing::info!(user = %user.username, clock = id, slots = input.slots.len(), "clock changed");
-    get_clock(user, State(state), Path(id)).await
+    get_clock(user, State(state), station, Path(id)).await
 }
 
 /// Deletes a clock; the hours it was scheduled at rotate the whole library
@@ -266,11 +278,13 @@ async fn update_clock(
 async fn delete_clock(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
 ) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
-    let deleted = sqlx::query("DELETE FROM clocks WHERE id = ?")
+    let deleted = sqlx::query("DELETE FROM clocks WHERE id = ? AND station_id = ?")
         .bind(id)
+        .bind(station.id())
         .execute(&state.pool)
         .await?;
     if deleted.rows_affected() == 0 {
@@ -333,6 +347,7 @@ pub struct PreviewRequest {
 async fn preview_clock(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(request): Json<PreviewRequest>,
 ) -> ApiResult<Json<ClockPreview>> {
     if request.slots.len() > MAX_SLOTS {
@@ -340,7 +355,7 @@ async fn preview_clock(
             "a clock has at most {MAX_SLOTS} slots"
         )));
     }
-    let library = rotation::load_library(&state.pool).await?;
+    let library = rotation::load_library(&state.pool, station.id()).await?;
     let clock = heron_rotation::Clock {
         id: 0,
         name: String::new(),
@@ -441,10 +456,13 @@ pub struct ScheduledHour {
 async fn get_schedule(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
 ) -> ApiResult<Json<Vec<ScheduledHour>>> {
     let rows: Vec<(u8, u8, u64)> = sqlx::query_as(
-        "SELECT day_of_week, hour, clock_id FROM clock_schedule ORDER BY day_of_week, hour",
+        "SELECT day_of_week, hour, clock_id FROM clock_schedule WHERE station_id = ?
+         ORDER BY day_of_week, hour",
     )
+    .bind(station.id())
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(
@@ -465,6 +483,7 @@ async fn get_schedule(
 async fn put_schedule(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(hours): Json<Vec<ScheduledHour>>,
 ) -> ApiResult<Json<Vec<ScheduledHour>>> {
     user.require(Role::Operator)?;
@@ -482,12 +501,26 @@ async fn put_schedule(
             )));
         }
     }
+    let clocks: std::collections::HashSet<u64> =
+        sqlx::query_scalar("SELECT id FROM clocks WHERE station_id = ?")
+            .bind(station.id())
+            .fetch_all(&state.pool)
+            .await?
+            .into_iter()
+            .collect();
+    if let Some(hour) = hours.iter().find(|hour| !clocks.contains(&hour.clock_id)) {
+        return Err(ApiError::Invalid(format!("no clock {}", hour.clock_id)));
+    }
     let mut tx = state.pool.begin().await?;
-    sqlx::query("DELETE FROM clock_schedule")
+    sqlx::query("DELETE FROM clock_schedule WHERE station_id = ?")
+        .bind(station.id())
         .execute(&mut *tx)
         .await?;
     for hour in &hours {
-        sqlx::query("INSERT INTO clock_schedule (day_of_week, hour, clock_id) VALUES (?, ?, ?)")
+        sqlx::query(
+            "INSERT INTO clock_schedule (station_id, day_of_week, hour, clock_id) VALUES (?, ?, ?, ?)",
+        )
+            .bind(station.id())
             .bind(hour.day_of_week)
             .bind(hour.hour)
             .bind(hour.clock_id)
@@ -503,7 +536,7 @@ async fn put_schedule(
     }
     tx.commit().await?;
     tracing::info!(user = %user.username, hours = hours.len(), "schedule changed");
-    get_schedule(user, State(state)).await
+    get_schedule(user, State(state), station).await
 }
 
 #[cfg(test)]

@@ -67,12 +67,15 @@ async fn mix_rows(
         return Err("the medley has no parts: build it first".to_owned());
     }
     let settings: PlayoutSettings = {
-        let json: Option<String> =
-            sqlx::query_scalar("SELECT CAST(value AS CHAR) FROM settings WHERE name = ?")
-                .bind(PlayoutSettings::SETTINGS_NAME)
-                .fetch_optional(pool)
-                .await
-                .map_err(|error| error.to_string())?;
+        // The first station's crossfades, until a medley has stations (M13).
+        let json: Option<String> = sqlx::query_scalar(
+            "SELECT CAST(value AS CHAR) FROM station_settings
+             WHERE name = ? AND station_id = (SELECT MIN(id) FROM stations)",
+        )
+        .bind(PlayoutSettings::SETTINGS_NAME)
+        .fetch_optional(pool)
+        .await
+        .map_err(|error| error.to_string())?;
         json.and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default()
     };

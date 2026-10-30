@@ -119,8 +119,8 @@ async fn add_output(
     let statistics =
         admin_password.map(|password| format!(r#"{{"admin_password": "{password}"}}"#));
     sqlx::query(
-        "INSERT INTO outputs (name, kind, encoder_profile_id, config, statistics, enabled)
-         SELECT ?, 'icecast', MIN(id), ?, ?, TRUE FROM encoder_profiles",
+        "INSERT INTO outputs (station_id, name, kind, encoder_profile_id, config, statistics, enabled)
+         SELECT 1, ?, 'icecast', MIN(id), ?, ?, TRUE FROM encoder_profiles",
     )
     .bind(name)
     .bind(config.to_string())
@@ -140,8 +140,8 @@ async fn add_play(pool: &sqlx::MySqlPool, title: &str, from_ms: i64, to_ms: i64)
         .unwrap()
         .last_insert_id();
     sqlx::query(
-        "INSERT INTO play_history (track_id, started_at, ended_at, deck, source)
-         VALUES (?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), 'a', 'rotation')",
+        "INSERT INTO play_history (station_id, track_id, started_at, ended_at, deck, source)
+         VALUES (1, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), 'a', 'rotation')",
     )
     .bind(track)
     .bind(from_ms as f64 / 1_000.0)
@@ -187,8 +187,9 @@ async fn simulated_listeners_are_counted() {
         return;
     };
     let pool = db.pool.clone();
-    settings::save(
+    settings::save_for(
         &pool,
+        1,
         StationSettings::SETTINGS_NAME,
         &StationSettings {
             timezone: "UTC".to_owned(),
@@ -205,10 +206,10 @@ async fn simulated_listeners_are_counted() {
     // Not read: HLS has no server to ask, a disabled output, settings the
     // engine would refuse.
     sqlx::query(
-        "INSERT INTO outputs (name, kind, encoder_profile_id, config, enabled)
-         SELECT 'HLS', 'hls', MIN(id), '{}', TRUE FROM encoder_profiles
-         UNION ALL SELECT 'Off', 'icecast', MIN(id), '{\"host\": \"127.0.0.1\", \"mount\": \"/live\", \"password\": \"x\"}', FALSE FROM encoder_profiles
-         UNION ALL SELECT 'Broken', 'icecast', MIN(id), '{\"host\": \"127.0.0.1\", \"mount\": \"live\", \"password\": \"x\"}', TRUE FROM encoder_profiles",
+        "INSERT INTO outputs (station_id, name, kind, encoder_profile_id, config, enabled)
+         SELECT 1, 'HLS', 'hls', MIN(id), '{}', TRUE FROM encoder_profiles
+         UNION ALL SELECT 1, 'Off', 'icecast', MIN(id), '{\"host\": \"127.0.0.1\", \"mount\": \"/live\", \"password\": \"x\"}', FALSE FROM encoder_profiles
+         UNION ALL SELECT 1, 'Broken', 'icecast', MIN(id), '{\"host\": \"127.0.0.1\", \"mount\": \"live\", \"password\": \"x\"}', TRUE FROM encoder_profiles",
     )
     .execute(&pool)
     .await
@@ -476,7 +477,7 @@ async fn simulated_listeners_are_counted() {
     let first = add_play(&pool, "First", at(10, 20, 0), at(10, 30, 0)).await;
     let second = add_play(&pool, "Second", at(10, 40, 0), at(10, 50, 0)).await;
     let third = add_play(&pool, "Third", at(11, 0, 0), at(11, 10, 0)).await;
-    let tracks = super::track_listeners(&pool, (at(0, 0, 0), at(24, 0, 0)), 60, 1)
+    let tracks = super::track_listeners(&pool, 1, (at(0, 0, 0), at(24, 0, 0)), 60, 1)
         .await
         .unwrap();
     let ranking: Vec<(u64, f64, Option<u32>)> = tracks

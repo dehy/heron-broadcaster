@@ -36,6 +36,7 @@ use crate::auth::{CurrentUser, Role};
 use crate::engine::{DeckName, EndReason, LinkEvent, PlayerState, TrackEvent, unix_ms};
 use crate::error::{ApiError, ApiResult, ErrorBody, is_duplicate};
 use crate::public::{UpcomingTrack, upcoming};
+use crate::stations::Station;
 
 /// Deliveries sent at the same time.
 const MAX_IN_FLIGHT: usize = 8;
@@ -144,6 +145,8 @@ pub struct PayloadTrack {
 #[derive(Clone, Debug, PartialEq, Serialize, ToSchema)]
 pub struct Payload {
     pub event: WebhookEvent,
+    /// The code of the station the webhook belongs to.
+    pub station: String,
     pub delivery_id: u64,
     pub at_unix_ms: u64,
     /// Missing for a ping.
@@ -176,6 +179,7 @@ impl Payload {
         let track = &entry.track;
         Self {
             event: WebhookEvent::of(event),
+            station: String::new(),
             delivery_id: 0,
             at_unix_ms,
             track: Some(PayloadTrack {
@@ -196,6 +200,7 @@ impl Payload {
     fn queue_changed(upcoming: Vec<UpcomingTrack>, at_unix_ms: u64) -> Self {
         Self {
             event: WebhookEvent::QueueChanged,
+            station: String::new(),
             delivery_id: 0,
             at_unix_ms,
             track: None,
@@ -208,6 +213,7 @@ impl Payload {
     fn ping() -> Self {
         Self {
             event: WebhookEvent::Ping,
+            station: String::new(),
             delivery_id: 0,
             at_unix_ms: unix_ms(SystemTime::now()),
             track: None,
@@ -226,6 +232,7 @@ impl Payload {
         let enum_text = |value: serde_json::Value| value.as_str().unwrap_or_default().to_owned();
         Some(match name {
             "event" => self.event.as_str().to_owned(),
+            "station" => self.station.clone(),
             "delivery_id" => self.delivery_id.to_string(),
             "at_unix_ms" => self.at_unix_ms.to_string(),
             "track_id" => track
@@ -270,8 +277,9 @@ impl Payload {
 }
 
 /// The placeholders a body template can use.
-pub const PLACEHOLDERS: [&str; 17] = [
+pub const PLACEHOLDERS: [&str; 18] = [
     "event",
+    "station",
     "delivery_id",
     "at_unix_ms",
     "track_id",
@@ -472,7 +480,11 @@ impl Webhooks {
     }
 
     /// Queues deliveries for the engine's track changes.
-    pub async fn dispatch(self: Arc<Self>, mut events: broadcast::Receiver<LinkEvent>) {
+    pub async fn dispatch(
+        self: Arc<Self>,
+        station_id: u64,
+        mut events: broadcast::Receiver<LinkEvent>,
+    ) {
         loop {
             let event = match events.recv().await {
                 Ok(LinkEvent::Track(event)) => event,
@@ -484,13 +496,13 @@ impl Webhooks {
                 }
                 Err(broadcast::error::RecvError::Closed) => return,
             };
-            if let Err(error) = self.queue_event(&event).await {
+            if let Err(error) = self.queue_event(station_id, &event).await {
                 tracing::error!(%error, "cannot queue webhook deliveries");
             }
         }
     }
 
-    async fn queue_event(&self, event: &TrackEvent) -> ApiResult<()> {
+    async fn queue_event(&self, station_id: u64, event: &TrackEvent) -> ApiResult<()> {
         let payload = Payload::of(event);
         // FX player tracks, and tracks that send no metadata (jingles), go
         // only to webhooks that ask for them.
@@ -503,8 +515,10 @@ impl Webhooks {
                 .as_ref()
                 .is_some_and(|track| track.deck == DeckName::Fx);
         let webhooks: Vec<(u64, String, bool)> = sqlx::query_as(
-            "SELECT id, CAST(events AS CHAR), include_fx FROM webhooks WHERE enabled ORDER BY id",
+            "SELECT id, CAST(events AS CHAR), include_fx FROM webhooks
+             WHERE enabled AND station_id = ? ORDER BY id",
         )
+        .bind(station_id)
         .fetch_all(&self.pool)
         .await?;
         let mut queued = false;
@@ -526,6 +540,7 @@ impl Webhooks {
     /// The first state read is the starting point, not a change.
     pub async fn watch_queue(
         self: Arc<Self>,
+        station_id: u64,
         mut state: watch::Receiver<Option<Arc<PlayerState>>>,
     ) {
         let key = |state: &watch::Receiver<Option<Arc<PlayerState>>>| {
@@ -578,17 +593,20 @@ impl Webhooks {
                 upcoming_now.into_iter().map(|(_, track)| track).collect(),
                 now,
             );
-            if let Err(error) = self.queue_for(payload).await {
+            if let Err(error) = self.queue_for(station_id, payload).await {
                 tracing::error!(%error, "cannot queue webhook deliveries");
             }
         }
     }
 
-    /// Queues `payload` for every enabled webhook that asks for its event.
-    async fn queue_for(&self, payload: Payload) -> ApiResult<()> {
+    /// Queues `payload` for every enabled webhook of a station that asks
+    /// for its event.
+    async fn queue_for(&self, station_id: u64, payload: Payload) -> ApiResult<()> {
         let webhooks: Vec<(u64, String)> = sqlx::query_as(
-            "SELECT id, CAST(events AS CHAR) FROM webhooks WHERE enabled ORDER BY id",
+            "SELECT id, CAST(events AS CHAR) FROM webhooks
+             WHERE enabled AND station_id = ? ORDER BY id",
         )
+        .bind(station_id)
         .fetch_all(&self.pool)
         .await?;
         let mut queued = false;
@@ -617,12 +635,15 @@ impl Webhooks {
         .execute(&mut *tx)
         .await?
         .last_insert_id();
-        let (content_type, template): (String, Option<String>) =
-            sqlx::query_as("SELECT content_type, body_template FROM webhooks WHERE id = ?")
-                .bind(webhook_id)
-                .fetch_one(&mut *tx)
-                .await?;
+        let (content_type, template, station): (String, Option<String>, String) = sqlx::query_as(
+            "SELECT w.content_type, w.body_template, s.code
+                 FROM webhooks w JOIN stations s ON s.id = w.station_id WHERE w.id = ?",
+        )
+        .bind(webhook_id)
+        .fetch_one(&mut *tx)
+        .await?;
         payload.delivery_id = id;
+        payload.station = station;
         sqlx::query(
             "UPDATE webhook_deliveries SET body = ?, next_attempt_at = NOW(6) WHERE id = ?",
         )
@@ -1018,7 +1039,11 @@ type WebhookRow = (
     Option<u16>,
 );
 
-async fn load_webhooks(pool: &MySqlPool, id: Option<u64>) -> ApiResult<Vec<WebhookView>> {
+async fn load_webhooks(
+    pool: &MySqlPool,
+    station: &Station,
+    id: Option<u64>,
+) -> ApiResult<Vec<WebhookView>> {
     let rows: Vec<WebhookRow> = sqlx::query_as(
         "SELECT w.id, w.name, w.url, w.enabled, CAST(w.events AS CHAR), w.include_fx,
                 w.content_type, w.body_template,
@@ -1028,9 +1053,10 @@ async fn load_webhooks(pool: &MySqlPool, id: Option<u64>) -> ApiResult<Vec<Webho
          FROM webhooks w
          LEFT JOIN webhook_deliveries d ON d.id =
              (SELECT MAX(id) FROM webhook_deliveries WHERE webhook_id = w.id)
-         WHERE ? IS NULL OR w.id = ?
+         WHERE w.station_id = ? AND (? IS NULL OR w.id = ?)
          ORDER BY w.name",
     )
+    .bind(station.id())
     .bind(id)
     .bind(id)
     .fetch_all(pool)
@@ -1071,8 +1097,8 @@ async fn load_webhooks(pool: &MySqlPool, id: Option<u64>) -> ApiResult<Vec<Webho
         .collect())
 }
 
-async fn load_webhook(pool: &MySqlPool, id: u64) -> ApiResult<WebhookView> {
-    load_webhooks(pool, Some(id))
+async fn load_webhook(pool: &MySqlPool, station: &Station, id: u64) -> ApiResult<WebhookView> {
+    load_webhooks(pool, station, Some(id))
         .await?
         .pop()
         .ok_or_else(|| ApiError::not_found("webhook"))
@@ -1084,9 +1110,10 @@ async fn load_webhook(pool: &MySqlPool, id: u64) -> ApiResult<WebhookView> {
 async fn list_webhooks(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
 ) -> ApiResult<Json<Vec<WebhookView>>> {
     user.require(Role::Admin)?;
-    Ok(Json(load_webhooks(&state.pool, None).await?))
+    Ok(Json(load_webhooks(&state.pool, &station, None).await?))
 }
 
 #[utoipa::path(get, path = "/webhooks/{id}", tag = "webhooks",
@@ -1095,10 +1122,11 @@ async fn list_webhooks(
 async fn get_webhook(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
 ) -> ApiResult<Json<WebhookView>> {
     user.require(Role::Admin)?;
-    Ok(Json(load_webhook(&state.pool, id).await?))
+    Ok(Json(load_webhook(&state.pool, &station, id).await?))
 }
 
 /// Adds a webhook. The answer holds its secret, shown only this once.
@@ -1109,6 +1137,7 @@ async fn get_webhook(
 async fn create_webhook(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(input): Json<WebhookInput>,
 ) -> ApiResult<(StatusCode, Json<CreatedWebhook>)> {
     user.require(Role::Admin)?;
@@ -1117,10 +1146,11 @@ async fn create_webhook(
     let checked = check(input)?;
     let secret = new_secret()?;
     let id = sqlx::query(
-        "INSERT INTO webhooks (name, url, enabled, events, include_fx, secret, content_type,
-                               body_template)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO webhooks (station_id, name, url, enabled, events, include_fx, secret,
+                               content_type, body_template)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
+    .bind(station.id())
     .bind(&checked.name)
     .bind(&checked.url)
     .bind(enabled)
@@ -1134,7 +1164,7 @@ async fn create_webhook(
     .map_err(duplicate_or)?
     .last_insert_id();
     tracing::info!(user = %user.username, id, name = %checked.name, "webhook created");
-    let webhook = load_webhook(&state.pool, id).await?;
+    let webhook = load_webhook(&state.pool, &station, id).await?;
     Ok((
         StatusCode::CREATED,
         Json(CreatedWebhook { webhook, secret }),
@@ -1148,6 +1178,7 @@ async fn create_webhook(
 async fn update_webhook(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
     Json(input): Json<WebhookInput>,
 ) -> ApiResult<Json<WebhookView>> {
@@ -1155,10 +1186,12 @@ async fn update_webhook(
     let enabled = input.enabled;
     let include_fx = input.include_fx;
     let checked = check(input)?;
-    let exists: Option<u64> = sqlx::query_scalar("SELECT id FROM webhooks WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&state.pool)
-        .await?;
+    let exists: Option<u64> =
+        sqlx::query_scalar("SELECT id FROM webhooks WHERE id = ? AND station_id = ?")
+            .bind(id)
+            .bind(station.id())
+            .fetch_optional(&state.pool)
+            .await?;
     if exists.is_none() {
         return Err(ApiError::not_found("webhook"));
     }
@@ -1179,7 +1212,7 @@ async fn update_webhook(
     .await
     .map_err(duplicate_or)?;
     tracing::info!(user = %user.username, id, name = %checked.name, "webhook changed");
-    Ok(Json(load_webhook(&state.pool, id).await?))
+    Ok(Json(load_webhook(&state.pool, &station, id).await?))
 }
 
 /// Deletes a webhook and its deliveries. Admins only.
@@ -1189,11 +1222,13 @@ async fn update_webhook(
 async fn delete_webhook(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
 ) -> ApiResult<StatusCode> {
     user.require(Role::Admin)?;
-    let deleted = sqlx::query("DELETE FROM webhooks WHERE id = ?")
+    let deleted = sqlx::query("DELETE FROM webhooks WHERE id = ? AND station_id = ?")
         .bind(id)
+        .bind(station.id())
         .execute(&state.pool)
         .await?;
     if deleted.rows_affected() == 0 {
@@ -1211,13 +1246,15 @@ async fn delete_webhook(
 async fn rotate_secret(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
 ) -> ApiResult<Json<WebhookSecret>> {
     user.require(Role::Admin)?;
     let secret = new_secret()?;
-    let updated = sqlx::query("UPDATE webhooks SET secret = ? WHERE id = ?")
+    let updated = sqlx::query("UPDATE webhooks SET secret = ? WHERE id = ? AND station_id = ?")
         .bind(&secret)
         .bind(id)
+        .bind(station.id())
         .execute(&state.pool)
         .await?;
     if updated.rows_affected() == 0 {
@@ -1254,10 +1291,11 @@ async fn load_delivery(pool: &MySqlPool, id: u64) -> ApiResult<DeliveryView> {
 async fn test_webhook(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
 ) -> ApiResult<(StatusCode, Json<DeliveryView>)> {
     user.require(Role::Admin)?;
-    load_webhook(&state.pool, id).await?;
+    load_webhook(&state.pool, &station, id).await?;
     let delivery = state.webhooks.queue(id, Payload::ping()).await?;
     state.webhooks.wake.notify_one();
     Ok((
@@ -1273,6 +1311,7 @@ async fn test_webhook(
 async fn list_deliveries(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
     Query(query): Query<DeliveriesQuery>,
 ) -> ApiResult<Json<Vec<DeliveryView>>> {
@@ -1281,7 +1320,7 @@ async fn list_deliveries(
     if !(1..=200).contains(&limit) {
         return Err(ApiError::BadRequest("limit is 1 to 200".to_owned()));
     }
-    load_webhook(&state.pool, id).await?;
+    load_webhook(&state.pool, &station, id).await?;
     let mut sql = sqlx::QueryBuilder::new(DELIVERY_COLUMNS);
     sql.push(" WHERE webhook_id = ").push_bind(id);
     if let Some(before) = query.before {
@@ -1302,10 +1341,14 @@ async fn list_deliveries(
 async fn retry_delivery(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Path(id): Path<u64>,
 ) -> ApiResult<(StatusCode, Json<DeliveryView>)> {
     user.require(Role::Admin)?;
     let delivery = load_delivery(&state.pool, id).await?;
+    load_webhook(&state.pool, &station, delivery.webhook_id)
+        .await
+        .map_err(|_| ApiError::not_found("delivery"))?;
     if delivery.status == DeliveryStatus::Pending.as_str() {
         return Err(ApiError::Conflict(
             "the delivery is still being sent".to_owned(),
@@ -1606,8 +1649,8 @@ mod delivery_tests {
 
     async fn add_webhook(pool: &MySqlPool, name: &str, url: &str) -> u64 {
         sqlx::query(
-            "INSERT INTO webhooks (name, url, events, secret)
-             VALUES (?, ?, '[\"track.started\"]', 'whsec_test')",
+            "INSERT INTO webhooks (station_id, name, url, events, secret)
+             VALUES (1, ?, ?, '[\"track.started\"]', 'whsec_test')",
         )
         .bind(name)
         .bind(url)
@@ -1682,8 +1725,14 @@ mod delivery_tests {
         let down_id = add_webhook(&db.pool, "down", &down_url).await;
 
         // FX tracks go only to webhooks that ask for them.
-        webhooks.queue_event(&started(DeckName::Fx)).await.unwrap();
-        webhooks.queue_event(&started(DeckName::A)).await.unwrap();
+        webhooks
+            .queue_event(1, &started(DeckName::Fx))
+            .await
+            .unwrap();
+        webhooks
+            .queue_event(1, &started(DeckName::A))
+            .await
+            .unwrap();
 
         assert_eq!(
             settled(&db.pool, flaky_id).await,
@@ -1755,7 +1804,10 @@ mod delivery_tests {
             .execute(&db.pool)
             .await
             .unwrap();
-        webhooks.queue_event(&started(DeckName::A)).await.unwrap();
+        webhooks
+            .queue_event(1, &started(DeckName::A))
+            .await
+            .unwrap();
         let sender = tokio::spawn(Arc::clone(&webhooks).send_loop());
         assert_eq!(
             settled(&db.pool, id).await,
@@ -1780,7 +1832,10 @@ mod delivery_tests {
         let url = format!("http://{}/hook", listener.local_addr().unwrap());
         drop(listener);
         let id = add_webhook(&db.pool, "gone", &url).await;
-        webhooks.queue_event(&started(DeckName::B)).await.unwrap();
+        webhooks
+            .queue_event(1, &started(DeckName::B))
+            .await
+            .unwrap();
         assert_eq!(
             settled(&db.pool, id).await,
             [("failed".to_owned(), 2, None)]

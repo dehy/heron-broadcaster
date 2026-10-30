@@ -11,8 +11,8 @@
 //! - `track` for each track change reported by the engine;
 //! - `eq` whenever the deck EQ settings change.
 
+use axum::extract::Query;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Query, State};
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -24,6 +24,7 @@ use crate::app::AppState;
 use crate::auth::CurrentUser;
 use crate::engine::{DeckName, Levels, LinkEvent, PlayerState, TrackEvent, unix_ms};
 use crate::error::ErrorBody;
+use crate::stations::Station;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct DeckPosition {
@@ -73,14 +74,14 @@ pub fn router() -> OpenApiRouter<AppState> {
               (status = "4XX", body = ErrorBody)))]
 async fn live(
     _user: CurrentUser,
-    State(state): State<AppState>,
+    station: Station,
     Query(query): Query<LiveQuery>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
     let levels = query.levels.unwrap_or(true);
     upgrade.on_upgrade(move |socket| async move {
         metrics::gauge!("heron_api_live_clients").increment(1.0);
-        if let Err(error) = serve(socket, state, levels).await {
+        if let Err(error) = serve(socket, station, levels).await {
             tracing::debug!(%error, "live client gone");
         }
         metrics::gauge!("heron_api_live_clients").decrement(1.0);
@@ -109,13 +110,13 @@ fn positions(player: &PlayerState) -> LiveMessage {
 
 async fn serve(
     mut socket: WebSocket,
-    state: AppState,
+    station: Station,
     with_levels: bool,
 ) -> Result<(), axum::Error> {
-    let mut player = state.engine.state();
-    let mut events = state.engine.events();
-    let mut eq_changes = state.eq_changes.subscribe();
-    let mut levels = with_levels.then(|| state.engine.levels());
+    let mut player = station.engine.state();
+    let mut events = station.engine.events();
+    let mut eq_changes = station.eq_changes.subscribe();
+    let mut levels = with_levels.then(|| station.engine.levels());
 
     let current = player.borrow_and_update().clone();
     let mut shown = current.as_ref().map(|player| player.structure());

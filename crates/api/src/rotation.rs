@@ -30,6 +30,7 @@ use crate::auth::{CurrentUser, Role};
 use crate::engine::{DeckName, PlayerState, QueueEntry, unix_ms};
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::settings::{self, StationSettings};
+use crate::stations::Station;
 
 /// Playable length under which an analyzed track counts as silent.
 pub const SILENT_MS: u32 = 1_000;
@@ -58,8 +59,9 @@ pub fn target(kind: &str, id: u64) -> Option<Target> {
     }
 }
 
-/// The station as rotation sees it.
-pub async fn load_library(pool: &MySqlPool) -> ApiResult<Library> {
+/// A station's library as its rotation sees it: the tracks, its clocks,
+/// schedule and rotation settings.
+pub async fn load_library(pool: &MySqlPool, station_id: u64) -> ApiResult<Library> {
     let rows: Vec<(u64, Option<String>, Option<String>, i64)> = sqlx::query_as(
         "SELECT t.id, t.title, t.album,
                 CAST(COALESCE(o.cue_out_ms, a.cue_out_ms) AS SIGNED)
@@ -122,10 +124,13 @@ pub async fn load_library(pool: &MySqlPool) -> ApiResult<Library> {
 
     let mut slots: HashMap<u64, Vec<Slot>> = HashMap::new();
     let rows: Vec<(u64, u64, String, bool, Option<String>)> = sqlx::query_as(
-        "SELECT clock_id, category_id, CAST(selection_method AS CHAR), enforce_rules,
-                CAST(separation AS CHAR)
-         FROM clock_slots ORDER BY clock_id, position",
+        "SELECT s.clock_id, s.category_id, CAST(s.selection_method AS CHAR), s.enforce_rules,
+                CAST(s.separation AS CHAR)
+         FROM clock_slots s JOIN clocks c ON c.id = s.clock_id
+         WHERE c.station_id = ?
+         ORDER BY s.clock_id, s.position",
     )
+    .bind(station_id)
     .fetch_all(pool)
     .await?;
     for (clock, category, method, enforce_rules, separation) in rows {
@@ -136,9 +141,11 @@ pub async fn load_library(pool: &MySqlPool) -> ApiResult<Library> {
             separation: overrides(separation.as_deref()),
         });
     }
-    let rows: Vec<(u64, String, bool)> = sqlx::query_as("SELECT id, name, looping FROM clocks")
-        .fetch_all(pool)
-        .await?;
+    let rows: Vec<(u64, String, bool)> =
+        sqlx::query_as("SELECT id, name, looping FROM clocks WHERE station_id = ?")
+            .bind(station_id)
+            .fetch_all(pool)
+            .await?;
     let clocks = rows
         .into_iter()
         .map(|(id, name, looping)| Clock {
@@ -148,10 +155,12 @@ pub async fn load_library(pool: &MySqlPool) -> ApiResult<Library> {
             looping,
         })
         .collect();
-    let rows: Vec<(u8, u8, u64)> =
-        sqlx::query_as("SELECT day_of_week, hour, clock_id FROM clock_schedule")
-            .fetch_all(pool)
-            .await?;
+    let rows: Vec<(u8, u8, u64)> = sqlx::query_as(
+        "SELECT day_of_week, hour, clock_id FROM clock_schedule WHERE station_id = ?",
+    )
+    .bind(station_id)
+    .fetch_all(pool)
+    .await?;
     let schedule = Schedule {
         hours: rows
             .into_iter()
@@ -183,8 +192,10 @@ pub async fn load_library(pool: &MySqlPool) -> ApiResult<Library> {
     )
     .fetch_all(pool)
     .await?;
-    let settings: RotationSettings = settings::load(pool, RotationSettings::SETTINGS_NAME).await?;
-    let station: StationSettings = settings::load(pool, StationSettings::SETTINGS_NAME).await?;
+    let settings: RotationSettings =
+        settings::load_for(pool, station_id, RotationSettings::SETTINGS_NAME).await?;
+    let station: StationSettings =
+        settings::load_for(pool, station_id, StationSettings::SETTINGS_NAME).await?;
     Ok(Library::new(
         LibraryParts {
             tracks,
@@ -305,41 +316,53 @@ async fn plays(
         .collect())
 }
 
-/// What played up to `now_ms`, as far back as separation looks, and when
-/// each track last played. The FX player counts only for what rotation
-/// picked there (jingles over an intro), not for jingles fired by hand.
-pub async fn load_history(pool: &MySqlPool, library: &Library, now_ms: i64) -> ApiResult<History> {
+/// What played on a station up to `now_ms`, as far back as separation
+/// looks, and when each track last played there. The FX player counts only
+/// for what rotation picked there (jingles over an intro), not for jingles
+/// fired by hand.
+pub async fn load_history(
+    pool: &MySqlPool,
+    station_id: u64,
+    library: &Library,
+    now_ms: i64,
+) -> ApiResult<History> {
     let since_ms = now_ms - library.horizon_ms();
     let recorded: Vec<Recorded> = sqlx::query_as(
         "SELECT h.track_id, COALESCE(h.artist, t.artist) AS artist,
                 COALESCE(h.title, t.title) AS title, t.album,
                 CAST(UNIX_TIMESTAMP(h.started_at) * 1000 AS SIGNED) AS start_ms
          FROM play_history h LEFT JOIN tracks t ON t.id = h.track_id
-         WHERE (h.deck <> 'fx' OR h.source = 'rotation') AND h.started_at >= FROM_UNIXTIME(?)
+         WHERE h.station_id = ? AND (h.deck <> 'fx' OR h.source = 'rotation')
+           AND h.started_at >= FROM_UNIXTIME(?)
          ORDER BY h.started_at, h.id",
     )
+    .bind(station_id)
     .bind(since_ms as f64 / 1_000.0)
     .fetch_all(pool)
     .await?;
     let plays = plays(pool, library, recorded).await?;
     let last: Vec<(u64, i64)> = sqlx::query_as(
         "SELECT track_id, CAST(UNIX_TIMESTAMP(MAX(started_at)) * 1000 AS SIGNED)
-         FROM play_history WHERE track_id IS NOT NULL AND (deck <> 'fx' OR source = 'rotation')
+         FROM play_history
+         WHERE station_id = ? AND track_id IS NOT NULL AND (deck <> 'fx' OR source = 'rotation')
          GROUP BY track_id",
     )
+    .bind(station_id)
     .fetch_all(pool)
     .await?;
     Ok(History::new(plays, last.into_iter().collect()))
 }
 
-/// Where the clock is: the slot of the last pick made from a clock.
-pub async fn last_position(pool: &MySqlPool) -> ApiResult<Option<Position>> {
+/// Where a station's clock is: the slot of its last pick made from a clock.
+pub async fn last_position(pool: &MySqlPool, station_id: u64) -> ApiResult<Option<Position>> {
     let row: Option<(u64, u32, i64)> = sqlx::query_as(
         "SELECT clock_id, slot, CAST(UNIX_TIMESTAMP(hour_start) * 1000 AS SIGNED)
          FROM rotation_picks
-         WHERE clock_id IS NOT NULL AND slot IS NOT NULL AND hour_start IS NOT NULL
+         WHERE station_id = ? AND clock_id IS NOT NULL AND slot IS NOT NULL
+           AND hour_start IS NOT NULL
          ORDER BY id DESC LIMIT 1",
     )
+    .bind(station_id)
     .fetch_optional(pool)
     .await?;
     Ok(row.map(|(clock_id, slot, hour_start_unix_ms)| Position {
@@ -424,6 +447,7 @@ pub fn seed() -> u64 {
 /// entry it became, with the engine's start time.
 pub async fn record_pick(
     pool: &MySqlPool,
+    station_id: u64,
     pick: &heron_rotation::Pick,
     entry: Option<(u64, u64)>,
 ) -> ApiResult<u64> {
@@ -432,10 +456,11 @@ pub async fn record_pick(
     let position = pick.position;
     let id = sqlx::query(
         "INSERT INTO rotation_picks
-             (track_id, planned_at, clock_id, slot, hour_start, category_id, step, explanation,
-              engine_started_at, entry_id)
-         VALUES (?, FROM_UNIXTIME(?), ?, ?, FROM_UNIXTIME(?), ?, ?, ?, ?, ?)",
+             (station_id, track_id, planned_at, clock_id, slot, hour_start, category_id, step,
+              explanation, engine_started_at, entry_id)
+         VALUES (?, ?, FROM_UNIXTIME(?), ?, ?, FROM_UNIXTIME(?), ?, ?, ?, ?, ?)",
     )
+    .bind(station_id)
     .bind(pick.track)
     .bind(pick.explanation.at_unix_ms as f64 / 1_000.0)
     .bind(position.map(|p| p.clock_id))
@@ -499,6 +524,7 @@ pub struct PicksQuery {
 async fn list_picks(
     _user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Query(query): Query<PicksQuery>,
 ) -> ApiResult<Json<Vec<RotationPick>>> {
     let limit = query.limit.unwrap_or(50);
@@ -513,8 +539,9 @@ async fn list_picks(
          FROM rotation_picks p
          LEFT JOIN tracks t ON t.id = p.track_id
          LEFT JOIN play_history h ON h.id = p.play_id
-         WHERE TRUE",
+         WHERE p.station_id = ",
     );
+    sql.push_bind(station.id());
     if let Some(before) = query.before {
         sql.push(" AND p.id < ").push_bind(before);
     }
@@ -588,6 +615,7 @@ pub struct SimulationReport {
 async fn simulate(
     user: CurrentUser,
     State(state): State<AppState>,
+    station: Station,
     Json(request): Json<SimulationRequest>,
 ) -> ApiResult<Json<SimulationReport>> {
     user.require(Role::Operator)?;
@@ -595,7 +623,7 @@ async fn simulate(
     if !(1..=168).contains(&hours) {
         return Err(ApiError::Invalid("hours is 1 to 168".to_owned()));
     }
-    let mut library = load_library(&state.pool).await?;
+    let mut library = load_library(&state.pool, station.id()).await?;
     if let Some(clock_id) = request.clock_id {
         if !library.clocks.contains_key(&clock_id) {
             return Err(ApiError::not_found("clock"));
@@ -606,8 +634,8 @@ async fn simulate(
     }
     let now = now_ms();
     let start = request.start_unix_ms.unwrap_or(now);
-    let history = load_history(&state.pool, &library, start.min(now)).await?;
-    let last = last_position(&state.pool).await?;
+    let history = load_history(&state.pool, station.id(), &library, start.min(now)).await?;
+    let last = last_position(&state.pool, station.id()).await?;
     let seed = request.seed.unwrap_or_else(seed);
     let duration = i64::from(hours) * 3_600_000;
     let simulation = tokio::task::spawn_blocking(move || {
