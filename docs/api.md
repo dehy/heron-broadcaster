@@ -44,7 +44,7 @@ What belongs to a station (its engine and decks, queue, history, clocks, schedul
 
 | Area | Routes |
 |---|---|
-| Stations | `GET`, `POST /stations`; `GET`, `PUT`, `DELETE /stations/{id}` (`{"name", "code", "engine_url", "enabled", "position"}`): admins change them; see [below](#stations) |
+| Stations | `GET`, `POST /stations`; `GET`, `PUT`, `DELETE /stations/{id}` (`{"name", "code", "enabled", "position"}`; the answers add `engine_variable` and `engine_configured`): admins change them; see [below](#stations) |
 | Account | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `PUT /auth/password`, `PUT /auth/preferences` (`{"theme", "language", "full_width"}`, each optional: the theme is system, light or dark; the language is system or a language tag such as `fr`; `full_width` drops the centred column); `GET`, `POST /tokens`, `DELETE /tokens/{id}` |
 | Users (admins) | `GET`, `POST /users`; `PATCH`, `DELETE /users/{id}` |
 | Engine and decks | `GET /engine` (reachable, configuration in sync), `GET /player` (decks, cued track, queue, outputs), `GET /player/levels`, `POST /player/skip`, `/player/pause`, `/player/resume`, `POST /player/fx` (`{"track_id"}`), `DELETE /player/fx` |
@@ -72,9 +72,9 @@ Every engine action is there: queue (enqueue, remove, clear, move, and replace, 
 
 ## Stations
 
-Each station has a name, a code (1 to 32 lowercase letters, digits and `-`, unique), the gRPC address of its own engine (`engine_url`), whether it is enabled, and a position in lists. The first station is the one an existing Heron became: its engine is `HERON_ENGINE_URL` (`engine_url` left empty), it is named from `HERON_STATION_NAME` until renamed, and it can be neither disabled nor deleted.
+Each station has a name, a code (1 to 32 lowercase letters and digits, unique), whether it is enabled, and a position in lists. Its engine's gRPC address is in `heron-api`'s environment: `HERON_ENGINE_URL` for the first station, `HERON_ENGINE_URL_<CODE>` for the others (`engine_variable`; `engine_configured` says whether it is set). Their code is therefore set once: changing it is refused (`409`). The first station is the one an existing Heron became: it is named from `HERON_STATION_NAME` until renamed, its code can be changed, and it can be neither disabled nor deleted.
 
-- A new station needs its own engine, a new service of the deployment ([Upgrading – Several stations](upgrading.md#several-stations)); the API connects to it when the station is added, and starts its queue manager, history and webhooks.
+- A new station needs its own engine, a new service of the deployment, and its variable in `heron-api`'s environment ([Upgrading – Several stations](upgrading.md#several-stations)); the API connects to it when the station is added, or when it starts with the variable set, and starts its queue manager, history and webhooks.
 - A disabled station is not fed: its engine plays what it has queued, then its fallback directory. Its programming can still be edited.
 - A station is deleted only once it has no clocks, schedule, outputs or webhooks left; its history, selection log and listener totals go with it.
 
