@@ -5166,6 +5166,11 @@ export interface components {
             /** @description At least 8 characters. */
             password: string;
             role: components["schemas"]["Role"];
+            /**
+             * @description Roles on stations (left out: `none`); the shared role on every
+             *     station when left out.
+             */
+            station_roles?: components["schemas"]["StationRole"][] | null;
             username: string;
         };
         NowPlaying: {
@@ -6428,6 +6433,16 @@ export interface components {
             /** Format: int32 */
             position?: number;
         };
+        StationRole: {
+            role: components["schemas"]["StationRoleName"];
+            /** Format: int64 */
+            station_id: number;
+        };
+        /**
+         * @description A role on a station; `none`: the user does not see it.
+         * @enum {string}
+         */
+        StationRoleName: "none" | "viewer" | "operator" | "admin";
         /** @description The station itself. */
         StationSettings: {
             /**
@@ -7058,6 +7073,12 @@ export interface components {
             /** Format: int64 */
             last_login_at_unix_ms?: number | null;
             role: components["schemas"]["Role"];
+            /**
+             * @description Their role on each station; a station left out is `none`. `role` is
+             *     the shared role (the library, what stations share); a shared admin
+             *     is admin on every station.
+             */
+            station_roles: components["schemas"]["StationRole"][];
             theme: components["schemas"]["Theme"];
             username: string;
         };
@@ -7067,6 +7088,8 @@ export interface components {
             /** @description Signs the user out everywhere. */
             password?: string | null;
             role?: components["schemas"]["Role"] | null;
+            /** @description Replaces their roles on stations (left out: `none`). */
+            station_roles?: components["schemas"]["StationRole"][] | null;
         };
         Violation: {
             /** Format: int64 */

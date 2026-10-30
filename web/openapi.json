@@ -14963,6 +14963,16 @@
           "role": {
             "$ref": "#/components/schemas/Role"
           },
+          "station_roles": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/StationRole"
+            },
+            "description": "Roles on stations (left out: `none`); the shared role on every\nstation when left out."
+          },
           "username": {
             "type": "string"
           }
@@ -18069,6 +18079,34 @@
         },
         "additionalProperties": false
       },
+      "StationRole": {
+        "type": "object",
+        "required": [
+          "station_id",
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/StationRoleName"
+          },
+          "station_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "StationRoleName": {
+        "type": "string",
+        "description": "A role on a station; `none`: the user does not see it.",
+        "enum": [
+          "none",
+          "viewer",
+          "operator",
+          "admin"
+        ]
+      },
       "StationSettings": {
         "type": "object",
         "description": "The station itself.",
@@ -19977,7 +20015,8 @@
           "theme",
           "language",
           "full_width",
-          "created_at_unix_ms"
+          "created_at_unix_ms",
+          "station_roles"
         ],
         "properties": {
           "created_at_unix_ms": {
@@ -20009,6 +20048,13 @@
           },
           "role": {
             "$ref": "#/components/schemas/Role"
+          },
+          "station_roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StationRole"
+            },
+            "description": "Their role on each station; a station left out is `none`. `role` is\nthe shared role (the library, what stations share); a shared admin\nis admin on every station."
           },
           "theme": {
             "$ref": "#/components/schemas/Theme"
@@ -20044,6 +20090,16 @@
                 "type": "null"
               }
             ]
+          },
+          "station_roles": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/StationRole"
+            },
+            "description": "Replaces their roles on stations (left out: `none`)."
           }
         },
         "additionalProperties": false

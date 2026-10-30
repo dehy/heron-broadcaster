@@ -50,6 +50,110 @@ pub struct User {
     pub full_width: bool,
     pub last_login_at_unix_ms: Option<i64>,
     pub created_at_unix_ms: i64,
+    /// Their role on each station; a station left out is `none`. `role` is
+    /// the shared role (the library, what stations share); a shared admin
+    /// is admin on every station.
+    pub station_roles: Vec<StationRole>,
+}
+
+/// A role on a station; `none`: the user does not see it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StationRoleName {
+    None,
+    Viewer,
+    Operator,
+    Admin,
+}
+
+impl StationRoleName {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Viewer => "viewer",
+            Self::Operator => "operator",
+            Self::Admin => "admin",
+        }
+    }
+
+    fn parse(role: &str) -> Self {
+        match role {
+            "viewer" => Self::Viewer,
+            "operator" => Self::Operator,
+            "admin" => Self::Admin,
+            _ => Self::None,
+        }
+    }
+}
+
+impl From<Role> for StationRoleName {
+    fn from(role: Role) -> Self {
+        match role {
+            Role::Viewer => Self::Viewer,
+            Role::Operator => Self::Operator,
+            Role::Admin => Self::Admin,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StationRole {
+    pub station_id: u64,
+    pub role: StationRoleName,
+}
+
+/// The users' roles on stations.
+async fn attach_roles(pool: &MySqlPool, users: &mut [User]) -> ApiResult<()> {
+    let rows: Vec<(u64, u64, String)> = sqlx::query_as(
+        "SELECT user_id, station_id, CAST(role AS CHAR) FROM user_station_roles
+         WHERE role <> 'none' ORDER BY user_id, station_id",
+    )
+    .fetch_all(pool)
+    .await?;
+    for user in users {
+        user.station_roles = rows
+            .iter()
+            .filter(|(user_id, ..)| *user_id == user.id)
+            .map(|(_, station_id, role)| StationRole {
+                station_id: *station_id,
+                role: StationRoleName::parse(role),
+            })
+            .collect();
+    }
+    Ok(())
+}
+
+/// Replaces a user's roles on stations: those left out are `none`.
+async fn write_roles(pool: &MySqlPool, user_id: u64, roles: &[StationRole]) -> ApiResult<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM user_station_roles WHERE user_id = ?")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    for role in roles
+        .iter()
+        .filter(|role| role.role != StationRoleName::None)
+    {
+        sqlx::query(
+            "INSERT INTO user_station_roles (user_id, station_id, role) VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE role = VALUES(role)",
+        )
+        .bind(user_id)
+        .bind(role.station_id)
+        .bind(role.role.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            if crate::error::is_still_used(&error) {
+                ApiError::Invalid(format!("no station {}", role.station_id))
+            } else {
+                error.into()
+            }
+        })?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 /// The web UI's theme.
@@ -111,6 +215,7 @@ fn user(
         full_width,
         last_login_at_unix_ms: last_login,
         created_at_unix_ms: created,
+        station_roles: Vec::new(),
     }
 }
 
@@ -121,7 +226,9 @@ async fn find_user(pool: &MySqlPool, id: u64) -> ApiResult<User> {
     .bind(id)
     .fetch_optional(pool)
     .await?;
-    row.map(user).ok_or_else(|| ApiError::not_found("user"))
+    let mut users: Vec<User> = row.map(user).into_iter().collect();
+    attach_roles(pool, &mut users).await?;
+    users.pop().ok_or_else(|| ApiError::not_found("user"))
 }
 
 pub async fn all_users(pool: &MySqlPool) -> ApiResult<Vec<User>> {
@@ -130,10 +237,13 @@ pub async fn all_users(pool: &MySqlPool) -> ApiResult<Vec<User>> {
     )))
     .fetch_all(pool)
     .await?;
-    Ok(rows.into_iter().map(user).collect())
+    let mut users: Vec<User> = rows.into_iter().map(user).collect();
+    attach_roles(pool, &mut users).await?;
+    Ok(users)
 }
 
-/// Creates a user; used by the API and the command line.
+/// Creates a user with their shared role on every station; used by the API
+/// and the command line.
 pub async fn add_user(
     pool: &MySqlPool,
     passwords: &Passwords,
@@ -157,6 +267,13 @@ pub async fn add_user(
             }
         })?
         .last_insert_id();
+    sqlx::query(
+        "INSERT INTO user_station_roles (user_id, station_id, role) SELECT ?, id, ? FROM stations",
+    )
+    .bind(id)
+    .bind(role.as_str())
+    .execute(pool)
+    .await?;
     find_user(pool, id).await
 }
 
@@ -389,6 +506,10 @@ pub struct NewUser {
     /// At least 8 characters.
     pub password: String,
     pub role: Role,
+    /// Roles on stations (left out: `none`); the shared role on every
+    /// station when left out.
+    #[serde(default)]
+    pub station_roles: Option<Vec<StationRole>>,
 }
 
 /// Admins only.
@@ -401,7 +522,7 @@ async fn create_user(
     Json(new): Json<NewUser>,
 ) -> ApiResult<(StatusCode, Json<User>)> {
     user.require(Role::Admin)?;
-    let created = add_user(
+    let mut created = add_user(
         &state.pool,
         &state.passwords,
         &new.username,
@@ -409,6 +530,10 @@ async fn create_user(
         new.role,
     )
     .await?;
+    if let Some(roles) = &new.station_roles {
+        write_roles(&state.pool, created.id, roles).await?;
+        created = find_user(&state.pool, created.id).await?;
+    }
     tracing::info!(by = %user.username, username = %created.username, role = ?created.role, "user created");
     Ok((StatusCode::CREATED, Json(created)))
 }
@@ -421,6 +546,8 @@ pub struct UserPatch {
     pub enabled: Option<bool>,
     /// Signs the user out everywhere.
     pub password: Option<String>,
+    /// Replaces their roles on stations (left out: `none`).
+    pub station_roles: Option<Vec<StationRole>>,
 }
 
 /// Refuses changes that would leave no enabled admin.
@@ -466,6 +593,9 @@ async fn update_user(
             .bind(id)
             .execute(&state.pool)
             .await?;
+    }
+    if let Some(roles) = &patch.station_roles {
+        write_roles(&state.pool, id, roles).await?;
     }
     if let Some(enabled) = patch.enabled {
         sqlx::query("UPDATE users SET enabled = ? WHERE id = ?")
