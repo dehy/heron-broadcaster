@@ -19,6 +19,7 @@ import {
 import { FadeEditor } from "../components/FadeEditor";
 import { NewCategory } from "../components/NewCategory";
 import { TaskState, useTask } from "../components/Task";
+import { TryTransition } from "../components/TryTransition";
 import {
   LabelChip,
   LabelsDialog,
@@ -286,15 +287,17 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
       }),
     },
   ];
-  if (mixPoint !== null) {
+  // Always shown: on the cue-out when the next track follows back to back.
+  {
     markers.push({
       id: "mix",
-      label: t("transition.nextStarts"),
-      ms: mixPoint,
+      label: mixPoint !== null ? t("transition.nextStarts") : t("transition.nextStartsBackToBack"),
+      ms: mixPoint ?? cueOut,
       color: "var(--accent)",
       end: true,
       row: 1,
-      ...(canEdit && {
+      // Not draggable when the track never crossfades.
+      ...(canEdit && crossfades && {
         // Dragging it sets a fixed crossfade for this track.
         onDrag: (ms: number) =>
           setDraft((d) => ({
@@ -578,7 +581,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
             <span>
               <span className="swatch" style={{ background: "var(--accent)" }} /> {t("track.nextTrackStarts")}{" "}
               <strong className="num">
-                {mixPoint !== null ? duration(mixPoint, true) : t("track.afterCueOut")}
+                {mixPoint !== null ? duration(mixPoint, true) : t("track.backToBackAt", { at: duration(cueOut, true) })}
               </strong>
             </span>
             <span>{t("track.plays", { duration: duration(cueOut - cueIn) })}</span>
@@ -629,6 +632,8 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
           />
         </div>
       </Card>
+
+      {track.analysis && <TryTransition trackId={track.id} trackName={trackName(track)} overrides={draft} />}
 
       <div className="grid two">
         <OverridesCard

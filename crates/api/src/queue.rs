@@ -117,6 +117,11 @@ impl TrackRow {
     }
 
     fn playout(&self) -> TrackPlayout {
+        self.playout_with(&self.overrides())
+    }
+
+    /// How the track plays with these overrides instead of its own.
+    fn playout_with(&self, overrides: &TrackOverrides) -> TrackPlayout {
         let base = match (self.analyzed, self.cue_in_ms, self.cue_out_ms) {
             (true, Some(cue_in_ms), Some(cue_out_ms)) => TrackPlayout {
                 duration_ms: self.duration_ms.unwrap_or(cue_out_ms).max(cue_out_ms),
@@ -133,11 +138,11 @@ impl TrackRow {
             // Unknown length: the engine plays the whole file, overrides aside.
             return TrackPlayout {
                 cue_out_ms: 0,
-                crossfade: self.overrides().crossfade,
+                crossfade: overrides.crossfade,
                 ..base
             };
         }
-        base.with_overrides(&self.overrides())
+        base.with_overrides(overrides)
     }
 
     /// Why the track cannot be played, if it cannot.
@@ -251,13 +256,18 @@ impl QueueManager {
             .collect()
     }
 
-    /// How a library track plays: analysis and overrides combined.
-    pub async fn playout(&self, id: u64) -> ApiResult<TrackPlayout> {
+    /// How a library track plays: analysis and overrides combined, its
+    /// own overrides or, for previews, `overrides` not saved yet.
+    pub async fn playout(
+        &self,
+        id: u64,
+        overrides: Option<&TrackOverrides>,
+    ) -> ApiResult<TrackPlayout> {
         let rows = self.rows(&[id]).await?;
         let row = rows
             .first()
             .ok_or_else(|| ApiError::NotFound(format!("track {id} not found")))?;
-        Ok(row.playout())
+        Ok(overrides.map_or_else(|| row.playout(), |overrides| row.playout_with(overrides)))
     }
 
     pub async fn run(self: Arc<Self>) {
