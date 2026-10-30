@@ -72,6 +72,33 @@ A plain `docker compose pull && docker compose up -d` also works, but Compose st
 
 To go back to the previous version, run the script with it. Migrations are not undone: going back across a migration needs the database backup.
 
+### Several stations
+
+Each station has its own engine ([Several stations](stations.md#engines)): a second station is a second engine service, with its own state volume and its own relay, added in a `docker-compose.override.yml` next to `docker-compose.yml`:
+
+```yaml
+services:
+  heron-engine-2:
+    extends: { file: docker-compose.yml, service: heron-engine }
+    volumes:
+      - ${HERON_MUSIC_DIR:-./data/music}:/music:ro
+      - ${HERON_FALLBACK_DIR:-./data/fallback}:/var/lib/heron/fallback:ro
+      - engine-2-state:/var/lib/heron/engine
+      - engine-2-relay:/run/heron/relay
+  heron-relay-2:
+    extends: { file: docker-compose.yml, service: heron-relay }
+    volumes:
+      - engine-2-relay:/run/heron/relay
+
+volumes:
+  engine-2-state:
+  engine-2-relay:
+```
+
+Start it with `docker compose up -d`, then add the station on the **Stations** page (or `POST /api/v1/stations`) with the engine address `http://heron-engine-2:50051`. The first station keeps `HERON_ENGINE_URL`.
+
+`scripts/upgrade.sh` hands over `heron-engine` only: the other stations' engines restart with `docker compose up -d --no-deps heron-engine-2` (a cold restart of a few seconds, which the fallback mount covers), until the script hands each of them over too.
+
 ## Docker Swarm
 
 A Swarm stack is deployed with `docker stack deploy` from a directory of its own. Keep there everything the stack mounts, and write its paths relative to the stack file (`docker stack deploy` resolves them from the file's directory):

@@ -38,8 +38,11 @@ Then:
 
 ## Routes
 
+What belongs to a station (its engine and decks, queue, history, clocks, schedule, selection log and simulations, outputs, webhooks, listener statistics, live WebSocket and its own settings: `playout`, `eq`, `queue`, `rotation`, `station`) is served under **`/stations/{id}/…`**: `GET /stations/2/queue`, `PUT /stations/2/settings/playout`. The same routes without the prefix (`GET /queue`) serve the **first station**, so scripts and station websites written for one station keep working ([Several stations](stations.md#api)). Everything else is shared by the stations and has no prefix; a shared route under a station answers `404`.
+
 | Area | Routes |
 |---|---|
+| Stations | `GET`, `POST /stations`; `GET`, `PUT`, `DELETE /stations/{id}` (`{"name", "code", "engine_url", "enabled", "position"}`): admins change them; see [below](#stations) |
 | Account | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `PUT /auth/password`, `PUT /auth/preferences` (`{"theme", "language", "full_width"}`, each optional: the theme is system, light or dark; the language is system or a language tag such as `fr`; `full_width` drops the centred column); `GET`, `POST /tokens`, `DELETE /tokens/{id}` |
 | Users (admins) | `GET`, `POST /users`; `PATCH`, `DELETE /users/{id}` |
 | Engine and decks | `GET /engine` (reachable, configuration in sync), `GET /player` (decks, cued track, queue, outputs), `GET /player/levels`, `POST /player/skip`, `/player/pause`, `/player/resume`, `POST /player/fx` (`{"track_id"}`), `DELETE /player/fx` |
@@ -60,10 +63,18 @@ Then:
 | Outputs | `GET`, `POST /encoder-profiles`; `GET`, `PUT`, `DELETE /encoder-profiles/{id}`; `GET`, `POST /outputs`; `GET`, `PUT`, `DELETE /outputs/{id}` (with each output's live state, and its `statistics` settings: the stream server's admin credentials) |
 | Webhooks (admins) | `GET`, `POST /webhooks`; `GET`, `PUT`, `DELETE /webhooks/{id}`; `POST /webhooks/{id}/secret`; `POST /webhooks/{id}/test`; `GET /webhooks/{id}/deliveries` (`before`, `status`, `limit`); `POST /webhook-deliveries/{id}/retry` — see [below](#webhooks) |
 | Listener statistics | `GET /listeners/now`, `/listeners/samples`, `/listeners/days`, `/listeners/hours-of-day`, `/listeners/tracks`, `/listeners/players` (CSV with `format=csv` for days, hours and tracks); `GET`, `PUT /settings/statistics` (admins) — see [Listener statistics](statistics.md#api) |
-| Public | `GET /public/now-playing`, `GET /public/history` (`before`, `limit`), `GET /public/queue` — no sign-in, see [below](#public-endpoints) |
+| Public | `GET /public/now-playing`, `GET /public/history` (`before`, `limit`), `GET /public/queue`, and the same per station under `/public/stations/{code}/…` — no sign-in, see [below](#public-endpoints) |
 | Live | `GET /live` (WebSocket) |
 
 Every engine action is there: queue (enqueue, remove, clear, move, and replace, which the queue manager uses), transport (skip, pause, resume), FX player, state, levels, track changes (WebSocket), playout settings, outputs and the deck EQ. Tracks the engine plays from its fallback directory show with the source `fallback`; autofill does not count them as queued, and anything queued replaces a cued one.
+
+## Stations
+
+Each station has a name, a code (1 to 32 lowercase letters, digits and `-`, unique), the gRPC address of its own engine (`engine_url`), whether it is enabled, and a position in lists. The first station is the one an existing Heron became: its engine is `HERON_ENGINE_URL` (`engine_url` left empty), it is named from `HERON_STATION_NAME` until renamed, and it can be neither disabled nor deleted.
+
+- A new station needs its own engine, a new service of the deployment ([Upgrading – Several stations](upgrading.md#several-stations)); the API connects to it when the station is added, and starts its queue manager, history and webhooks.
+- A disabled station is not fed: its engine plays what it has queued, then its fallback directory. Its programming can still be edited.
+- A station is deleted only once it has no clocks, schedule, outputs or webhooks left; its history, selection log and listener totals go with it.
 
 ## Live WebSocket
 
@@ -121,7 +132,7 @@ For station websites, apps and displays: no sign-in, readable from any origin (`
 - `GET /api/v1/public/queue`: `upcoming`, the tracks waiting in airing order, as `queue.changed` sends them (at most 10, the music only, with `position` and `planned_start_unix_ms`), and `server_time_unix_ms`; empty while the engine is unreachable. Cached 5 seconds.
 - `GET /api/v1/public/history`: the latest plays, most recent first (artist, title, album, `started_at_unix_ms`, `ended_at_unix_ms`); `limit` 1 to 50 (20), `before` for the next page. Cached 15 seconds.
 
-They answer through `heron-web` like the rest of the API (`http://<host>:8000/api/v1/public/now-playing`). Put a cache or rate limit in the reverse proxy in front of it if the station is busy.
+Each station has its own, by its code: `/api/v1/public/stations/{code}/now-playing`, `/queue` and `/history`; the routes without a code are the first station's. They answer through `heron-web` like the rest of the API (`http://<host>:8000/api/v1/public/now-playing`). Put a cache or rate limit in the reverse proxy in front of it if the station is busy.
 
 ## Queue manager
 

@@ -12,7 +12,7 @@ A **station** has:
 |---|---|
 | **Name** | Shown in the web UI, e.g. `Hits`, `Hits 80` |
 | **Code** | Short, unique, lowercase letters, digits and `-` (e.g. `hits`, `hits80`): shown in badges next to categories and medleys, used in the API's public routes. Can be changed; the API refers to stations by ID |
-| **Time zone** | Its clocks, schedule, restrictions and statistics follow it (the `station` settings of one station today) |
+| **Time zone** | Its clocks, schedule, restrictions and statistics follow it: its `station` settings |
 | **Engine** | The engine that puts it on air: one engine per station ([Engines](#engines)) |
 | **Enabled** | A disabled station is not fed: its engine plays on with what it has queued, then its fallback directory |
 
@@ -138,7 +138,7 @@ An existing user keeps their role, as their shared role and their role on the fi
 - Track and artist answers carry their plays and last play per station and in total.
 - **Public endpoints** per station: `/api/v1/public/stations/{code}/now-playing`, `/queue`, `/history`.
 - **Webhooks** belong to a station; their deliveries carry the station's code.
-- **Live WebSocket:** each message carries its station; a client subscribes to the stations it shows.
+- **Live WebSocket:** one per station, `/api/v1/stations/{id}/live` (`/api/v1/live` for the first station).
 - **Compatibility:** the routes of a single station (`/queue`, `/player`, `/public/now-playing`…) keep answering, for the first station, until the next major version, so existing scripts and station websites keep working.
 
 ## Web UI
