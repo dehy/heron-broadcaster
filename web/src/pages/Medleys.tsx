@@ -4,6 +4,8 @@
 // rearranged here, then mixed into a library file by heron-librarian.
 // See docs/medleys.md.
 
+import { StationBadges, StationChecks, useSeveralStations } from "../components/Stations";
+import { useStation } from "../lib/station";
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
 import { type Schemas, api, done, unwrap } from "../api";
@@ -60,6 +62,12 @@ function useCategories() {
 export function Medleys() {
   const canEdit = useCan("operator");
   const medleys = useMedleys();
+  const station = useStation();
+  const several = useSeveralStations();
+  const [onlyHere, setOnlyHere] = useState(false);
+  const shown = medleys.data?.filter(
+    (medley) => !onlyHere || station === null || medley.station_ids.includes(station),
+  );
   return (
     <>
       <PageHead
@@ -73,11 +81,17 @@ export function Medleys() {
           )
         }
       />
+      {several && (
+        <label className="check">
+          <input type="checkbox" checked={onlyHere} onChange={(e) => setOnlyHere(e.target.checked)} />{" "}
+          {t("medleys.onlyStation")}
+        </label>
+      )}
       <Card flush>
         {medleys.isPending && <Loading />}
         {medleys.isError && <ErrorView error={medleys.error} />}
-        {medleys.data?.length === 0 && <Empty>{t("medleys.none")}</Empty>}
-        {medleys.data && medleys.data.length > 0 && (
+        {shown?.length === 0 && <Empty>{t("medleys.none")}</Empty>}
+        {shown && shown.length > 0 && (
           <table className="table">
             <thead>
               <tr>
@@ -87,10 +101,11 @@ export function Medleys() {
               </tr>
             </thead>
             <tbody>
-              {medleys.data.map((medley) => (
+              {shown.map((medley) => (
                 <tr key={medley.id}>
                   <td>
-                    <Link to={`/medleys/${medley.id}`}>{displayName(medley)}</Link>
+                    <Link to={`/medleys/${medley.id}`}>{displayName(medley)}</Link>{" "}
+                    <StationBadges ids={medley.station_ids} />
                   </td>
                   <td className="num">{number(medley.parts.filter((part) => part.kind === "hook").length)}</td>
                   <td className="small muted">
@@ -147,11 +162,20 @@ function RecipeCard({
 }) {
   const categories = useCategories();
   const labels = useLabels();
+  const station = useStation();
+  const several = useSeveralStations();
   const [recipe, setRecipe] = useState<Recipe>(medley?.recipe ?? newRecipe(settings));
+  const [stationIds, setStationIds] = useState<number[]>(
+    medley?.station_ids ?? (station === null ? [] : [station]),
+  );
+  // The categories its stations can use.
+  const offered = categories.data?.filter(
+    (category) => !several || category.station_ids.some((id) => stationIds.includes(id)),
+  );
   const set = (changes: Partial<Recipe>) => setRecipe((r) => ({ ...r, ...changes }));
   const save = useAction(
     () => {
-      const body = { recipe };
+      const body = { recipe, ...(several ? { station_ids: stationIds } : {}) };
       return medley
         ? unwrap(api.PUT("/api/v1/medleys/{id}", { params: { path: { id: medley.id } }, body }))
         : unwrap(api.POST("/api/v1/medleys", { body }));
@@ -226,11 +250,17 @@ function RecipeCard({
           })}
         </p>
 
+        {several && (
+          <Field label={t("medleys.stations")} hint={t("medleys.stationsHint")}>
+            <StationChecks value={stationIds} onChange={setStationIds} disabled={disabled} />
+          </Field>
+        )}
+
         <fieldset>
           <legend>{t("medleys.songs")}</legend>
           <div className="stack">
             <div className="chips" role="group" aria-label={t("medleys.songCategories")}>
-              {categories.data?.map((category) => (
+              {offered?.map((category) => (
                 <label key={category.id} className="row small" style={{ gap: "0.3rem" }}>
                   <input
                     type="checkbox"
@@ -508,11 +538,13 @@ function RecipeCard({
             <button
               type="submit"
               className="btn primary"
-              disabled={save.isPending || recipe.category_ids.length === 0}
+              disabled={save.isPending || (several && stationIds.length === 0)}
             >
               {t("common.save")}
             </button>
-            {recipe.category_ids.length === 0 && <span className="small muted">{t("medleys.pickCategory")}</span>}
+            {recipe.category_ids.length === 0 && (
+              <span className="small muted">{t("medleys.allCategories")}</span>
+            )}
           </div>
         )}
       </form>

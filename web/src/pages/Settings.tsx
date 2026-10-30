@@ -10,7 +10,9 @@ import { Card, ErrorView, Field, Icon, Loading, NumberInput, PageHead } from "..
 import { type PlainKey, number, rich, t } from "../i18n";
 import { WINDOW_FIELDS } from "../lib/rotation";
 import { Link } from "../lib/router";
-import { useCategories } from "./Clocks";
+import { useStationCategories } from "./Clocks";
+import { useStations } from "../components/Stations";
+import { useStation } from "../lib/station";
 import { DuckPlaceSelect, FadeCurveSelect, useMedleySettings } from "./Medleys";
 import { useAction, useCan } from "../lib/session";
 
@@ -151,7 +153,10 @@ const WINDOW_LABELS: Record<string, PlainKey> = {
 
 function RotationCard() {
   const canEdit = useCan("operator");
-  const categories = useCategories();
+  const categories = useStationCategories();
+  const stations = useStations();
+  const station = useStation();
+  const others = stations.filter((s) => s.id !== station);
   const settings = useQuery({
     queryKey: ["settings", "rotation"],
     queryFn: () => unwrap(api.GET("/api/v1/settings/rotation")),
@@ -229,6 +234,59 @@ function RotationCard() {
               />
             </Field>
           </div>
+          {others.length > 0 && (
+            <fieldset>
+              <legend>{t("settings.across")}</legend>
+              <p className="muted small" style={{ marginTop: 0 }}>
+                {t("settings.acrossHelp")}
+              </p>
+              <div className="form-grid">
+                {(
+                  [
+                    ["artist_min", "separation.artist"],
+                    ["title_min", "separation.title"],
+                    ["track_min", "separation.track"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Field key={key} label={t(label)} hint={t("settings.acrossOff")}>
+                    <NumberInput
+                      value={draft.across[key]}
+                      min={0}
+                      max={10_080}
+                      step={1}
+                      suffix={t("common.min")}
+                      disabled={!canEdit}
+                      onChange={(minutes) => set({ across: { ...draft.across, [key]: Math.round(minutes) } })}
+                    />
+                  </Field>
+                ))}
+              </div>
+              <Field label={t("settings.acrossStations")} hint={t("settings.acrossStationsHint")}>
+                <span className="station-checks">
+                  {others.map((other) => (
+                    <label key={other.id} className="check">
+                      <input
+                        type="checkbox"
+                        disabled={!canEdit}
+                        checked={draft.across.station_ids.includes(other.id)}
+                        onChange={(event) =>
+                          set({
+                            across: {
+                              ...draft.across,
+                              station_ids: event.target.checked
+                                ? [...draft.across.station_ids, other.id]
+                                : draft.across.station_ids.filter((id) => id !== other.id),
+                            },
+                          })
+                        }
+                      />{" "}
+                      {other.name} <span className="badge">{other.code}</span>
+                    </label>
+                  ))}
+                </span>
+              </Field>
+            </fieldset>
+          )}
         </>
       )}
     </SettingsCard>
@@ -247,7 +305,7 @@ function CategorySelect({
   disabled: boolean;
   onChange: (id: number | null) => void;
 }) {
-  const categories = useCategories();
+  const categories = useStationCategories();
   return (
     <select
       className="input"

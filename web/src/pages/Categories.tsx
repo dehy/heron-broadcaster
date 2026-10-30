@@ -6,6 +6,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
+import { StationBadges, StationChecks, useSeveralStations } from "../components/Stations";
+import { useStation } from "../lib/station";
 import { type Category, type SeparationOverrides, api, done, unwrap } from "../api";
 import { useLabels } from "../components/SelectionActions";
 import { SeparationEditor } from "../components/Separation";
@@ -145,6 +147,7 @@ export function Categories() {
                     <span className="row">
                       <span className="swatch" style={{ background: category.color ?? undefined }} />
                       {category.name}
+                      <StationBadges ids={category.station_ids} />
                       {category.fx_player && (
                         <span className="chip" title={t("categories.fxPlayerHint")}>
                           {t("categories.fxPlayerChip")}
@@ -218,13 +221,25 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
   const [typeId, setTypeId] = useState<number | null | undefined>(category ? (category.type_id ?? null) : undefined);
   const chosenType = typeId === undefined ? (types.data?.[0]?.id ?? null) : typeId;
   const [separation, setSeparation] = useState<SeparationOverrides>(category?.separation ?? {});
+  const station = useStation();
+  const several = useSeveralStations();
+  const [stationIds, setStationIds] = useState<number[]>(
+    category?.station_ids ?? (station === null ? [] : [station]),
+  );
   const rotation = useQuery({
     queryKey: ["settings", "rotation"],
     queryFn: () => unwrap(api.GET("/api/v1/settings/rotation")),
   });
   const save = useAction(
     () => {
-      const body = { name, color, type_id: chosenType, fx_player: fxPlayer, separation };
+      const body = {
+        name,
+        color,
+        type_id: chosenType,
+        fx_player: fxPlayer,
+        separation,
+        ...(several ? { station_ids: stationIds } : {}),
+      };
       return category
         ? unwrap(api.PUT("/api/v1/categories/{id}", { params: { path: { id: category.id } }, body }))
         : unwrap(api.POST("/api/v1/categories", { body }));
@@ -285,6 +300,11 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
             <input type="color" value={color} onChange={(e) => setColor(e.target.value)} aria-label={t("categories.otherColor")} />
           </div>
         </Field>
+        {several && (
+          <Field label={t("categories.stations")} hint={t("categories.stationsHint")}>
+            <StationChecks value={stationIds} onChange={setStationIds} />
+          </Field>
+        )}
         <Field label={t("categories.fxPlayer")} hint={t("categories.fxPlayerHint")}>
           <label className="check">
             <input type="checkbox" checked={fxPlayer} onChange={(e) => setFxPlayer(e.target.checked)} />

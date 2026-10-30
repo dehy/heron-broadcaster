@@ -32,6 +32,7 @@ import {
   type SimulationReport,
   api,
   done,
+  query,
   unwrap,
 } from "../api";
 import { SeparationEditor, applyOverrides } from "../components/Separation";
@@ -53,6 +54,7 @@ import { duration } from "../lib/format";
 import { METHODS_LIST, describeOverrides, methodLabel, stepLabel } from "../lib/rotation";
 import { Link, navigate } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
+import { useStation } from "../lib/station";
 import { useCategoryTypes } from "./CategoryTypes";
 
 const HOUR_MS = 3_600_000;
@@ -61,6 +63,16 @@ export function useCategories() {
   return useQuery({
     queryKey: ["categories"],
     queryFn: () => unwrap(api.GET("/api/v1/categories")),
+  });
+}
+
+/** The categories the station shown can use: those tagged with it. */
+export function useStationCategories() {
+  const station = useStation();
+  return useQuery({
+    queryKey: ["categories", station],
+    queryFn: () =>
+      unwrap(api.GET("/api/v1/categories", { params: { query: query({ station_id: station }) } })),
   });
 }
 
@@ -165,7 +177,7 @@ export function ClockEditor({ id }: { id: number | null }) {
 
 function Editor({ clock }: { clock: ClockView | null }) {
   const canEdit = useCan("operator");
-  const categories = useCategories();
+  const categories = useStationCategories();
   const rotation = useQuery({
     queryKey: ["settings", "rotation"],
     queryFn: () => unwrap(api.GET("/api/v1/settings/rotation")),

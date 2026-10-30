@@ -5,6 +5,7 @@
 
 import createClient from "openapi-fetch";
 import { type PlainKey, t } from "../i18n";
+import { currentStation, onStation } from "../lib/station";
 import type { components, paths } from "./schema";
 
 export type Schemas = components["schemas"];
@@ -67,6 +68,14 @@ export type TrackSort = NonNullable<
 // from a form on another site (see docs/api.md#authentication).
 export const api = createClient<paths>({
   headers: { "X-Requested-With": "heron-web" },
+});
+
+// A station's routes go to the station the pages show.
+api.use({
+  onRequest({ request }) {
+    const url = onStation(request.url, currentStation());
+    return url === request.url ? undefined : new Request(url, request);
+  },
 });
 
 /** An error answered by the API, with its code (`not_found`, `conflict`…). */

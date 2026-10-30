@@ -9,6 +9,15 @@ import { Banner, Card, ConfirmButton, ErrorView, Field, Icon, Loading, Modal, Pa
 import { type PlainKey, t } from "../i18n";
 import { ago } from "../lib/format";
 import { useAction, useCan, useUser } from "../lib/session";
+import { useStations } from "../components/Stations";
+import type { StationRoleName } from "../lib/station";
+
+const STATION_ROLES: { value: StationRoleName; label: PlainKey }[] = [
+  { value: "none", label: "users.role.none" },
+  { value: "viewer", label: "users.role.viewer" },
+  { value: "operator", label: "users.role.operator" },
+  { value: "admin", label: "users.role.admin" },
+];
 
 const ROLES: { value: Role; label: PlainKey; hint: PlainKey }[] = [
   { value: "viewer", label: "users.role.viewer", hint: "users.role.viewerHint" },
@@ -24,10 +33,20 @@ export function Users() {
     queryFn: () => unwrap(api.GET("/api/v1/users")),
     enabled: isAdmin,
   });
+  const stations = useStations();
+  const several = stations.length > 1;
   const [creating, setCreating] = useState(false);
   const [resetting, setResetting] = useState<User | null>(null);
   const update = useAction(
-    ({ id, ...body }: { id: number; role?: Role; enabled?: boolean }) =>
+    ({
+      id,
+      ...body
+    }: {
+      id: number;
+      role?: Role;
+      enabled?: boolean;
+      station_roles?: { station_id: number; role: StationRoleName }[];
+    }) =>
       unwrap(api.PATCH("/api/v1/users/{id}", { params: { path: { id } }, body })),
     { success: t("categories.saved"), invalidate: [["users"]] },
   );
@@ -58,7 +77,13 @@ export function Users() {
               <thead>
                 <tr>
                   <th>{t("users.user")}</th>
-                  <th>{t("users.role")}</th>
+                  <th>{several ? t("users.sharedRole") : t("users.role")}</th>
+                  {several &&
+                    stations.map((station) => (
+                      <th key={station.id} title={station.name}>
+                        {station.code}
+                      </th>
+                    ))}
                   <th className="hide-narrow">{t("users.lastSignIn")}</th>
                   <th>
                     <span className="visually-hidden">{t("library.actions")}</span>
@@ -86,6 +111,39 @@ export function Users() {
                         ))}
                       </select>
                     </td>
+                    {several &&
+                      stations.map((station) => {
+                        const current =
+                          user.role === "admin"
+                            ? "admin"
+                            : (user.station_roles.find((r) => r.station_id === station.id)?.role ?? "none");
+                        return (
+                          <td key={station.id}>
+                            <select
+                              className="input"
+                              value={current}
+                              disabled={user.role === "admin"}
+                              title={user.role === "admin" ? t("users.adminEverywhere") : undefined}
+                              aria-label={t("users.roleOn", { name: user.username, station: station.code })}
+                              onChange={(e) =>
+                                update.mutate({
+                                  id: user.id,
+                                  station_roles: [
+                                    ...user.station_roles.filter((r) => r.station_id !== station.id),
+                                    { station_id: station.id, role: e.target.value as StationRoleName },
+                                  ],
+                                })
+                              }
+                            >
+                              {STATION_ROLES.map((role) => (
+                                <option key={role.value} value={role.value}>
+                                  {t(role.label)}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        );
+                      })}
                     <td className="hide-narrow muted">{ago(user.last_login_at_unix_ms)}</td>
                     <td className="actions">
                       <button type="button" className="btn small" onClick={() => setResetting(user)}>
@@ -119,6 +177,7 @@ export function Users() {
           </div>
         )}
       </Card>
+      {several && <p className="muted small">{t("users.stationRolesHint")}</p>}
       <dl className="facts small">
         {ROLES.map((role) => (
           <div key={role.value} style={{ display: "contents" }}>

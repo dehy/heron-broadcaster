@@ -3,12 +3,14 @@
 // The selection log: every track rotation queued, and why. And simulations
 // of the programming to come, checked rule by rule.
 
+import { useStations } from "../components/Stations";
+import { codes } from "../lib/station";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { type Explanation, type RotationPick, type SimulationReport, api, query, unwrap } from "../api";
 import { Banner, Card, Empty, ErrorView, Field, Loading, PageHead, Segmented } from "../components/ui";
 import { number, rich, t } from "../i18n";
-import { ago, dateTime } from "../lib/format";
+import { ago, clockTime, dateTime } from "../lib/format";
 import { describeWindows, methodLabel, stepLabel } from "../lib/rotation";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
@@ -65,12 +67,21 @@ function Where({ explanation }: { explanation: Explanation }) {
 }
 
 function Details({ explanation }: { explanation: Explanation }) {
+  const stations = useStations();
   const blocked = explanation.blocked;
   const held = [
     blocked.track && t("rotationPage.blockedTrack", { count: blocked.track }),
     blocked.title && t("rotationPage.blockedTitle", { count: blocked.title }),
     blocked.artist && t("rotationPage.blockedArtist", { count: blocked.artist }),
     blocked.album && t("rotationPage.blockedAlbum", { count: blocked.album }),
+    blocked.across && t("rotationPage.blockedAcross", { count: blocked.across }),
+  ].filter(Boolean);
+  const elsewhere = explanation.held_elsewhere;
+  const across = explanation.across ?? { artist_min: 0, title_min: 0, track_min: 0 };
+  const acrossWindows = [
+    across.artist_min && `${t("separation.artist")} ${across.artist_min} ${t("common.min")}`,
+    across.title_min && `${t("separation.title")} ${across.title_min} ${t("common.min")}`,
+    across.track_min && `${t("separation.track")} ${across.track_min} ${t("common.min")}`,
   ].filter(Boolean);
   return (
     <dl className="facts small">
@@ -85,6 +96,23 @@ function Details({ explanation }: { explanation: Explanation }) {
         <>
           <dt>{t("rotationPage.heldBack")}</dt>
           <dd>{held.join(", ")}</dd>
+        </>
+      )}
+      {elsewhere && (
+        <>
+          <dt>{t("rotationPage.heldElsewhere")}</dt>
+          <dd>
+            {t(elsewhere.planned ? "rotationPage.heldByQueue" : "rotationPage.heldByPlay", {
+              station: codes([elsewhere.station_id], stations).join("") || `#${elsewhere.station_id}`,
+              time: clockTime(elsewhere.at_unix_ms),
+            })}
+          </dd>
+        </>
+      )}
+      {acrossWindows.length > 0 && (
+        <>
+          <dt>{t("rotationPage.acrossWindows")}</dt>
+          <dd>{acrossWindows.join(" · ")}</dd>
         </>
       )}
       <dt>{t("rotationPage.chosenAmong")}</dt>

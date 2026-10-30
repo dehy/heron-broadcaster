@@ -26,6 +26,7 @@ import { DAY_NUMBERS, dayName, describeRule, hourLabel, targetKind } from "../li
 import { Link, setSearch, useLocation } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 import { useCategories } from "./Clocks";
+import { StationBadges, StationChecks, useSeveralStations } from "../components/Stations";
 
 type TargetKind = Target["kind"];
 
@@ -129,7 +130,9 @@ export function Restrictions() {
                       </Link>
                     </td>
                     <td>{describeRule(restriction.rule, categoryName)}</td>
-                    <td className="muted small">{restriction.note}</td>
+                    <td className="muted small">
+                      <StationBadges ids={restriction.station_ids} emptyMeansAll /> {restriction.note}
+                    </td>
                     <td>
                       <input
                         type="checkbox"
@@ -207,12 +210,20 @@ export function RestrictionDialog({
   const [kind, setKind] = useState<TargetKind>(target?.kind ?? "category");
   const [rule, setRule] = useState<Rule>(restriction?.rule ?? defaultRule("daypart", firstCategory));
   const [note, setNote] = useState(restriction?.note ?? "");
+  const several = useSeveralStations();
+  const [stationIds, setStationIds] = useState<number[]>(restriction?.station_ids ?? []);
   const save = useAction(
     () => {
       if (!target) {
         throw new Error(t("restrictions.pickTarget"));
       }
-      const body = { target, rule, enabled: restriction?.enabled ?? true, note: note.trim() || null };
+      const body = {
+        target,
+        rule,
+        enabled: restriction?.enabled ?? true,
+        note: note.trim() || null,
+        ...(several ? { station_ids: stationIds } : {}),
+      };
       return restriction
         ? unwrap(api.PUT("/api/v1/restrictions/{id}", { params: { path: { id: restriction.id } }, body }))
         : unwrap(api.POST("/api/v1/restrictions", { body }));
@@ -348,6 +359,11 @@ export function RestrictionDialog({
         <p className="muted small" style={{ margin: 0 }}>
           {describeRule(rule, (id) => categories.data?.find((c) => c.id === id)?.name)}.
         </p>
+        {several && (
+          <Field label={t("restrictions.stations")} hint={t("restrictions.stationsHint")}>
+            <StationChecks value={stationIds} onChange={setStationIds} />
+          </Field>
+        )}
         <Field label={t("restrictions.note")} hint={t("restrictions.noteHint")}>
           <input className="input" value={note} maxLength={512} onChange={(event) => setNote(event.target.value)} />
         </Field>

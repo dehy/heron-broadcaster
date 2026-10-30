@@ -17,6 +17,7 @@ import { sourceLabel } from "../lib/labels";
 import { isShaping, useEqSettings } from "../lib/eq";
 import { useListenersNow } from "../lib/listeners";
 import { positionNow, useLive } from "../lib/live";
+import { useStationCategories } from "./Clocks";
 import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 import { introFromCueIn, jingleStart } from "../lib/intro";
@@ -221,10 +222,8 @@ function storedFxTab(): number | null {
  * whole library.
  */
 function FxPicker({ play, playing }: { play: (trackId: number) => void; playing: boolean }) {
-  const categories = useQuery({
-    queryKey: ["categories"],
-    queryFn: () => unwrap(api.GET("/api/v1/categories")),
-  });
+  // The FX categories of the station shown.
+  const categories = useStationCategories();
   const [chosen, setChosen] = useState<number | "library" | null>(storedFxTab);
   const fxCategories = categories.data?.filter((category) => category.fx_player) ?? [];
   const tab =
