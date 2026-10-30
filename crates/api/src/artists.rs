@@ -267,6 +267,10 @@ pub struct Artist {
     pub names: Vec<ArtistName>,
     /// Separation treats these as the same artist.
     pub similar: Vec<ArtistRef>,
+    /// Plays and last play in total and per station; only on
+    /// `GET /artists/{id}`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plays: Option<crate::history::Plays>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -337,6 +341,7 @@ async fn artists(pool: &MySqlPool, ids: &[u64]) -> ApiResult<Vec<Artist>> {
                     tracks,
                     names: Vec::new(),
                     similar: Vec::new(),
+                    plays: None,
                 },
             )
         })
@@ -419,7 +424,10 @@ async fn get_artist(
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> ApiResult<Json<Artist>> {
-    artist(&state.pool, id).await.map(Json)
+    let mut artist = artist(&state.pool, id).await?;
+    artist.plays =
+        Some(crate::history::plays(&state.pool, crate::history::PlaysOf::Artist(id)).await?);
+    Ok(Json(artist))
 }
 
 #[derive(Debug, Default, Deserialize, ToSchema)]

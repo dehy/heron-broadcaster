@@ -8,9 +8,10 @@ use jiff::civil::DateTime;
 use serde::{Deserialize, Serialize};
 
 use crate::restrict::{Subject, forbidding};
-use crate::rules::{FALLBACK_STEP, LAST_STEP, Windows, describe_step};
+use crate::rules::{AcrossWindows, FALLBACK_STEP, LAST_STEP, Windows, describe_step};
 use crate::{
-    ArtistId, CategoryId, ClockId, History, Library, Method, Position, Rng, Track, TrackId,
+    ArtistId, CategoryId, ClockId, Elsewhere, History, Library, Method, Position, Rng, StationId,
+    Track, TrackId,
 };
 
 /// The next track, where it sits in the clock and why it was picked.
@@ -47,6 +48,9 @@ pub struct Explanation {
     pub step_description: String,
     /// Separation windows applied at this step.
     pub windows: Windows,
+    /// Windows across stations applied at this step.
+    #[serde(default)]
+    pub across: AcrossWindows,
     /// Tracks in the slot's category.
     pub pool: u32,
     /// Of them, forbidden by restrictions.
@@ -62,6 +66,23 @@ pub struct Explanation {
     pub weight: f64,
     /// Slots passed over because nothing could be picked, even relaxed.
     pub skipped_slots: Vec<SkippedSlot>,
+    /// Of the tracks the rules across stations held back with the windows
+    /// as configured, the least recently played, and what held it back.
+    #[serde(default)]
+    pub held_elsewhere: Option<HeldElsewhere>,
+}
+
+/// A track another station's play or planned track held back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HeldElsewhere {
+    pub track_id: TrackId,
+    pub rule: SeparationRule,
+    pub station_id: StationId,
+    /// When the other station played it, or plans to (Unix ms).
+    pub at_unix_ms: i64,
+    /// In the other station's queue, not played yet.
+    pub planned: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +92,9 @@ pub struct Blocked {
     pub title: u32,
     pub artist: u32,
     pub album: u32,
+    /// By the rules across stations (and by none of the station's own).
+    #[serde(default)]
+    pub across: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,6 +205,51 @@ impl<'h> Recent<'h> {
         }
         None
     }
+}
+
+/// The rule across stations, and the other station's play or planned
+/// track, that hold `track` back at `at_ms`: within a window before or
+/// after it.
+pub(crate) fn held_elsewhere<'h>(
+    library: &Library,
+    history: &'h History,
+    track: &Track,
+    windows: AcrossWindows,
+    at_ms: i64,
+) -> Option<(SeparationRule, &'h Elsewhere)> {
+    let longest = i64::from(windows.longest_min()) * 60_000;
+    if longest == 0 {
+        return None;
+    }
+    let elsewhere = history.elsewhere();
+    let from = elsewhere.partition_point(|other| other.play.start_ms <= at_ms - longest);
+    let near = |minutes: u32, start: i64| {
+        minutes > 0 && (at_ms - start).abs() < i64::from(minutes) * 60_000
+    };
+    let same_key = |a: &Option<String>, b: &Option<String>| a.is_some() && a == b;
+    elsewhere[from..]
+        .iter()
+        .take_while(|other| other.play.start_ms < at_ms + longest)
+        .find_map(|other| {
+            let play = &other.play;
+            let start = play.start_ms;
+            let rule = if near(windows.track_min, start) && play.track == Some(track.id) {
+                SeparationRule::Track
+            } else if near(windows.title_min, start) && same_key(&track.title_key, &play.title_key)
+            {
+                SeparationRule::Title
+            } else if near(windows.artist_min, start)
+                && track
+                    .artists
+                    .iter()
+                    .any(|a| play.artists.iter().any(|b| library.same_artist(*a, *b)))
+            {
+                SeparationRule::Artist
+            } else {
+                return None;
+            };
+            Some((rule, other))
+        })
 }
 
 /// A category as a slot calls it.
@@ -325,7 +394,13 @@ fn fill(
         .map(|play| play.categories.as_slice());
     let recent = Recent::new(history, at_ms);
     let (allowed, restricted) = slot.call.allowed(library, local, previous);
+    let across = if slot.enforce_rules {
+        library.settings.across.windows()
+    } else {
+        AcrossWindows::OFF
+    };
     let mut blocked = Blocked::default();
+    let mut held: Option<(Option<i64>, HeldElsewhere)> = None;
     if slot.enforce_rules {
         for (track, _) in &allowed {
             match recent.blocking(library, track, slot.call.windows, at_ms) {
@@ -333,12 +408,40 @@ fn fill(
                 Some(SeparationRule::Title) => blocked.title += 1,
                 Some(SeparationRule::Artist) => blocked.artist += 1,
                 Some(SeparationRule::Album) => blocked.album += 1,
-                None => {}
+                None => {
+                    if let Some((rule, other)) =
+                        held_elsewhere(library, history, track, across, at_ms)
+                    {
+                        blocked.across += 1;
+                        let last = history.last_played(track.id);
+                        // Never played first, then the oldest; then by ID.
+                        let wanted = held.as_ref().is_none_or(|(held_last, held)| {
+                            (last, track.id) < (*held_last, held.track_id)
+                        });
+                        if wanted {
+                            held = Some((
+                                last,
+                                HeldElsewhere {
+                                    track_id: track.id,
+                                    rule,
+                                    station_id: other.station_id,
+                                    at_unix_ms: other.play.start_ms,
+                                    planned: other.planned,
+                                },
+                            ));
+                        }
+                    }
+                }
             }
         }
     }
     let mut fallback: Option<(Call<'_>, Vec<(&Track, f64)>)> = None;
     for step in steps(slot.enforce_rules) {
+        let across = if step < FALLBACK_STEP {
+            across.at_step(step)
+        } else {
+            AcrossWindows::OFF
+        };
         let (call, pool, windows) = if step < FALLBACK_STEP {
             let windows = if slot.enforce_rules {
                 slot.call.windows.at_step(step)
@@ -357,7 +460,10 @@ fn fill(
         };
         let candidates: Vec<_> = pool
             .iter()
-            .filter(|(track, _)| recent.blocking(library, track, windows, at_ms).is_none())
+            .filter(|(track, _)| {
+                recent.blocking(library, track, windows, at_ms).is_none()
+                    && held_elsewhere(library, history, track, across, at_ms).is_none()
+            })
             .copied()
             .collect();
         if candidates.is_empty() {
@@ -382,6 +488,7 @@ fn fill(
             step,
             step_description: describe_step(step).to_owned(),
             windows,
+            across,
             pool: u32::try_from(slot.call.pool.len()).unwrap_or(u32::MAX),
             restricted,
             blocked,
@@ -389,6 +496,7 @@ fn fill(
             last_played_unix_ms: history.last_played(track.id),
             weight,
             skipped_slots: Vec::new(),
+            held_elsewhere: held.map(|(_, held)| held),
         };
         return Some((track.id, explanation));
     }

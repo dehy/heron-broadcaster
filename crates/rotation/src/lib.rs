@@ -23,7 +23,7 @@ mod sim;
 
 pub use restrict::{Mode, Restriction, Rule, Target};
 pub use rng::Rng;
-pub use rules::{SeparationOverrides, Windows};
+pub use rules::{AcrossWindows, SeparationOverrides, Windows};
 pub use select::{Blocked, Explanation, Pick, SeparationRule, SkipReason, SkippedSlot, next};
 pub use sim::{SimulatedPick, Simulation, Violation, audit, simulate};
 
@@ -31,6 +31,7 @@ pub type TrackId = u64;
 pub type ArtistId = u64;
 pub type CategoryId = u64;
 pub type ClockId = u64;
+pub type StationId = u64;
 /// A category type (`category_types`): Song, Jingle, Ad…
 pub type TypeId = u64;
 
@@ -90,7 +91,7 @@ pub const MIN_WEIGHT: f64 = 0.1;
 pub const MAX_WEIGHT: f64 = 10.0;
 
 /// Station-wide rotation settings, stored under the `rotation` settings name.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct RotationSettings {
@@ -98,6 +99,33 @@ pub struct RotationSettings {
     /// Where relaxation ends (steps 9 and 10). The whole library when unset.
     pub fallback_category_id: Option<CategoryId>,
     pub weights: WeightSettings,
+    /// Rules across stations: off by default.
+    pub across: AcrossStations,
+}
+
+/// What a station keeps apart from the other stations' plays and queues.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct AcrossStations {
+    /// The same artist (or a similar one) within, in minutes; 0: off.
+    pub artist_min: u32,
+    /// The same title (any version) within.
+    pub title_min: u32,
+    /// The same track within.
+    pub track_min: u32,
+    /// The stations it looks at; all the others when empty.
+    pub station_ids: Vec<StationId>,
+}
+
+impl AcrossStations {
+    pub fn windows(&self) -> AcrossWindows {
+        AcrossWindows {
+            artist_min: self.artist_min,
+            title_min: self.title_min,
+            track_min: self.track_min,
+        }
+    }
 }
 
 impl RotationSettings {
@@ -105,6 +133,7 @@ impl RotationSettings {
 
     pub fn check(&self) -> Result<(), String> {
         self.separation.check()?;
+        self.across.windows().check()?;
         let weights = &self.weights;
         if !(0.5..=1.0).contains(&weights.play_factor) {
             return Err("weights.play_factor is between 0.5 and 1".to_owned());
@@ -330,6 +359,11 @@ impl Library {
         i64::from(longest.max(60)) * 60_000
     }
 
+    /// How far back and ahead the rules across stations look, in ms.
+    pub fn across_horizon_ms(&self) -> i64 {
+        i64::from(self.settings.across.windows().longest_min()) * 60_000
+    }
+
     /// Station time at `at_ms` (Unix milliseconds).
     pub fn local(&self, at_ms: i64) -> jiff::Zoned {
         Timestamp::from_millisecond(at_ms)
@@ -363,12 +397,23 @@ impl Play {
     }
 }
 
+/// Another station's play, or a track in its queue at its planned time.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Elsewhere {
+    pub station_id: StationId,
+    /// Queued, not played yet.
+    pub planned: bool,
+    pub play: Play,
+}
+
 /// What was played (and what is queued), as far back as separation looks,
-/// and when each track last played.
+/// and when each track last played; and what the other stations played
+/// and will play, for the rules across stations.
 #[derive(Clone, Debug, Default)]
 pub struct History {
     plays: Vec<Play>,
     last_played: HashMap<TrackId, i64>,
+    elsewhere: Vec<Elsewhere>,
 }
 
 impl History {
@@ -381,7 +426,23 @@ impl History {
                 *last = (*last).max(play.start_ms);
             }
         }
-        Self { plays, last_played }
+        Self {
+            plays,
+            last_played,
+            elsewhere: Vec::new(),
+        }
+    }
+
+    /// With the other stations' plays and planned tracks.
+    #[must_use]
+    pub fn with_elsewhere(mut self, mut elsewhere: Vec<Elsewhere>) -> Self {
+        elsewhere.sort_by_key(|other| other.play.start_ms);
+        self.elsewhere = elsewhere;
+        self
+    }
+
+    pub fn elsewhere(&self) -> &[Elsewhere] {
+        &self.elsewhere
     }
 
     pub fn push(&mut self, play: Play) {

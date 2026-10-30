@@ -362,6 +362,95 @@ pub async fn load_history(
     Ok(History::new(plays, last.into_iter().collect()))
 }
 
+/// What the other stations played and will play (their queues at their
+/// planned times) within the windows across stations of `library`, around
+/// `now_ms`: those its settings name, every other one when they name none.
+pub async fn load_elsewhere(
+    pool: &MySqlPool,
+    stations: &crate::stations::Stations,
+    station_id: u64,
+    library: &Library,
+    now_ms: i64,
+) -> ApiResult<Vec<heron_rotation::Elsewhere>> {
+    let horizon = library.across_horizon_ms();
+    if horizon == 0 {
+        return Ok(Vec::new());
+    }
+    let wanted = &library.settings.across.station_ids;
+    let others: Vec<std::sync::Arc<crate::stations::StationRuntime>> = stations
+        .all()
+        .into_iter()
+        .filter(|other| other.id() != station_id)
+        .filter(|other| wanted.is_empty() || wanted.contains(&other.id()))
+        .collect();
+    if others.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut query = QueryBuilder::new(
+        "SELECT h.station_id, h.track_id, COALESCE(h.artist, t.artist) AS artist,
+                COALESCE(h.title, t.title) AS title, t.album,
+                CAST(UNIX_TIMESTAMP(h.started_at) * 1000 AS SIGNED) AS start_ms
+         FROM play_history h LEFT JOIN tracks t ON t.id = h.track_id
+         WHERE (h.deck <> 'fx' OR h.source = 'rotation') AND h.started_at >= FROM_UNIXTIME(",
+    );
+    query
+        .push_bind((now_ms - horizon) as f64 / 1_000.0)
+        .push(") AND h.station_id IN (");
+    let mut ids = query.separated(", ");
+    for other in &others {
+        ids.push_bind(other.id());
+    }
+    query.push(") ORDER BY h.started_at, h.id");
+    // Station, then the play as recorded.
+    type Row = (
+        u64,
+        Option<u64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i64,
+    );
+    let rows: Vec<Row> = query.build_query_as().fetch_all(pool).await?;
+    let mut origins: Vec<(u64, bool)> = Vec::with_capacity(rows.len());
+    let mut recorded = Vec::with_capacity(rows.len());
+    for (station, track_id, artist, title, album, start_ms) in rows {
+        origins.push((station, false));
+        recorded.push(Recorded {
+            track_id,
+            artist,
+            title,
+            album,
+            start_ms,
+        });
+    }
+    for other in &others {
+        let state = other.engine.state().borrow().clone();
+        let Some(state) = state else {
+            continue;
+        };
+        for (entry, at) in planned_starts(&state, now_ms).0 {
+            origins.push((other.id(), true));
+            recorded.push(Recorded {
+                track_id: entry.track.track_id,
+                artist: entry.track.artist.clone(),
+                title: entry.track.title.clone(),
+                album: entry.track.album.clone(),
+                start_ms: at,
+            });
+        }
+    }
+    Ok(plays(pool, library, recorded)
+        .await?
+        .into_iter()
+        .zip(origins)
+        .map(|(play, (station_id, planned))| heron_rotation::Elsewhere {
+            station_id,
+            planned,
+            play,
+        })
+        .collect())
+}
+
 /// Where a station's clock is: the slot of its last pick made from a clock.
 pub async fn last_position(pool: &MySqlPool, station_id: u64) -> ApiResult<Option<Position>> {
     let row: Option<(u64, u32, i64)> = sqlx::query_as(
@@ -644,6 +733,9 @@ async fn simulate(
     let now = now_ms();
     let start = request.start_unix_ms.unwrap_or(now);
     let history = load_history(&state.pool, station.id(), &library, start.min(now)).await?;
+    let elsewhere =
+        load_elsewhere(&state.pool, &state.stations, station.id(), &library, now).await?;
+    let history = history.with_elsewhere(elsewhere);
     let last = last_position(&state.pool, station.id()).await?;
     let seed = request.seed.unwrap_or_else(seed);
     let duration = i64::from(hours) * 3_600_000;

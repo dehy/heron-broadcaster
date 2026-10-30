@@ -3376,6 +3376,57 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description What a station keeps apart from the other stations' plays and queues. */
+        AcrossStations: {
+            /**
+             * Format: int32
+             * @description The same artist (or a similar one) within, in minutes; 0: off.
+             * @default 0
+             */
+            artist_min: number;
+            /**
+             * @description The stations it looks at; all the others when empty.
+             * @default []
+             */
+            station_ids: components["schemas"]["u64"][];
+            /**
+             * Format: int32
+             * @description The same title (any version) within.
+             * @default 0
+             */
+            title_min: number;
+            /**
+             * Format: int32
+             * @description The same track within.
+             * @default 0
+             */
+            track_min: number;
+        };
+        /**
+         * @description Windows across stations (`docs/stations.md#rules-across-stations`):
+         *     another station's play or planned track holds a track back within them,
+         *     before or after it. 0 turns a rule off; all are off by default.
+         */
+        AcrossWindows: {
+            /**
+             * Format: int32
+             * @description The same artist (or a similar one).
+             * @default 0
+             */
+            artist_min: number;
+            /**
+             * Format: int32
+             * @description The same title (any version).
+             * @default 0
+             */
+            title_min: number;
+            /**
+             * Format: int32
+             * @description The same track.
+             * @default 0
+             */
+            track_min: number;
+        };
         AnalysisQueueStatus: {
             /** Format: int64 */
             failed: number;
@@ -3459,6 +3510,7 @@ export interface components {
             musicbrainz_id?: string | null;
             name: string;
             names: components["schemas"]["ArtistName"][];
+            plays?: components["schemas"]["Plays"] | null;
             /** @description Separation treats these as the same artist. */
             similar: components["schemas"]["ArtistRef"][];
             /** Format: int64 */
@@ -3540,6 +3592,11 @@ export interface components {
             unchanged?: number;
         };
         Blocked: {
+            /**
+             * Format: int32
+             * @description By the rules across stations (and by none of the station's own).
+             */
+            across?: number;
             /** Format: int32 */
             album: number;
             /** Format: int32 */
@@ -4127,6 +4184,8 @@ export interface components {
         };
         /** @description Why a track was picked: the selection log. */
         Explanation: {
+            /** @description Windows across stations applied at this step. */
+            across?: components["schemas"]["AcrossWindows"];
             /**
              * Format: int64
              * @description When the track is planned to start (Unix ms).
@@ -4147,6 +4206,7 @@ export interface components {
             clock_id?: components["schemas"]["u64"] | null;
             clock_name?: string | null;
             enforce_rules: boolean;
+            held_elsewhere?: components["schemas"]["HeldElsewhere"] | null;
             /**
              * Format: int64
              * @description When the picked track last played; missing if never.
@@ -4214,6 +4274,19 @@ export interface components {
         };
         /** @enum {string} */
         GroupSource: "upload" | "incoming";
+        /** @description A track another station's play or planned track held back. */
+        HeldElsewhere: {
+            /**
+             * Format: int64
+             * @description When the other station played it, or plans to (Unix ms).
+             */
+            at_unix_ms: number;
+            /** @description In the other station's queue, not played yet. */
+            planned: boolean;
+            rule: components["schemas"]["SeparationRule"];
+            station_id: components["schemas"]["u64"];
+            track_id: components["schemas"]["u64"];
+        };
         HookInput: {
             /**
              * Format: int32
@@ -5459,6 +5532,15 @@ export interface components {
              */
             silence_watchdog: components["schemas"]["SilenceWatchdogSettings"];
         };
+        /** @description Plays that count of a track or an artist: on every station, and on each. */
+        Plays: {
+            /** Format: int64 */
+            last_played_at_unix_ms?: number | null;
+            /** Format: int64 */
+            play_count: number;
+            /** @description The stations it played on, by ID. */
+            stations: components["schemas"]["StationPlays"][];
+        };
         /** @description What to change; what is left out stays as it is. */
         Preferences: {
             /** @description Use the whole width of the screen instead of a centred column. */
@@ -5880,6 +5962,16 @@ export interface components {
         };
         /** @description Station-wide rotation settings, stored under the `rotation` settings name. */
         RotationSettings: {
+            /**
+             * @description Rules across stations: off by default.
+             * @default {
+             *       "artist_min": 0,
+             *       "station_ids": [],
+             *       "title_min": 0,
+             *       "track_min": 0
+             *     }
+             */
+            across: components["schemas"]["AcrossStations"];
             /** @default null */
             fallback_category_id: components["schemas"]["u64"] | null;
             /**
@@ -6316,6 +6408,14 @@ export interface components {
             /** Format: int32 */
             position: number;
         };
+        StationPlays: {
+            /** Format: int64 */
+            last_played_at_unix_ms?: number | null;
+            /** Format: int64 */
+            play_count: number;
+            /** Format: int64 */
+            station_id: number;
+        };
         StationRequest: {
             code: string;
             enabled?: boolean;
@@ -6555,6 +6655,8 @@ export interface components {
             musicbrainz?: components["schemas"]["TrackMusicBrainz"] | null;
             overrides: components["schemas"]["TrackOverrides"];
             playout: components["schemas"]["EffectivePlayout"];
+            /** @description Plays and last play in total and per station. */
+            plays: components["schemas"]["Plays"];
             /**
              * @description Tags kept in Heron's database (library setting `write_tags` off),
              *     shown instead of the file's: `POST /tracks/tag-overrides/clear`
@@ -6787,6 +6889,13 @@ export interface components {
             q?: string | null;
             sort?: components["schemas"]["TrackSort"] | null;
             sound_code?: string | null;
+            /**
+             * Format: int64
+             * @description Count plays on this station only: play counts, last played, their
+             *     sort, `never_played` and `not_played_days`. Every station's when
+             *     left out.
+             */
+            station_id?: number | null;
             /** Format: int32 */
             year_max?: number | null;
             /** Format: int32 */
@@ -6991,6 +7100,17 @@ export interface components {
             /** Format: int32 */
             pick: number;
             type_id: components["schemas"]["u64"];
+        } | {
+            /** @enum {string} */
+            kind: "across_stations";
+            /** Format: int64 */
+            other_unix_ms: number;
+            /** Format: int32 */
+            pick: number;
+            rule: components["schemas"]["SeparationRule"];
+            station_id: components["schemas"]["u64"];
+            /** Format: int32 */
+            window_min: number;
         };
         Waveform: {
             /**
@@ -13729,6 +13849,12 @@ export interface operations {
                 labels_any?: string;
                 /** @description Tracks with none of these labels. */
                 labels_none?: string;
+                /**
+                 * @description Count plays on this station only: play counts, last played, their
+                 *     sort, `never_played` and `not_played_days`. Every station's when
+                 *     left out.
+                 */
+                station_id?: number;
                 /** @description Tracks never played. */
                 never_played?: boolean;
                 /** @description Tracks not played for this many days (including those never played). */
