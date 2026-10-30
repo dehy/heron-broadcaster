@@ -59,6 +59,21 @@ See [Library management](library.md#the-buffer-zone).
 
 Library batches gain the kinds `delete` and `purge`, moves the origin `staging` (the trash is in the library, `.heron-trash/`), and library tasks the kinds `staging_import`, `delete` and `empty_trash` (restoring is an `undo`).
 
+## Stations
+
+See [Several stations](stations.md) ([M13](roadmap/m13-several-stations.md)).
+
+| Table | Columns |
+|---|---|
+| `stations` | id, name, code (unique), time_zone, engine_url, enabled, position |
+| `category_stations` | category_id, station_id — the stations a category is used on |
+| `medley_stations` | medley_id, station_id, position (0: the medley's first station) |
+| `restriction_stations` | restriction_id, station_id — none: every station |
+| `user_station_roles` | user_id, station_id, role (none, viewer, operator, admin); `users.role` is the shared role |
+| `station_settings` | station_id, name, JSON value: the per-station settings groups (`station`, `playout`, `eq`, `queue`, `engine`, `rotation`, the medley categories) |
+
+`station_id` is added to `clocks`, `clock_schedule`, `rotation_picks`, `play_history`, `outputs`, `webhooks` and `listener_totals`. The first station gets every existing row.
+
 ## Categories
 
 | Table | Columns |

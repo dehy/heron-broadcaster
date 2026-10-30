@@ -8,6 +8,7 @@ Raise these when they become relevant instead of guessing.
 | Name of the analysis service: `heron-analyzer` was chosen as a working name. | [M0](roadmap/m0-foundations.md) |
 | Silence ceiling: −50 dBFS trims inaudible fade-ins but also quiet deliberate intros (Pink Floyd's wind, Yes' nature sounds, 23–27 s). −60 dBFS keeps most of them. Which default? | [M1](roadmap/m1-import-analysis.md) |
 | Opus and HE-AAC decoding, not supported by Symphonia: add libopus (BSD) and an HE-AAC-capable decoder, or report them as unsupported. | [M2](roadmap/m2-engine-core.md) |
+| Liners of a medley tagged with several stations: its first station's (proposed), or one rendered file per station with its own liners. | [M13](roadmap/m13-several-stations.md#questions) |
 
 ## Resolved
 
