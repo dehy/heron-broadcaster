@@ -60,7 +60,7 @@ const PER_STATION: [&str; 13] = [
     "listeners",
 ];
 /// The settings groups served per station (`/settings/{group}`).
-const STATION_SETTINGS: [&str; 5] = ["playout", "eq", "queue", "rotation", "station"];
+const STATION_SETTINGS: [&str; 6] = ["playout", "eq", "queue", "rotation", "station", "medleys"];
 /// The public routes per station (`/public/{route}`).
 const PUBLIC: [&str; 3] = ["now-playing", "queue", "history"];
 
@@ -641,7 +641,7 @@ mod tests {
         assert!(per_station("settings/playout"));
         assert!(per_station("webhook-deliveries/3/retry"));
         assert!(!per_station("settings/library"));
-        assert!(!per_station("settings/medleys"));
+        assert!(per_station("settings/medleys"));
         assert!(!per_station("tracks/1"));
         assert!(!per_station("stations"));
     }

@@ -287,7 +287,15 @@ impl EngineManagement {
 
 /// The settings groups each station has its own of, in `station_settings`
 /// (docs/stations.md#settings). The others are shared, in `settings`.
-pub const PER_STATION: [&str; 6] = ["station", "playout", "eq", "queue", "engine", "rotation"];
+pub const PER_STATION: [&str; 7] = [
+    "station",
+    "playout",
+    "eq",
+    "queue",
+    "engine",
+    "rotation",
+    "medley_categories",
+];
 
 fn shared(name: &str) {
     debug_assert!(
@@ -644,13 +652,7 @@ async fn put_rotation_settings(
     user.require(Role::Operator)?;
     settings.check().map_err(ApiError::Invalid)?;
     if let Some(id) = settings.fallback_category_id {
-        let exists: Option<u64> = sqlx::query_scalar("SELECT id FROM categories WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&state.pool)
-            .await?;
-        if exists.is_none() {
-            return Err(ApiError::Invalid(format!("no category {id}")));
-        }
+        crate::categories::check_offered(&state.pool, station.id(), id).await?;
     }
     save_for(
         &state.pool,

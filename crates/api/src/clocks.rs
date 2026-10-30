@@ -172,6 +172,15 @@ fn conflict(error: sqlx::Error) -> ApiError {
     }
 }
 
+/// Refuses a slot calling a category the station does not use.
+async fn check_slots(state: &AppState, station: &Station, slots: &[ClockSlot]) -> ApiResult<()> {
+    let ids: std::collections::BTreeSet<u64> = slots.iter().map(|slot| slot.category_id).collect();
+    for id in ids {
+        crate::categories::check_offered(&state.pool, station.id(), id).await?;
+    }
+    Ok(())
+}
+
 async fn write_slots(
     tx: &mut sqlx::MySqlConnection,
     clock: u64,
@@ -228,6 +237,7 @@ async fn create_clock(
         .await
         .map_err(conflict)?
         .last_insert_id();
+    check_slots(&state, &station, &input.slots).await?;
     write_slots(&mut tx, id, &input.slots).await?;
     tx.commit().await?;
     let Json(clock) = get_clock(user, State(state), station, Path(id)).await?;
@@ -264,6 +274,7 @@ async fn update_clock(
         .execute(&mut *tx)
         .await
         .map_err(conflict)?;
+    check_slots(&state, &station, &input.slots).await?;
     write_slots(&mut tx, id, &input.slots).await?;
     tx.commit().await?;
     tracing::info!(user = %user.username, clock = id, slots = input.slots.len(), "clock changed");

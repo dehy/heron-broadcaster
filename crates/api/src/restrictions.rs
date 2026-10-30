@@ -31,6 +31,8 @@ pub struct RestrictionView {
     pub rule: Rule,
     pub enabled: bool,
     pub note: Option<String>,
+    /// The stations it applies to; empty: every station.
+    pub station_ids: Vec<u64>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -41,6 +43,10 @@ pub struct RestrictionInput {
     #[serde(default = "yes")]
     pub enabled: bool,
     pub note: Option<String>,
+    /// The stations it applies to, empty for every station: every station
+    /// when left out on creation, kept when left out on a change.
+    #[serde(default)]
+    pub station_ids: Option<Vec<u64>>,
 }
 
 fn yes() -> bool {
@@ -87,6 +93,14 @@ impl RestrictionInput {
             .as_deref()
             .map(str::trim)
             .filter(|note| !note.is_empty());
+        if let Some(id) = self
+            .station_ids
+            .iter()
+            .flatten()
+            .find(|id| state.stations.get(**id).is_none())
+        {
+            return Err(ApiError::Invalid(format!("no station {id}")));
+        }
         if note.is_some_and(|note| note.chars().count() > 512) {
             return Err(ApiError::Invalid(
                 "notes are up to 512 characters".to_owned(),
@@ -106,6 +120,8 @@ pub struct RestrictionQuery {
     /// `track`, `artist` or `category`.
     pub target: Option<String>,
     pub target_id: Option<u64>,
+    /// Only those that apply to this station.
+    pub station_id: Option<u64>,
 }
 
 type Row = (
@@ -116,6 +132,7 @@ type Row = (
     String,
     bool,
     Option<String>,
+    Option<String>,
 );
 
 const SELECT: &str = "SELECT r.id, CAST(r.target AS CHAR), r.target_id,
@@ -125,11 +142,13 @@ const SELECT: &str = "SELECT r.id, CAST(r.target AS CHAR), r.target_id,
             WHEN 'artist' THEN (SELECT a.name FROM artists a WHERE a.id = r.target_id)
             ELSE (SELECT c.name FROM categories c WHERE c.id = r.target_id)
         END,
-        CAST(r.rule AS CHAR), r.enabled, r.note
+        CAST(r.rule AS CHAR), r.enabled, r.note,
+        (SELECT CAST(GROUP_CONCAT(rs.station_id ORDER BY rs.station_id) AS CHAR)
+         FROM restriction_stations rs WHERE rs.restriction_id = r.id)
     FROM restrictions r";
 
 fn view(
-    (id, target, target_id, target_name, rule, enabled, note): Row,
+    (id, target, target_id, target_name, rule, enabled, note, stations): Row,
 ) -> ApiResult<RestrictionView> {
     Ok(RestrictionView {
         id,
@@ -140,7 +159,31 @@ fn view(
             .map_err(|error| ApiError::Internal(format!("restriction {id}: {error}")))?,
         enabled,
         note,
+        station_ids: stations
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|id| id.parse().ok())
+            .collect(),
     })
+}
+
+async fn write_stations(state: &AppState, id: u64, station_ids: &[u64]) -> ApiResult<()> {
+    let mut tx = state.pool.begin().await?;
+    sqlx::query("DELETE FROM restriction_stations WHERE restriction_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    for station_id in station_ids {
+        sqlx::query(
+            "INSERT IGNORE INTO restriction_stations (restriction_id, station_id) VALUES (?, ?)",
+        )
+        .bind(id)
+        .bind(station_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 async fn find(state: &AppState, id: u64) -> ApiResult<RestrictionView> {
@@ -170,6 +213,15 @@ async fn list_restrictions(
     }
     if let Some(id) = query.target_id {
         sql.push(" AND r.target_id = ").push_bind(id);
+    }
+    if let Some(station_id) = query.station_id {
+        sql.push(
+            " AND (NOT EXISTS (SELECT 1 FROM restriction_stations rs WHERE rs.restriction_id = r.id)
+                   OR EXISTS (SELECT 1 FROM restriction_stations rs
+                              WHERE rs.restriction_id = r.id AND rs.station_id = ",
+        )
+        .push_bind(station_id)
+        .push("))");
     }
     sql.push(" ORDER BY r.target, r.target_id, r.id");
     let rows: Vec<Row> = sql.build_query_as().fetch_all(&state.pool).await?;
@@ -202,6 +254,7 @@ async fn create_restriction(
     .execute(&state.pool)
     .await?
     .last_insert_id();
+    write_stations(&state, id, input.station_ids.as_deref().unwrap_or_default()).await?;
     tracing::info!(user = %user.username, restriction = id, "restriction added");
     state.stations.wake_all();
     Ok((StatusCode::CREATED, Json(find(&state, id).await?)))
@@ -235,6 +288,9 @@ async fn update_restriction(
     if updated.rows_affected() == 0 {
         // Unchanged, or missing.
         find(&state, id).await?;
+    }
+    if let Some(station_ids) = &input.station_ids {
+        write_stations(&state, id, station_ids).await?;
     }
     state.stations.wake_all();
     Ok(Json(find(&state, id).await?))

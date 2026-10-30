@@ -70,7 +70,7 @@ A category is **tagged with the stations it is used on**: one, several or all. W
 - The stations' codes show as badges next to the category's name wherever it appears: the track page, the library's filters, clocks, restrictions, medleys.
 - A station's clocks, restrictions, fallback category and medley settings only offer the categories tagged with it.
 - **Untagging is refused while the station uses the category**, listing what uses it: its clocks' slots, its restrictions, its fallback category, its medley settings, the recipes of the medleys tagged with it. The station stops using it first.
-- A new category is tagged with the station being worked on; categories brought by an import from another software are tagged with the stations the import chose.
+- A category is tagged with at least one station. A new category is tagged with the station being worked on; categories brought by an import from another software are tagged with the stations the import chose.
 - A track's categories and weights are the same on every station: a track in `80s` plays on the three stations above, with its one weight.
 
 Category types (Song, Jingle, Ad…) are shared.
@@ -107,7 +107,7 @@ A station can keep its music apart from what other stations play: in its `rotati
 A medley is **tagged with the stations it plays on**, like a category: one, several or all.
 
 - Its rendered track goes into the **rendered medleys' category of each of its stations** (a `medleys` setting of each station), so each station's clocks and FX player find it there. A station without that category set cannot be tagged.
-- Its songs come from **every category its stations can use**, by default; its recipe can narrow them to some categories (only `Hits gold`, or only `80s gold`), as today. The recipe only offers categories tagged with at least one of its stations.
+- Its songs come from **every category its stations can use** when its recipe chooses none; its recipe can narrow them to some categories (only `Hits gold`, or only `80s gold`), as today. The recipe only offers categories tagged with at least one of its stations.
 - Its liners come from the liner categories of **its first station** (the one it was made on, shown first): a medley tagged `hits` and `hits80` says `hits`'s name in its liners on both.
 - The stations' codes show as badges in the medley list and on its page; the list can be filtered by station.
 - Untagging a station is refused while the medley waits in that station's queue; its track leaves that station's rendered medleys' category.
