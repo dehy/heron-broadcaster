@@ -359,7 +359,22 @@ function Editor({ clock }: { clock: ClockView | null }) {
           </Card>
         </div>
         <div className="stack">
-          <HourCard preview={shown} categories={byId} slots={plain} looping={looping} />
+          <HourCard
+            preview={shown}
+            categories={byId}
+            slots={plain}
+            looping={looping}
+            onRulesOff={
+              canEdit
+                ? () =>
+                    setSlots((current) =>
+                      current.map((slot, index) =>
+                        shown?.slots[index]?.short ? { ...slot, enforce_rules: false } : slot,
+                      ),
+                    )
+                : undefined
+            }
+          />
           {clock && <SimulateCard clockId={clock.id} dirty={dirty} />}
         </div>
       </div>
@@ -535,11 +550,14 @@ function HourCard({
   categories,
   slots,
   looping,
+  onRulesOff,
 }: {
   preview: ClockPreview | undefined;
   categories: Map<number, Category>;
   slots: ClockSlot[];
   looping: boolean;
+  /** Turns enforce rules off on the slots running short; unset for viewers. */
+  onRulesOff: (() => void) | undefined;
 }) {
   const short = preview?.slots.filter((slot) => slot.short) ?? [];
   // Two slots in a row calling a type that never plays twice in a row: the
@@ -630,6 +648,13 @@ function HourCard({
                 count: short.length,
                 names: [...new Set(short.map((slot) => categories.get(slot.category_id)?.name ?? t("clocks.aCategory")))].join(", "),
               })}
+              {onRulesOff && (
+                <div className="row" style={{ marginTop: "0.5rem" }}>
+                  <button type="button" className="btn small" title={t("clocks.enforceHelp")} onClick={onRulesOff}>
+                    {t("clocks.rulesOff", { count: short.length })}
+                  </button>
+                </div>
+              )}
             </Banner>
           )}
           <p className="muted small" style={{ margin: 0 }}>
