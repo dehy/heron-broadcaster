@@ -79,7 +79,7 @@ An ordered list of slots. Each slot **calls a category**, and how it calls it ma
 - an **enforce rules** flag;
 - separation overrides for this slot (see [Separation rules](#separation-rules)).
 
-Building good clocks has to be easy: the editor shows each hour as it will sound (slots, expected starts from the categories' average lengths, categories running short of tracks for their track separation), and a clock can be simulated before it goes on air.
+Building good clocks has to be easy: the editor shows each hour as it will sound (slots, expected starts from the categories' average lengths, categories running short of tracks for their track separation), and a clock can be simulated before it goes on air. A category running short (a few jingles for a slot every quarter of an hour) only plays with its rules relaxed; the editor offers to turn *enforce rules* off on the slots calling it instead, which stops the separation rules there and keeps the restrictions.
 
 How a clock runs:
 
