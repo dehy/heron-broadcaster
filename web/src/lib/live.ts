@@ -29,7 +29,7 @@ export interface LiveState {
 const MAX_EVENTS = 20;
 const MAX_DELAY_MS = 10_000;
 
-let state: LiveState = {
+const EMPTY: LiveState = {
   connected: false,
   player: undefined,
   positions: null,
@@ -37,6 +37,7 @@ let state: LiveState = {
   events: [],
   eq: null,
 };
+let state: LiveState = EMPTY;
 const listeners = new Set<() => void>();
 let socket: WebSocket | null = null;
 let retry: ReturnType<typeof setTimeout> | null = null;
@@ -77,11 +78,19 @@ function connect() {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(onStation(`${scheme}://${window.location.host}/api/v1/live`, currentStation()));
   socket = ws;
+  // A socket closed by stopLive (another station, or signed out) may still
+  // deliver a message or its close: they are not this connection's.
   ws.onopen = () => {
+    if (socket !== ws) {
+      return;
+    }
     delay = 500;
     set({ connected: true });
   };
   ws.onmessage = (event) => {
+    if (socket !== ws) {
+      return;
+    }
     try {
       handle(JSON.parse(String(event.data)) as LiveMessage);
     } catch {
@@ -89,6 +98,9 @@ function connect() {
     }
   };
   ws.onclose = () => {
+    if (socket !== ws) {
+      return;
+    }
     socket = null;
     // Changes made while disconnected are not known: read them again.
     set({ connected: false, levels: null, eq: null });
@@ -112,9 +124,11 @@ export function stopLive() {
     clearTimeout(retry);
     retry = null;
   }
-  socket?.close();
+  const closing = socket;
   socket = null;
-  state = { connected: false, player: undefined, positions: null, levels: null, events: [], eq: null };
+  closing?.close();
+  // The pages show nothing of the last station until the next one answers.
+  set(EMPTY);
 }
 
 function subscribe(listener: () => void) {
@@ -122,6 +136,11 @@ function subscribe(listener: () => void) {
   return () => {
     listeners.delete(listener);
   };
+}
+
+/** The live state now, outside React. */
+export function liveState(): LiveState {
+  return state;
 }
 
 /** A slice of the live state; re-renders only when it changes. */
