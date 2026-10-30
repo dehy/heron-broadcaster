@@ -993,6 +993,10 @@ const fr = {
     one: "{names} a trop peu de pistes pour sa séparation de piste : attendez-vous à des règles assouplies.",
     other: "{names} ont trop peu de pistes pour leur séparation de piste : attendez-vous à des règles assouplies.",
   },
+  "clocks.rulesOff": {
+    one: "Ne pas appliquer les règles sur ce créneau",
+    other: "Ne pas appliquer les règles sur ces {count} créneaux",
+  },
   "clocks.aCategory": "Une catégorie",
   "clocks.lengthsHelp": "Les durées sont les moyennes des catégories ; les vraies pistes varient.",
   "clocks.loopCarriesOn": "La boucle continue d'une heure à l'autre, là où elle s'était arrêtée.",

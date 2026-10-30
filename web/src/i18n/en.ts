@@ -984,6 +984,10 @@ const en = {
     one: "{names} has too few tracks for its track separation: expect relaxed rules.",
     other: "{names} have too few tracks for their track separation: expect relaxed rules.",
   },
+  "clocks.rulesOff": {
+    one: "Don't enforce rules on this slot",
+    other: "Don't enforce rules on these {count} slots",
+  },
   "clocks.aCategory": "A category",
   "clocks.lengthsHelp": "Lengths are the categories' averages; real tracks vary.",
   "clocks.loopCarriesOn": "The loop carries on across hours, from where it stopped.",
