@@ -120,7 +120,10 @@ The roles ([API – Authentication](api.md#authentication)) are given **per stat
 - **Role on each station** (`none`, `viewer`, `operator`, `admin`): its programming, queue, playout, outputs, webhooks and settings. With `none`, the user does not see the station.
 - A shared `admin` is `admin` on every station.
 
-An existing user keeps their role, as their shared role and their role on the first station.
+An existing user keeps their role, as their shared role and their role on the first station. A user added without roles per station gets their shared role on every station; a new station is seen by shared admins only until roles are given on it.
+
+- What a request may do follows the role on its station for the routes of a station (`/stations/{id}/…`, and the single-station routes for the first station), the shared role for the others. A station the user has `none` on answers `404`, and `GET /stations` leaves it out.
+- `GET`, `POST /users` and `PATCH /users/{id}` carry `station_roles` (`[{"station_id", "role"}]`); a station left out is `none`. `GET /auth/me` has the user's own.
 
 ## Engines
 

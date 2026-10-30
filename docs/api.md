@@ -21,6 +21,8 @@ Local users only for now ([Decisions](decisions.md#decisions-made-after-the-hand
 | `operator` | Also run the station: queue, skip, pause, FX, the deck EQ and its presets, track overrides, intro and hook points and categories, queue and rotation settings, clocks, the schedule, restrictions, artists, simulations, the review of identifications |
 | `admin` | Also playout, analysis, library and station (time zone) settings, organizing the library and undoing batches, encoder profiles, outputs, webhooks and users |
 
+With [several stations](stations.md#roles), these roles are given per station, plus a shared role for the library and what the stations share: a station's routes follow the role on that station.
+
 Create the first admin on the command line (the password is read without echo; from stdin when it is not a terminal):
 
 ```sh
