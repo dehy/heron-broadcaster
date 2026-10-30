@@ -62,7 +62,7 @@ Decode threads use the analysis' own decoder (`heron_analysis::Decoder`), so the
 The player plans each transition when it loads the next track, as soon as the current one starts ([`heron_core::playout::plan_transition`](../crates/core/src/playout.rs)). The plan is a pure function of the analysis, the per-track overrides and the settings, so it is deterministic and the UI can preview it. The audio thread then starts the next track on the exact frame planned.
 
 1. **Where the next track starts:** at the analyzed crossfade point (`fade_out_start_ms`, mode `auto`), or a fixed time before the cue-out (mode `fixed`).
-2. **Back to back instead**, the next track starting on the frame the current one ends, when either track is `min_track_ms` long or shorter (20 s: jingles, IDs), when the track disables crossfading, or when there is no usable crossfade point.
+2. **Back to back instead**, the next track starting on the frame the current one ends, when either track is `min_track_ms` long or shorter (20 s: jingles, IDs), when the track disables crossfading, or when there is no usable crossfade point. A track of `min_track_ms` or shorter that **sets where the next track starts itself** (a fixed time before its cue-out, from the track's page) keeps that point: a two-second jingle can start the next track half a second before its end. Such a transition has no fades, so neither track's sound changes: they only overlap. A longer track followed by a short one stays back to back, whatever its own point.
 3. **Fade-out** of the outgoing track from the moment the next starts, over `fade_out.time_ms` at most (never past the cue-out), down to `fade_out.level_pct`.
 4. **Fade-in** of the incoming track over `fade_in.time_ms`, from `fade_in.level_pct`.
 5. If the audio of a track ends before its cue-out (truncated file), the next track starts on that frame.
@@ -106,7 +106,7 @@ Stored under `playout` in the `settings` table (JSON, missing fields take the de
 | `crossfade.fade_out` | enabled, `linear`, 2,500 ms, to 0 % |
 | `crossfade.fade_in` | disabled (`linear`, 1,000 ms, from 0 %) |
 | `crossfade.mode` | `auto` (`fixed`: `fixed_ms` before the cue-out, 2,000 ms) |
-| `crossfade.min_track_ms` | 20,000: shorter tracks are never crossfaded |
+| `crossfade.min_track_ms` | 20,000: shorter tracks are never crossfaded, unless the track sets where the next one starts (then without fades) |
 | `crossfade.skip_fade_ms` | 1,000 |
 | `loudness.enabled` | true |
 | `loudness.target_lufs` | −16 |
