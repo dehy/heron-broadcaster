@@ -108,7 +108,7 @@ A medley is **tagged with the stations it plays on**, like a category: one, seve
 
 - Its rendered track goes into the **rendered medleys' category of each of its stations** (a `medleys` setting of each station), so each station's clocks and FX player find it there. A station without that category set cannot be tagged.
 - Its songs come from **every category its stations can use**, by default; its recipe can narrow them to some categories (only `Hits gold`, or only `80s gold`), as today. The recipe only offers categories tagged with at least one of its stations.
-- Its liners come from the liner categories of **its first station** (the one it was made on, shown first): a medley tagged `hits` and `hits80` says `hits`'s name in its liners on both. *(Open question: see the [milestone](roadmap/m13-several-stations.md#questions).)*
+- Its liners come from the liner categories of **its first station** (the one it was made on, shown first): a medley tagged `hits` and `hits80` says `hits`'s name in its liners on both.
 - The stations' codes show as badges in the medley list and on its page; the list can be filtered by station.
 - Untagging a station is refused while the medley waits in that station's queue; its track leaves that station's rendered medleys' category.
 

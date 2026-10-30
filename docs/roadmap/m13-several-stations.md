@@ -52,7 +52,7 @@ Design: [Several stations](../stations.md).
 
 ## Questions
 
-- **Liners of a medley on several stations.** A medley tagged `hits` and `hits80` has one set of liners: which station's? Proposed: its first station's; or one rendered file per station, each with its own liners.
+- ~~**Liners of a medley on several stations.**~~ Decided: its first station's, one rendered file for all its stations.
 - **Station-specific track details.** Should a track's weight in a category, or its overrides, ever differ between stations? Proposed: no, until a station asks.
 
 ## References
