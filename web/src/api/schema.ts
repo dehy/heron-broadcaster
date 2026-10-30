@@ -2014,7 +2014,10 @@ export interface paths {
         /** Every station. */
         get: operations["list_stations"];
         put?: never;
-        /** Adds a station (admins). Its engine is a new service of the deployment. */
+        /**
+         * Adds a station (admins). Its engine is a new service of the deployment,
+         *     whose address is `HERON_ENGINE_URL_<CODE>` in `heron-api`'s environment.
+         */
         post: operations["create_station"];
         delete?: never;
         options?: never;
@@ -2031,8 +2034,9 @@ export interface paths {
         };
         get: operations["get_station_info"];
         /**
-         * Renames a station, changes its code, engine or position, enables or
-         *     disables it (admins).
+         * Renames a station, changes its position, enables or disables it
+         *     (admins). Only the first station's code can change: the others' names
+         *     their engine's variable.
          */
         put: operations["update_station"];
         post?: never;
@@ -6395,18 +6399,24 @@ export interface components {
         };
         /** @description A station as stored. */
         StationInfo: {
-            /** @description Short and unique: lowercase letters, digits and `-`. */
+            /**
+             * @description Short and unique: lowercase letters and digits. Set once for the
+             *     stations after the first: it names their engine's variable.
+             */
             code: string;
             /**
              * @description A disabled station is not fed: its engine plays what it has
              *     queued, then its fallback directory.
              */
             enabled: boolean;
+            /** @description Whether that variable is set: a station without it is off the air. */
+            engine_configured: boolean;
             /**
-             * @description The engine's gRPC address; missing for the first station, whose
-             *     engine is `HERON_ENGINE_URL`.
+             * @description The variable of `heron-api`'s environment that holds its engine's
+             *     gRPC address: `HERON_ENGINE_URL` for the first station,
+             *     `HERON_ENGINE_URL_<CODE>` for the others.
              */
-            engine_url?: string | null;
+            engine_variable: string;
             /** Format: int64 */
             id: number;
             name: string;
@@ -6423,12 +6433,11 @@ export interface components {
         };
         StationRequest: {
             code: string;
-            enabled?: boolean;
             /**
-             * @description The engine's gRPC address, e.g. `http://heron-engine-2:50051`.
-             *     Required, except for the first station (`HERON_ENGINE_URL`).
+             * @description Set once for the stations after the first: their engine's variable
+             *     is `HERON_ENGINE_URL_<CODE>`.
              */
-            engine_url?: string | null;
+            enabled?: boolean;
             name: string;
             /** Format: int32 */
             position?: number;

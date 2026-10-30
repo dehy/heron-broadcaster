@@ -192,6 +192,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let stations = stations::Stations::start(
         pool.clone(),
         cli.engine_url,
+        stations::engines_from_env(),
         std::env::var("HERON_STATION_NAME").ok(),
         Arc::clone(&webhooks),
     )
@@ -468,15 +469,12 @@ mod tests {
 
         MIGRATOR.run(&pool).await.unwrap();
 
-        let stations: Vec<(u64, String, String, Option<String>, bool)> =
-            sqlx::query_as("SELECT id, name, code, engine_url, enabled FROM stations")
+        let stations: Vec<(u64, String, String, bool)> =
+            sqlx::query_as("SELECT id, name, code, enabled FROM stations")
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(
-            stations,
-            [(1, String::new(), "main".to_owned(), None, true)]
-        );
+        assert_eq!(stations, [(1, String::new(), "main".to_owned(), true)]);
         for table in [
             "clocks",
             "clock_schedule",
@@ -552,6 +550,7 @@ mod tests {
         let stations = stations::Stations::start(
             pool.clone(),
             "http://127.0.0.1:9".to_owned(),
+            std::collections::BTreeMap::new(),
             Some("Hits".to_owned()),
             webhooks,
         )

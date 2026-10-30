@@ -13,7 +13,6 @@ import { type StationInfo, firstStation } from "../lib/station";
 interface Draft {
   name: string;
   code: string;
-  engine_url: string;
   enabled: boolean;
   position: number;
 }
@@ -72,8 +71,8 @@ export function Stations() {
                     <td>
                       <span className="badge accent">{station.code}</span>
                     </td>
-                    <td className="hide-narrow muted mono">
-                      {station.engine_url ?? t("stations.engineDefault")}
+                    <td className="hide-narrow">
+                      <EngineVariable station={station} />
                     </td>
                     <td className="actions">
                       <button type="button" className="btn small" onClick={() => setEditing(station)}>
@@ -121,11 +120,12 @@ function StationDialog({
   const [draft, setDraft] = useState<Draft>({
     name: station?.name ?? "",
     code: station?.code ?? "",
-    engine_url: station?.engine_url ?? "",
     enabled: station?.enabled ?? true,
     position: station?.position ?? 0,
   });
-  const body = { ...draft, engine_url: draft.engine_url.trim() || null };
+  const body = draft;
+  // A station's code names its engine's variable: only the first's can change.
+  const codeLocked = station !== null && !first;
   const save = useAction(
     () =>
       station
@@ -165,23 +165,25 @@ function StationDialog({
         <Field label={t("stations.name")}>
           <input className="input" value={draft.name} onChange={(e) => set({ name: e.target.value })} required />
         </Field>
-        <Field label={t("stations.code")} hint={t("stations.codeHint")}>
+        <Field
+          label={t("stations.code")}
+          hint={codeLocked ? t("stations.codeLocked") : first ? t("stations.codeFirstHint") : t("stations.codeHint")}
+        >
           <input
             className="input"
             value={draft.code}
-            pattern="[a-z0-9-]{1,32}"
+            pattern="[a-z0-9]{1,32}"
             onChange={(e) => set({ code: e.target.value })}
+            disabled={codeLocked}
             required
           />
         </Field>
-        <Field label={t("stations.engine")} hint={first ? t("stations.engineFirstHint") : t("stations.engineHint")}>
-          <input
-            className="input mono"
-            value={draft.engine_url}
-            placeholder="http://heron-engine-2:50051"
-            onChange={(e) => set({ engine_url: e.target.value })}
-            required={!first}
-          />
+        <Field label={t("stations.engine")} hint={t("stations.engineVariableHint")}>
+          {station ? (
+            <EngineVariable station={station} />
+          ) : (
+            <code className="mono">HERON_ENGINE_URL_{draft.code.toUpperCase() || "…"}</code>
+          )}
         </Field>
         <Field label={t("stations.position")}>
           <input
@@ -201,5 +203,19 @@ function StationDialog({
         )}
       </form>
     </Modal>
+  );
+}
+
+/** A station's engine variable, and whether heron-api has it. */
+function EngineVariable({ station }: { station: StationInfo }) {
+  return (
+    <span>
+      <code className="mono">{station.engine_variable}</code>{" "}
+      {station.engine_configured ? (
+        <span className="badge good">{t("stations.engineConfigured")}</span>
+      ) : (
+        <span className="badge warn">{t("stations.engineMissing")}</span>
+      )}
+    </span>
   );
 }
