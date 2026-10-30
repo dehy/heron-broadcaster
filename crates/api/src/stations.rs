@@ -320,7 +320,7 @@ async fn list(pool: &MySqlPool) -> ApiResult<Vec<StationInfo>> {
 
 /// The station a request is for, set by [`rewrite`].
 #[derive(Clone, Copy, Debug)]
-struct StationId(u64);
+pub(crate) struct StationId(pub(crate) u64);
 
 /// The station a request is for: the one in `/stations/{id}/…`, or the
 /// first station on the single-station routes and the shared ones.
@@ -369,6 +369,11 @@ pub fn rewrite<B>(stations: &Stations, mut request: Request<B>) -> Request<B> {
                 .then(|| (station.id(), format!("/api/v1/public/{rest}")))
         })
     } else {
+        // A single-station route: the first station's.
+        if path.strip_prefix("/api/v1/").is_some_and(per_station) {
+            let first = stations.first().id();
+            request.extensions_mut().insert(StationId(first));
+        }
         None
     };
     let Some((id, path)) = found else {
@@ -482,10 +487,20 @@ fn conflict(error: sqlx::Error, code: &str) -> ApiError {
 #[utoipa::path(get, path = "/stations", tag = "stations",
     responses((status = 200, body = Vec<StationInfo>), (status = "4XX", body = ErrorBody)))]
 async fn list_stations(
-    _user: CurrentUser,
+    user: CurrentUser,
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<StationInfo>>> {
-    Ok(Json(list(&state.pool).await?))
+    let mut stations = list(&state.pool).await?;
+    if user.role != Role::Admin {
+        let seen: Vec<u64> = sqlx::query_scalar(
+            "SELECT station_id FROM user_station_roles WHERE user_id = ? AND role <> 'none'",
+        )
+        .bind(user.id)
+        .fetch_all(&state.pool)
+        .await?;
+        stations.retain(|station| seen.contains(&station.id));
+    }
+    Ok(Json(stations))
 }
 
 /// Adds a station (admins). Its engine is a new service of the deployment.
@@ -535,10 +550,17 @@ async fn fetch(pool: &MySqlPool, id: u64) -> ApiResult<StationInfo> {
     params(("id" = u64, Path)),
     responses((status = 200, body = StationInfo), (status = "4XX", body = ErrorBody)))]
 async fn get_station_info(
-    _user: CurrentUser,
+    user: CurrentUser,
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> ApiResult<Json<StationInfo>> {
+    if user.role != Role::Admin
+        && crate::auth::station_role(&state.pool, user.id, id)
+            .await?
+            .is_none()
+    {
+        return Err(ApiError::NotFound(format!("station {id} not found")));
+    }
     Ok(Json(fetch(&state.pool, id).await?))
 }
 

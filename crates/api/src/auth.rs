@@ -108,7 +108,8 @@ impl FromRequestParts<AppState> for CurrentUser {
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> ApiResult<Self> {
         if let Some(token) = bearer_token(&parts.headers) {
-            return authenticate_token(&state.pool, token).await;
+            let user = authenticate_token(&state.pool, token).await?;
+            return on_station(&state.pool, user, parts).await;
         }
         let Some(token) = cookie(&parts.headers, SESSION_COOKIE) else {
             return Err(ApiError::Unauthorized);
@@ -120,8 +121,48 @@ impl FromRequestParts<AppState> for CurrentUser {
                 "requests signed in with a cookie need an X-Requested-With header".to_owned(),
             ));
         }
-        Ok(user)
+        on_station(&state.pool, user, parts).await
     }
+}
+
+/// On a station's route, the user's role is their role on that station; a
+/// station they have `none` on is not found.
+async fn on_station(
+    pool: &MySqlPool,
+    mut user: CurrentUser,
+    parts: &Parts,
+) -> ApiResult<CurrentUser> {
+    let Some(crate::stations::StationId(station_id)) = parts.extensions.get().copied() else {
+        return Ok(user);
+    };
+    if user.role == Role::Admin {
+        return Ok(user);
+    }
+    match station_role(pool, user.id, station_id).await? {
+        Some(role) => {
+            user.role = role;
+            Ok(user)
+        }
+        None => Err(ApiError::NotFound(format!(
+            "station {station_id} not found"
+        ))),
+    }
+}
+
+/// A user's role on a station; `None` for `none`, a shared admin's aside.
+pub async fn station_role(
+    pool: &MySqlPool,
+    user_id: u64,
+    station_id: u64,
+) -> ApiResult<Option<Role>> {
+    let role: Option<String> = sqlx::query_scalar(
+        "SELECT CAST(role AS CHAR) FROM user_station_roles WHERE user_id = ? AND station_id = ?",
+    )
+    .bind(user_id)
+    .bind(station_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(role.as_deref().and_then(Role::parse))
 }
 
 fn bearer_token(headers: &HeaderMap) -> Option<&str> {

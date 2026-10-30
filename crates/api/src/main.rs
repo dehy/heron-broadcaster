@@ -372,6 +372,7 @@ mod tests {
             "track_categories",
             "track_overrides",
             "tracks",
+            "user_station_roles",
             "users",
             "webhook_deliveries",
             "webhooks",
@@ -447,6 +448,7 @@ mod tests {
                  ('medleys', '{\"category_id\": 9, \"name_from\": \"titles\"}');
              INSERT INTO categories (id, name) VALUES (9, 'Medleys');
              INSERT INTO medleys (id, recipe) VALUES (5, '{}');
+             INSERT INTO users (id, username, password_hash, role) VALUES (3, 'op', 'x', 'operator');
              INSERT INTO clocks (id, name) VALUES (7, 'Morning');
              INSERT INTO clock_schedule (day_of_week, hour, clock_id) VALUES (1, 6, 7);
              INSERT INTO play_history (title, started_at, deck, source)
@@ -532,6 +534,13 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(tags, (1, 1, 0));
+        let role: String = sqlx::query_scalar(
+            "SELECT CAST(role AS CHAR) FROM user_station_roles WHERE user_id = 3 AND station_id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(role, "operator");
         let queue: settings::QueueSettings =
             settings::load_for(&pool, 1, settings::QueueSettings::SETTINGS_NAME)
                 .await

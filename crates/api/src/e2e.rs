@@ -5169,3 +5169,123 @@ async fn rules_across_stations_and_plays_per_station() {
     );
     station.stop().await;
 }
+
+/// Roles are given per station: a user with `none` on a station does not
+/// see it; a viewer on one station and an operator on another can run only
+/// the second.
+#[tokio::test(flavor = "multi_thread")]
+async fn roles_per_station() {
+    let Some(mut station) = Station::start().await else {
+        return;
+    };
+    let (_engine, _state_dir, second_url, grpc) = start_engine(station.library.path(), None).await;
+    station.tasks.push(grpc);
+    let admin = station.signed_in("admin").await;
+    let first = admin.get("/stations").await[0]["id"].as_u64().unwrap();
+    let (status, created) = admin
+        .send(
+            Method::POST,
+            "/stations",
+            json!({"name": "Hits 80", "code": "hits80", "engine_url": second_url}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let second = created["id"].as_u64().unwrap();
+
+    // Existing users keep their role on the first station only.
+    let users = admin.get("/users").await;
+    let viewer = users
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|user| user["username"] == "viewer")
+        .unwrap();
+    assert_eq!(
+        viewer["station_roles"],
+        json!([{"station_id": first, "role": "viewer"}])
+    );
+
+    let (status, body) = admin
+        .send(
+            Method::POST,
+            "/users",
+            json!({"username": "eighties", "password": "correct horse", "role": "viewer",
+                   "station_roles": [{"station_id": first, "role": "viewer"},
+                                     {"station_id": second, "role": "operator"}]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let operator = station.signed_in("eighties").await;
+    assert_eq!(operator.get("/stations").await.as_array().unwrap().len(), 2);
+    assert_eq!(
+        operator.get("/auth/me").await["station_roles"][1]["role"],
+        "operator"
+    );
+    let queue = json!({"autofill": true, "min_queued": 4});
+    let (status, _) = operator
+        .send(
+            Method::PUT,
+            &format!("/stations/{second}/settings/queue"),
+            queue.clone(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    for path in [
+        "/settings/queue".to_owned(),
+        format!("/stations/{first}/settings/queue"),
+    ] {
+        let (status, _) = operator.send(Method::PUT, &path, queue.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
+    }
+    // The shared role holds for what the stations share.
+    let (status, _) = operator
+        .send(
+            Method::POST,
+            "/categories",
+            json!({"name": "Nope", "color": null}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // `none` on the second station: it is not there.
+    let viewer = station.signed_in("viewer").await;
+    let stations = viewer.get("/stations").await;
+    assert_eq!(stations.as_array().unwrap().len(), 1, "{stations}");
+    for path in [
+        format!("/stations/{second}/queue"),
+        format!("/stations/{second}"),
+    ] {
+        let (status, _) = viewer.request(Method::GET, &path, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+    }
+    viewer.get("/queue").await;
+
+    // Roles change with the user; a shared admin sees every station.
+    let id = admin
+        .get("/users")
+        .await
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|user| user["username"] == "viewer")
+        .unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    let (status, body) = admin
+        .send(
+            Method::PATCH,
+            &format!("/users/{id}"),
+            json!({"station_roles": [{"station_id": second, "role": "viewer"}]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    viewer.get(&format!("/stations/{second}/queue")).await;
+    let (status, _) = viewer.request(Method::GET, "/queue", None).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "none on the first station now"
+    );
+    assert_eq!(admin.get("/stations").await.as_array().unwrap().len(), 2);
+    station.stop().await;
+}
