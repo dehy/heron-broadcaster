@@ -16,8 +16,7 @@ use axum::extract::{Query, State};
 use heron_rotation::names::{normalize, title_key};
 use heron_rotation::{
     Category, Clock, Explanation, History, Library, LibraryParts, Member, Method, Play, Position,
-    Restriction, RotationSettings, Rule, Schedule, SeparationOverrides, Simulation, Slot, Target,
-    Track,
+    Restriction, RotationSettings, Rule, SeparationOverrides, Simulation, Slot, Target, Track,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, QueryBuilder};
@@ -158,18 +157,7 @@ pub async fn load_library(pool: &MySqlPool, station_id: u64) -> ApiResult<Librar
             looping,
         })
         .collect();
-    let rows: Vec<(u8, u8, u64)> = sqlx::query_as(
-        "SELECT day_of_week, hour, clock_id FROM clock_schedule WHERE station_id = ?",
-    )
-    .bind(station_id)
-    .fetch_all(pool)
-    .await?;
-    let schedule = Schedule {
-        hours: rows
-            .into_iter()
-            .map(|(day, hour, clock)| ((day, hour), clock))
-            .collect(),
-    };
+    let (schedule, schedules) = crate::schedules::load(pool, station_id).await?;
 
     let rows: Vec<(u64, String, u64, String)> = sqlx::query_as(
         "SELECT r.id, CAST(r.target AS CHAR), r.target_id, CAST(r.rule AS CHAR)
@@ -213,6 +201,7 @@ pub async fn load_library(pool: &MySqlPool, station_id: u64) -> ApiResult<Librar
             restrictions,
             clocks,
             schedule,
+            schedules,
             settings,
             no_two_in_a_row,
         },
@@ -729,6 +718,7 @@ async fn simulate(
         library.schedule.hours = (1..=7)
             .flat_map(|day| (0..24).map(move |hour| ((day, hour), clock_id)))
             .collect();
+        library.schedules.clear();
     }
     let now = now_ms();
     let start = request.start_unix_ms.unwrap_or(now);

@@ -1,7 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vitest";
-import { type Grid, cell, copyDay, everyDay, paint, rectangle, wholeDays } from "./schedule";
+import {
+  type Grid,
+  cell,
+  civilLabel,
+  copyDay,
+  everyDay,
+  joinCivil,
+  paint,
+  periodProblem,
+  rectangle,
+  splitCivil,
+  wholeDays,
+} from "./schedule";
 
 describe("painting the week", () => {
   it("covers a day, an hour of every day, a rectangle", () => {
@@ -35,5 +47,24 @@ describe("painting the week", () => {
     expect(copied.has(cell(2, 9))).toBe(false);
     expect(copied.get(cell(3, 6))).toBe(4);
     expect(copied.get(cell(1, 6))).toBe(4);
+  });
+});
+
+describe("periods", () => {
+  it("splits and joins a station time", () => {
+    expect(splitCivil("2026-12-01T06:00:00")).toEqual({ date: "2026-12-01", hour: 6 });
+    expect(joinCivil({ date: "2026-12-31", hour: 20 })).toBe("2026-12-31T20:00:00");
+  });
+
+  it("writes a period's bounds, without the year every year", () => {
+    expect(civilLabel("2026-12-01T00:00:00", false, "en-GB")).toBe("1 December 2026 at 00:00");
+    expect(civilLabel("2026-12-01T00:00:00", true, "en-GB")).toBe("1 December at 00:00");
+  });
+
+  it("finds the periods the API refuses", () => {
+    expect(periodProblem({ start: "2026-12-01T00:00:00", end: "2027-01-01T00:00:00" })).toBeNull();
+    expect(periodProblem({ start: "2027-01-01T00:00:00", end: "2026-12-01T00:00:00" })).toBe("backwards");
+    expect(periodProblem({ start: "2026-12-20T00:00:00", end: "2026-01-06T00:00:00", every_year: true })).toBeNull();
+    expect(periodProblem({ start: "2026-12-01T00:00:00", end: "2030-12-01T00:00:00", every_year: true })).toBe("empty");
   });
 });

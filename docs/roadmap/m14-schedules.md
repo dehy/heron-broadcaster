@@ -36,13 +36,13 @@ Design: [Rotation – Scheduling](../rotation.md#scheduling).
 
 ## Acceptance criteria
 
-- [ ] An existing station upgrades with its schedule as its default schedule, and plays the same clocks.
-- [ ] A Christmas schedule with a period from 1 December 00:00 to 1 January 00:00, every year, plays its clocks from 1 December 00:00 to 31 December 23:59 each year, and the default schedule's before and after; a simulation across 1 December shows the change at midnight, station time.
-- [ ] A period inside another (31 December 20:00 to 1 January 02:00 inside Christmas) plays its own schedule, then Christmas comes back until the end of its period.
-- [ ] An hour the active schedule leaves empty rotates the whole library, even when the default schedule has a clock then.
-- [ ] Each pick in the selection log names its schedule.
-- [ ] The default schedule cannot be deleted or given periods; a period that ends before it starts, or not on the hour, is refused.
-- [ ] *Schedule* shows which schedule plays now and the next change, and a new schedule copied from the default one has its hours.
+- [x] An existing station upgrades with its schedule as its default schedule, and plays the same clocks.
+- [x] A Christmas schedule with a period from 1 December 00:00 to 1 January 00:00, every year, plays its clocks from 1 December 00:00 to 31 December 23:59 each year, and the default schedule's before and after; a simulation across 1 December shows the change at midnight, station time.
+- [x] A period inside another (31 December 20:00 to 1 January 02:00 inside Christmas) plays its own schedule, then Christmas comes back until the end of its period.
+- [x] An hour the active schedule leaves empty rotates the whole library, even when the default schedule has a clock then.
+- [x] Each pick in the selection log names its schedule.
+- [x] The default schedule cannot be deleted or given periods; a period that ends before it starts, or not on the hour, is refused.
+- [x] *Schedule* shows which schedule plays now and the next change, and a new schedule copied from the default one has its hours.
 
 ## Questions
 

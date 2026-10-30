@@ -5325,3 +5325,189 @@ async fn roles_per_station() {
     assert_eq!(admin.get("/stations").await.as_array().unwrap().len(), 2);
     station.stop().await;
 }
+
+#[tokio::test]
+async fn schedules_play_during_their_periods() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+    let t = &station.tracks;
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            "/settings/station",
+            json!({"timezone": "Europe/Paris"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Two clocks, each calling its own category.
+    let mut clocks = Vec::new();
+    for (name, members) in [("Usual", &t[..3]), ("Christmas", &t[3..])] {
+        let (status, category) = admin
+            .send(Method::POST, "/categories", json!({"name": name}))
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{category}");
+        for track in members {
+            let (status, _) = admin
+                .send(
+                    Method::PUT,
+                    &format!("/tracks/{track}/categories"),
+                    json!([{"category_id": category["id"]}]),
+                )
+                .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+        let (status, clock) = admin
+            .send(
+                Method::POST,
+                "/clocks",
+                json!({"name": name, "slots": [{"category_id": category["id"], "enforce_rules": false}]}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{clock}");
+        clocks.push(clock["id"].as_u64().unwrap());
+    }
+    let week = |clock: u64, skip: Option<u8>| -> Value {
+        json!(
+            (1..=7u8)
+                .flat_map(|day| (0..24u8).map(move |hour| (day, hour)))
+                .filter(|(_, hour)| Some(*hour) != skip)
+                .map(|(day, hour)| json!({"day_of_week": day, "hour": hour, "clock_id": clock}))
+                .collect::<Vec<_>>()
+        )
+    };
+
+    // The existing week is the default schedule's.
+    let (status, _) = admin
+        .send(Method::PUT, "/schedule", week(clocks[0], None))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let list = admin.get("/schedules").await;
+    let default_id = list["schedules"][0]["id"].as_u64().unwrap();
+    assert_eq!(list["schedules"].as_array().unwrap().len(), 1);
+    assert_eq!(list["schedules"][0]["is_default"], true);
+    assert_eq!(list["schedules"][0]["hours"], 168);
+    assert_eq!(list["active_id"], default_id);
+    assert!(list["next_change"].is_null());
+
+    // A Christmas schedule, copied from the default one.
+    let (status, _) = viewer
+        .send(Method::POST, "/schedules", json!({"name": "Christmas"}))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, christmas) = admin
+        .send(
+            Method::POST,
+            "/schedules",
+            json!({"name": "Christmas", "copy_from": default_id}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{christmas}");
+    assert_eq!(christmas["hours"].as_array().unwrap().len(), 168);
+    let christmas_id = christmas["id"].as_u64().unwrap();
+    let (status, _) = admin
+        .send(Method::POST, "/schedules", json!({"name": "Christmas"}))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // Periods: on the hour, not on the default schedule.
+    let period =
+        json!({"start": "2026-12-01T00:00:00", "end": "2027-01-01T00:00:00", "every_year": true});
+    for (id, periods, expected) in [
+        (
+            default_id,
+            json!([period]),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            christmas_id,
+            json!([{"start": "2026-12-01T00:30:00", "end": "2027-01-01T00:00:00"}]),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            christmas_id,
+            json!([{"start": "2027-01-01T00:00:00", "end": "2026-12-01T00:00:00"}]),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+    ] {
+        let (status, body) = admin
+            .send(
+                Method::PUT,
+                &format!("/schedules/{id}"),
+                json!({"hours": [], "periods": periods}),
+            )
+            .await;
+        assert_eq!(status, expected, "{body}");
+    }
+    // Christmas plays its clock, but leaves noon empty.
+    let (status, body) = admin
+        .send(
+            Method::PUT,
+            &format!("/schedules/{christmas_id}"),
+            json!({"name": "Noël", "hours": week(clocks[1], Some(12)), "periods": [period]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["name"], "Noël");
+    assert_eq!(body["periods"][0]["every_year"], true);
+    assert_eq!(body["hours"].as_array().unwrap().len(), 161);
+    let list = admin.get("/schedules").await;
+    assert!(list["next_change"].is_object(), "{list}");
+
+    // A simulation across 1 December: the change at midnight, Paris time
+    // (23:00 UTC), and the empty noon rotates the whole library.
+    let start = jiff::civil::date(2026, 11, 30)
+        .at(22, 0, 0, 0)
+        .in_tz("Europe/Paris")
+        .unwrap()
+        .timestamp()
+        .as_millisecond();
+    let midnight = start + 2 * 3_600_000;
+    let noon = start + 14 * 3_600_000;
+    let (status, report) = admin
+        .send(
+            Method::POST,
+            "/rotation/simulate",
+            json!({"hours": 16, "start_unix_ms": start, "seed": 7}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    let picks = report["simulation"]["picks"].as_array().unwrap();
+    assert!(!picks.is_empty());
+    for pick in picks {
+        let at = pick["start_unix_ms"].as_i64().unwrap();
+        let explanation = &pick["explanation"];
+        if at < midnight {
+            assert_eq!(explanation["schedule_id"], default_id, "{pick}");
+            assert_eq!(explanation["clock_id"], clocks[0], "{pick}");
+        } else {
+            assert_eq!(explanation["schedule_id"], christmas_id, "{pick}");
+            assert_eq!(explanation["schedule_name"], "Noël", "{pick}");
+            if (noon..noon + 3_600_000).contains(&at) {
+                assert!(explanation["clock_id"].is_null(), "{pick}");
+            } else {
+                assert_eq!(explanation["clock_id"], clocks[1], "{pick}");
+            }
+        }
+    }
+
+    // The default schedule stays; the others go.
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/schedules/{default_id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/schedules/{christmas_id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        admin.get("/schedules").await["schedules"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}

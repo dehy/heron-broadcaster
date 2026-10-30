@@ -1,19 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// The schedule: which clock runs at each hour of the week, in the
-// station's time zone. Pick a clock, then paint hours, rectangles, days,
-// an hour of every day or the week (docs/web.md › Painting the schedule).
+// The schedules: which clock runs at each hour of the week, in the
+// station's time zone. Pick a schedule and a clock, then paint hours,
+// rectangles, days, an hour of every day or the week (docs/web.md ›
+// Painting the schedule); a schedule other than the default one plays
+// during its periods (docs/web.md › Schedules and periods).
 
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type ScheduledHour, api, unwrap } from "../api";
-import { Card, Empty, ErrorView, Loading, PageHead } from "../components/ui";
-import { rich, t } from "../i18n";
+import { type Period, type ScheduleSummary, type ScheduledHour, api, done, unwrap } from "../api";
+import { Banner, Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, Modal, PageHead } from "../components/ui";
+import { locale, rich, t } from "../i18n";
 import { DAY_NUMBERS, dayName, hourLabel } from "../lib/rotation";
 import {
   type Grid,
   type Hour,
   HOURS,
+  civilLabel,
+  joinCivil,
+  periodProblem,
+  splitCivil,
   WEEKDAYS,
   WEEKEND,
   cell,
@@ -43,10 +49,32 @@ function fromGrid(grid: Grid): ScheduledHour[] {
   });
 }
 
+/** The name shown for a schedule: the default one has none of its own. */
+function scheduleName(schedule: Pick<ScheduleSummary, "name" | "is_default"> | undefined): string {
+  return !schedule ? "?" : schedule.is_default ? t("schedules.default") : schedule.name;
+}
+
+function samePeriods(a: Period[], b: Period[]): boolean {
+  return JSON.stringify(a.map(normal)) === JSON.stringify(b.map(normal));
+}
+
+function normal(period: Period): Period {
+  return { start: period.start, end: period.end, every_year: period.every_year ?? false };
+}
+
 export function Schedule() {
   const canEdit = useCan("operator");
   const clocks = useQuery({ queryKey: ["clocks"], queryFn: () => unwrap(api.GET("/api/v1/clocks")) });
-  const schedule = useQuery({ queryKey: ["schedule"], queryFn: () => unwrap(api.GET("/api/v1/schedule")) });
+  const list = useQuery({ queryKey: ["schedules"], queryFn: () => unwrap(api.GET("/api/v1/schedules")) });
+  // The schedule shown; the one playing now until another is picked.
+  const [chosen, setChosen] = useState<number | undefined>(undefined);
+  const selectedId = chosen ?? list.data?.active_id;
+  const schedule = useQuery({
+    queryKey: ["schedules", selectedId],
+    queryFn: () => unwrap(api.GET("/api/v1/schedules/{id}", { params: { path: { id: selectedId ?? 0 } } })),
+    enabled: selectedId !== undefined,
+  });
+  const [periods, setPeriods] = useState<Period[]>([]);
   const station = useQuery({
     queryKey: ["settings", "station"],
     queryFn: () => unwrap(api.GET("/api/v1/settings/station")),
@@ -67,7 +95,9 @@ export function Schedule() {
 
   useEffect(() => {
     if (schedule.data) {
-      setGrid(toGrid(schedule.data));
+      setGrid(toGrid(schedule.data.hours));
+      setPeriods(schedule.data.periods.map(normal));
+      setUndo([]);
     }
   }, [schedule.data]);
   useEffect(() => {
@@ -106,18 +136,28 @@ export function Schedule() {
     [clocks.data],
   );
   const names = new Map((clocks.data ?? []).map((clock) => [clock.id, clock.name]));
-  const save = useAction(() => unwrap(api.PUT("/api/v1/schedule", { body: fromGrid(grid) })), {
-    success: t("schedule.saved"),
-    invalidate: [["schedule"], ["clocks"]],
-  });
+  const save = useAction(
+    () =>
+      unwrap(
+        api.PUT("/api/v1/schedules/{id}", {
+          params: { path: { id: selectedId ?? 0 } },
+          body: { hours: fromGrid(grid), periods },
+        }),
+      ),
+    {
+      success: t("schedule.saved"),
+      invalidate: [["schedules"], ["schedule"], ["clocks"]],
+    },
+  );
 
-  if (clocks.isPending || schedule.isPending) {
+  if (clocks.isPending || list.isPending || schedule.isPending) {
     return <Loading />;
   }
-  if (clocks.isError || schedule.isError) {
-    return <ErrorView error={clocks.error ?? schedule.error} />;
+  if (clocks.isError || list.isError || schedule.isError) {
+    return <ErrorView error={clocks.error ?? list.error ?? schedule.error} />;
   }
-  const dirty = !sameGrid(toGrid(schedule.data), grid);
+  const dirty = !sameGrid(toGrid(schedule.data.hours), grid) || !samePeriods(schedule.data.periods, periods);
+  const invalid = periods.some((period) => periodProblem(period) !== null);
   /** One stroke: these hours painted with the clock picked, undoable. */
   const apply = (hours: Hour[]) => {
     setUndo((stack) => [...stack, grid]);
@@ -125,7 +165,8 @@ export function Schedule() {
   };
   const brushName = brush === null ? t("schedule.noClockBrush") : (names.get(brush) ?? "?");
   const revert = () => {
-    setGrid(toGrid(schedule.data));
+    setGrid(toGrid(schedule.data.hours));
+    setPeriods(schedule.data.periods.map(normal));
     setUndo([]);
   };
   const hoursOf = (clock: number) => [...grid.values()].filter((id) => id === clock).length;
@@ -158,7 +199,7 @@ export function Schedule() {
               <button
                 type="button"
                 className="btn primary"
-                disabled={!dirty || save.isPending}
+                disabled={!dirty || invalid || save.isPending}
                 onClick={() => save.mutate(undefined)}
               >
                 {t("common.save")}
@@ -166,6 +207,16 @@ export function Schedule() {
             </>
           )
         }
+      />
+      <SchedulesCard
+        list={list.data.schedules}
+        activeId={list.data.active_id}
+        nextChange={list.data.next_change ?? null}
+        selected={schedule.data}
+        periods={periods}
+        canEdit={canEdit}
+        onSelect={setChosen}
+        onPeriods={setPeriods}
       />
       {clocks.data.length === 0 ? (
         <Card>
@@ -388,5 +439,303 @@ export function Schedule() {
         </Card>
       )}
     </>
+  );
+}
+
+/** The schedules: which plays now, the next change, the one shown and its periods. */
+function SchedulesCard({
+  list,
+  activeId,
+  nextChange,
+  selected,
+  periods,
+  canEdit,
+  onSelect,
+  onPeriods,
+}: {
+  list: ScheduleSummary[];
+  activeId: number;
+  nextChange: { at: string; schedule_id: number } | null;
+  selected: { id: number; name: string; is_default: boolean; hours: ScheduledHour[]; periods: Period[] };
+  periods: Period[];
+  canEdit: boolean;
+  onSelect: (id: number) => void;
+  onPeriods: (periods: Period[]) => void;
+}) {
+  const byId = new Map(list.map((schedule) => [schedule.id, schedule]));
+  const [creating, setCreating] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState("");
+  const [copyFrom, setCopyFrom] = useState<number | null>(selected.id);
+  const create = useAction(
+    () =>
+      unwrap(
+        api.POST("/api/v1/schedules", { body: { name: name.trim(), ...(copyFrom !== null ? { copy_from: copyFrom } : {}) } }),
+      ),
+    {
+      success: t("schedules.created"),
+      invalidate: [["schedules"]],
+      onSuccess: (created) => {
+        setCreating(false);
+        onSelect(created.id);
+      },
+    },
+  );
+  const rename = useAction(
+    () =>
+      unwrap(
+        api.PUT("/api/v1/schedules/{id}", {
+          params: { path: { id: selected.id } },
+          body: { name: name.trim(), hours: selected.hours, periods: selected.periods },
+        }),
+      ),
+    { success: t("schedules.renamed"), invalidate: [["schedules"]], onSuccess: () => setRenaming(false) },
+  );
+  const remove = useAction(
+    () => done(api.DELETE("/api/v1/schedules/{id}", { params: { path: { id: selected.id } } })),
+    {
+      success: t("schedules.deleted"),
+      invalidate: [["schedules"], ["schedule"], ["clocks"]],
+      onSuccess: () => onSelect(activeId === selected.id ? (list[0]?.id ?? activeId) : activeId),
+    },
+  );
+  const next = nextChange ? byId.get(nextChange.schedule_id) : undefined;
+  const update = (index: number, changes: Partial<Period>) =>
+    onPeriods(periods.map((period, at) => (at === index ? { ...period, ...changes } : period)));
+  const bound = (index: number, which: "start" | "end", label: string) => {
+    const period = periods[index];
+    if (!period) {
+      return null;
+    }
+    const value = splitCivil(period[which]);
+    return (
+      <Field label={label}>
+        <span className="row" style={{ gap: "0.3rem", flexWrap: "nowrap" }}>
+          <input
+            className="input"
+            type="date"
+            required
+            value={value.date}
+            disabled={!canEdit}
+            aria-label={t("schedules.boundDate", { bound: label, period: index + 1 })}
+            onChange={(event) => update(index, { [which]: joinCivil({ ...value, date: event.target.value }) })}
+          />
+          <select
+            className="input"
+            style={{ width: "auto" }}
+            value={value.hour}
+            disabled={!canEdit}
+            aria-label={t("schedules.boundHour", { bound: label, period: index + 1 })}
+            onChange={(event) => update(index, { [which]: joinCivil({ ...value, hour: Number(event.target.value) }) })}
+          >
+            {HOURS.map((hour) => (
+              <option key={hour} value={hour}>
+                {hourLabel(hour)}
+              </option>
+            ))}
+          </select>
+        </span>
+      </Field>
+    );
+  };
+  const today = new Date().toISOString().slice(0, 10);
+  return (
+    <Card title={t("schedules.title")}>
+      <div className="stack">
+        <div className="row">
+          <select
+            className="input"
+            style={{ width: "auto" }}
+            aria-label={t("schedules.shown")}
+            value={selected.id}
+            onChange={(event) => onSelect(Number(event.target.value))}
+          >
+            {list.map((schedule) => (
+              <option key={schedule.id} value={schedule.id}>
+                {scheduleName(schedule)}
+                {schedule.id === activeId ? ` · ${t("schedules.playingNow")}` : ""}
+              </option>
+            ))}
+          </select>
+          <span className="spacer" />
+          {canEdit && (
+            <>
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => {
+                  setName("");
+                  setCopyFrom(selected.id);
+                  setCreating(true);
+                }}
+              >
+                <Icon name="plus" /> {t("schedules.new")}
+              </button>
+              {!selected.is_default && (
+                <>
+                  <button
+                    type="button"
+                    className="btn small"
+                    onClick={() => {
+                      setName(selected.name);
+                      setRenaming(true);
+                    }}
+                  >
+                    {t("schedules.rename")}
+                  </button>
+                  <ConfirmButton
+                    className="btn small danger"
+                    confirm={t("categories.deleteButton")}
+                    question={<p>{rich("schedules.deleteQuestion", { name: <strong>{selected.name}</strong> })}</p>}
+                    onConfirm={() => remove.mutate(undefined)}
+                  >
+                    <Icon name="trash" /> {t("categories.deleteButton")}
+                  </ConfirmButton>
+                </>
+              )}
+            </>
+          )}
+        </div>
+        <p className="muted small" style={{ margin: 0 }}>
+          {rich("schedules.now", { name: <strong>{scheduleName(byId.get(activeId))}</strong> })}{" "}
+          {nextChange && next
+            ? rich("schedules.nextChange", {
+                name: <strong>{scheduleName(next)}</strong>,
+                at: civilLabel(nextChange.at, false, locale()),
+              })
+            : t("schedules.noChange")}
+        </p>
+        {selected.is_default ? (
+          <p className="muted small" style={{ margin: 0 }}>
+            {t("schedules.defaultHelp")}
+          </p>
+        ) : (
+          <>
+            {periods.length === 0 && <Banner kind="warn">{t("schedules.noPeriod")}</Banner>}
+            <ol className="list" aria-label={t("schedules.periods")}>
+              {periods.map((period, index) => {
+                const problem = periodProblem(period);
+                return (
+                  <li key={index} className="row" style={{ alignItems: "flex-end" }}>
+                    {bound(index, "start", t("schedules.from"))}
+                    {bound(index, "end", t("schedules.until"))}
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={period.every_year ?? false}
+                        disabled={!canEdit}
+                        onChange={(event) => update(index, { every_year: event.target.checked })}
+                      />
+                      {t("restrictions.everyYear")}
+                    </label>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        className="btn ghost icon"
+                        aria-label={t("schedules.removePeriod", { period: index + 1 })}
+                        title={t("schedules.removePeriod", { period: index + 1 })}
+                        onClick={() => onPeriods(periods.filter((_, at) => at !== index))}
+                      >
+                        <Icon name="trash" />
+                      </button>
+                    )}
+                    {problem && <span className="badge warn">{t(problem === "empty" ? "schedules.problemEmpty" : "schedules.problemBackwards")}</span>}
+                  </li>
+                );
+              })}
+            </ol>
+            <p className="muted small" style={{ margin: 0 }}>
+              {t("schedules.periodsHelp")}
+            </p>
+            {canEdit && (
+              <div className="row">
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() =>
+                    onPeriods([
+                      ...periods,
+                      { start: joinCivil({ date: today, hour: 0 }), end: joinCivil({ date: today, hour: 23 }), every_year: false },
+                    ])
+                  }
+                >
+                  <Icon name="plus" /> {t("schedules.addPeriod")}
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      <Modal
+        title={t("schedules.new")}
+        open={creating}
+        onClose={() => setCreating(false)}
+        footer={
+          <>
+            <button type="button" className="btn" onClick={() => setCreating(false)}>
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!name.trim() || create.isPending}
+              onClick={() => create.mutate(undefined)}
+            >
+              {t("schedules.create")}
+            </button>
+          </>
+        }
+      >
+        <div className="stack">
+          <Field label={t("categories.name")}>
+            <input
+              className="input"
+              value={name}
+              maxLength={255}
+              placeholder={t("schedules.namePlaceholder")}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </Field>
+          <Field label={t("schedules.startFrom")} hint={t("schedules.startFromHelp")}>
+            <select
+              className="input"
+              value={copyFrom ?? ""}
+              onChange={(event) => setCopyFrom(event.target.value === "" ? null : Number(event.target.value))}
+            >
+              <option value="">{t("schedules.empty")}</option>
+              {list.map((schedule) => (
+                <option key={schedule.id} value={schedule.id}>
+                  {t("schedules.copyOf", { name: scheduleName(schedule) })}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      </Modal>
+      <Modal
+        title={t("schedules.rename")}
+        open={renaming}
+        onClose={() => setRenaming(false)}
+        footer={
+          <>
+            <button type="button" className="btn" onClick={() => setRenaming(false)}>
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!name.trim() || rename.isPending}
+              onClick={() => rename.mutate(undefined)}
+            >
+              {t("common.save")}
+            </button>
+          </>
+        }
+      >
+        <Field label={t("categories.name")}>
+          <input className="input" value={name} maxLength={255} onChange={(event) => setName(event.target.value)} />
+        </Field>
+      </Modal>
+    </Card>
   );
 }

@@ -597,6 +597,7 @@ async fn create_station(
             .await
             .map_err(|error| conflict(error, &code))?
             .last_insert_id();
+    crate::schedules::default_id(&state.pool, id).await?;
     state.stations.reload(id).await?;
     tracing::info!(station = %code, by = %user.username, "station added");
     let station = state.stations.describe(fetch(&state.pool, id).await?);
@@ -697,10 +698,14 @@ async fn delete_station(
     }
     let uses: Vec<(String, i64)> = sqlx::query_as(
         "SELECT 'clocks', COUNT(*) FROM clocks WHERE station_id = ?
-         UNION ALL SELECT 'schedule', COUNT(*) FROM clock_schedule WHERE station_id = ?
+         UNION ALL SELECT 'scheduled hours', COUNT(*) FROM clock_schedule cs
+             JOIN schedules s ON s.id = cs.schedule_id WHERE s.station_id = ?
+         UNION ALL SELECT 'schedules besides the default one', COUNT(*) FROM schedules
+             WHERE station_id = ? AND NOT is_default
          UNION ALL SELECT 'outputs', COUNT(*) FROM outputs WHERE station_id = ?
          UNION ALL SELECT 'webhooks', COUNT(*) FROM webhooks WHERE station_id = ?",
     )
+    .bind(id)
     .bind(id)
     .bind(id)
     .bind(id)

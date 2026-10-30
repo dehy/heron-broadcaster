@@ -31,6 +31,7 @@ mod public;
 mod queue;
 mod restrictions;
 mod rotation;
+mod schedules;
 mod selection;
 mod settings;
 mod staging;
@@ -353,6 +354,8 @@ mod tests {
             "medley_stations",
             "restriction_stations",
             "clock_schedule",
+            "schedules",
+            "schedule_periods",
             "clock_slots",
             "clocks",
             "encoder_profiles",
@@ -475,9 +478,17 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(stations, [(1, String::new(), "main".to_owned(), true)]);
+        // The schedule became the first station's default schedule.
+        let hours: Vec<(u64, bool, u8, u8, u64)> = sqlx::query_as(
+            "SELECT s.station_id, s.is_default, cs.day_of_week, cs.hour, cs.clock_id
+             FROM clock_schedule cs JOIN schedules s ON s.id = cs.schedule_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(hours, [(1, true, 1, 6, 7)]);
         for table in [
             "clocks",
-            "clock_schedule",
             "play_history",
             "rotation_picks",
             "outputs",

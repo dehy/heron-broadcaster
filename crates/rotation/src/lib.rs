@@ -18,12 +18,14 @@ pub mod names;
 pub mod restrict;
 mod rng;
 pub mod rules;
+pub mod schedule;
 mod select;
 mod sim;
 
 pub use restrict::{Mode, Restriction, Rule, Target};
 pub use rng::Rng;
 pub use rules::{AcrossWindows, SeparationOverrides, Windows};
+pub use schedule::{Period, Schedule, ScheduleId};
 pub use select::{Blocked, Explanation, Pick, SeparationRule, SkipReason, SkippedSlot, next};
 pub use sim::{SimulatedPick, Simulation, Violation, audit, simulate};
 
@@ -192,13 +194,6 @@ pub struct Clock {
     pub looping: bool,
 }
 
-/// Which clock runs at a given hour of a given day.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Schedule {
-    /// ISO day of the week (1 = Monday … 7 = Sunday) and hour (0 to 23).
-    pub hours: HashMap<(u8, u8), ClockId>,
-}
-
 /// Everything rotation needs to know about the station.
 #[derive(Clone, Debug)]
 pub struct Library {
@@ -208,7 +203,10 @@ pub struct Library {
     pub similar: HashMap<ArtistId, Vec<ArtistId>>,
     pub restrictions: Vec<Restriction>,
     pub clocks: HashMap<ClockId, Clock>,
+    /// The default schedule.
     pub schedule: Schedule,
+    /// The other schedules, which play during their periods.
+    pub schedules: Vec<Schedule>,
     pub settings: RotationSettings,
     pub time_zone: TimeZone,
     /// Categories whose type never plays twice in a row, and their type
@@ -225,7 +223,10 @@ pub struct LibraryParts {
     pub similar: Vec<(ArtistId, ArtistId)>,
     pub restrictions: Vec<Restriction>,
     pub clocks: Vec<Clock>,
+    /// The default schedule.
     pub schedule: Schedule,
+    /// The other schedules, which play during their periods.
+    pub schedules: Vec<Schedule>,
     pub settings: RotationSettings,
     /// Categories whose type never plays twice in a row, and their type.
     pub no_two_in_a_row: Vec<(CategoryId, TypeId)>,
@@ -274,6 +275,7 @@ impl Library {
             restrictions: parts.restrictions,
             clocks: parts.clocks.into_iter().map(|c| (c.id, c)).collect(),
             schedule: parts.schedule,
+            schedules: parts.schedules,
             settings: parts.settings,
             time_zone,
             no_two_in_a_row: parts.no_two_in_a_row.into_iter().collect(),
@@ -312,11 +314,17 @@ impl Library {
             .and_then(|id| self.categories.get(&id))
     }
 
-    /// The clock scheduled at `at`.
+    /// The schedule playing at `at`: the default one, or another during
+    /// its periods.
+    pub fn schedule_at(&self, at: &jiff::Zoned) -> &Schedule {
+        schedule::playing(&self.schedule, &self.schedules, at.datetime())
+    }
+
+    /// The clock scheduled at `at`, by the schedule playing then.
     pub fn clock_at(&self, at: &jiff::Zoned) -> Option<&Clock> {
         let day = at.weekday().to_monday_one_offset() as u8;
         let hour = at.hour() as u8;
-        self.schedule
+        self.schedule_at(at)
             .hours
             .get(&(day, hour))
             .and_then(|id| self.clocks.get(id))
