@@ -150,6 +150,7 @@ An existing user keeps their role, as their shared role and their role on the fi
 - **Stations** page (admins): create, rename, enable or disable, and see each station's engine variable and whether it is set.
 - **Users**: a role per station.
 - Track and artist pages show plays per station and in total.
+- A category created on the spot, from a track, a selection of tracks or the buffer, belongs to the station shown; the Categories page changes its stations.
 
 ## Limitations
 

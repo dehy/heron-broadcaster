@@ -13,6 +13,7 @@ import { useLabels } from "../components/SelectionActions";
 import { SeparationEditor } from "../components/Separation";
 import { Card, ConfirmButton, Empty, ErrorView, Field, Icon, Loading, Modal, PageHead } from "../components/ui";
 import { number, rich, t } from "../i18n";
+import { COLORS } from "../lib/colors";
 import { totalTime } from "../lib/format";
 import { describeOverrides } from "../lib/rotation";
 import { Link } from "../lib/router";
@@ -36,7 +37,6 @@ export function sortCategories(categories: Category[], by: SortKey, descending: 
   });
 }
 
-export const COLORS = ["#2f6fd6", "#b4549a", "#1d7a3e", "#b07a00", "#c62828", "#0b6e66", "#6b4fbb", "#5f6268"];
 
 export function Categories() {
   const canEdit = useCan("operator");
