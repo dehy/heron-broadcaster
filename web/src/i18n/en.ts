@@ -483,6 +483,8 @@ const en = {
   "track.revert": "Revert",
   "track.emptyFields": "Empty fields use the analysis and the station's {link}.",
   "track.crossfadeSettings": "crossfade settings",
+  "track.nextStartsNow": "Now: {value}. Empty: the station's mode.",
+  "track.nextStartsShort": "Short track: always back to back.",
   "track.analysisValue": "Analysis: {value}",
   "track.gapKiller": "Gap Killer",
   "track.gapKillerHelp": "Off plays the whole file",

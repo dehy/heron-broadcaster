@@ -486,6 +486,8 @@ const fr = {
   "track.revert": "Annuler les modifications",
   "track.emptyFields": "Les champs vides suivent l'analyse et les {link} de la station.",
   "track.crossfadeSettings": "réglages d'enchaînement",
+  "track.nextStartsNow": "Actuellement : {value}. Vide : le mode de la station.",
+  "track.nextStartsShort": "Piste courte : toujours bout à bout.",
   "track.analysisValue": "Analyse : {value}",
   "track.gapKiller": "Gap Killer",
   "track.gapKillerHelp": "Désactivé, tout le fichier est diffusé",
