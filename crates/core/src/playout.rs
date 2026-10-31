@@ -349,10 +349,28 @@ pub fn plan_transition(
         fade_in: None,
     };
     let overrides = &outgoing.crossfade;
-    if overrides.crossfade == Some(false)
-        || outgoing.playable_ms() <= settings.min_track_ms
-        || incoming.playable_ms() <= settings.min_track_ms
-    {
+    if overrides.crossfade == Some(false) {
+        return back_to_back;
+    }
+    // A short track (a jingle) that sets where the next track starts keeps
+    // that point, without fades: the tracks only overlap.
+    if outgoing.playable_ms() <= settings.min_track_ms {
+        let own_point = match (overrides.mode, overrides.fixed_ms) {
+            (Some(CrossfadeMode::Fixed), Some(fixed_ms)) => {
+                Some(outgoing.cue_out_ms.saturating_sub(fixed_ms))
+            }
+            _ => None,
+        };
+        return own_point
+            .filter(|point| (outgoing.cue_in_ms..outgoing.cue_out_ms).contains(point))
+            .map_or(back_to_back, |point| Transition {
+                next_start_ms: point
+                    .max(outgoing.cue_out_ms.saturating_sub(incoming.playable_ms())),
+                fade_out: None,
+                fade_in: None,
+            });
+    }
+    if incoming.playable_ms() <= settings.min_track_ms {
         return back_to_back;
     }
 
@@ -568,5 +586,45 @@ mod tests {
         assert_eq!(settings.crossfade.fade_out.curve, FadeCurve::SCurve);
         assert_eq!(settings.crossfade.fade_out.time_ms, 2_500);
         assert_eq!(settings.crossfade.min_track_ms, 20_000);
+    }
+
+    #[test]
+    fn a_short_track_keeps_its_own_point_without_fades() {
+        let settings = CrossfadeSettings::default();
+        let mut jingle = track(0, 2_000, None);
+        jingle.crossfade.mode = Some(CrossfadeMode::Fixed);
+        jingle.crossfade.fixed_ms = Some(500);
+        let song = track(0, 200_000, Some(195_000));
+        let plan = plan_transition(&jingle, &song, &settings);
+        assert_eq!(plan.next_start_ms, 1_500);
+        assert_eq!(plan.fade_out, None);
+        assert_eq!(plan.fade_in, None);
+        // Into another jingle too.
+        assert_eq!(
+            plan_transition(&jingle, &jingle, &settings).next_start_ms,
+            1_500
+        );
+        // Without its own point, or with crossfading off: back to back.
+        let plain = track(0, 2_000, None);
+        assert_eq!(
+            plan_transition(&plain, &song, &settings).next_start_ms,
+            2_000
+        );
+        jingle.crossfade.crossfade = Some(false);
+        assert_eq!(
+            plan_transition(&jingle, &song, &settings).next_start_ms,
+            2_000
+        );
+    }
+
+    #[test]
+    fn a_long_track_into_a_short_one_stays_back_to_back() {
+        let settings = CrossfadeSettings::default();
+        let mut song = track(0, 200_000, Some(195_000));
+        song.crossfade.mode = Some(CrossfadeMode::Fixed);
+        song.crossfade.fixed_ms = Some(4_000);
+        let jingle = track(0, 2_000, None);
+        let plan = plan_transition(&song, &jingle, &settings);
+        assert_eq!(plan.next_start_ms, 200_000);
     }
 }
