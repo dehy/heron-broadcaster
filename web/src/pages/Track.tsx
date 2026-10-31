@@ -248,13 +248,22 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   const shortTrack = crossfade ? cueOut - cueIn <= crossfade.min_track_ms : false;
   const crossfades = overrides.crossfade !== false && !shortTrack;
   const autoPoint = track.analysis?.fade_out_start_ms ?? null;
-  const mixPoint = !crossfades
-    ? null
-    : mode === "fixed"
-      ? Math.max(cueIn, cueOut - fixedMs)
-      : autoPoint !== null && autoPoint >= cueIn && autoPoint < cueOut
-        ? autoPoint
-        : null;
+  // A short track keeps a point it sets itself, without fades.
+  const ownPoint =
+    overrides.crossfade !== false && overrides.mode === "fixed" && overrides.fixed_ms != null
+      ? cueOut - overrides.fixed_ms
+      : null;
+  const mixPoint = shortTrack
+    ? ownPoint !== null && ownPoint >= cueIn && ownPoint < cueOut
+      ? ownPoint
+      : null
+    : !crossfades
+      ? null
+      : mode === "fixed"
+        ? Math.max(cueIn, cueOut - fixedMs)
+        : autoPoint !== null && autoPoint >= cueIn && autoPoint < cueOut
+          ? autoPoint
+          : null;
   const fadeOut: Fade | undefined = overrides.fade_out ?? crossfade?.fade_out;
   const fadeIn: Fade | undefined = overrides.fade_in ?? crossfade?.fade_in;
 
@@ -297,15 +306,14 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
       color: "var(--accent)",
       end: true,
       row: 1,
-      // Dragging it sets a fixed crossfade for this track; a short track
-      // always follows back to back.
-      ...(canEdit && !shortTrack && {
+      // Dragging it sets a fixed crossfade for this track.
+      ...(canEdit && {
         onDrag: (ms: number) => setDraft((d) => withNextStart(d, ms, cueOut)),
       }),
     });
   }
   const regions: Region[] = [];
-  if (mixPoint !== null && fadeOut?.enabled) {
+  if (mixPoint !== null && fadeOut?.enabled && !shortTrack) {
     regions.push({
       startMs: mixPoint,
       endMs: Math.min(cueOut, mixPoint + fadeOut.time_ms),
@@ -962,7 +970,7 @@ function OverridesCard({
           <Field
             label={t("transition.nextStarts")}
             hint={
-              shortTrack
+              shortTrack && mixPoint === null
                 ? t("track.nextStartsShort")
                 : mixPoint === null
                   ? t("track.nextStartsNow", { value: t("track.backToBackAt", { at: duration(cueOut, true) }) })
@@ -976,7 +984,7 @@ function OverridesCard({
                   : null
               }
               placeholder={mixPoint ?? cueOut}
-              disabled={disabled || shortTrack}
+              disabled={disabled}
               onChange={(ms) =>
                 setDraft((d) =>
                   ms === null
