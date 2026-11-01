@@ -921,6 +921,33 @@ a.badge-link:hover {
   border-top: 1px solid var(--border);
 }
 
+/* The clocks changing between two rows: a band with what happened, blue
+   going to winter time, yellow going to summer time. */
+.clock-change td {
+  padding: 0.55rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.clock-change span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.clock-change.winter td {
+  background: #1f5fbf;
+  color: #ffffff;
+}
+
+.clock-change.summer td {
+  background: #f5c518;
+  color: #3a2a00;
+}
+
 /* Dashboard -------------------------------------------------------------- */
 
 .decks {

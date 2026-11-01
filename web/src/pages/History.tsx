@@ -3,11 +3,11 @@
 // What was played, newest first.
 
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { type Play, api, query, unwrap } from "../api";
-import { Card, Empty, ErrorView, Loading, PageHead } from "../components/ui";
+import { Card, Empty, ErrorView, Icon, Loading, PageHead } from "../components/ui";
 import { t } from "../i18n";
-import { clockTime, duration, fullDate } from "../lib/format";
+import { clockChange, clockTime, duration, fullDate } from "../lib/format";
 import { endingLabel, sourceLabel } from "../lib/labels";
 import { useLive } from "../lib/live";
 import { Link } from "../lib/router";
@@ -65,8 +65,8 @@ export function History() {
                 </tr>
               </thead>
               <tbody>
-                {groupByDay(rows).map(([day, items]) => (
-                  <DayRows key={day} day={day} plays={items} />
+                {groupByDay(rows).map(([day, items], index, days) => (
+                  <DayRows key={day} day={day} plays={items} above={days[index - 1]?.[1].at(-1)} />
                 ))}
               </tbody>
             </table>
@@ -99,7 +99,8 @@ function groupByDay(plays: Play[]): [string, Play[]][] {
   return [...groups.entries()];
 }
 
-function DayRows({ day, plays }: { day: string; plays: Play[] }) {
+/** A day's plays; `above` is the play shown just before them, the next day's first. */
+function DayRows({ day, plays, above }: { day: string; plays: Play[]; above?: Play | undefined }) {
   return (
     <>
       <tr>
@@ -107,29 +108,47 @@ function DayRows({ day, plays }: { day: string; plays: Play[] }) {
           {day}
         </th>
       </tr>
-      {plays.map((play) => {
+      {plays.map((play, index) => {
         const name = [play.artist, play.title].filter(Boolean).join(" – ") || t("history.unknownTrack");
+        // Newest first: the play above started later.
+        const later = index === 0 ? above : plays[index - 1];
+        const change = later && clockChange(play.started_at_unix_ms, later.started_at_unix_ms);
         return (
-          <tr key={play.id}>
-            <td className="num">{clockTime(play.started_at_unix_ms)}</td>
-            <td className="title-cell ellipsis">
-              {play.track_id ? <Link to={`/library/${play.track_id}`}>{name}</Link> : name}
-            </td>
-            <td className="hide-narrow">{play.deck.toUpperCase()}</td>
-            <td className="hide-narrow">{sourceLabel(play.source)}</td>
-            <td>
-              {play.ended_at_unix_ms === null || play.ended_at_unix_ms === undefined ? (
-                <span className="badge accent">{t("nav.onAir")}</span>
-              ) : (
-                <span className={play.end_reason === "skipped" ? "warn" : ""}>
-                  {endingLabel(play.end_reason)}
-                  {play.played_ms !== null && play.played_ms !== undefined && (
-                    <span className="muted num"> · {duration(play.played_ms)}</span>
-                  )}
-                </span>
-              )}
-            </td>
-          </tr>
+          <Fragment key={play.id}>
+            {change && (
+              <tr className={`clock-change ${change.kind}`}>
+                <td colSpan={5}>
+                  <span>
+                    <Icon name={change.kind === "summer" ? "sun" : "snow"} size={16} />
+                    {t(change.kind === "summer" ? "history.toSummerTime" : "history.toWinterTime", {
+                      from: change.from,
+                      to: change.to,
+                    })}
+                  </span>
+                </td>
+              </tr>
+            )}
+            <tr>
+              <td className="num">{clockTime(play.started_at_unix_ms)}</td>
+              <td className="title-cell ellipsis">
+                {play.track_id ? <Link to={`/library/${play.track_id}`}>{name}</Link> : name}
+              </td>
+              <td className="hide-narrow">{play.deck.toUpperCase()}</td>
+              <td className="hide-narrow">{sourceLabel(play.source)}</td>
+              <td>
+                {play.ended_at_unix_ms === null || play.ended_at_unix_ms === undefined ? (
+                  <span className="badge accent">{t("nav.onAir")}</span>
+                ) : (
+                  <span className={play.end_reason === "skipped" ? "warn" : ""}>
+                    {endingLabel(play.end_reason)}
+                    {play.played_ms !== null && play.played_ms !== undefined && (
+                      <span className="muted num"> · {duration(play.played_ms)}</span>
+                    )}
+                  </span>
+                )}
+              </td>
+            </tr>
+          </Fragment>
         );
       })}
     </>

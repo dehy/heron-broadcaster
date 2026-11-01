@@ -10,6 +10,8 @@ import type { Catalog } from ".";
 const fr = {
   // Formatting
   "format.never": "jamais",
+  "format.summerTime": "{time} (heure d’été)",
+  "format.winterTime": "{time} (heure d’hiver)",
   "format.bytes": "{size} o",
   "format.kilobytes": "{size} ko",
   "format.megabytes": "{size} Mo",
@@ -332,6 +334,8 @@ const fr = {
   "history.replaced": "Remplacée",
   "history.ended": "Terminée",
   "history.description": "Chaque diffusion, telle que le moteur l'a signalée, à l'heure de la station ({zone}).",
+  "history.toSummerTime": "Passage à l’heure d’été · {from} → {to}",
+  "history.toWinterTime": "Passage à l’heure d’hiver · {from} → {to}",
   "history.showFx": "Afficher le lecteur FX",
   "history.empty": "Rien n'a encore été diffusé.",
   "history.started": "Début",

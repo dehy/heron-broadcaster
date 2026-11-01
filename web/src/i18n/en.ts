@@ -7,6 +7,8 @@
 const en = {
   // Formatting
   "format.never": "never",
+  "format.summerTime": "{time} (summer time)",
+  "format.winterTime": "{time} (winter time)",
   "format.bytes": "{size} B",
   "format.kilobytes": "{size} kB",
   "format.megabytes": "{size} MB",
@@ -329,6 +331,8 @@ const en = {
   "history.replaced": "Replaced",
   "history.ended": "Ended",
   "history.description": "Every play, as the engine reported it, in station time ({zone}).",
+  "history.toSummerTime": "Change to summer time · {from} → {to}",
+  "history.toWinterTime": "Change to winter time · {from} → {to}",
   "history.showFx": "Show the FX player",
   "history.empty": "Nothing played yet.",
   "history.started": "Started",
