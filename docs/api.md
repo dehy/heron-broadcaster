@@ -89,7 +89,7 @@ Each station has a name, a code (1 to 32 lowercase letters and digits, unique), 
 | `positions` | Twice a second | Each deck's position and length |
 | `levels` | Ten times a second, unless the URL has `?levels=false` | Peak and RMS (dBFS) of the master bus and each deck |
 | `eq` | Whenever the deck EQ settings change | `settings`: the same as `GET /settings/eq` |
-| `track` | Each track change | `event`: `started` or `ended` (with `played_ms` and `reason`: finished, skipped, stopped, replaced) |
+| `track` | Each track change | `event`: `started` (with `resumed`: the track on air going on in a restarted engine, or one taking over, not a new play) or `ended` (with `played_ms` and `reason`: finished, skipped, stopped, replaced) |
 
 The API polls the engine's state twice a second and its levels ten times a second, only while someone watches them.
 
@@ -97,7 +97,7 @@ The API polls the engine's state twice a second and its levels ten times a secon
 
 Webhooks tell other systems (a website, a chat bot, a studio display) about track changes as they happen. Admins manage them; their secrets are never sent back.
 
-- **Events:** `track.started`, `track.ended` and `track.skipped`, as the engine reports them: a skip is `track.skipped` (not also `track.ended`), any other end (played to its transition, an FX stopped or replaced) is `track.ended`. Tracks of the FX player, and tracks that send no metadata (a category type with `sends_metadata` off: jingles, ads), are only sent to webhooks with `include_fx`; tracks from the fallback directory are sent like any other.
+- **Events:** `track.started`, `track.ended` and `track.skipped`, as the engine reports them: a skip is `track.skipped` (not also `track.ended`), any other end (played to its transition, an FX stopped or replaced) is `track.ended`. The track on air going on in a restarted engine, or in one taking over from another (an upgrade), is not sent again. Tracks of the FX player, and tracks that send no metadata (a category type with `sends_metadata` off: jingles, ads), are only sent to webhooks with `include_fx`; tracks from the fallback directory are sent like any other.
 - **`queue.changed`:** what comes next changed: a track started (the queue moved on), autofill or an operator queued, removed, moved or replaced one, the queue was cleared. It carries the **upcoming tracks in airing order**, at most 10, the music only (as the public endpoints: no FX player, no tracks that send no metadata such as jingles, ads and medleys), each with its position and planned start (as the Queue page shows it, without crossfades). Changes in a burst are sent once, 2 seconds after the last; nothing is sent when the list a listener would see did not change (a planned time moving after a skip is not a change on its own, but comes with the next one).
 
   ```json
