@@ -13763,6 +13763,32 @@
         },
         "additionalProperties": false
       },
+      "FolderProblem": {
+        "type": "object",
+        "description": "What keeps backups from being written.",
+        "required": [
+          "error",
+          "uid",
+          "gid"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "The system's error (`Permission denied`…)."
+          },
+          "gid": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "uid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The user and group the API runs as: the backup folder must be\ntheirs.",
+            "minimum": 0
+          }
+        }
+      },
       "GroupSource": {
         "type": "string",
         "enum": [
@@ -19255,6 +19281,17 @@
           "server_time_unix_ms"
         ],
         "properties": {
+          "backups": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FolderProblem",
+                "description": "What keeps backups from being written: the backup folder."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "clock": {
             "$ref": "#/components/schemas/ClockStatus",
             "description": "The server clock's synchronization (the host's: containers share it)."

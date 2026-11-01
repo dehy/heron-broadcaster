@@ -33,7 +33,7 @@ quick-xml.workspace = true
 metrics.workspace = true
 notify.workspace = true
 # Reads passwords without echoing them.
-rustix = { workspace = true, features = ["termios"] }
+rustix = { workspace = true, features = ["termios", "process"] }
 # Sends webhook deliveries.
 reqwest.workspace = true
 serde.workspace = true
