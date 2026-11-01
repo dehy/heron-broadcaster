@@ -202,6 +202,8 @@ jobs:
           test "$(stat -c %a "data/backups/heron-config-$name.json")" = 600
       - name: Chaos tests (M3)
         run: scripts/chaos-test.sh
+      - name: Two stations, upgraded, and a backup restored on air (M12, M13)
+        run: scripts/check-two-stations.sh
       - if: github.event_name == 'push'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
