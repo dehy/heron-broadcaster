@@ -161,13 +161,8 @@ impl ConfigSync {
             settings::load_for(&self.pool, self.station_id, EngineManagement::SETTINGS_NAME)
                 .await?;
         if !management.managed {
-            self.adopt(
-                &engine_playout,
-                engine_eq.as_ref(),
-                engine_agc.as_ref(),
-                &engine_outputs,
-            )
-            .await?;
+            self.adopt(&engine_playout, engine_eq.as_ref(), &engine_outputs)
+                .await?;
             settings::save_for(
                 &self.pool,
                 self.station_id,
@@ -198,6 +193,20 @@ impl ConfigSync {
         }
 
         if let Some(engine_agc) = engine_agc {
+            // A station managed before M10 has no AGC chain saved yet: the
+            // engine's is kept (set with `ctl set-agc`, or bypassed).
+            if !settings::exists_for(&self.pool, self.station_id, AgcSettings::SETTINGS_NAME)
+                .await?
+            {
+                settings::save_for(
+                    &self.pool,
+                    self.station_id,
+                    AgcSettings::SETTINGS_NAME,
+                    &engine_agc,
+                )
+                .await?;
+                tracing::info!("copied the engine's AGC chain into the database");
+            }
             let agc: AgcSettings =
                 settings::load_for(&self.pool, self.station_id, AgcSettings::SETTINGS_NAME).await?;
             if agc != engine_agc {
@@ -227,7 +236,6 @@ impl ConfigSync {
         &self,
         playout: &PlayoutSettings,
         eq: Option<&EqSettings>,
-        agc: Option<&AgcSettings>,
         outputs: &OutputsConfig,
     ) -> ApiResult<()> {
         if !settings::exists_for(&self.pool, self.station_id, PlayoutSettings::SETTINGS_NAME)
@@ -247,14 +255,6 @@ impl ConfigSync {
         {
             settings::save_for(&self.pool, self.station_id, EqSettings::SETTINGS_NAME, eq).await?;
             tracing::info!("copied the engine's deck EQ into the database");
-        }
-        if let Some(agc) = agc
-            && !settings::exists_for(&self.pool, self.station_id, AgcSettings::SETTINGS_NAME)
-                .await?
-        {
-            settings::save_for(&self.pool, self.station_id, AgcSettings::SETTINGS_NAME, agc)
-                .await?;
-            tracing::info!("copied the engine's AGC chain into the database");
         }
         outputs::adopt(&self.pool, self.station_id, outputs).await?;
         Ok(())

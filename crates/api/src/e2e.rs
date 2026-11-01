@@ -1400,6 +1400,31 @@ async fn adopts_outputs_configured_on_the_engine() {
         .unwrap();
     let outputs: heron_core::OutputsConfig = serde_json::from_str(&config.outputs_json).unwrap();
     assert_eq!(outputs.outputs, engine_config.outputs.outputs);
+
+    // A station managed before M10: no AGC chain saved, the engine's set
+    // with `ctl set-agc` meanwhile. It is kept, not replaced by the defaults.
+    sqlx::query("DELETE FROM station_settings WHERE name = 'agc'")
+        .execute(&station.state.pool)
+        .await
+        .unwrap();
+    let first = station.state.stations.first();
+    let mut chain: heron_core::AgcSettings =
+        serde_json::from_str(&config.agc_settings_json).unwrap();
+    chain.final_stage.ceiling_db = -3.0;
+    first
+        .engine
+        .set_agc_settings(serde_json::to_string(&chain).unwrap())
+        .await
+        .unwrap();
+    first.sync.changed();
+    eventually("the AGC chain kept", Duration::from_secs(10), || async {
+        let agc = admin.get("/settings/agc").await;
+        (agc["final_stage"]["ceiling_db"] == -3.0).then_some(())
+    })
+    .await;
+    let config = first.engine.config().await.unwrap();
+    let kept: heron_core::AgcSettings = serde_json::from_str(&config.agc_settings_json).unwrap();
+    assert_eq!(kept.final_stage.ceiling_db, -3.0);
     station.stop().await;
 }
 
