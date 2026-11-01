@@ -209,6 +209,9 @@ pub enum TrackEvent {
         deck: DeckName,
         entry: QueueEntry,
         at_unix_ms: u64,
+        /// The track on air going on in a restarted engine, or one taking
+        /// over from another: the same play, not a new one.
+        resumed: bool,
     },
     Ended {
         deck: DeckName,
@@ -619,6 +622,7 @@ fn track_event(event: pb::EngineEvent) -> Option<TrackEvent> {
     match event.event? {
         pb::engine_event::Event::TrackStarted(started) => Some(TrackEvent::Started {
             deck: deck(started.deck()),
+            resumed: started.resumed,
             entry: entry(started.entry?),
             at_unix_ms,
         }),
