@@ -12,6 +12,7 @@ The schema lives in `migrations/`; this page summarizes it. Tables not used yet 
 | `analysis_jobs` | id, track_id, analysis_version, status (pending, running, done, failed), attempts, claimed_by, claimed_at, error, created_at, updated_at — queue between the scanner and `heron-analyzer` (see [Import and analysis](analysis.md#job-queue)) |
 | `track_fingerprints` | track_id, chromaprint (compressed, first two minutes), created_at |
 | `track_waveforms` | track_id, interval_ms (50), peaks (one byte per interval: the highest sample peak on a dB scale, 0 for −72 dBFS or below, 255 for full scale) — drawn by the web UI, computed with the analysis |
+| `track_levels` | track_id, min_db, max_db (the lowest and highest peak between the cue points, dBFS), the cue points and analysis time they were computed from — computed by `heron-api` from the waveform ([Import and analysis](analysis.md#job-queue)) |
 | `track_identifications` | track_id, status (identified, needs_review, kept: reviewed, the file keeps its own tags), reason, score, recording_mbid, release_mbid, candidates (JSON, for the review screen), updated_at |
 
 ## Track details and labels
