@@ -37,6 +37,7 @@ export const PAGES: Page[] = [
   { path: "/rotation", label: "nav.rotation", icon: "log", station: true },
   { path: "/playout", label: "nav.playout", icon: "fade", section: "nav.station", station: true },
   { path: "/eq", label: "nav.eq", icon: "eq", station: true },
+  { path: "/agc", label: "nav.agc", icon: "agc", station: true },
   { path: "/outputs", label: "nav.outputs", icon: "output", station: true },
   { path: "/settings", label: "nav.settings", icon: "settings", station: true },
   { path: "/webhooks", label: "nav.webhooks", icon: "bolt", admin: true, station: true },
