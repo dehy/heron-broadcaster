@@ -36,6 +36,9 @@ pub use file::{ConfigFile, Kind, RestoreReport};
 const KEEP_BEFORE_RESTORE: usize = 7;
 /// The largest configuration file uploaded.
 const MAX_UPLOAD: usize = 512 * 1024 * 1024;
+/// Locked by a backup or restore, in the backup folder: one at a time
+/// across processes, the API and `heron-api backup`.
+const LOCK_FILE: &str = ".heron-backup.lock";
 
 /// The `backups` settings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -104,8 +107,10 @@ pub struct BackupView {
 /// What keeps backups from being written.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, ToSchema)]
 pub struct FolderProblem {
-    /// The system's error (`Permission denied`…).
+    /// The system's error (`Permission denied`, `No space left on device`…).
     pub error: String,
+    /// The folder is not the API's user's: `chown` fixes it.
+    pub permission_denied: bool,
     /// The user and group the API runs as: the backup folder must be
     /// theirs.
     pub uid: u32,
@@ -116,7 +121,8 @@ pub struct FolderProblem {
 pub struct Backups {
     dir: PathBuf,
     database_url: String,
-    /// One backup or restore at a time.
+    /// One backup or restore at a time in this process; `LOCK_FILE` for
+    /// the others.
     lock: tokio::sync::Mutex<()>,
     /// Whether the folder could be written, when last checked.
     problem: std::sync::Mutex<Option<FolderProblem>>,
@@ -230,10 +236,13 @@ impl Backups {
 
     /// Writes and removes a file in the folder.
     fn probe(&self) -> std::io::Result<()> {
-        let probe = self.dir.join(".heron-write-check");
         std::fs::create_dir_all(&self.dir)?;
-        std::fs::write(&probe, b"")?;
-        std::fs::remove_file(&probe)
+        // A file of its own: another process checking at the same time
+        // does not remove it.
+        tempfile::Builder::new()
+            .prefix(".heron-write-check-")
+            .tempfile_in(&self.dir)?
+            .close()
     }
 
     /// Whether the folder can be written, remembered for `/status`.
@@ -243,18 +252,25 @@ impl Backups {
             let (uid, gid) = ids();
             FolderProblem {
                 error: error.to_string(),
+                permission_denied: error.kind() == std::io::ErrorKind::PermissionDenied,
                 uid,
                 gid,
             }
         });
-        if let Some(problem) = &problem {
-            tracing::error!(
+        match &problem {
+            Some(problem) if problem.permission_denied => tracing::error!(
                 dir = %self.dir.display(),
                 error = %problem.error,
                 "the backup folder cannot be written: give it to {}:{} on the host",
                 problem.uid,
                 problem.gid
-            );
+            ),
+            Some(problem) => tracing::error!(
+                dir = %self.dir.display(),
+                error = %problem.error,
+                "the backup folder cannot be written"
+            ),
+            None => {}
         }
         let mut current = self
             .problem
@@ -315,8 +331,44 @@ impl Backups {
     }
 
     /// Takes a backup: the configuration file, then the database dump.
+    /// Waits for the backup or restore under way, here or in another
+    /// process; the next one waits until both are dropped.
+    async fn exclusive(
+        &self,
+    ) -> ApiResult<(tokio::sync::MutexGuard<'_, ()>, Option<std::fs::File>)> {
+        let guard = self.lock.lock().await;
+        self.check_folder()
+            .map_err(|error| folder_error(&self.dir, &error))?;
+        let path = self.dir.join(LOCK_FILE);
+        let file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(&path)
+            .await
+            .map_err(|error| folder_error(&self.dir, &error))?
+            .into_std()
+            .await;
+        // Tried again and again rather than waited for in a thread: a task
+        // stopped while it waits (the API shutting down) stops waiting.
+        loop {
+            match file.try_lock() {
+                Ok(()) => return Ok((guard, Some(file))),
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                // A share without locks: the API still takes one at a time.
+                Err(std::fs::TryLockError::Error(error)) => {
+                    tracing::warn!(%error, "cannot lock {}: backups taken on the command line may run at the same time", path.display());
+                    return Ok((guard, None));
+                }
+            }
+        }
+    }
+
     pub async fn create(&self, pool: &MySqlPool, kind: Kind) -> ApiResult<BackupView> {
-        let _guard = self.lock.lock().await;
+        let _exclusive = self.exclusive().await?;
         self.create_locked(pool, kind, None).await
     }
 
@@ -417,7 +469,7 @@ impl Backups {
         bytes: &[u8],
         upload: bool,
     ) -> ApiResult<RestoreReport> {
-        let _guard = self.lock.lock().await;
+        let _exclusive = self.exclusive().await?;
         let file: ConfigFile = serde_json::from_slice(bytes).map_err(|error| {
             ApiError::Invalid(format!("this is not a Heron configuration file: {error}"))
         })?;
@@ -778,11 +830,16 @@ mod tests {
         assert!(backups.check_folder().is_err());
         let problem = backups.problem().unwrap();
         assert_eq!((problem.uid, problem.gid), ids());
+        assert!(!problem.permission_denied, "not a matter of owner");
         // Fixed: the problem goes at the next check.
         std::fs::remove_file(&taken).unwrap();
         assert!(backups.check_folder().is_ok());
         assert_eq!(backups.problem(), None);
-        assert!(!taken.join(".heron-write-check").exists());
+        assert_eq!(
+            std::fs::read_dir(&taken).unwrap().count(),
+            0,
+            "the probe is gone"
+        );
     }
 
     #[test]
@@ -828,5 +885,28 @@ mod tests {
         });
         assert!(failed.is_err());
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn one_backup_at_a_time_across_processes() {
+        let dir = tempfile::tempdir().unwrap();
+        // Two processes: each its own `Backups`, the folder in common.
+        let api = Backups::new(dir.path().to_owned(), String::new());
+        let command_line = Backups::new(dir.path().to_owned(), String::new());
+        let held = api.exclusive().await.unwrap();
+        assert!(held.1.is_some(), "locked");
+        let waiting = tokio::spawn(async move { command_line.exclusive().await.map(|_| ()) });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!waiting.is_finished(), "waits for the other");
+        // Stopped while it waits (the API shutting down): it stops at once.
+        let stopped = Backups::new(dir.path().to_owned(), String::new());
+        let gone = tokio::time::timeout(Duration::from_millis(300), stopped.exclusive()).await;
+        assert!(gone.is_err(), "still waiting when stopped");
+        drop(held);
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("goes on once the other is done")
+            .unwrap()
+            .unwrap();
     }
 }

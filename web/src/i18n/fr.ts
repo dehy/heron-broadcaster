@@ -40,6 +40,7 @@ const fr = {
   "app.versionMismatch":
     "L'interface web ({web}) et l'API ({api}) ne sont pas de la même version : certaines pages peuvent échouer. Récupérez les deux images et redémarrez-les (docker compose pull, puis docker compose up -d).",
   "app.backupFolder": "Les sauvegardes ne peuvent pas être écrites ({error}) : le dossier des sauvegardes n'appartient pas à l'utilisateur de l'API. Sur la machine, donnez-le-lui avec {command} sur HERON_BACKUP_FOLDER (./data/backups par défaut). {link}",
+  "app.backupFolderError": "Les sauvegardes ne peuvent pas être écrites dans le dossier des sauvegardes : {error}. {link}",
   "app.clockWarning": "{label} {warning}. La programmation peut démarrer au mauvais moment.",
   "app.clockLabel": "Horloge :",
   "app.title": "{page} · Heron Broadcaster",

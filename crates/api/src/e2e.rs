@@ -6214,5 +6214,14 @@ async fn tracks_have_their_lowest_and_highest_level() {
         .collect();
     assert_eq!(order[..2], [t[1], t[0]]);
     assert_eq!(page["items"][4]["level_min_db"], Value::Null);
+    // The file changed: its analysis is gone, and so are its levels.
+    sqlx::query("DELETE FROM track_analysis WHERE track_id = ?")
+        .bind(t[1])
+        .execute(pool)
+        .await
+        .unwrap();
+    let detail = admin.get(&format!("/tracks/{}", t[1])).await;
+    assert_eq!(detail["level_min_db"], Value::Null, "{detail}");
+    assert_eq!(detail["level_max_db"], Value::Null);
     station.stop().await;
 }

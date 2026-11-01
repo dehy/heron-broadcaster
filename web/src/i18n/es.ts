@@ -39,6 +39,7 @@ const es = {
   "app.versionMismatch":
     "La interfaz web ({web}) y la API ({api}) no son de la misma versión: algunas páginas pueden fallar. Descargue ambas imágenes y vuelva a iniciarlas (docker compose pull y después docker compose up -d).",
   "app.backupFolder": "No se pueden escribir las copias de seguridad ({error}): la carpeta de copias de seguridad no pertenece al usuario de la API. En el servidor, asígnesela con {command} sobre HERON_BACKUP_FOLDER (./data/backups por defecto). {link}",
+  "app.backupFolderError": "No se pueden escribir las copias de seguridad en la carpeta de copias de seguridad: {error}. {link}",
   "app.clockWarning": "{label} {warning}. La programación prevista puede empezar a una hora incorrecta.",
   "app.clockLabel": "Reloj:",
   "app.title": "{page} · Heron Broadcaster",

@@ -4527,10 +4527,12 @@ export interface components {
         };
         /** @description What keeps backups from being written. */
         FolderProblem: {
-            /** @description The system's error (`Permission denied`…). */
+            /** @description The system's error (`Permission denied`, `No space left on device`…). */
             error: string;
             /** Format: int32 */
             gid: number;
+            /** @description The folder is not the API's user's: `chown` fixes it. */
+            permission_denied: boolean;
             /**
              * Format: int32
              * @description The user and group the API runs as: the backup folder must be
