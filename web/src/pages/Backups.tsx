@@ -97,7 +97,7 @@ export function Backups() {
         onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
-          if (file && window.confirm(t("backups.restoreQuestion", { name: file.name }))) {
+          if (file && window.confirm(t("backups.restoreFileQuestion", { name: file.name }))) {
             void restoreFile(file);
           }
         }}
@@ -113,9 +113,9 @@ export function Backups() {
               <thead>
                 <tr>
                   <th>{t("backups.time")}</th>
-                  <th>{t("backups.kind")}</th>
+                  <th className="hide-narrow">{t("backups.kind")}</th>
                   <th>{t("backups.config")}</th>
-                  <th>{t("backups.database")}</th>
+                  <th className="hide-narrow">{t("backups.database")}</th>
                   <th>
                     <span className="visually-hidden">{t("library.actions")}</span>
                   </th>
@@ -125,7 +125,7 @@ export function Backups() {
                 {backups.data.map((backup) => (
                   <tr key={backup.name}>
                     <td title={backup.name}>{dateTime(backup.created_at_unix_ms)}</td>
-                    <td>
+                    <td className="hide-narrow">
                       <span className="badge">{t(KINDS[backup.kind])}</span>
                     </td>
                     <td>
@@ -133,7 +133,7 @@ export function Backups() {
                         {bytes(backup.config_size)}
                       </a>
                     </td>
-                    <td>
+                    <td className="hide-narrow">
                       {backup.database_size !== null && backup.database_size !== undefined ? (
                         <a href={`/api/v1/backups/${encodeURIComponent(backup.name)}/database`} download>
                           {bytes(backup.database_size)}

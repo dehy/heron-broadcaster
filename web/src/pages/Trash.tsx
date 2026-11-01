@@ -170,7 +170,7 @@ export function Trash() {
               disabled={page + 1 >= pages}
               onClick={() => setSearch({ page: page + 1 })}
             >
-              {t("dashboard.next")}
+              {t("library.nextPage")}
             </button>
           </div>
         )}

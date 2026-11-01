@@ -24,6 +24,8 @@ export type Catalog = { readonly [K in Key]: Message };
 export const LANGUAGES = [
   { code: "en", name: "English", load: async () => en },
   { code: "fr", name: "Français", load: async () => (await import("./fr")).default },
+  { code: "es", name: "Español", load: async () => (await import("./es")).default },
+  { code: "de", name: "Deutsch", load: async () => (await import("./de")).default },
 ] as const satisfies readonly { code: string; name: string; load: () => Promise<Catalog> }[];
 
 export type Language = (typeof LANGUAGES)[number]["code"];
