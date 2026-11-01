@@ -188,6 +188,9 @@ export function useAgcSettings(): { data: AgcSettings | undefined; error: unknow
   const live = useLive((live) => live.agc);
   const query = useQuery({
     queryKey: [...AGC_KEY, connected],
+    // Read again on every reconnection: the live messages missed meanwhile
+    // are not sent again.
+    staleTime: 0,
     queryFn: () => unwrap(api.GET("/api/v1/stations/{station_id}/settings/agc", { params: { path: here() } })),
   });
   return { data: live ?? query.data, error: query.error };
