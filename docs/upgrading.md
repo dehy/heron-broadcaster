@@ -224,3 +224,24 @@ curl -s http://localhost:8010/status-json.xsl               # one source on /liv
 `/healthz` of the engine reports `"role": "active"`; a `"standby"` engine left behind means a handover did not happen (see the logs of both engines). The Grafana dashboard ([Monitoring](monitoring.md)) shows the version of each service.
 
 A new engine can only take over from an engine that speaks the same handover protocol. When a release changes it, its release notes say so, and the upgrade is a cold restart covered by the fallback mount.
+
+## Release notes
+
+What each release asks of an upgrade, on top of the steps above. What it brings is in the [changelog](../CHANGELOG.md).
+
+### 0.1.0 to 0.2.0
+
+The upgrade is done on air with `scripts/upgrade.sh 0.2.0` (or `--swarm <stack> 0.2.0`): the handover protocol has not changed, so the 0.2.0 engine takes over from the 0.1.0 one without a gap, and there is nothing to set.
+
+1. **Back up the database** (see above): `heron-api` runs 21 migrations when it starts, and going back to 0.1.0 needs the backup.
+2. **Update the deployment files.** `docker-compose.yml` now reads `HERON_REGISTRY` (where the images come from, `ghcr.io/dehy` by default) and passes `HERON_FFMPEG` to the engine; both are optional. Take the 0.2.0 `docker-compose.yml` (`git checkout v0.2.0`), or for Swarm, write the images of the stack file as `${HERON_REGISTRY:-ghcr.io/dehy}/heron-…` as shown above.
+3. **Upgrade:** `scripts/upgrade.sh 0.2.0`.
+
+`heron-relay` has not changed: leave it on 0.1.0. A later `docker compose up -d` replaces it, since its image tag follows `HERON_VERSION`: a short break covered by the fallback mount. In Swarm, keep `HERON_RELAY_VERSION` where it is.
+
+After the upgrade, check:
+
+- **Your station is now the first station**, with code `main` and named from `HERON_STATION_NAME`, holding all its categories, clocks, schedule, restrictions, history, outputs, webhooks and settings. Its code can be changed on the **Stations** page (it is in the public endpoints under `/api/v1/public/stations/{code}/…`); the single-station API routes and public endpoints answer as before. Every user keeps their role, on the first station and as the shared role.
+- **Category types.** Each category gets a type: categories the FX player offers become **Jingle**, the others **Song**. A Jingle never plays twice in a row, and Jingle and Ad tracks send no metadata to the stream servers (listeners keep seeing the song before). Check them on the **Categories** page, and the types' rules in *Category types* at its bottom ([Rotation – Category types](rotation.md#category-types)).
+- **The schedule** becomes the station's default schedule, unchanged; other schedules can be added for their periods.
+- **The deck EQ** is flat and bypassed: the sound does not change until it is turned on.
