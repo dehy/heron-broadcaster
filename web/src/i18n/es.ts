@@ -1929,6 +1929,14 @@ const es = {
   "backups.missingTracks": "{count} pistas no encontradas:",
   "backups.missingArtists": "Artistas no encontrados: {names}.",
   "backups.signInAgain": "Volver a iniciar sesión",
+  "library.sort.levelMin": "Nivel más bajo",
+  "library.sort.levelMax": "Nivel más alto",
+  "library.column.levelMin": "Nivel mín.",
+  "library.column.levelMax": "Nivel máx.",
+  "track.levels": "Niveles",
+  "track.levelsRange": "{min} a {max}",
+  "track.levelsHelp": "El pico más bajo y el más alto entre el punto de entrada y el punto de salida, en dBFS (0: escala completa), según la forma de onda: los silencios del principio y del final no cuentan.",
+  "track.levelHelp": "El pico en el cabezal, en dBFS (0: escala completa)",
 } satisfies Catalog;
 
 export default es;

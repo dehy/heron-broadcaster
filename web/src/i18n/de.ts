@@ -1929,6 +1929,14 @@ const de = {
   "backups.missingTracks": "{count} Titel nicht gefunden:",
   "backups.missingArtists": "Interpreten nicht gefunden: {names}.",
   "backups.signInAgain": "Neu anmelden",
+  "library.sort.levelMin": "Niedrigster Pegel",
+  "library.sort.levelMax": "Höchster Pegel",
+  "library.column.levelMin": "Pegel min.",
+  "library.column.levelMax": "Pegel max.",
+  "track.levels": "Pegel",
+  "track.levelsRange": "{min} bis {max}",
+  "track.levelsHelp": "Der niedrigste und der höchste Spitzenpegel zwischen Cue-In und Cue-Out, in dBFS (0: Vollaussteuerung), aus der Wellenform: Die Stille am Anfang und am Ende zählt nicht.",
+  "track.levelHelp": "Der Spitzenpegel an der Abspielposition, in dBFS (0: Vollaussteuerung)",
 } satisfies Catalog;
 
 export default de;
