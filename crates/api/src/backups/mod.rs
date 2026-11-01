@@ -236,10 +236,13 @@ impl Backups {
 
     /// Writes and removes a file in the folder.
     fn probe(&self) -> std::io::Result<()> {
-        let probe = self.dir.join(".heron-write-check");
         std::fs::create_dir_all(&self.dir)?;
-        std::fs::write(&probe, b"")?;
-        std::fs::remove_file(&probe)
+        // A file of its own: another process checking at the same time
+        // does not remove it.
+        tempfile::Builder::new()
+            .prefix(".heron-write-check-")
+            .tempfile_in(&self.dir)?
+            .close()
     }
 
     /// Whether the folder can be written, remembered for `/status`.
@@ -337,26 +340,28 @@ impl Backups {
         self.check_folder()
             .map_err(|error| folder_error(&self.dir, &error))?;
         let path = self.dir.join(LOCK_FILE);
-        let file = tokio::task::spawn_blocking(move || {
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .mode(0o600)
-                .open(&path)
-                .map(|file| match file.lock() {
-                    Ok(()) => Some(file),
-                    // A share without locks: the API still takes one at a time.
-                    Err(error) => {
-                        tracing::warn!(%error, "cannot lock {}: backups taken on the command line may run at the same time", path.display());
-                        None
-                    }
-                })
-        })
-        .await
-        .map_err(|error| ApiError::Internal(error.to_string()))?
-        .map_err(|error| folder_error(&self.dir, &error))?;
-        Ok((guard, file))
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|error| folder_error(&self.dir, &error))?;
+        // Tried again and again rather than waited for in a thread: a task
+        // stopped while it waits (the API shutting down) stops waiting.
+        loop {
+            match file.try_lock() {
+                Ok(()) => return Ok((guard, Some(file))),
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                // A share without locks: the API still takes one at a time.
+                Err(std::fs::TryLockError::Error(error)) => {
+                    tracing::warn!(%error, "cannot lock {}: backups taken on the command line may run at the same time", path.display());
+                    return Ok((guard, None));
+                }
+            }
+        }
     }
 
     pub async fn create(&self, pool: &MySqlPool, kind: Kind) -> ApiResult<BackupView> {
@@ -827,7 +832,11 @@ mod tests {
         std::fs::remove_file(&taken).unwrap();
         assert!(backups.check_folder().is_ok());
         assert_eq!(backups.problem(), None);
-        assert!(!taken.join(".heron-write-check").exists());
+        assert_eq!(
+            std::fs::read_dir(&taken).unwrap().count(),
+            0,
+            "the probe is gone"
+        );
     }
 
     #[test]
@@ -886,6 +895,10 @@ mod tests {
         let waiting = tokio::spawn(async move { command_line.exclusive().await.map(|_| ()) });
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert!(!waiting.is_finished(), "waits for the other");
+        // Stopped while it waits (the API shutting down): it stops at once.
+        let stopped = Backups::new(dir.path().to_owned(), String::new());
+        let gone = tokio::time::timeout(Duration::from_millis(300), stopped.exclusive()).await;
+        assert!(gone.is_err(), "still waiting when stopped");
         drop(held);
         tokio::time::timeout(Duration::from_secs(5), waiting)
             .await
