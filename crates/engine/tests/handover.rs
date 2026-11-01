@@ -17,7 +17,7 @@ use heron_core::{
 };
 use heron_engine::engine::{Engine, EngineOptions};
 use heron_engine::handover::{self, Followed, Probe};
-use heron_engine::player::TrackRequest;
+use heron_engine::player::{PlayerEvent, TrackRequest};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -285,6 +285,7 @@ async fn hand_over(relay: Option<&Path>) {
     };
     let standby = engine(library.path(), state.path(), relay, true);
     assert!(standby.is_standby());
+    let mut events = standby.subscribe();
     let following = Arc::clone(&standby);
     let follow = tokio::task::spawn_blocking(move || handover::follow(&following, channel));
 
@@ -336,6 +337,18 @@ async fn hand_over(relay: Option<&Path>) {
         resumed_ms >= stopped_ms && resumed_ms <= stopped_ms + elapsed_ms + 50,
         "stopped at {stopped_ms} ms, resumed at {resumed_ms} ms, {elapsed_ms} ms after the hand-over started"
     );
+    // Its start is the same play going on, not a new one.
+    let started = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let PlayerEvent::Started { entry, resumed, .. } = events.recv().await.unwrap() {
+                return (entry.entry_id, resumed);
+            }
+        }
+    })
+    // Times out when the track on air reports no start.
+    .await
+    .unwrap();
+    assert_eq!(started, (entry_id, true));
     assert_eq!(standby.player().saved().waiting, waiting);
     assert_eq!(standby.config().eq, station_eq());
     assert_eq!(standby.config().agc, station_agc());

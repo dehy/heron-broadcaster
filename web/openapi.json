@@ -21076,6 +21076,7 @@
               "deck",
               "entry",
               "at_unix_ms",
+              "resumed",
               "kind"
             ],
             "properties": {
@@ -21095,6 +21096,10 @@
                 "enum": [
                   "started"
                 ]
+              },
+              "resumed": {
+                "type": "boolean",
+                "description": "The track on air going on in a restarted engine, or one taking\nover from another: the same play, not a new one."
               }
             }
           },

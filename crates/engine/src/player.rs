@@ -113,6 +113,9 @@ pub enum PlayerEvent {
     Started {
         deck: Deck,
         entry: QueueEntry,
+        /// The track on air going on after a restart or a handover
+        /// ([`Player::restore`], [`Player::take_over`]): not a new play.
+        resumed: bool,
         at: SystemTime,
     },
     Ended {
@@ -254,6 +257,9 @@ pub struct Player {
     /// Held by [`Self::hold`]: waiting to take over from another engine.
     held: bool,
     halted: Option<Halted>,
+    /// The track on air restored from a saved or handed-over queue, until
+    /// its start.
+    resuming: Option<u64>,
 }
 
 impl Player {
@@ -292,6 +298,7 @@ impl Player {
             changed: false,
             held: false,
             halted: None,
+            resuming: None,
         }
     }
 
@@ -614,6 +621,7 @@ impl Player {
         self.uncue_with(false)?;
         self.queue.clear();
         self.halted = None;
+        self.resuming = None;
         Ok(())
     }
 
@@ -802,6 +810,8 @@ impl Player {
                     // Its jingle is the mixer's now: it starts on the intro.
                     self.cued_jingle = None;
                 }
+                // Only the first start on air can be the restored track.
+                let resumed = deck != Deck::Fx && self.resuming.take() == Some(entry_id);
                 let Some(entry) = self.loaded.get(&entry_id).cloned() else {
                     return;
                 };
@@ -826,11 +836,13 @@ impl Player {
                     entry_id,
                     artist = entry.track.artist.as_deref().unwrap_or_default(),
                     title = entry.track.title.as_deref().unwrap_or_default(),
+                    resumed,
                     "track started"
                 );
                 let _ = self.events.send(PlayerEvent::Started {
                     deck,
                     entry,
+                    resumed,
                     at: SystemTime::now(),
                 });
             }
@@ -1347,6 +1359,7 @@ impl Player {
                                 "resuming the track on air"
                             );
                             self.cued = Some(entry.entry_id);
+                            self.resuming = Some(entry.entry_id);
                             self.loaded.insert(entry.entry_id, entry);
                         }
                     }

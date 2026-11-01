@@ -659,20 +659,23 @@ fn a_restart_resumes_the_track_on_air_and_the_queue() {
         deck.position_ms
     );
     station.play(8.0);
-    let order: Vec<(u64, String)> = station
+    // The track on air goes on: its start is not a new play.
+    let order: Vec<(u64, String, bool)> = station
         .events()
         .iter()
         .filter_map(|event| match event {
-            PlayerEvent::Started { entry, .. } => Some((entry.entry_id, entry.track.path.clone())),
+            PlayerEvent::Started { entry, resumed, .. } => {
+                Some((entry.entry_id, entry.track.path.clone(), *resumed))
+            }
             PlayerEvent::Ended { .. } => None,
         })
         .collect();
     assert_eq!(
         order,
         [
-            (ids[0], "one.wav".to_owned()),
-            (ids[1], "two.wav".to_owned()),
-            (ids[2], "three.wav".to_owned()),
+            (ids[0], "one.wav".to_owned(), true),
+            (ids[1], "two.wav".to_owned(), false),
+            (ids[2], "three.wav".to_owned(), false),
         ]
     );
     // New entries do not reuse the IDs of the saved ones.

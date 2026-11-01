@@ -7719,6 +7719,11 @@ export interface components {
             entry: components["schemas"]["QueueEntry"];
             /** @enum {string} */
             kind: "started";
+            /**
+             * @description The track on air going on in a restarted engine, or one taking
+             *     over from another: the same play, not a new one.
+             */
+            resumed: boolean;
         } | {
             /** Format: int64 */
             at_unix_ms: number;
