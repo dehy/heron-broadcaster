@@ -107,8 +107,10 @@ pub struct BackupView {
 /// What keeps backups from being written.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, ToSchema)]
 pub struct FolderProblem {
-    /// The system's error (`Permission denied`…).
+    /// The system's error (`Permission denied`, `No space left on device`…).
     pub error: String,
+    /// The folder is not the API's user's: `chown` fixes it.
+    pub permission_denied: bool,
     /// The user and group the API runs as: the backup folder must be
     /// theirs.
     pub uid: u32,
@@ -247,18 +249,25 @@ impl Backups {
             let (uid, gid) = ids();
             FolderProblem {
                 error: error.to_string(),
+                permission_denied: error.kind() == std::io::ErrorKind::PermissionDenied,
                 uid,
                 gid,
             }
         });
-        if let Some(problem) = &problem {
-            tracing::error!(
+        match &problem {
+            Some(problem) if problem.permission_denied => tracing::error!(
                 dir = %self.dir.display(),
                 error = %problem.error,
                 "the backup folder cannot be written: give it to {}:{} on the host",
                 problem.uid,
                 problem.gid
-            );
+            ),
+            Some(problem) => tracing::error!(
+                dir = %self.dir.display(),
+                error = %problem.error,
+                "the backup folder cannot be written"
+            ),
+            None => {}
         }
         let mut current = self
             .problem
@@ -813,6 +822,7 @@ mod tests {
         assert!(backups.check_folder().is_err());
         let problem = backups.problem().unwrap();
         assert_eq!((problem.uid, problem.gid), ids());
+        assert!(!problem.permission_denied, "not a matter of owner");
         // Fixed: the problem goes at the next check.
         std::fs::remove_file(&taken).unwrap();
         assert!(backups.check_folder().is_ok());

@@ -390,13 +390,16 @@ function Warnings() {
     );
   }
   if (isAdmin && status.data?.backups) {
-    const { uid, gid, error } = status.data.backups;
+    const { uid, gid, error, permission_denied } = status.data.backups;
+    const link = <Link to="/backups">{t("nav.backups")}</Link>;
     warnings.push(
-      rich("app.backupFolder", {
-        error,
-        command: <code className="mono">{`chown ${uid}:${gid}`}</code>,
-        link: <Link to="/backups">{t("nav.backups")}</Link>,
-      }),
+      permission_denied
+        ? rich("app.backupFolder", {
+            error,
+            command: <code className="mono">{`chown ${uid}:${gid}`}</code>,
+            link,
+          })
+        : rich("app.backupFolderError", { error, link }),
     );
   }
   if (status.data && differentBuilds(webBuild(), status.data)) {

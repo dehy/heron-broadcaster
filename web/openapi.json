@@ -13768,18 +13768,23 @@
         "description": "What keeps backups from being written.",
         "required": [
           "error",
+          "permission_denied",
           "uid",
           "gid"
         ],
         "properties": {
           "error": {
             "type": "string",
-            "description": "The system's error (`Permission denied`…)."
+            "description": "The system's error (`Permission denied`, `No space left on device`…)."
           },
           "gid": {
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "permission_denied": {
+            "type": "boolean",
+            "description": "The folder is not the API's user's: `chown` fixes it."
           },
           "uid": {
             "type": "integer",
