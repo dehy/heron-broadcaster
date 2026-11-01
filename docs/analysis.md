@@ -44,7 +44,7 @@ Re-analysis happens automatically when `ALGORITHM_VERSION` in `heron-analysis` i
 
 **Waveform:** the analysis also keeps the highest sample peak of every 50 ms, on a dB scale (one byte per point, from −72 dBFS to full scale: quiet intros and outros stay visible), in `track_waveforms`. The web UI draws it with the cue and fade points (`GET /api/v1/tracks/{id}/waveform`), and shows the level in dBFS under the pointer and at the playhead. About 1.2 kB per minute of audio.
 
-**Levels:** each track's lowest and highest peak in dBFS **between its cue-in and its cue-out** (its overrides first), from the waveform: the quietest and loudest 50 ms of what goes on air, its silences at both ends left out. A minimum at −72 dBFS reads "−72 dBFS or below". `heron-api` computes them from the waveform when a track is analyzed again or its cue points change (`track_levels`), within a few seconds.
+**Levels:** each track's lowest and highest peak in dBFS **between its cue-in and its cue-out** (its overrides first), from the waveform: the quietest and loudest 50 ms of what goes on air, its silences at both ends left out. A minimum at −72 dBFS reads "−72 dBFS or below". `heron-api` computes them from the waveform when a track is analyzed again or its cue points change (`track_levels`), within a few seconds. Levels from an earlier analysis are not shown: a track whose file changed has none until it is analyzed again.
 
 ## Analyzer
 
