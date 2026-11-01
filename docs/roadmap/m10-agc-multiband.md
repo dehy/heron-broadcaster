@@ -59,7 +59,7 @@ The tolerances are a starting point: the first code commits measure them and wri
 - [x] The silence watchdog still skips a silent track with the chain on and the AGC at its highest gain: silence is measured before the chain (`silence_is_measured_before_the_agc_chain`: a track at −54 dBFS lifted by 13 dB on the master bus still counts as silent).
 - [x] The AGC page shows the input and output levels, the AGC's gain and each band's gain reduction, live (on a demo station with the Pop preset: linked bands 1 and 2 showed the same reduction).
 - [ ] No audible artifacts on a reference playlist (music of several styles, speech, a jingle over a track, a crossfade), listened to with each preset and with each block alone.
-- [ ] CPU used by the chain measured and written in [Audio engine](../audio-engine.md#master-agc-chain): under 5 % of one core with every block on, stereo, 48 kHz. (The chain alone: 1.1 % of an Apple M1 Pro core; still to measure in a running engine.)
+- [x] CPU used by the chain measured and written in [Audio engine](../audio-engine.md#master-agc-chain): under 5 % of one core with every block on, stereo, 48 kHz. (Apple M1 Pro: 1.1 % of a core for the chain alone; about 2.8 % in a running engine, with the `Dense` preset.)
 
 ## References
 

@@ -225,7 +225,7 @@ By default the chain is bypassed, so a new or upgraded station sounds the same a
 - Filters compute in `f64` (crossovers and EQ at low frequencies are noisy in `f32`), the rest in `f32`.
 - **Latency:** 5 ms while the limiter is on, none otherwise. Deck positions are counted before the chain, the master meter after it; 5 ms is not heard as a delay.
 - **Meters:** with the levels, the chain reports its input and output peak and RMS, the AGC's gain, and the gain reduction of each of the 5 and the 2 bands and of the final stage. Gain reductions hold their deepest value and come back by 20 dB/s, as the peak meters.
-- **CPU:** the chain with every block on (the heaviest test settings) processes 60 s of stereo at 48 kHz in 0.68 s on an Apple M1 Pro core: 1.1 % of it (`cargo test -p heron-dsp --release -- --ignored --nocapture agc::tests::cpu`). Bypassed, it costs nothing.
+- **CPU:** the chain with every block on (the heaviest test settings) processes 60 s of stereo at 48 kHz in 0.68 s on an Apple M1 Pro core: 1.1 % of it (`cargo test -p heron-dsp --release -- --ignored --nocapture agc::tests::cpu`). In a running engine playing a station, with the `Dense` preset (every block on), the engine used 4.4 to 4.7 % of that core against 1.7 to 1.9 % bypassed: about 2.8 % for the chain, more than it takes alone. Bypassed, it costs nothing.
 - **Distortion:** a sine compressed by 10 dB in one band, with the default times (attack 20 ms, release 250 ms), comes out with 0.35 % of harmonic distortion at 50 Hz, 0.18 % at 100 Hz and 0.02 % at 1 kHz.
 
 ## Control interface
