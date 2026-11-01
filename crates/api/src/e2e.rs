@@ -5763,6 +5763,8 @@ async fn configuration(admin: &Client, tracks: &[u64]) -> Value {
         "/users",
         "/eq-presets",
         "/stations",
+        "/medleys",
+        "/settings/medleys",
     ] {
         shown.insert(path.to_owned(), admin.get(path).await);
     }
@@ -5867,6 +5869,23 @@ async fn a_backup_restores_onto_an_empty_database() {
         )
         .await;
     let gold = gold["id"].as_u64().unwrap();
+    // A medley, going into Gold.
+    let (status, body) = admin
+        .send(
+            Method::PUT,
+            "/settings/medleys",
+            json!({"category_id": gold}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = admin
+        .send(
+            Method::POST,
+            "/medleys",
+            json!({"recipe": {"category_ids": [gold], "hooks": 2}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
     let (status, _) = admin
         .send(
             Method::PUT,
@@ -6101,6 +6120,32 @@ async fn a_backup_restores_onto_an_empty_database() {
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(admin.get("/backups").await.as_array().unwrap().len(), 3);
+
+    // A restore that fails half-way, on a row the database refuses after
+    // the earlier tables were written, changes nothing.
+    let mut broken = admin.get(&format!("/backups/{before}/config")).await;
+    broken["tables"]["track_categories"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"track": "Artist 1/Track 1.wav", "category_id": 999_999, "weight": 1.0}));
+    let unchanged = configuration(&admin, &other.tracks).await;
+    let (status, body) = admin.send(Method::POST, "/backups/restore", broken).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("track_categories"),
+        "{body}"
+    );
+    let mut different = Vec::new();
+    differences(
+        &unchanged,
+        &configuration(&admin, &other.tracks).await,
+        "",
+        &mut different,
+    );
+    assert!(different.is_empty(), "{}", different.join("\n"));
     other.stop().await;
 }
 
