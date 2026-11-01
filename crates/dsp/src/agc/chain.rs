@@ -237,6 +237,10 @@ impl Chain {
         let step = self.switch_step;
         let target = if self.bypass_all { 0.0 } else { 1.0 };
         for chunk in samples[..whole].chunks_mut(CHUNK_FRAMES * CHANNELS) {
+            if !self.is_active() {
+                // Bypassed within this call: the rest goes out untouched.
+                break;
+            }
             let mut dry = [0.0f32; CHUNK_FRAMES * CHANNELS];
             let dry = &mut dry[..chunk.len()];
             let fading = self.mix != target;
