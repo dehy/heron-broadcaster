@@ -592,6 +592,63 @@ async fn standby_failing(answer_prepare: bool) {
     assert_eq!(server.sources.load(Ordering::Relaxed), 1);
 }
 
+/// A standby late for the first attempt and ready at once for the second
+/// (the track on air quick to open the second time), 6 s before its stop:
+/// the active engine waits for the stop and hands over.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn hands_over_when_the_standby_is_ready_long_before_the_stop() {
+    let _real_time = REAL_TIME.lock().await;
+    let (_library, state, active, _server) = station(None).await;
+    let listener = handover::Listener::bind(state.path()).unwrap();
+    let Probe::Standby(mut fake) = handover::probe(state.path()) else {
+        panic!("no standby");
+    };
+    let fake = tokio::task::spawn_blocking(move || {
+        let mut prepares = 0;
+        while let Ok((message, _)) = fake.recv(None) {
+            match message {
+                // Silent on the first attempt, ready at once on the next.
+                handover::Message::Prepare { attempt, .. } => {
+                    prepares += 1;
+                    if attempt > 1 {
+                        fake.send(&handover::Message::Ready { attempt }).unwrap();
+                    }
+                }
+                handover::Message::Cut { .. } => {
+                    fake.send(&handover::Message::Done).unwrap();
+                    return (prepares, true);
+                }
+                _ => break,
+            }
+        }
+        (prepares, false)
+    });
+    let mut channel = None;
+    wait_for("the standby", Duration::from_secs(5), || {
+        channel = listener.take_standby();
+        channel.is_some()
+    })
+    .await;
+
+    let handing = Arc::clone(&active);
+    let runtime = tokio::runtime::Handle::current();
+    let channel = channel.unwrap();
+    let started = Instant::now();
+    tokio::task::spawn_blocking(move || handover::hand_over(&handing, channel, &runtime))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(fake.await.unwrap(), (2, true));
+    // The second stop was 6 s ahead, after the first attempt's 2 s.
+    assert!(
+        started.elapsed() > Duration::from_secs(7),
+        "{:?}",
+        started.elapsed()
+    );
+    // Stopped where the standby goes on, held there.
+    assert!(active.player().is_held());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn plays_on_when_the_standby_dies_while_preparing() {
     let _real_time = REAL_TIME.lock().await;

@@ -54,6 +54,8 @@ const READY_MARGIN: Duration = Duration::from_millis(300);
 const READY_WITHOUT_STOP: Duration = Duration::from_secs(10);
 /// The whole handover, within Docker's stop grace period (30 s).
 const HANDOVER_TIMEOUT: Duration = Duration::from_secs(25);
+/// How long after its stop the track on air may take to stop there.
+const HALT_MARGIN: Duration = Duration::from_secs(2);
 /// How long an output has to send what is encoded and give up its connection.
 const RELEASE_TIMEOUT: Duration = Duration::from_secs(2);
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -518,13 +520,19 @@ fn cut_over(
     let stop = loop {
         attempt += 1;
         let point = loop {
-            match engine.handover_point(lead_ms) {
-                HandoverPoint::Wait if Instant::now() < deadline => std::thread::sleep(POLL),
-                HandoverPoint::Wait => {
-                    return Err(HandoverError::Failed(
-                        "no moment to stop the track on air".to_owned(),
-                    ));
-                }
+            // The stop falls within the handover's time: a later one would
+            // keep the old engine past Docker's grace period.
+            let left_ms = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis();
+            let lead = u32::try_from(left_ms).unwrap_or(u32::MAX).min(lead_ms);
+            if lead < FIRST_LEAD_MS {
+                return Err(HandoverError::Failed(
+                    "no moment to stop the track on air".to_owned(),
+                ));
+            }
+            match engine.handover_point(lead) {
+                HandoverPoint::Wait => std::thread::sleep(POLL),
                 point => break point,
             }
         };
@@ -576,10 +584,15 @@ fn cut_over(
     // Stop the track on air exactly where the standby will go on.
     let mut last_frame = None;
     if let Some(position) = stop {
+        // The standby may be ready long before the stop (a retry, with the
+        // track quick to open the second time): wait until it is due.
+        let ahead = Duration::from_millis(frames_to_ms(
+            position.saturating_sub(engine.on_air_position().unwrap_or(position)),
+        ));
         engine
             .halt_at(position)
             .map_err(|error| HandoverError::Failed(error.to_string()))?;
-        let halted_by = Instant::now() + Duration::from_secs(2);
+        let halted_by = Instant::now() + ahead + HALT_MARGIN;
         let halted = loop {
             if let Some(halted) = engine.take_halted() {
                 break halted;
