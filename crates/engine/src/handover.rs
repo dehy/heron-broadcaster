@@ -81,7 +81,14 @@ pub enum Message {
     Ready { attempt: u32 },
     /// Active → standby: stopped. The connections of `outputs` come with
     /// the message, in that order.
-    Cut { outputs: Vec<HandedOver> },
+    /// `agc_gain_db`: the gated AGC's gain at the stop, while it is on; the
+    /// standby starts from it. Absent from engines before the AGC chain, and
+    /// ignored by them.
+    Cut {
+        outputs: Vec<HandedOver>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agc_gain_db: Option<f32>,
+    },
     /// Standby → active: on air.
     Done,
     /// Active → standby: the handover is given up.
@@ -453,7 +460,10 @@ pub fn follow(engine: &Engine, mut channel: Channel) -> Followed {
                     return Followed::GivenUp(format!("the active engine went away ({error})"));
                 }
             }
-            Message::Cut { outputs } => {
+            Message::Cut {
+                outputs,
+                agc_gain_db,
+            } => {
                 if outputs.len() != fds.len() {
                     tracing::warn!(
                         outputs = outputs.len(),
@@ -467,7 +477,7 @@ pub fn follow(engine: &Engine, mut channel: Channel) -> Followed {
                     .map(|(handed, fd)| (handed.output, HandedConnection::from_fd(handed.kind, fd)))
                     .collect();
                 let handed = connections.len();
-                engine.complete_takeover(connections);
+                engine.complete_takeover(connections, agc_gain_db);
                 tracing::info!(connections = handed, "took over: on air");
                 if let Err(error) = channel.send(&Message::Done) {
                     tracing::warn!(%error, "cannot tell the old engine");
@@ -585,7 +595,9 @@ fn cut_over(
         if halted.position != position {
             tracing::warn!(halted.position, position, "stopped off the planned frame");
         }
-        last_frame = Some(halted.at_frame);
+        // The AGC chain's limiter delays the audio: the end of the fade-out
+        // comes out of it that much later.
+        last_frame = Some(halted.at_frame + engine.agc_latency_frames());
         // The audio up to the stop is rendered: give it time to reach the
         // encoders (the clock renders 50 ms ahead).
         std::thread::sleep(Duration::from_millis(100));
@@ -613,6 +625,7 @@ fn cut_over(
     channel.send_with(
         &Message::Cut {
             outputs: outputs.clone(),
+            agc_gain_db: engine.agc_gain_db(),
         },
         &fds,
     )?;
@@ -683,16 +696,32 @@ mod tests {
         }];
         let cut = Message::Cut {
             outputs: outputs.clone(),
+            agc_gain_db: Some(3.5),
         };
         active.send_with(&cut, &[OwnedFd::from(given)]).unwrap();
         let (message, mut fds) = standby.recv(Some(Duration::from_secs(1))).unwrap();
-        assert_eq!(message, Message::Cut { outputs });
+        assert_eq!(message, cut);
         assert_eq!(fds.len(), 1);
         let mut received = UnixStream::from(fds.remove(0));
         kept.write_all(b"still here").unwrap();
         let mut buffer = [0_u8; 10];
         received.read_exact(&mut buffer).unwrap();
         assert_eq!(&buffer, b"still here");
+    }
+
+    #[test]
+    fn a_cut_from_an_engine_before_the_agc_chain_has_no_gain() {
+        let message: Message = serde_json::from_str(r#"{"type": "cut", "outputs": []}"#).unwrap();
+        assert_eq!(
+            message,
+            Message::Cut {
+                outputs: Vec::new(),
+                agc_gain_db: None
+            }
+        );
+        // Without a gain, nothing more is sent: older engines read it as before.
+        let json = serde_json::to_string(&message).unwrap();
+        assert_eq!(json, r#"{"type":"cut","outputs":[]}"#);
     }
 
     #[test]
