@@ -170,13 +170,13 @@ What each block is for:
 
 ### Blocks
 
-**Gated AGC.** Measures the programme's short-term loudness (K-weighted, over 3 s, as the EBU R128 short-term loudness), every 100 ms. Its gain moves towards the difference between the station's loudness target (`loudness.target_lufs` of the [playout settings](#playout-settings), −16 LUFS by default) and that loudness, within ±`max_gain_db`: down with a time constant of 1 s, up with one of 4 s. Tracks the loudness gain already brought to the target pass at about 0 dB. Under `gate_lufs` the gain holds. It starts at 0 dB on a cold start, and from the old engine's gain after a [hot handover](#upgrades-and-handover).
+**Gated AGC.** Measures the programme's short-term loudness (K-weighted, over 3 s, as the EBU R128 short-term loudness), every 100 ms. Its gain moves towards the difference between the station's loudness target (`loudness.target_lufs` of the [playout settings](#playout-settings), −16 LUFS by default) and that loudness, within ±`max_gain_db`: down with a time constant of 1 s, up with one of 4 s. Tracks the loudness gain already brought to the target pass at about 0 dB. While the momentary loudness (400 ms) is under `gate_lufs`, the gain holds: a pause, a silence or the end of a fade stops it at once, where the 3 s loudness would still be falling. It starts at 0 dB on a cold start, and from the old engine's gain after a [hot handover](#upgrades-and-handover).
 
 **Stereo expander.** Splits the stereo into mid (L + R) and side (L − R). The width is the side level against the mid level, over 300 ms. The side is boosted by `depth` × (−6 dB − width), between 0 and `level` × 6 dB: a recording whose side is already within 6 dB of its mid is left as it is, a near-mono one gets up to `level`'s boost, and a mono one stays mono (its side is silent). Under `threshold_db` (the programme's level, over 300 ms) nothing is boosted. The side below 150 Hz is never boosted: the bass stays centred, which encoders and mono listeners need.
 
 **Bass EQ.** One filter of the [deck EQ](#deck-eq)'s kind (state-variable, `f64`): a low shelf (slope 1) or a peak (Q 1, about an octave and a third wide) at `frequency_hz`.
 
-**5-band and dual-band processors.** Crossovers split the sound into bands; each band goes through its dynamics, then its gain; the bands add up again. The crossovers are **Linkwitz-Riley of the 4th order** (two 2nd-order Butterworth filters in series), and each band also goes through the all-pass of the crossovers that do not split it, so the bands of a flat processor add up to the input's magnitude exactly: a phase shift, no change of level. `overdrive_db` raises the level going into the five bands: more of the sound is over the thresholds, and denser; the final stage catches the peaks. A **link** between two adjacent bands makes both apply the deeper of their two gain reductions, so a strong kick does not make the low mids breathe on their own.
+**5-band and dual-band processors.** Crossovers split the sound into bands; each band goes through its dynamics, then its gain; the bands add up again. The crossovers are **Linkwitz-Riley of the 4th order** (two 2nd-order Butterworth filters in series), and each band also goes through the all-pass of the crossovers that do not split it, so the bands of a flat processor add up to the input's magnitude exactly: a phase shift, no change of level. `overdrive_db` raises the level going into the five bands: more of the sound is over the thresholds, and denser; the final stage catches the peaks. A **link** between two adjacent bands makes both apply the deeper of their two gain reductions, so a strong kick does not make the low mids breathe on their own. Changing the links crossfades the gains of the old and the new links over 50 ms.
 
 **Band dynamics.** Per band:
 
@@ -216,7 +216,7 @@ By default the chain is bypassed, so a new or upgraded station sounds the same a
 
 - **Bypass all** skips the chain: it is not computed, and the audio is bit-identical to an engine without it. So is a chain with every block off. A block that is off is not computed either.
 - **Switching** a block, or the whole chain, crossfades between the audio with and without it over 50 ms. A block switched on starts from rest. Switching the limiter crossfades its 5 ms delay too: a brief phasing, no click.
-- **Parameters** glide to new values in about 50 ms (a one-pole smoother, 15 ms time constant, as the [deck EQ](#deck-eq)): gains, thresholds, ratios, times, crossover frequencies (in octaves). A band's mode changes by crossfading its gain from one mode to the other.
+- **Parameters** glide to new values in about 50 ms (a one-pole smoother, 15 ms time constant, as the [deck EQ](#deck-eq)): gains, thresholds, ratios, times, crossover frequencies (in octaves). Filters are designed again at every sample while they glide: in steps, they would whine at the rate of the steps. After a change of mode, a band's gain moves to its new value with its attack or release, as it does when the level changes. Lowering the ceiling is followed by the limiter's look-ahead: the audio already delayed keeps the ceiling it was limited for.
 - **Pause:** the chain gets silence; the AGC, under its gate, holds its gain until the music comes back.
 
 ### Implementation
@@ -225,7 +225,8 @@ By default the chain is bypassed, so a new or upgraded station sounds the same a
 - Filters compute in `f64` (crossovers and EQ at low frequencies are noisy in `f32`), the rest in `f32`.
 - **Latency:** 5 ms while the limiter is on, none otherwise. Deck positions are counted before the chain, the master meter after it; 5 ms is not heard as a delay.
 - **Meters:** with the levels, the chain reports its input and output peak and RMS, the AGC's gain, and the gain reduction of each of the 5 and the 2 bands and of the final stage. Gain reductions hold their deepest value and come back by 20 dB/s, as the peak meters.
-- **CPU:** *measured in M10 and written here.*
+- **CPU:** the chain with every block on (the heaviest test settings) processes 60 s of stereo at 48 kHz in 0.68 s on an Apple M1 Pro core: 1.1 % of it (`cargo test -p heron-dsp --release -- --ignored --nocapture agc::tests::cpu`). Bypassed, it costs nothing.
+- **Distortion:** a sine compressed by 10 dB in one band, with the default times (attack 20 ms, release 250 ms), comes out with 0.35 % of harmonic distortion at 50 Hz, 0.18 % at 100 Hz and 0.02 % at 1 kHz.
 
 ## Control interface
 

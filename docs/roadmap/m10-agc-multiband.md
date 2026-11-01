@@ -43,15 +43,15 @@ A station's sound is part of its identity: an even level from one track to the n
 
 The tolerances are a starting point: the first code commits measure them and write the results here.
 
-- [ ] Each block is unit-tested with generated test signals (sines, steps, bursts, noise, silence):
-  - Gated AGC: brings a sine 6 dB under or over the target to it within 0.5 dB; never beyond `max_gain_db`; holds its gain under the gate.
+- [x] Each block is unit-tested with generated test signals (sines, steps, bursts, noise, silence) (`heron_dsp::agc::tests`):
+  - Gated AGC: brings a sine 6 dB under or over the target to it within 0.5 dB; never beyond `max_gain_db`; holds its gain under the gate and through a pause. Its loudness meter reads the sines of EBU Tech 3341 within 0.05 LU.
   - Stereo expander: a mono signal stays mono; a near-mono signal gets the side boost its settings give, within 0.3 dB; a wide one and one under the threshold are untouched.
   - Bass EQ: the response matches the filter design within 0.1 dB from 20 Hz to 20 kHz.
   - Crossovers: the 5 and the 2 bands, flat and at 1:1, add up to the input within 0.1 dB from 20 Hz to 20 kHz; each band is −6 dB at its crossovers.
-  - Band dynamics: the static curve of each mode within 0.5 dB of threshold and ratio (outside the knee); attack, release and hold times within 10 %; linked bands apply the same gain reduction; harmonic distortion of a sine compressed by 10 dB with the default times measured and written here.
+  - Band dynamics: the static curve of each mode within 0.5 dB of threshold and ratio (outside the knee); attack, release and hold times within 10 %; linked bands apply the same gain reduction; harmonic distortion of a sine compressed by 10 dB with the default times: 0.35 % at 50 Hz, 0.18 % at 100 Hz, 0.02 % at 1 kHz (tested under 0.5, 0.25 and 0.05 %).
   - Final stage: no sample over the ceiling on any test signal, among them full-scale square waves, sines 24 dB over the ceiling and bursts; under the ceiling, the limiter is a pure 5 ms delay and the clipper bit-identical.
 - [ ] A bypassed chain, and a chain with every block off, give bit-identical audio; each block on with neutral settings changes a signal by under 0.1 dB.
-- [ ] No clicks when a parameter moves, a preset loads, or a block or the chain is switched: no sample-to-sample step larger than the steady sine's, and the energy away from the sine stays within 10 dB of an ideal glide's (the method of [M9](m9-deck-eq.md)).
+- [ ] No clicks when a parameter moves, a preset loads, or a block or the chain is switched. A 300 Hz sine goes through the change; a click is energy above 3 kHz around it more than 10 dB over the steady sound's and louder than −70 dB from the signal. Every glide and switch stays within 3 dB of the steady sound (about −80 dB from the signal), and the same changes made at once, the control, click, by 12 to 33 dB (`switching_does_not_click`, `settings_glide_without_clicks`; the M9 method of comparing steps fails on compressors, whose level moves). Checked by ear on a stack too.
 - [ ] The audio thread still never allocates: `tests/no_alloc.rs` moves every block's parameters and switches them during crossfades.
 - [ ] A control moved in the web UI is heard within 200 ms, and other open pages follow it.
 - [ ] Presets: save, load, update, rename, delete through the API and the web UI; the seeded presets are there on a fresh install.
@@ -59,7 +59,7 @@ The tolerances are a starting point: the first code commits measure them and wri
 - [ ] The silence watchdog still skips a silent track with the chain on and the AGC at its highest gain.
 - [ ] The AGC page shows the input and output levels, the AGC's gain and each band's gain reduction, live.
 - [ ] No audible artifacts on a reference playlist (music of several styles, speech, a jingle over a track, a crossfade), listened to with each preset and with each block alone.
-- [ ] CPU used by the chain measured and written in [Audio engine](../audio-engine.md#master-agc-chain): under 5 % of one core with every block on, stereo, 48 kHz.
+- [ ] CPU used by the chain measured and written in [Audio engine](../audio-engine.md#master-agc-chain): under 5 % of one core with every block on, stereo, 48 kHz. (The chain alone: 1.1 % of an Apple M1 Pro core; still to measure in a running engine.)
 
 ## References
 
