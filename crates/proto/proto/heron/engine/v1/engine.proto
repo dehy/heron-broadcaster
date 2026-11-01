@@ -229,6 +229,9 @@ enum EndReason {
 message TrackStarted {
   Deck deck = 1;
   QueueEntry entry = 2;
+  // The track on air going on after a restart or a handover: the same
+  // play, not a new one.
+  bool resumed = 3;
 }
 
 message TrackEnded {

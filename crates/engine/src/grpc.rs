@@ -409,11 +409,17 @@ fn unix_ms(time: SystemTime) -> u64 {
 
 fn event_to_proto(event: PlayerEvent) -> pb::EngineEvent {
     match event {
-        PlayerEvent::Started { deck, entry, at } => pb::EngineEvent {
+        PlayerEvent::Started {
+            deck,
+            entry,
+            resumed,
+            at,
+        } => pb::EngineEvent {
             timestamp_unix_ms: unix_ms(at),
             event: Some(pb::engine_event::Event::TrackStarted(pb::TrackStarted {
                 deck: deck_to_proto(deck).into(),
                 entry: Some(entry_to_proto(entry)),
+                resumed,
             })),
         },
         PlayerEvent::Ended {
