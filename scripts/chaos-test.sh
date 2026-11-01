@@ -92,6 +92,7 @@ compose() {
 }
 
 step() {
+    current_step=$*
     printf '\n== %s\n' "$*"
 }
 
@@ -101,6 +102,9 @@ pass() {
 
 fail() {
     printf '  FAIL %s\n' "$*"
+    # An annotation of the CI run, read without its logs: the step and the
+    # check that failed.
+    [ -z "${GITHUB_ACTIONS:-}" ] || printf '::error::chaos test, %s: %s\n' "${current_step:-}" "$*"
     failures=$((failures + 1))
 }
 
@@ -146,14 +150,14 @@ check_listening() {
     heard=${heard:-0}
     echo "  heard ${heard} s of ${listened} s, longest silence ${longest} s"
     if [ "$starts" -gt "$ends" ]; then
-        fail "the stream was still silent at the end"
+        fail "the stream was still silent at the end (heard ${heard} s of ${listened} s, longest silence ${longest} s)"
         return 1
     fi
     if awk -v heard="$heard" -v wanted="$listened" -v longest="$longest" -v max="$max_silence" \
         'BEGIN { exit !(heard >= wanted * 0.9 && longest <= max) }'; then
         return 0
     fi
-    fail "the stream was interrupted"
+    fail "the stream was interrupted (heard ${heard} s of ${listened} s, longest silence ${longest} s, ${max_silence} s allowed)"
     return 1
 }
 
