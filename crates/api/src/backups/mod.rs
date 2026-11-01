@@ -340,13 +340,16 @@ impl Backups {
         self.check_folder()
             .map_err(|error| folder_error(&self.dir, &error))?;
         let path = self.dir.join(LOCK_FILE);
-        let file = std::fs::OpenOptions::new()
+        let file = tokio::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(false)
             .mode(0o600)
             .open(&path)
-            .map_err(|error| folder_error(&self.dir, &error))?;
+            .await
+            .map_err(|error| folder_error(&self.dir, &error))?
+            .into_std()
+            .await;
         // Tried again and again rather than waited for in a thread: a task
         // stopped while it waits (the API shutting down) stops waiting.
         loop {
