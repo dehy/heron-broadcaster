@@ -5801,6 +5801,11 @@ async fn configuration(admin: &Client, tracks: &[u64]) -> Value {
         }
     }
     forget_times(&mut shown);
+    // Each output's live state, which the engine reports when it gets to
+    // it: not configuration.
+    for output in shown["/outputs"].as_array_mut().unwrap() {
+        output.as_object_mut().unwrap().remove("status");
+    }
     // An artist is found again by name, under the ID the scan gave it.
     for restriction in shown["/restrictions"].as_array_mut().unwrap() {
         if restriction["target"]["kind"] == "artist" {

@@ -436,7 +436,15 @@ impl Backups {
             before_restore: before.name,
             ..RestoreReport::default()
         };
-        let mut tx = pool.begin().await?;
+        // Read committed: what other tasks change meanwhile (a webhook's
+        // deliveries, retried in the background) is read as it is now. In
+        // repeatable read, deleting a row changed since the transaction's
+        // snapshot fails ("Record has changed since last read").
+        let mut connection = pool.acquire().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            .execute(&mut *connection)
+            .await?;
+        let mut tx = sqlx::Connection::begin(&mut *connection).await?;
         file::restore(&mut tx, &file, &mut report).await?;
         // Everyone signs in again, with the restored users.
         sqlx::query("DELETE FROM sessions")
