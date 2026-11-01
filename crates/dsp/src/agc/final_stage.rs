@@ -150,9 +150,13 @@ impl FinalStage {
         self.release_share = share(f64::from(release) / 1000.0, 1, self.sample_rate);
     }
 
-    /// Frames of delay of the limiter.
+    /// Frames of delay: the limiter's, none once the clipper alone is heard.
     pub fn latency(&self) -> usize {
-        self.window - 1
+        if self.clipper_mix >= 1.0 {
+            0
+        } else {
+            self.window - 1
+        }
     }
 
     /// The lowest gain since the last call, in dB (0 or less).
