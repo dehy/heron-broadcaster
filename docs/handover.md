@@ -162,7 +162,9 @@ So the cut never falls in a crossfade or under a jingle: there is a single voice
 
 The standby resets its player, then `Player::take_over` cues the track on air starting at the stop position (the same fast skip as a restart, without its own fade-in), and queues the waiting tracks. The mixer is held, so the cued track does not start. The standby polls `MixerStatus::cued_ready` (the decoder has `READY_SAMPLES` decoded) and answers `Ready`.
 
-The active engine needs `Ready` at least 300 ms (`READY_MARGIN`) before the track reaches the stop, to plan the stop in time. Seeking far into a long file on a Raspberry Pi can take longer than the 2 s lead, so a late `Ready` is not an error: the active engine sends a new `Prepare` with a lead three times longer (2 s, 6 s, 18 s), and ignores a `Ready` for an earlier attempt. After three attempts, or 25 s in all (within the 30 s stop grace period), it gives up.
+The active engine needs `Ready` at least 300 ms (`READY_MARGIN`) before the track reaches the stop, to plan the stop in time. Seeking far into a long file on a Raspberry Pi can take longer than the 2 s lead, so a late `Ready` is not an error: the active engine sends a new `Prepare` with a lead three times longer (2 s, 6 s, 18 s), and ignores a `Ready` for an earlier attempt. After three attempts, or 25 s in all (within the 30 s stop grace period), it gives up. The stop never falls after those 25 s: a longer lead is cut to the time left, and with less than 2 s left the active engine gives up.
+
+A standby may answer `Ready` well before the stop, when the track is quick to open the second time. The active engine then waits for the track to reach the stop, and gives up only 2 s after it should have stopped there.
 
 ## Stopping on the exact frame
 
@@ -215,7 +217,7 @@ The rule: whatever fails, it ends as a cold restart covered by the fallback moun
 |---|---|---|
 | The standby dies, or its socket closes | `hand_over` fails; stops as before (saves the queue) | Gone |
 | Not ready after three attempts | Sends `Abort`, stops as before | Waits until the active engine is gone, then cold start |
-| The track on air does not stop (2 s) | Plays on (`unhold`), sends `Abort`, stops as before | Cold start |
+| The track on air does not stop (2 s after the stop) | Plays on (`unhold`), sends `Abort`, stops as before | Cold start |
 | An output gives no connection | Hands over the others | Connects that output itself |
 | The active engine dies before `Cut` | Gone (queue saved last, up to 5 s earlier) | Socket closed: cold start once nobody listens |
 | The active engine dies after `Cut` | Gone | On air already |
