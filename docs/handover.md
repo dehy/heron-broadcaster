@@ -114,7 +114,7 @@ Length-prefixed JSON: a 4-byte big-endian length, then the message. A message is
 | `Hello { protocol, version }` | both | First message each way |
 | `Prepare { attempt, config, queue }` | active → standby | Get ready to go on with this queue (the `queue.json` format), the track on air stopping at `queue.on_air.position_ms`. A later `Prepare` replaces it. |
 | `Ready { attempt }` | standby → active | The track on air is open at that position, with enough audio decoded |
-| `Cut { outputs }` | active → standby | Stopped. The connections of `outputs` (output ID and kind: `relayed` or `tcp`) come with it, in that order |
+| `Cut { outputs, agc_gain_db }` | active → standby | Stopped. The connections of `outputs` (output ID and kind: `relayed` or `tcp`) come with it, in that order. `agc_gain_db`: the gain of the [AGC chain](audio-engine.md#master-agc-chain)'s gated AGC at the stop, absent when it is off; older engines ignore it |
 | `Done` | standby → active | On air |
 | `Abort { reason }` | active → standby | The handover is given up |
 
@@ -183,6 +183,8 @@ flowchart LR
 ```
 
 The outputs must not carry the silence that follows. `Outputs::stop_after(at_frame)` makes the fan-out thread hand nothing to the encoders after that master frame (it counts the frames it reads, which match the frames rendered unless blocks were dropped). The active engine waits 100 ms for the audio rendered ahead (the clock renders 50 ms ahead) to reach the encoders.
+
+With the [AGC chain](audio-engine.md#master-agc-chain)'s limiter on, the audio comes out of the chain 5 ms late: the stop is `at_frame` plus the chain's delay, so the end of the fade-out reaches the encoders, and no step is left where it is cut short. The new engine's gated AGC starts at the gain of the old one (`agc_gain_db` in `Cut`), so the level does not change at the cut; the other blocks start from rest, under the 10 ms fade-in.
 
 ## Handing over the connections
 

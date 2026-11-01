@@ -19,7 +19,9 @@ use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 
 use heron_core::playout::{TrackPlayout, Transition, db_to_gain, plan_transition};
-use heron_core::{CrossfadeSettings, DeckEq, EqSettings, FadeCurve, PlaySource, PlayoutSettings};
+use heron_core::{
+    AgcSettings, CrossfadeSettings, DeckEq, EqSettings, FadeCurve, PlaySource, PlayoutSettings,
+};
 use heron_outputs::NowPlaying;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, watch};
@@ -211,6 +213,7 @@ pub struct Player {
     library_dir: PathBuf,
     settings: PlayoutSettings,
     eq: EqSettings,
+    agc: AgcSettings,
     mixer: MixerHandle,
     queue: VecDeque<QueueEntry>,
     /// Entries handed to the mixer (cued, on air, fading out, FX).
@@ -265,6 +268,7 @@ impl Player {
             library_dir,
             settings,
             eq: EqSettings::default(),
+            agc: AgcSettings::default(),
             mixer,
             queue: VecDeque::new(),
             loaded: HashMap::new(),
@@ -617,9 +621,20 @@ impl Player {
         &self.settings
     }
 
-    /// New settings apply to the next transitions planned.
-    pub fn set_settings(&mut self, settings: PlayoutSettings) {
+    /// New settings apply to the next transitions planned. A new loudness
+    /// target is the gated AGC's new target too: it glides there.
+    pub fn set_settings(&mut self, settings: PlayoutSettings) -> Result<(), PlayerError> {
+        if settings.loudness.target_lufs != self.settings.loudness.target_lufs {
+            // Sent first: when the mixer is busy, nothing has changed, and
+            // the same settings sent again try again.
+            let params = crate::agc::chain_params(&self.agc, settings.loudness.target_lufs);
+            self.send(Command::SetAgc {
+                params,
+                glide: true,
+            })?;
+        }
         self.settings = settings;
+        Ok(())
     }
 
     pub fn eq(&self) -> &EqSettings {
@@ -641,6 +656,25 @@ impl Player {
         self.send(commands(EqTarget::Fx, eq.fx))?;
         self.eq = eq;
         Ok(())
+    }
+
+    pub fn agc(&self) -> &AgcSettings {
+        &self.agc
+    }
+
+    /// New AGC chain settings. They glide in, or with `glide: false` apply
+    /// at once, from rest: only while nothing plays (starting, taking over).
+    pub fn set_agc(&mut self, agc: AgcSettings, glide: bool) -> Result<(), PlayerError> {
+        let params = crate::agc::chain_params(&agc, self.settings.loudness.target_lufs);
+        self.send(Command::SetAgc { params, glide })?;
+        self.agc = agc;
+        Ok(())
+    }
+
+    /// The gated AGC starts from this gain: the old engine's, after a
+    /// handover. Only while nothing plays.
+    pub fn start_agc_at(&mut self, gain_db: f32) -> Result<(), PlayerError> {
+        self.send(Command::StartAgcAt { gain_db })
     }
 
     /// Handles what the mixer reported and keeps the next track cued. Call

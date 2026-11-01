@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use heron_core::playout::TrackPlayout;
 use heron_core::{
-    EncoderKind, EncoderProfile, EqSettings, OutputConfig, OutputKind, OutputsConfig, PlaySource,
+    AgcSettings, EncoderKind, EncoderProfile, EqSettings, OutputConfig, OutputKind, OutputsConfig,
+    PlaySource,
 };
 use heron_engine::engine::{Engine, EngineOptions};
 use heron_engine::handover::{self, Followed, Probe};
@@ -218,6 +219,18 @@ fn station_eq() -> EqSettings {
     eq
 }
 
+/// The AGC chain of the station: the gated AGC and the look-ahead limiter,
+/// whose 5 ms delay the cut must wait for.
+fn station_agc() -> AgcSettings {
+    let mut agc = AgcSettings {
+        bypass_all: false,
+        ..AgcSettings::default()
+    };
+    agc.gated_agc.enabled = true;
+    agc.gated_agc.max_gain_db = 12.0;
+    agc
+}
+
 /// An engine on air with two tracks queued, streaming to `server`, through
 /// a relay listening on `relay` when given.
 async fn station(
@@ -234,6 +247,7 @@ async fn station(
     let active = engine(library.path(), state.path(), relay, false);
     active.set_outputs(&outputs(port)).unwrap();
     active.set_eq(station_eq()).unwrap();
+    active.set_agc(station_agc()).unwrap();
     let tracks = vec![
         track(library.path(), "first.wav", 30.0),
         track(library.path(), "second.wav", 10.0),
@@ -282,6 +296,11 @@ async fn hand_over(relay: Option<&Path>) {
     .await;
     let (entry_id, _) = on_air(&active).unwrap();
     let waiting = active.player().saved().waiting;
+    // The tone is about 5 dB over the loudness target: the AGC brings it down.
+    wait_for("the AGC", Duration::from_secs(10), || {
+        active.agc_gain_db().is_some_and(|gain| gain < -1.0)
+    })
+    .await;
 
     let handing = Arc::clone(&active);
     let runtime = tokio::runtime::Handle::current();
@@ -319,6 +338,15 @@ async fn hand_over(relay: Option<&Path>) {
     );
     assert_eq!(standby.player().saved().waiting, waiting);
     assert_eq!(standby.config().eq, station_eq());
+    assert_eq!(standby.config().agc, station_agc());
+    // The new engine's AGC went on from the old one's gain, held since the
+    // stop.
+    let (old, new) = (
+        active.agc_gain_db().unwrap(),
+        standby.agc_gain_db().unwrap(),
+    );
+    println!("AGC gain at the cut: {old:.2} dB, after it: {new:.2} dB");
+    assert!((old - new).abs() < 0.5, "{old} dB, then {new} dB");
     let before = server.bytes();
     tokio::time::sleep(Duration::from_secs(1)).await;
     // 128 kbps: about 16 kB a second.
@@ -444,6 +472,7 @@ async fn starts_from_the_saved_state_when_nothing_is_handed_over() {
     .await;
     assert_eq!(standby.config().outputs.outputs.len(), 1);
     assert_eq!(standby.config().eq, station_eq());
+    assert_eq!(standby.config().agc, station_agc());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

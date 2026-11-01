@@ -21,6 +21,7 @@ import { Categories } from "./pages/Categories";
 import { ClockEditor, Clocks } from "./pages/Clocks";
 import { Dashboard } from "./pages/Dashboard";
 import { Eq } from "./pages/Eq";
+import { Agc } from "./pages/Agc";
 import { History } from "./pages/History";
 import { Labels } from "./pages/Labels";
 import { MedleyEditor, Medleys } from "./pages/Medleys";
@@ -134,6 +135,8 @@ function route(pathname: string): ReactNode {
       return <Playout />;
     case "/eq":
       return <Eq />;
+    case "/agc":
+      return <Agc />;
     case "/outputs":
       return <Outputs />;
     case "/settings":

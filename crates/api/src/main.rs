@@ -6,6 +6,7 @@
 //! feeds the engine and serves the API and the ops endpoints. See
 //! `docs/api.md`.
 
+mod agc;
 mod app;
 mod artists;
 mod auth;
@@ -436,6 +437,7 @@ mod tests {
         .await
         .unwrap();
         for expected in [
+            "agc_presets",
             "analysis_jobs",
             "api_tokens",
             "artist_names",

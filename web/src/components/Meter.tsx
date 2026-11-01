@@ -4,6 +4,7 @@
 
 import type { ChannelLevels } from "../api";
 import { number, t } from "../i18n";
+import { REDUCTION_RANGE_DB, formatDb, reductionScale } from "../lib/agc";
 
 const FLOOR_DB = -60;
 
@@ -51,6 +52,25 @@ export function LineMeter({ levels, label }: { levels: ChannelLevels | null; lab
       aria-valuemax={0} aria-valuenow={Math.max(FLOOR_DB, Math.round(rms))}
       style={{ ["--meter-width" as string]: `${width > 0 ? 10000 / width : 100}%` }}>
       <div style={{ width: `${width}%` }} />
+    </div>
+  );
+}
+
+/**
+ * A gain reduction (dB, 0 or less), filling from the left as it deepens,
+ * to 24 dB. Empty and dashed while there is none to show.
+ */
+export function ReductionMeter({ db, label }: Readonly<{ db: number | null | undefined; label: string }>) {
+  const known = db !== null && db !== undefined && Number.isFinite(db);
+  return (
+    <div className={known ? "gr-meter" : "gr-meter idle"}>
+      {/* The native meter for assistive technologies; the bar below is drawn. */}
+      <meter className="visually-hidden" aria-label={t("meter.reduction", { name: label })}
+        min={-REDUCTION_RANGE_DB} max={0} value={known ? Math.round(db) : 0} />
+      <div className="gr-track" aria-hidden="true">
+        <div style={{ width: `${reductionScale(db) * 100}%` }} />
+      </div>
+      <span className="num">{known ? formatDb(db) : "–"}</span>
     </div>
   );
 }

@@ -10,6 +10,157 @@
     "version": "0.2.0"
   },
   "paths": {
+    "/api/v1/agc-presets": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Every AGC preset, by name.",
+        "operationId": "list_agc_presets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgcPreset"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Saves a chain's blocks as a new preset. Operators and admins.",
+        "operationId": "create_agc_preset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgcPresetInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgcPreset"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agc-presets/{id}": {
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Renames a preset or saves new blocks in it. The chains it was loaded\ninto keep their settings. Operators and admins.",
+        "operationId": "update_agc_preset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgcPresetInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgcPreset"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Deletes a preset. The chains it was loaded into keep their settings.\nOperators and admins.",
+        "operationId": "delete_agc_preset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/artist-names/{id}": {
       "put": {
         "tags": [
@@ -5202,6 +5353,72 @@
         }
       }
     },
+    "/api/v1/settings/agc": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "The station's AGC chain.",
+        "operationId": "get_agc",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgcSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Replaces the station's AGC chain (missing fields take the defaults) and\npushes it to the engine at once, where it glides in. Every open live\nWebSocket gets an `agc` message. Operators and admins.",
+        "operationId": "put_agc",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgcSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgcSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/settings/analysis": {
       "get": {
         "tags": [
@@ -8848,6 +9065,94 @@
         }
       }
     },
+    "/api/v1/stations/{station_id}/settings/agc": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "The station's AGC chain.",
+        "operationId": "get_agc_on_station",
+        "parameters": [
+          {
+            "name": "station_id",
+            "in": "path",
+            "description": "The station's ID",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgcSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Replaces the station's AGC chain (missing fields take the defaults) and\npushes it to the engine at once, where it glides in. Every open live\nWebSocket gets an `agc` message. Operators and admins.",
+        "operationId": "put_agc_on_station",
+        "parameters": [
+          {
+            "name": "station_id",
+            "in": "path",
+            "description": "The station's ID",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgcSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgcSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/stations/{station_id}/settings/eq": {
       "get": {
         "tags": [
@@ -11706,6 +12011,366 @@
         },
         "additionalProperties": false
       },
+      "AgcLevels": {
+        "type": "object",
+        "description": "The AGC chain's meters. Gain reductions are in dB, 0 or less.",
+        "required": [
+          "input",
+          "five_band_db",
+          "dual_band_db",
+          "final_stage_db"
+        ],
+        "properties": {
+          "agc_gain_db": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "The gated AGC's gain, while it is on."
+          },
+          "dual_band_db": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "The dual-band processor's low and high bands."
+          },
+          "final_stage_db": {
+            "type": "number",
+            "format": "float"
+          },
+          "five_band_db": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Each band of the 5-band processor, from the lowest."
+          },
+          "input": {
+            "$ref": "#/components/schemas/ChannelLevels",
+            "description": "The master bus before the chain (`master` is after it)."
+          }
+        }
+      },
+      "AgcPreset": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "settings"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/AgcPresetSettings"
+          }
+        }
+      },
+      "AgcPresetInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "settings"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Unique, ignoring case."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/AgcPresetSettings",
+            "description": "Missing fields take the defaults."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgcPresetSettings": {
+        "type": "object",
+        "description": "The blocks of an AGC chain, as a preset keeps them: the chain's\nsettings without `bypass_all`.",
+        "properties": {
+          "bass_eq": {
+            "$ref": "#/components/schemas/BassEqSettings",
+            "default": {
+              "enabled": false,
+              "frequency_hz": 100.0,
+              "gain_db": 0.0,
+              "shape": "shelf"
+            }
+          },
+          "dual_band": {
+            "$ref": "#/components/schemas/DualBandSettings",
+            "default": {
+              "bands": [
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                },
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                }
+              ],
+              "crossover_hz": 200.0,
+              "enabled": false,
+              "link": false
+            }
+          },
+          "final_stage": {
+            "$ref": "#/components/schemas/FinalStageSettings",
+            "default": {
+              "ceiling_db": -1.0,
+              "enabled": true,
+              "mode": "limiter",
+              "release_ms": 100.0
+            }
+          },
+          "five_band": {
+            "$ref": "#/components/schemas/FiveBandSettings",
+            "default": {
+              "bands": [
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                },
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                },
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                },
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                },
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                }
+              ],
+              "crossovers_hz": [
+                100.0,
+                400.0,
+                1600.0,
+                6400.0
+              ],
+              "enabled": false,
+              "links": [
+                false,
+                false,
+                false,
+                false
+              ],
+              "overdrive_db": 0.0
+            }
+          },
+          "gated_agc": {
+            "$ref": "#/components/schemas/GatedAgcSettings",
+            "default": {
+              "enabled": false,
+              "gate_lufs": -45.0,
+              "max_gain_db": 6.0
+            }
+          },
+          "stereo_expander": {
+            "$ref": "#/components/schemas/StereoExpanderSettings",
+            "default": {
+              "depth": 50.0,
+              "enabled": false,
+              "level": 50.0,
+              "threshold_db": -40.0
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgcSettings": {
+        "type": "object",
+        "description": "The whole chain. Bypassed by default; turned on as it is, it is the final\nlimiter alone.",
+        "properties": {
+          "bass_eq": {
+            "$ref": "#/components/schemas/BassEqSettings",
+            "default": {
+              "enabled": false,
+              "frequency_hz": 100.0,
+              "gain_db": 0.0,
+              "shape": "shelf"
+            }
+          },
+          "bypass_all": {
+            "type": "boolean",
+            "description": "Skips the chain, whatever the blocks' switches say.",
+            "default": true
+          },
+          "dual_band": {
+            "$ref": "#/components/schemas/DualBandSettings",
+            "default": {
+              "bands": [
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                },
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                }
+              ],
+              "crossover_hz": 200.0,
+              "enabled": false,
+              "link": false
+            }
+          },
+          "final_stage": {
+            "$ref": "#/components/schemas/FinalStageSettings",
+            "default": {
+              "ceiling_db": -1.0,
+              "enabled": true,
+              "mode": "limiter",
+              "release_ms": 100.0
+            }
+          },
+          "five_band": {
+            "$ref": "#/components/schemas/FiveBandSettings",
+            "default": {
+              "bands": [
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                },
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                },
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                },
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                },
+                {
+                  "attack_ms": 20.0,
+                  "gain_db": 0.0,
+                  "hold_ms": 0.0,
+                  "mode": "compressor",
+                  "ratio": 3.0,
+                  "release_ms": 250.0,
+                  "threshold_db": -20.0
+                }
+              ],
+              "crossovers_hz": [
+                100.0,
+                400.0,
+                1600.0,
+                6400.0
+              ],
+              "enabled": false,
+              "links": [
+                false,
+                false,
+                false,
+                false
+              ],
+              "overdrive_db": 0.0
+            }
+          },
+          "gated_agc": {
+            "$ref": "#/components/schemas/GatedAgcSettings",
+            "default": {
+              "enabled": false,
+              "gate_lufs": -45.0,
+              "max_gain_db": 6.0
+            }
+          },
+          "stereo_expander": {
+            "$ref": "#/components/schemas/StereoExpanderSettings",
+            "default": {
+              "depth": 50.0,
+              "enabled": false,
+              "level": 50.0,
+              "threshold_db": -40.0
+            }
+          }
+        },
+        "additionalProperties": false
+      },
       "AnalysisQueueStatus": {
         "type": "object",
         "required": [
@@ -12061,6 +12726,95 @@
             "description": "Its time and kind: `2026-11-03T03-30-00Z-daily`."
           }
         }
+      },
+      "BandMode": {
+        "type": "string",
+        "enum": [
+          "compressor",
+          "expander",
+          "limiter"
+        ]
+      },
+      "BandSettings": {
+        "type": "object",
+        "description": "One band of the 5-band or the dual-band processor.",
+        "properties": {
+          "attack_ms": {
+            "type": "number",
+            "format": "float",
+            "description": "0.5 to 200 ms.",
+            "default": 20.0
+          },
+          "gain_db": {
+            "type": "number",
+            "format": "float",
+            "description": "After the dynamics, −12 to +12 dB.",
+            "default": 0.0
+          },
+          "hold_ms": {
+            "type": "number",
+            "format": "float",
+            "description": "0 to 500 ms.",
+            "default": 0.0
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BandMode",
+            "default": "compressor"
+          },
+          "ratio": {
+            "type": "number",
+            "format": "float",
+            "description": "1 to 20 (ignored by the limiter).",
+            "default": 3.0
+          },
+          "release_ms": {
+            "type": "number",
+            "format": "float",
+            "description": "10 to 2,000 ms.",
+            "default": 250.0
+          },
+          "threshold_db": {
+            "type": "number",
+            "format": "float",
+            "description": "−60 to 0 dBFS.",
+            "default": -20.0
+          }
+        },
+        "additionalProperties": false
+      },
+      "BassEqSettings": {
+        "type": "object",
+        "description": "The bass EQ: one shelf or peak.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "frequency_hz": {
+            "type": "number",
+            "format": "float",
+            "description": "40 to 250 Hz.",
+            "default": 100.0
+          },
+          "gain_db": {
+            "type": "number",
+            "format": "float",
+            "description": "−12 to +12 dB.",
+            "default": 0.0
+          },
+          "shape": {
+            "$ref": "#/components/schemas/BassShape",
+            "default": "shelf"
+          }
+        },
+        "additionalProperties": false
+      },
+      "BassShape": {
+        "type": "string",
+        "enum": [
+          "shelf",
+          "peak"
+        ]
       },
       "Batch": {
         "type": "object",
@@ -13164,6 +13918,54 @@
           }
         }
       },
+      "DualBandSettings": {
+        "type": "object",
+        "description": "The dual-band processor.",
+        "properties": {
+          "bands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BandSettings"
+            },
+            "description": "Low, then high.",
+            "default": [
+              {
+                "attack_ms": 20.0,
+                "gain_db": 0.0,
+                "hold_ms": 0.0,
+                "mode": "compressor",
+                "ratio": 3.0,
+                "release_ms": 250.0,
+                "threshold_db": -20.0
+              },
+              {
+                "attack_ms": 20.0,
+                "gain_db": 0.0,
+                "hold_ms": 0.0,
+                "mode": "compressor",
+                "ratio": 3.0,
+                "release_ms": 250.0,
+                "threshold_db": -20.0
+              }
+            ]
+          },
+          "crossover_hz": {
+            "type": "number",
+            "format": "float",
+            "description": "60 to 2,000 Hz.",
+            "default": 200.0
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "link": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "additionalProperties": false
+      },
       "EffectivePlayout": {
         "type": "object",
         "description": "How the engine will play the track: analysis and overrides combined.",
@@ -13763,6 +14565,137 @@
         },
         "additionalProperties": false
       },
+      "FinalMode": {
+        "type": "string",
+        "enum": [
+          "limiter",
+          "clipper"
+        ]
+      },
+      "FinalStageSettings": {
+        "type": "object",
+        "description": "The final stage.",
+        "properties": {
+          "ceiling_db": {
+            "type": "number",
+            "format": "float",
+            "description": "−6 to 0 dBFS.",
+            "default": -1.0
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "mode": {
+            "$ref": "#/components/schemas/FinalMode",
+            "default": "limiter"
+          },
+          "release_ms": {
+            "type": "number",
+            "format": "float",
+            "description": "The limiter's, 10 to 1,000 ms.",
+            "default": 100.0
+          }
+        },
+        "additionalProperties": false
+      },
+      "FiveBandSettings": {
+        "type": "object",
+        "description": "The 5-band processor.",
+        "properties": {
+          "bands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BandSettings"
+            },
+            "default": [
+              {
+                "attack_ms": 20.0,
+                "gain_db": 0.0,
+                "hold_ms": 0.0,
+                "mode": "compressor",
+                "ratio": 3.0,
+                "release_ms": 250.0,
+                "threshold_db": -20.0
+              },
+              {
+                "attack_ms": 20.0,
+                "gain_db": 0.0,
+                "hold_ms": 0.0,
+                "mode": "compressor",
+                "ratio": 3.0,
+                "release_ms": 250.0,
+                "threshold_db": -20.0
+              },
+              {
+                "attack_ms": 20.0,
+                "gain_db": 0.0,
+                "hold_ms": 0.0,
+                "mode": "compressor",
+                "ratio": 3.0,
+                "release_ms": 250.0,
+                "threshold_db": -20.0
+              },
+              {
+                "attack_ms": 20.0,
+                "gain_db": 0.0,
+                "hold_ms": 0.0,
+                "mode": "compressor",
+                "ratio": 3.0,
+                "release_ms": 250.0,
+                "threshold_db": -20.0
+              },
+              {
+                "attack_ms": 20.0,
+                "gain_db": 0.0,
+                "hold_ms": 0.0,
+                "mode": "compressor",
+                "ratio": 3.0,
+                "release_ms": 250.0,
+                "threshold_db": -20.0
+              }
+            ]
+          },
+          "crossovers_hz": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Rising, at least a third of an octave apart, 40 to 16,000 Hz.",
+            "default": [
+              100.0,
+              400.0,
+              1600.0,
+              6400.0
+            ]
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "boolean"
+            },
+            "description": "`links[i]` links band `i` and band `i + 1`.",
+            "default": [
+              false,
+              false,
+              false,
+              false
+            ]
+          },
+          "overdrive_db": {
+            "type": "number",
+            "format": "float",
+            "description": "0 to 12 dB.",
+            "default": 0.0
+          }
+        },
+        "additionalProperties": false
+      },
       "FolderProblem": {
         "type": "object",
         "description": "What keeps backups from being written.",
@@ -13793,6 +14726,29 @@
             "minimum": 0
           }
         }
+      },
+      "GatedAgcSettings": {
+        "type": "object",
+        "description": "The gated AGC: a slow gain to the station's loudness target.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "gate_lufs": {
+            "type": "number",
+            "format": "float",
+            "description": "Under this momentary loudness (LUFS) the gain holds: −70 to −20.",
+            "default": -45.0
+          },
+          "max_gain_db": {
+            "type": "number",
+            "format": "float",
+            "description": "The gain stays within ± this, in dB: 0 to 18.",
+            "default": 6.0
+          }
+        },
+        "additionalProperties": false
       },
       "GroupSource": {
         "type": "string",
@@ -14830,6 +15786,17 @@
           "fx"
         ],
         "properties": {
+          "agc": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgcLevels",
+                "description": "While the AGC chain is on."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "deck_a": {
             "$ref": "#/components/schemas/ChannelLevels"
           },
@@ -14840,7 +15807,8 @@
             "$ref": "#/components/schemas/ChannelLevels"
           },
           "master": {
-            "$ref": "#/components/schemas/ChannelLevels"
+            "$ref": "#/components/schemas/ChannelLevels",
+            "description": "After the AGC chain: what the listeners hear."
           }
         }
       },
@@ -15275,6 +16243,24 @@
                 "type": "string",
                 "enum": [
                   "eq"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "settings",
+              "type"
+            ],
+            "properties": {
+              "settings": {
+                "$ref": "#/components/schemas/AgcSettings"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "agc"
                 ]
               }
             }
@@ -19328,6 +20314,35 @@
             "type": "string"
           }
         }
+      },
+      "StereoExpanderSettings": {
+        "type": "object",
+        "description": "The stereo expander: widens programmes close to mono.",
+        "properties": {
+          "depth": {
+            "type": "number",
+            "format": "float",
+            "description": "How much of the missing width is made up, 0 to 100 %.",
+            "default": 50.0
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "level": {
+            "type": "number",
+            "format": "float",
+            "description": "Most boost of the side, 0 to 100 % of 6 dB.",
+            "default": 50.0
+          },
+          "threshold_db": {
+            "type": "number",
+            "format": "float",
+            "description": "Programme level (dBFS) under which nothing is boosted: −60 to 0.",
+            "default": -40.0
+          }
+        },
+        "additionalProperties": false
       },
       "SuggestionReview": {
         "type": "object",

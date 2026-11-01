@@ -17,7 +17,7 @@ The configuration file is what a station restores after a bad change or a lost d
 |---|---|
 | Stations (name, code, enabled, order) and every settings group, shared and per station | Tracks themselves, their analysis, waveforms, fingerprints and identification: the scan rebuilds them |
 | Encoder profiles and outputs, with their passwords and statistics credentials | The play history, the selection log, listener statistics: in the database dump |
-| EQ presets | Library tasks, import batches, the trash journal |
+| EQ and AGC presets | Library tasks, import batches, the trash journal |
 | Category types, categories and their stations | The buffer zone |
 | Clocks and their slots, every station's schedules, their periods and hours | Webhook deliveries |
 | Restrictions and their stations | Sessions (everyone signs in again after a restore) |
@@ -76,7 +76,7 @@ docker compose restart heron-api    # the engines get the restored configuration
 2. The current configuration is backed up (`before_restore`), so a restore can itself be undone.
 3. Everything the file holds replaces what the database has, in one transaction: a restore applies whole or not at all. Rows are matched by ID: what the database has and the file does not (a category made since) is deleted, except stations, which are left as they are with their history. What is set on tracks is replaced for every track: a track the file does not name (added since) loses its categories and settings. What the file does not hold (the tracks themselves, history…) is not touched.
 4. Every session is closed: sign in again, with the users of the backup. When no admin can sign in afterwards, `heron-api user passwd` sets a password from the command line.
-5. Each engine gets its station's restored playout settings, deck EQ and outputs at once, as after any change ([API – Engine configuration](api.md#engine-configuration)); outputs whose settings did not change keep streaming.
+5. Each engine gets its station's restored playout settings, deck EQ, AGC chain and outputs at once, as after any change ([API – Engine configuration](api.md#engine-configuration)); outputs whose settings did not change keep streaming.
 
 The restore's report lists what it replaced, counted by kind, and what it left out: the tracks it did not find by path, with how many settings each had, and the restrictions and medley parts whose track or artist is gone.
 
