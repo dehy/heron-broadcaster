@@ -8,6 +8,7 @@ import { type PointerEvent, useEffect, useLayoutEffect, useRef, useState } from 
 import { ApiError, api, unwrap } from "../api";
 import { t } from "../i18n";
 import { duration } from "../lib/format";
+import { levelAt, levelText } from "../lib/level";
 
 export interface WaveformData {
   intervalMs: number;
@@ -220,7 +221,10 @@ export function WaveformView({
       )}
       {hover !== null && (
         <div className={hover - from > span * 0.85 ? "hover flip" : "hover"} style={{ left: left(hover) }}>
-          <span className="num">{duration(hover, true)}</span>
+          <span className="num">
+            {duration(hover, true)}
+            {data && ` · ${levelText(levelAt(data.peaks, data.intervalMs, hover))}`}
+          </span>
         </div>
       )}
       <div className="axis num">

@@ -37,6 +37,7 @@ import { type RangeSelection, useRangeSelection } from "../lib/rangeSelection";
 import { useAction, useCan } from "../lib/session";
 import { type Preview, usePreview } from "../lib/preview";
 import { here } from "../lib/station";
+import { levelText } from "../lib/level";
 
 const PAGE = 50;
 /** Files in one tag edit, at most (the API's limit). */
@@ -66,6 +67,8 @@ const SORTS: { value: TrackSort; label: PlainKey }[] = [
   { value: "bpm", label: "library.sort.bpm" },
   { value: "mood", label: "library.sort.mood" },
   { value: "sound_code", label: "library.sort.soundCode" },
+  { value: "level_min", label: "library.sort.levelMin" },
+  { value: "level_max", label: "library.sort.levelMax" },
 ];
 
 type Column =
@@ -81,6 +84,8 @@ type Column =
   | "bpm"
   | "mood"
   | "sound_code"
+  | "level_min"
+  | "level_max"
   | "labels";
 
 const COLUMNS: { value: Column; label: PlainKey }[] = [
@@ -96,6 +101,8 @@ const COLUMNS: { value: Column; label: PlainKey }[] = [
   { value: "bpm", label: "library.column.bpm" },
   { value: "mood", label: "library.column.mood" },
   { value: "sound_code", label: "library.column.soundCode" },
+  { value: "level_min", label: "library.column.levelMin" },
+  { value: "level_max", label: "library.column.levelMax" },
   { value: "labels", label: "library.column.labels" },
 ];
 
@@ -860,6 +867,8 @@ function Row({
     bpm: <span className="num">{track.bpm !== null && track.bpm !== undefined ? number(track.bpm) : "–"}</span>,
     mood: track.mood ?? none,
     sound_code: track.sound_code ?? none,
+    level_min: <span className="num small">{levelText(track.level_min_db)}</span>,
+    level_max: <span className="num small">{levelText(track.level_max_db)}</span>,
     labels: (
       <span className="chips">
         {track.labels.map((label) => (

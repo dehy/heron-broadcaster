@@ -6103,3 +6103,66 @@ async fn a_backup_restores_onto_an_empty_database() {
     assert_eq!(admin.get("/backups").await.as_array().unwrap().len(), 3);
     other.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tracks_have_their_lowest_and_highest_level() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    let pool = &station.db.pool;
+    let t = station.tracks.clone();
+    // 50 ms points over the 3 s tracks: silence at both ends, the music
+    // between the cue points (0 to 3000 ms in the test analysis).
+    for (track, quietest, loudest) in [(t[0], 100u8, 250u8), (t[1], 50, 200)] {
+        let mut peaks = vec![quietest; 60];
+        peaks[30] = loudest;
+        sqlx::query("INSERT INTO track_waveforms (track_id, interval_ms, peaks) VALUES (?, 50, ?)")
+            .bind(track)
+            .bind(peaks)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+    assert_eq!(crate::levels::update(pool).await.unwrap(), 2);
+    assert_eq!(crate::levels::update(pool).await.unwrap(), 0, "done once");
+    let level = |byte: u8| (crate::levels::byte_db(byte) * 10.0).round() / 10.0;
+    let detail = admin.get(&format!("/tracks/{}", t[0])).await;
+    assert_eq!(detail["level_min_db"], json!(level(100)), "{detail}");
+    assert_eq!(detail["level_max_db"], json!(level(250)));
+    // A cue point moved: computed again, between the new points.
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/tracks/{}/overrides", t[0]),
+            json!({"cue_in_ms": 1_500, "cue_out_ms": 1_600}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(crate::levels::update(pool).await.unwrap(), 1);
+    let detail = admin.get(&format!("/tracks/{}", t[0])).await;
+    assert_eq!(detail["level_min_db"], json!(level(100)));
+    assert_eq!(detail["level_max_db"], json!(level(250)));
+    let (status, _) = admin
+        .send(
+            Method::PUT,
+            &format!("/tracks/{}/overrides", t[0]),
+            json!({"cue_in_ms": 0, "cue_out_ms": 1_000}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    crate::levels::update(pool).await.unwrap();
+    let detail = admin.get(&format!("/tracks/{}", t[0])).await;
+    assert_eq!(detail["level_max_db"], json!(level(100)), "the peak is out");
+    // The list sorts by them, tracks without a level last.
+    let page = admin.get("/tracks?sort=level_min").await;
+    let order: Vec<u64> = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|track| track["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(order[..2], [t[1], t[0]]);
+    assert_eq!(page["items"][4]["level_min_db"], Value::Null);
+    station.stop().await;
+}

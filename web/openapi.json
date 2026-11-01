@@ -10193,7 +10193,9 @@
                 "bpm",
                 "mood",
                 "sound_code",
-                "genre"
+                "genre",
+                "level_min",
+                "level_max"
               ]
             }
           },
@@ -20744,7 +20746,9 @@
           "bpm",
           "mood",
           "sound_code",
-          "genre"
+          "genre",
+          "level_min",
+          "level_max"
         ]
       },
       "TrackSummary": {
@@ -20877,6 +20881,21 @@
             ],
             "format": "int64",
             "description": "Plays that count (FX player aside, at least the programming\nsettings' `min_play_s`)."
+          },
+          "level_max_db": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "level_min_db": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The lowest and highest peak between the cue points, in dBFS (−72:\nthat or below); none until computed from the waveform."
           },
           "missing": {
             "type": "boolean"

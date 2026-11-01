@@ -51,6 +51,7 @@ import { Link } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 import { DeleteQuestion, bitrate } from "./Library";
 import { here } from "../lib/station";
+import { levelAt, levelText } from "../lib/level";
 
 /** Whether overrides change anything (every field unset). */
 function isDefault(overrides: TrackOverrides): boolean {
@@ -524,6 +525,14 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
                 >
                   <span className="visually-hidden">{t("track.playhead")} </span>
                   {duration(playhead ?? 0, true)} / {duration(length)}
+                  {waveform.data && (
+                    <>
+                      {" · "}
+                      <span title={t("track.levelHelp")}>
+                        {levelText(levelAt(waveform.data.peaks, waveform.data.intervalMs, playhead ?? 0))}
+                      </span>
+                    </>
+                  )}
                 </span>
                 <button type="button" className="btn small" onClick={() => playFrom(cueIn)}>
                   {t("track.fromCueIn")}
@@ -1280,6 +1289,12 @@ function DetailsCard({ track }: { track: TrackDetail }) {
         <dd>{analysis ? db(analysis.integrated_lufs, "LUFS") : t("track.notAnalyzed")}</dd>
         <dt>{t("track.truePeak")}</dt>
         <dd>{analysis ? db(analysis.true_peak_db, "dBTP") : "–"}</dd>
+        <dt>{t("track.levels")}</dt>
+        <dd title={t("track.levelsHelp")}>
+          {track.level_min_db === null || track.level_min_db === undefined
+            ? "–"
+            : t("track.levelsRange", { min: levelText(track.level_min_db), max: levelText(track.level_max_db) })}
+        </dd>
         <dt>{t("track.normalization")}</dt>
         <dd>{db(track.playout.gain_db)}</dd>
         {analysis?.has_internal_silence && (

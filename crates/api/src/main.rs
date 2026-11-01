@@ -21,6 +21,7 @@ mod error;
 mod history;
 mod import;
 mod labels;
+mod levels;
 mod librarian;
 mod library;
 mod listeners;
@@ -242,6 +243,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Arc::clone(&stations),
     )));
     tasks.push(tokio::spawn(medleys::run_linker(pool.clone())));
+    tasks.push(tokio::spawn(levels::run(pool.clone())));
     tasks.push(tokio::spawn(users::purge_sessions(pool.clone())));
     tasks.push(tokio::spawn(
         Arc::clone(&backups).run_daily(pool.clone(), Arc::clone(&stations)),
