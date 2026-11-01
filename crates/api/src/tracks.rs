@@ -82,6 +82,10 @@ pub enum TrackSort {
     /// In the order of the sound code scale.
     SoundCode,
     Genre,
+    /// Quietest first: the lowest level between the cue points.
+    LevelMin,
+    /// Quietest first: the highest level between the cue points.
+    LevelMax,
 }
 
 /// Which tracks: the filters of `GET /tracks`, also used to select tracks
@@ -178,6 +182,10 @@ pub struct TrackSummary {
     pub bpm: Option<f64>,
     pub mood: Option<String>,
     pub sound_code: Option<String>,
+    /// The lowest and highest peak between the cue points, in dBFS (−72:
+    /// that or below); none until computed from the waveform.
+    pub level_min_db: Option<f64>,
+    pub level_max_db: Option<f64>,
     #[sqlx(skip)]
     pub labels: Vec<LabelRef>,
 }
@@ -232,7 +240,10 @@ impl ListContext {
                     COALESCE(mb.first_release_year, t.year) AS year, ",
         );
         self.push_era(query);
-        query.push(" AS era, CAST(COALESCE(p.bpm, a.bpm) AS DOUBLE) AS bpm, p.mood, p.sound_code ");
+        query.push(
+            " AS era, CAST(COALESCE(p.bpm, a.bpm) AS DOUBLE) AS bpm, p.mood, p.sound_code,
+              CAST(l.min_db AS DOUBLE) AS level_min_db, CAST(l.max_db AS DOUBLE) AS level_max_db ",
+        );
         self.push_from(query);
     }
 
@@ -244,6 +255,7 @@ impl ListContext {
               LEFT JOIN track_overrides tov ON tov.track_id = t.id
               LEFT JOIN track_musicbrainz mb ON mb.track_id = t.id
               LEFT JOIN track_programming p ON p.track_id = t.id
+              LEFT JOIN track_levels l ON l.track_id = t.id
               LEFT JOIN (SELECT track_id, COUNT(*) AS plays, MAX(started_at) AS last_played
                          FROM play_history
                          WHERE track_id IS NOT NULL AND deck <> 'fx'",
@@ -461,6 +473,14 @@ impl ListContext {
             )),
             TrackSort::Bitrate => query.push(format!(
                 " ORDER BY t.bitrate_kbps IS NULL, t.bitrate_kbps{0}, t.artist, t.title",
+                direction(true)
+            )),
+            TrackSort::LevelMin => query.push(format!(
+                " ORDER BY l.min_db IS NULL, l.min_db{0}, t.artist, t.title",
+                direction(true)
+            )),
+            TrackSort::LevelMax => query.push(format!(
+                " ORDER BY l.max_db IS NULL, l.max_db{0}, t.artist, t.title",
                 direction(true)
             )),
             TrackSort::Duration => query.push(format!(
