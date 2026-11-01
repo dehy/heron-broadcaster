@@ -98,7 +98,7 @@ Pages are a centred column by default. *Use the whole width of the screen* (Acco
 
 ## Languages
 
-English and French. *System* (the default) follows the browser's languages (`navigator.languages`: the first one the web UI has, English otherwise); a fixed language is saved per user by the API (`PUT /api/v1/auth/preferences`, `{"language": "fr"}`) and remembered by the browser, like the theme, so the sign-in page and the first paint already use it. `<html lang>` follows.
+English, French, Spanish and German. *System* (the default) follows the browser's languages (`navigator.languages`: the first one the web UI has, English otherwise); a fixed language is saved per user by the API (`PUT /api/v1/auth/preferences`, `{"language": "fr"}`) and remembered by the browser, like the theme, so the sign-in page and the first paint already use it. `<html lang>` follows.
 
 Dates, times, numbers, sizes, levels, relative times and plurals are written the language's way (`-1,5 dB`, *il y a 5 minutes*, *2 pistes*), with the browser's own variant of it when it has one (`en-GB` writes 24-hour times). Duration fields take a comma as well as a dot (`1:23,5`). Only the language changes, never the time zone (see [Times](#times)).
 
