@@ -18,6 +18,7 @@ use std::mem::MaybeUninit;
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -211,6 +212,8 @@ pub struct Listener {
     path: PathBuf,
     /// Identifies our socket file: another engine may have replaced it.
     inode: u64,
+    /// Handed over: the socket is the new engine's now, left alone.
+    handed_over: AtomicBool,
 }
 
 impl Listener {
@@ -224,8 +227,10 @@ impl Listener {
             _ => {}
         }
         let listener = UnixListener::bind(&aside)?;
+        // Read before the rename, which keeps it: the path itself may be
+        // gone already, removed by the engine this one took over from.
+        let inode = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&aside)?);
         std::fs::rename(&aside, &path)?;
-        let inode = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&path)?);
         let standby: Arc<Mutex<Option<Channel>>> = Arc::default();
         let accepted = Arc::clone(&standby);
         std::thread::Builder::new()
@@ -248,6 +253,7 @@ impl Listener {
             standby,
             path,
             inode,
+            handed_over: AtomicBool::new(false),
         })
     }
 
@@ -260,7 +266,12 @@ impl Listener {
 impl Drop for Listener {
     /// Removes the socket, unless a new engine replaced it: a starting
     /// engine finds nobody on air instead of a socket nobody answers.
+    /// After a handover, the new engine is replacing it right now: checking
+    /// then removing could remove the new socket, so it is left alone.
     fn drop(&mut self) {
+        if self.handed_over.load(Ordering::Relaxed) {
+            return;
+        }
         let ours = std::fs::metadata(&self.path)
             .is_ok_and(|metadata| std::os::unix::fs::MetadataExt::ino(&metadata) == self.inode);
         if ours {
@@ -385,7 +396,10 @@ pub fn stop(engine: &Engine, listener: &Listener, runtime: &tokio::runtime::Hand
         return;
     };
     match hand_over(engine, channel, runtime) {
-        Ok(()) => tracing::info!("the new engine is on air"),
+        Ok(()) => {
+            listener.handed_over.store(true, Ordering::Relaxed);
+            tracing::info!("the new engine is on air");
+        }
         Err(error) => {
             tracing::error!(%error, "handover failed: stopping as usual");
             engine.save_queue();
@@ -718,6 +732,36 @@ mod tests {
             active.recv(Some(Duration::from_secs(1))),
             Err(HandoverError::Invalid(_))
         ));
+    }
+
+    fn inode(path: &Path) -> Option<u64> {
+        std::fs::metadata(path)
+            .ok()
+            .map(|metadata| std::os::unix::fs::MetadataExt::ino(&metadata))
+    }
+
+    #[test]
+    fn leaves_the_socket_to_the_engine_that_took_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = socket_path(dir.path());
+
+        // Alone: the socket goes with the engine.
+        let alone = Listener::bind(dir.path()).unwrap();
+        assert_eq!(inode(&path), Some(alone.inode));
+        drop(alone);
+        assert_eq!(inode(&path), None);
+
+        // Replaced by another engine, without a handover: left to it.
+        let old = Listener::bind(dir.path()).unwrap();
+        let new = Listener::bind(dir.path()).unwrap();
+        drop(old);
+        assert_eq!(inode(&path), Some(new.inode));
+
+        // Handed over: left alone even before the new engine replaces it,
+        // which it may be doing at that very moment.
+        new.handed_over.store(true, Ordering::Relaxed);
+        drop(new);
+        assert!(inode(&path).is_some());
     }
 
     #[test]
