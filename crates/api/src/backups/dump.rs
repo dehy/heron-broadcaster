@@ -50,13 +50,25 @@ fn parse(url: &str) -> Result<Target, String> {
     let (address, database) = location
         .split_once('/')
         .ok_or("the database URL names no database")?;
-    let (host, port) = match address.rsplit_once(':') {
-        Some((host, port)) => (
-            host,
-            port.parse()
-                .map_err(|_| format!("invalid port in the database URL: {port}"))?,
-        ),
-        None => (address, 3306),
+    let port = |port: &str| {
+        port.parse::<u16>()
+            .map_err(|_| format!("invalid port in the database URL: {port}"))
+    };
+    // An IPv6 address is in brackets, its port after them.
+    let (host, port) = if let Some(bracketed) = address.strip_prefix('[') {
+        let (host, after) = bracketed
+            .split_once(']')
+            .ok_or("invalid IPv6 address in the database URL")?;
+        match after.strip_prefix(':') {
+            Some(after) => (host, port(after)?),
+            None if after.is_empty() => (host, 3306),
+            None => return Err(format!("invalid port in the database URL: {after}")),
+        }
+    } else {
+        match address.rsplit_once(':') {
+            Some((host, after)) => (host, port(after)?),
+            None => (address, 3306),
+        }
     };
     if database.is_empty() {
         return Err("the database URL names no database".to_owned());
@@ -79,7 +91,9 @@ fn quoted(value: &str) -> String {
 pub async fn dump(database_url: &str, target: &Path) -> Result<(), String> {
     let database = parse(database_url)?;
     let dir = target.parent().ok_or("no backup folder")?;
-    // The password goes in an option file, not on the command line.
+    // The password goes in an option file, not on the command line. TCP,
+    // as SQLx: for `localhost`, the client would take a socket instead,
+    // and leave the port out.
     let options = tempfile::Builder::new()
         .prefix(".heron-dump-")
         .tempfile_in(dir)
@@ -88,7 +102,7 @@ pub async fn dump(database_url: &str, target: &Path) -> Result<(), String> {
         let mut file = options.as_file();
         writeln!(
             file,
-            "[client]\nuser={}\npassword={}\nhost={}\nport={}",
+            "[client]\nuser={}\npassword={}\nhost={}\nport={}\nprotocol=TCP",
             quoted(&database.user),
             quoted(&database.password),
             quoted(&database.host),
@@ -191,6 +205,12 @@ mod tests {
         );
         let target = parse("mysql://root@127.0.0.1/heron").unwrap();
         assert_eq!((target.port, target.password.as_str()), (3306, ""));
+        let target = parse("mysql://heron:pass@[::1]/heron").unwrap();
+        assert_eq!((target.host.as_str(), target.port), ("::1", 3306));
+        let target = parse("mysql://heron:pass@[2001:db8::5]:3307/heron").unwrap();
+        assert_eq!((target.host.as_str(), target.port), ("2001:db8::5", 3307));
+        assert!(parse("mysql://heron@[::1/heron").is_err());
+        assert!(parse("mysql://heron@[::1]x/heron").is_err());
         assert!(parse("postgres://x/y").is_err());
         assert!(parse("mysql://x@host").is_err());
     }
