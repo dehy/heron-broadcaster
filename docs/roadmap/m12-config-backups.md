@@ -42,7 +42,7 @@ A station is set by hand, over months: stations, clocks, schedules, categories, 
 - [x] A restore is undone by restoring the backup it took first.
 - [ ] A corrupt, truncated or newer-format file is refused with a clear message and changes nothing; a crash during a restore leaves the configuration as it was before it.
 - [x] Backup files are written atomically and readable by the API's user only; only admins can list, download, upload, restore or delete them.
-- [ ] The engines play on through a backup and a restore; outputs whose settings did not change do not reconnect.
+- [x] The engines play on through a backup and a restore; outputs whose settings did not change do not reconnect.
 
 ## References
 

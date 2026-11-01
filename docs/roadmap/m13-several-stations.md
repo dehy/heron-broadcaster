@@ -41,8 +41,8 @@ Design: [Several stations](../stations.md).
 
 ## Acceptance criteria
 
-- [ ] An existing Heron upgrades to one station holding all its categories, clocks, schedule, restrictions, history, outputs, webhooks and settings, and plays on through the upgrade (hot handover) with nothing to set.
-- [ ] Two stations, each with its own engine, play at once from the same library, each with its own clocks, schedule, queue, playout settings, EQ and outputs; a hot handover of one does not touch the other.
+- [x] An existing Heron upgrades to one station holding all its categories, clocks, schedule, restrictions, history, outputs, webhooks and settings, and plays on through the upgrade (hot handover) with nothing to set.
+- [x] Two stations, each with its own engine, play at once from the same library, each with its own clocks, schedule, queue, playout settings, EQ and outputs; a hot handover of one does not touch the other.
 - [x] A category tagged with two stations is offered by both, one tagged with one is offered by that one only; untagging a station that uses the category is refused and lists what uses it.
 - [x] Plays are recorded per station; a track and an artist show plays and last play per station and in total.
 - [x] With an artist window across stations of 30 minutes, a week simulated on two stations never plays an artist on one within 30 minutes of the other (played or planned), unless the selection log shows that rule relaxed; the same for titles and tracks.
