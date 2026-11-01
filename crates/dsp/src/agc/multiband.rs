@@ -5,8 +5,9 @@
 //! the bands add up again. Each band also goes through the all-pass of the
 //! crossovers above it that do not split it, so flat bands add up to the
 //! input's magnitude exactly. Linked adjacent bands apply the deeper of their
-//! gain reductions; changing the links crossfades the two groupings' gains
-//! over 50 ms.
+//! gain reductions; changing the links glides each band from the gain it had
+//! to the new grouping's over 50 ms, also when the links change again during
+//! a glide.
 
 use super::crossover::{Crossover, State};
 use super::dynamics::Dynamics;
@@ -78,10 +79,14 @@ pub struct Multiband {
     dynamics: [Dynamics; MAX_BANDS],
     band_gain: [Smoothed; MAX_BANDS],
     links: [bool; MAX_BANDS - 1],
-    /// The links before their last change, while crossfading from them.
-    previous_links: [bool; MAX_BANDS - 1],
-    /// 1 to 0: how much the previous links still count.
+    /// What each band's gain was off the new links' when they changed, in
+    /// dB: faded out from there.
+    link_offset_db: [f32; MAX_BANDS],
+    /// 1 to 0: how much of the offset is left.
     link_fade: f32,
+    /// The bands' gains last computed, before and after the links, in dB.
+    last_gains_db: [f32; MAX_BANDS],
+    last_linked_db: [f32; MAX_BANDS],
     link_step: f32,
     drive: Smoothed,
     share: f32,
@@ -104,8 +109,10 @@ impl Multiband {
             dynamics: [Dynamics::new(rate); MAX_BANDS],
             band_gain: [Smoothed::new(1.0); MAX_BANDS],
             links: [false; MAX_BANDS - 1],
-            previous_links: [false; MAX_BANDS - 1],
+            link_offset_db: [0.0; MAX_BANDS],
             link_fade: 0.0,
+            last_gains_db: [0.0; MAX_BANDS],
+            last_linked_db: [0.0; MAX_BANDS],
             link_step: (1.0 / (LINK_SECONDS * rate)) as f32,
             drive: Smoothed::new(1.0),
             share: share(GLIDE_SECONDS, 1, rate),
@@ -139,14 +146,18 @@ impl Multiband {
             *link = on;
         }
         if wanted != self.links {
-            // From where the crossfade has got to: close enough when it is
-            // changed again in the middle of one.
-            self.previous_links = if self.link_fade > 0.5 {
-                self.previous_links
-            } else {
-                self.links
-            };
+            // From the gains the bands have now, mid-glide or not.
             self.links = wanted;
+            let mut target = self.last_gains_db;
+            Self::link(self.bands, &self.links, &mut target);
+            for ((offset, &now), target) in self
+                .link_offset_db
+                .iter_mut()
+                .zip(&self.last_linked_db)
+                .zip(target)
+            {
+                *offset = now - target;
+            }
             self.link_fade = 1.0;
         }
         for ((dynamics, gain), params) in
@@ -176,18 +187,19 @@ impl Multiband {
         }
     }
 
-    /// The bands' gains with the links, crossfading from the previous links.
-    fn linked(&mut self, gains: &[f32; MAX_BANDS]) -> [f32; MAX_BANDS] {
+    /// The bands' gains with the links, gliding from where they were when
+    /// the links changed.
+    pub(super) fn linked(&mut self, gains: &[f32; MAX_BANDS]) -> [f32; MAX_BANDS] {
         let mut now = *gains;
         Self::link(self.bands, &self.links, &mut now);
         if self.link_fade > 0.0 {
-            let mut before = *gains;
-            Self::link(self.bands, &self.previous_links, &mut before);
-            for (now, before) in now.iter_mut().zip(before) {
-                *now += (before - *now) * self.link_fade;
+            for (now, offset) in now.iter_mut().zip(self.link_offset_db) {
+                *now += offset * self.link_fade;
             }
             self.link_fade = (self.link_fade - self.link_step).max(0.0);
         }
+        self.last_gains_db = *gains;
+        self.last_linked_db = now;
         now
     }
 
@@ -294,6 +306,8 @@ impl Block for Multiband {
         for dynamics in &mut self.dynamics {
             dynamics.reset();
         }
+        self.last_gains_db = [0.0; MAX_BANDS];
+        self.last_linked_db = [0.0; MAX_BANDS];
         self.deepest_db = [0.0; MAX_BANDS];
     }
 }

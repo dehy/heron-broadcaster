@@ -503,6 +503,42 @@ fn linked_bands_share_the_deeper_gain_reduction() {
     assert!(gain_at_1k(true) < -10.0);
 }
 
+#[test]
+fn links_changed_again_mid_glide_go_on_from_where_they_are() {
+    let mut dual = Multiband::new(RATE, 2);
+    let set = |dual: &mut Multiband, link: bool| {
+        dual.set_dual(&DualBandParams {
+            enabled: true,
+            link,
+            ..DualBandParams::default()
+        });
+    };
+    // Each band on its own: −20 and 0 dB.
+    let independent = [-20.0, 0.0, 0.0, 0.0, 0.0];
+    set(&mut dual, false);
+    assert_eq!(dual.linked(&independent)[1], 0.0);
+    // Linked: the upper band glides down to −20 dB over 50 ms…
+    set(&mut dual, true);
+    let mut upper = 0.0;
+    for _ in 0..(SECOND / 20 / 4) {
+        let next = dual.linked(&independent)[1];
+        assert!((next - upper).abs() < 0.1, "{upper} to {next} dB");
+        upper = next;
+    }
+    assert!(
+        (-6.0..=-4.0).contains(&upper),
+        "a quarter of the way: {upper} dB"
+    );
+    // …unlinked a quarter of the way: back up from there, without a jump.
+    set(&mut dual, false);
+    for _ in 0..SECOND / 10 {
+        let next = dual.linked(&independent)[1];
+        assert!((next - upper).abs() < 0.1, "{upper} to {next} dB");
+        upper = next;
+    }
+    assert_eq!(upper, 0.0);
+}
+
 /// Harmonic distortion (%) of a sine through one band compressed by about
 /// 10 dB with the default times.
 fn compressed_sine_distortion(frequency: f64) -> f64 {
@@ -606,9 +642,24 @@ fn under_the_ceiling_the_limiter_is_a_delay_and_the_clipper_nothing() {
     assert!(audio[..239 * 2].iter().all(|&s| s == 0.0));
     assert_eq!(&audio[239 * 2..], &input[..input.len() - 239 * 2]);
 
+    let mut clipper = final_stage(FinalMode::Clipper);
+    assert_eq!(
+        clipper.latency(),
+        0,
+        "no delay once the clipper alone is heard"
+    );
     let mut audio = input.clone();
-    run(&mut final_stage(FinalMode::Clipper), &mut audio);
+    run(&mut clipper, &mut audio);
     assert_eq!(audio, input);
+    // Crossfading from the limiter: its delay still counts.
+    clipper.set(&FinalStageParams {
+        enabled: true,
+        mode: FinalMode::Limiter,
+        ceiling_db: -1.0,
+        release_ms: 100.0,
+    });
+    run(&mut clipper, &mut sine(440.0, 0.8, 0.01));
+    assert_eq!(clipper.latency(), 239);
 }
 
 #[test]
@@ -746,6 +797,21 @@ fn a_bypassed_chain_leaves_the_audio_as_it_is() {
     let mut audio = input.clone();
     run_chain(&mut chain, &mut audio);
     assert_eq!(audio, input, "bypassed after playing");
+
+    // Bypassed within one call (longer than the 50 ms fade): what comes
+    // after the fade goes out untouched, not through the chain again.
+    chain.set(&heavy());
+    run_chain(&mut chain, &mut programme(2.0));
+    chain.set(&ChainParams {
+        bypass_all: true,
+        ..heavy()
+    });
+    let input = programme(0.2);
+    let mut audio = input.clone();
+    chain.process(&mut audio);
+    assert!(!chain.is_active());
+    let after_the_fade = SECOND / 10 * 2;
+    assert_eq!(&audio[after_the_fade..], &input[after_the_fade..]);
 }
 
 #[test]
