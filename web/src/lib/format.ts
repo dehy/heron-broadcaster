@@ -90,6 +90,17 @@ function formats(language: string, timeZone?: string) {
     shortTime: new Intl.DateTimeFormat(language, { timeStyle: "short", timeZone }),
     dateTime: new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short", timeZone }),
     fullDate: new Intl.DateTimeFormat(language, { dateStyle: "full", timeZone }),
+    // The wall-clock time to the second, to find the hour that repeats.
+    wall: new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+      timeZone,
+    }),
     relative: new Intl.RelativeTimeFormat(language, { numeric: "auto" }),
   };
 }
@@ -121,19 +132,65 @@ export function timeZone(): string | undefined {
   return zone;
 }
 
+const HOUR_MS = 3_600_000;
+
+/**
+ * When the clocks go back, the hour that repeats says which pass it is:
+ * `02:40 (summer time)` an hour before `02:40 (winter time)`. Other times
+ * are written as they are.
+ */
+function withPass(unixMs: number, text: string): string {
+  const { wall } = current();
+  const here = wall.format(unixMs);
+  if (here === wall.format(unixMs + HOUR_MS)) {
+    return t("format.summerTime", { time: text });
+  }
+  if (here === wall.format(unixMs - HOUR_MS)) {
+    return t("format.winterTime", { time: text });
+  }
+  return text;
+}
+
+/** How far ahead of UTC the zone's clocks are at a Unix time, in ms. */
+function offset(unixMs: number): number {
+  const parts = Object.fromEntries(
+    current()
+      .wall.formatToParts(unixMs)
+      .map((part) => [part.type, Number(part.value)]),
+  );
+  const { year = 0, month = 1, day = 1, hour = 0, minute = 0, second = 0 } = parts;
+  const local = Date.UTC(year, month - 1, day, hour, minute, second);
+  return local - (unixMs - (((unixMs % 1000) + 1000) % 1000));
+}
+
+/**
+ * Whether the clocks changed between two Unix times in ms: `"summer"` when
+ * they went forward, `"winter"` when they went back, `null` otherwise.
+ */
+export function clockChange(earlierMs: number, laterMs: number): "summer" | "winter" | null {
+  const before = offset(earlierMs);
+  const after = offset(laterMs);
+  if (after > before) {
+    return "summer";
+  }
+  return after < before ? "winter" : null;
+}
+
 /** Time of day of a Unix time in ms. */
 export function clockTime(unixMs: number): string {
-  return current().time.format(new Date(unixMs));
+  return withPass(unixMs, current().time.format(new Date(unixMs)));
 }
 
 /** Time of day of a Unix time in ms, without the seconds. */
 export function shortTime(unixMs: number): string {
-  return current().shortTime.format(new Date(unixMs));
+  return withPass(unixMs, current().shortTime.format(new Date(unixMs)));
 }
 
 /** Date and time of a Unix time in ms. */
 export function dateTime(unixMs: number | null | undefined): string {
-  return unixMs === null || unixMs === undefined ? "–" : current().dateTime.format(new Date(unixMs));
+  return unixMs === null || unixMs === undefined
+    ? "–"
+    : withPass(unixMs, current().dateTime.format(new Date(unixMs)));
 }
 
 /** The date of a Unix time in ms, written in full with its weekday. */

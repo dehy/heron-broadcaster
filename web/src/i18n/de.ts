@@ -9,6 +9,8 @@ import type { Catalog } from ".";
 const de = {
   // Formatting
   "format.never": "nie",
+  "format.summerTime": "{time} (Sommerzeit)",
+  "format.winterTime": "{time} (Winterzeit)",
   "format.bytes": "{size} B",
   "format.kilobytes": "{size} kB",
   "format.megabytes": "{size} MB",
@@ -331,6 +333,8 @@ const de = {
   "history.replaced": "Ersetzt",
   "history.ended": "Beendet",
   "history.description": "Jede Ausspielung, wie die Engine sie gemeldet hat, in Senderzeit ({zone}).",
+  "history.toSummerTime": "Umstellung auf Sommerzeit",
+  "history.toWinterTime": "Umstellung auf Winterzeit",
   "history.showFx": "FX-Player anzeigen",
   "history.empty": "Noch nichts gespielt.",
   "history.started": "Start",

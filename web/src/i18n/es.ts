@@ -9,6 +9,8 @@ import type { Catalog } from ".";
 const es = {
   // Formatting
   "format.never": "nunca",
+  "format.summerTime": "{time} (horario de verano)",
+  "format.winterTime": "{time} (horario de invierno)",
   "format.bytes": "{size} B",
   "format.kilobytes": "{size} kB",
   "format.megabytes": "{size} MB",
@@ -331,6 +333,8 @@ const es = {
   "history.replaced": "Sustituida",
   "history.ended": "Terminada",
   "history.description": "Cada reproducción, tal como la notificó el motor, en hora de la emisora ({zone}).",
+  "history.toSummerTime": "Cambio al horario de verano",
+  "history.toWinterTime": "Cambio al horario de invierno",
   "history.showFx": "Mostrar el reproductor FX",
   "history.empty": "Todavía no ha sonado nada.",
   "history.started": "Inicio",

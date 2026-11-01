@@ -921,6 +921,29 @@ a.badge-link:hover {
   border-top: 1px solid var(--border);
 }
 
+/* The clocks changing between two rows: a line with what happened. */
+.clock-change td {
+  padding: 0.35rem 1rem;
+}
+
+.clock-change span {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.clock-change span::before,
+.clock-change span::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed var(--border);
+}
+
 /* Dashboard -------------------------------------------------------------- */
 
 .decks {

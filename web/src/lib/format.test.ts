@@ -5,6 +5,7 @@ import { locale, setLanguage } from "../i18n";
 import {
   ago,
   bytes,
+  clockChange,
   clockTime,
   dateTime,
   db,
@@ -12,6 +13,7 @@ import {
   fullDate,
   parseDuration,
   setTimeZone,
+  shortTime,
   totalTime,
   trackName,
 } from "./format";
@@ -90,6 +92,43 @@ describe("time zone", () => {
     expect(fullDate(at)).toBe(first);
   });
 
+  it("says which pass of the repeated hour a time is", () => {
+    setTimeZone("Europe/Paris");
+    // 2026-10-25: 03:00 summer time becomes 02:00, 02:40 comes twice.
+    const first = Date.UTC(2026, 9, 25, 0, 40);
+    const second = Date.UTC(2026, 9, 25, 1, 40);
+    expect(clockTime(first)).toBe(`${time("Europe/Paris", first)} (summer time)`);
+    expect(clockTime(second)).toBe(`${time("Europe/Paris", second)} (winter time)`);
+    expect(time("Europe/Paris", first)).toBe(time("Europe/Paris", second));
+    expect(shortTime(first)).toMatch(/\(summer time\)$/);
+    expect(dateTime(second)).toMatch(/\(winter time\)$/);
+    // Before and after the repeated hour, and in a zone without one.
+    expect(clockTime(Date.UTC(2026, 9, 24, 23, 59))).toBe(time("Europe/Paris", Date.UTC(2026, 9, 24, 23, 59)));
+    expect(clockTime(Date.UTC(2026, 9, 25, 2))).toBe(time("Europe/Paris", Date.UTC(2026, 9, 25, 2)));
+    setTimeZone("UTC");
+    expect(clockTime(first)).toBe(time("UTC", first));
+  });
+
+  it("skips the hour lost when the clocks go forward", () => {
+    setTimeZone("Europe/Paris");
+    // 2026-03-29: 01:59 is followed by 03:00, without a label.
+    const before = Date.UTC(2026, 2, 29, 0, 59);
+    const after = Date.UTC(2026, 2, 29, 1, 0);
+    expect(clockTime(before)).toBe(time("Europe/Paris", before));
+    expect(clockTime(after)).toBe(time("Europe/Paris", after));
+    expect(shortTime(before)).toMatch(/1:59/);
+    expect(shortTime(after)).toMatch(/3:00/);
+  });
+
+  it("finds when the clocks change", () => {
+    setTimeZone("Europe/Paris");
+    expect(clockChange(Date.UTC(2026, 2, 29, 0, 59), Date.UTC(2026, 2, 29, 1))).toBe("summer");
+    expect(clockChange(Date.UTC(2026, 9, 25, 0, 59), Date.UTC(2026, 9, 25, 1))).toBe("winter");
+    expect(clockChange(Date.UTC(2026, 9, 25, 1), Date.UTC(2026, 9, 25, 2))).toBeNull();
+    setTimeZone("UTC");
+    expect(clockChange(Date.UTC(2026, 9, 25, 0, 59), Date.UTC(2026, 9, 25, 1))).toBeNull();
+  });
+
   it("ignores a zone the browser does not know", () => {
     const at = Date.UTC(2024, 0, 1, 12);
     setTimeZone("UTC");
@@ -132,5 +171,7 @@ describe("in French", () => {
     expect(clockTime(at)).toBe(format({ timeStyle: "medium" }));
     expect(fullDate(at)).toBe("mardi 2 janvier 2024");
     expect(dateTime(at)).toBe(format({ dateStyle: "medium", timeStyle: "short" }));
+    expect(clockTime(Date.UTC(2026, 9, 25, 0, 40))).toMatch(/\(heure d’été\)$/);
+    expect(clockTime(Date.UTC(2026, 9, 25, 1, 40))).toMatch(/\(heure d’hiver\)$/);
   });
 });
