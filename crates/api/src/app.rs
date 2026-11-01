@@ -244,6 +244,8 @@ pub struct Status {
     pub clock: heron_service::clock::ClockStatus,
     /// The server's time, to compare with the browser's.
     pub server_time_unix_ms: i64,
+    /// What keeps backups from being written: the backup folder.
+    pub backups: Option<crate::backups::FolderProblem>,
 }
 
 /// Whether the API, its database and the engine are up, and whether the
@@ -268,6 +270,7 @@ async fn status(State(state): State<AppState>) -> Json<Status> {
             "unavailable"
         },
         clock: heron_service::clock::status(),
+        backups: state.backups.problem(),
         server_time_unix_ms: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| {

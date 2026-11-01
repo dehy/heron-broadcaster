@@ -101,12 +101,50 @@ pub struct BackupView {
     pub database_error: Option<String>,
 }
 
+/// What keeps backups from being written.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ToSchema)]
+pub struct FolderProblem {
+    /// The system's error (`Permission denied`…).
+    pub error: String,
+    /// The user and group the API runs as: the backup folder must be
+    /// theirs.
+    pub uid: u32,
+    pub gid: u32,
+}
+
 /// The backup folder, and what backs up the database.
 pub struct Backups {
     dir: PathBuf,
     database_url: String,
     /// One backup or restore at a time.
     lock: tokio::sync::Mutex<()>,
+    /// Whether the folder could be written, when last checked.
+    problem: std::sync::Mutex<Option<FolderProblem>>,
+}
+
+/// An error writing to the backup folder, saying how to fix it.
+fn folder_error(dir: &Path, error: &std::io::Error) -> ApiError {
+    if error.kind() == std::io::ErrorKind::PermissionDenied {
+        let (uid, gid) = ids();
+        ApiError::Invalid(format!(
+            "cannot write in the backup folder ({}): it is not the API's user's ({uid}:{gid}). \
+             On the host, give it to that user: chown {uid}:{gid} on HERON_BACKUP_FOLDER \
+             (./data/backups by default)",
+            dir.display()
+        ))
+    } else {
+        ApiError::Invalid(format!(
+            "cannot write in the backup folder ({}): {error}",
+            dir.display()
+        ))
+    }
+}
+
+fn ids() -> (u32, u32) {
+    (
+        rustix::process::getuid().as_raw(),
+        rustix::process::getgid().as_raw(),
+    )
 }
 
 fn config_file(name: &str) -> String {
@@ -178,7 +216,55 @@ impl Backups {
             dir,
             database_url,
             lock: tokio::sync::Mutex::new(()),
+            problem: std::sync::Mutex::new(None),
         })
+    }
+
+    /// What kept the folder from being written when last checked.
+    pub fn problem(&self) -> Option<FolderProblem> {
+        self.problem
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Writes and removes a file in the folder.
+    fn probe(&self) -> std::io::Result<()> {
+        let probe = self.dir.join(".heron-write-check");
+        std::fs::create_dir_all(&self.dir)?;
+        std::fs::write(&probe, b"")?;
+        std::fs::remove_file(&probe)
+    }
+
+    /// Whether the folder can be written, remembered for `/status`.
+    pub fn check_folder(&self) -> std::io::Result<()> {
+        let result = self.probe();
+        let problem = result.as_ref().err().map(|error| {
+            let (uid, gid) = ids();
+            FolderProblem {
+                error: error.to_string(),
+                uid,
+                gid,
+            }
+        });
+        if let Some(problem) = &problem {
+            tracing::error!(
+                dir = %self.dir.display(),
+                error = %problem.error,
+                "the backup folder cannot be written: give it to {}:{} on the host",
+                problem.uid,
+                problem.gid
+            );
+        }
+        let mut current = self
+            .problem
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if current.is_some() && problem.is_none() {
+            tracing::info!(dir = %self.dir.display(), "the backup folder can be written again");
+        }
+        current.clone_from(&problem);
+        result
     }
 
     pub fn dir(&self) -> &Path {
@@ -190,12 +276,7 @@ impl Backups {
         let entries = match std::fs::read_dir(&self.dir) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => {
-                return Err(ApiError::Internal(format!(
-                    "cannot read {}: {error}",
-                    self.dir.display()
-                )));
-            }
+            Err(error) => return Err(folder_error(&self.dir, &error)),
         };
         let mut backups = Vec::new();
         for entry in entries.flatten() {
@@ -245,9 +326,8 @@ impl Backups {
         kind: Kind,
         upload: Option<&[u8]>,
     ) -> ApiResult<BackupView> {
-        std::fs::create_dir_all(&self.dir).map_err(|error| {
-            ApiError::Internal(format!("cannot create {}: {error}", self.dir.display()))
-        })?;
+        self.check_folder()
+            .map_err(|error| folder_error(&self.dir, &error))?;
         let mut now = Timestamp::now();
         // Each backup has its own second, so that names sort by time.
         let taken: Vec<String> = self.list()?.into_iter().map(|backup| backup.name).collect();
@@ -271,7 +351,7 @@ impl Backups {
         tokio::task::spawn_blocking(move || write_atomically(&path, |file| file.write_all(&bytes)))
             .await
             .map_err(|error| ApiError::Internal(error.to_string()))?
-            .map_err(|error| ApiError::Internal(format!("cannot write the backup: {error}")))?;
+            .map_err(|error| folder_error(&self.dir, &error))?;
         let settings: BackupSettings =
             crate::settings::load(pool, BackupSettings::SETTINGS_NAME).await?;
         if settings.database && kind != Kind::Uploaded {
@@ -394,6 +474,10 @@ impl Backups {
     }
 
     async fn daily(&self, pool: &MySqlPool, stations: &Stations) -> ApiResult<()> {
+        // Checked every minute: the banner goes once the folder is fixed.
+        if self.check_folder().is_err() {
+            return Ok(());
+        }
         let settings: BackupSettings =
             crate::settings::load(pool, BackupSettings::SETTINGS_NAME).await?;
         let Some((hour, minute)) = settings.at().filter(|_| settings.enabled) else {
@@ -674,6 +758,32 @@ mod tests {
                 .join(database_file("2026-11-01T03-30-00Z-manual"))
                 .exists()
         );
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_written_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        // A file where the folder should be: it cannot be created.
+        let taken = dir.path().join("backups");
+        std::fs::write(&taken, "").unwrap();
+        let backups = Backups::new(taken.clone(), String::new());
+        assert!(backups.check_folder().is_err());
+        let problem = backups.problem().unwrap();
+        assert_eq!((problem.uid, problem.gid), ids());
+        // Fixed: the problem goes at the next check.
+        std::fs::remove_file(&taken).unwrap();
+        assert!(backups.check_folder().is_ok());
+        assert_eq!(backups.problem(), None);
+        assert!(!taken.join(".heron-write-check").exists());
+    }
+
+    #[test]
+    fn permission_errors_say_how_to_fix_them() {
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let message = folder_error(Path::new("/var/lib/heron/backups"), &denied).to_string();
+        let (uid, gid) = ids();
+        assert!(message.contains(&format!("chown {uid}:{gid}")), "{message}");
+        assert!(message.contains("HERON_BACKUP_FOLDER"), "{message}");
     }
 
     #[test]
