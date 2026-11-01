@@ -3,6 +3,8 @@
 //! Station settings, stored as JSON in the `settings` table, one row per group.
 //!
 //! - `playout`: crossfades and loudness, pushed to the engine.
+//! - `eq` and `agc`: the deck EQ and the master AGC chain, pushed to the
+//!   engine (`eq.rs`, `agc.rs`).
 //! - `analysis`: Gap Killer and crossfade point detection. Changing them
 //!   re-analyzes the library.
 //! - `library`: identification and layout, read by `heron-librarian`.
@@ -287,10 +289,11 @@ impl EngineManagement {
 
 /// The settings groups each station has its own of, in `station_settings`
 /// (docs/stations.md#settings). The others are shared, in `settings`.
-pub const PER_STATION: [&str; 7] = [
+pub const PER_STATION: [&str; 8] = [
     "station",
     "playout",
     "eq",
+    "agc",
     "queue",
     "engine",
     "rotation",

@@ -250,6 +250,12 @@ const TABLES: &[Table] = &[
         &["name"],
     ),
     table(
+        "agc_presets",
+        &[Plain("id"), Plain("name"), Json("settings")],
+        Mode::Upsert,
+        &["name"],
+    ),
+    table(
         "category_types",
         &[
             Plain("id"),

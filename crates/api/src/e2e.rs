@@ -1353,6 +1353,7 @@ async fn adopts_outputs_configured_on_the_engine() {
     let engine_config: EngineConfig = serde_json::from_value(json!({
         "playout": {"crossfade": {"min_track_ms": 25000}},
         "eq": {"music": {"enabled": true, "gains_db": [2, 0, 0, 0, 0, 0, 0, 0, 0, 0]}},
+        "agc": {"bypass_all": false, "final_stage": {"ceiling_db": -2}},
         "outputs": {
             "encoder_profiles": [
                 {"id": 1, "name": "MP3 128k", "encoder": "mp3", "bitrate_kbps": 128,
@@ -1384,6 +1385,9 @@ async fn adopts_outputs_configured_on_the_engine() {
     let eq = admin.get("/settings/eq").await;
     assert_eq!(eq["music"]["enabled"], true);
     assert_eq!(eq["music"]["gains_db"][0], 2.0);
+    let agc = admin.get("/settings/agc").await;
+    assert_eq!(agc["bypass_all"], false);
+    assert_eq!(agc["final_stage"]["ceiling_db"], -2.0);
 
     // Same IDs: the engine kept its configuration as it was.
     let config = station
@@ -4530,6 +4534,165 @@ async fn deck_eq_and_presets() {
     station.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn agc_chain_and_presets() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+
+    // Bypassed until set, the final limiter on.
+    let agc = admin.get("/settings/agc").await;
+    assert_eq!(agc["bypass_all"], true);
+    assert_eq!(agc["final_stage"]["enabled"], true);
+    assert_eq!(agc["five_band"]["bands"].as_array().unwrap().len(), 5);
+
+    let presets = viewer.get("/agc-presets").await;
+    let names: Vec<&str> = presets
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|preset| preset["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["Dense", "Gentle", "Pop", "Rock", "Talk"]);
+    let pop = presets
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Pop")
+        .unwrap();
+    assert_eq!(pop["settings"]["five_band"]["enabled"], true);
+    assert!(pop["settings"]["bypass_all"].is_null());
+
+    // Loading a preset: its blocks into the chain, switched on.
+    let mut settings = pop["settings"].clone();
+    settings["bypass_all"] = json!(false);
+    let (status, _) = viewer
+        .send(Method::PUT, "/settings/agc", settings.clone())
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let mut backwards = settings.clone();
+    backwards["five_band"]["crossovers_hz"] = json!([100, 400, 300, 6400]);
+    let (status, body) = admin.send(Method::PUT, "/settings/agc", backwards).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let mut unknown = settings.clone();
+    unknown["final_stage"]["mode"] = json!("brickwall");
+    let (status, _) = admin.send(Method::PUT, "/settings/agc", unknown).await;
+    assert!(status.is_client_error());
+
+    // Every live socket follows, and the engine has it at once.
+    let url = format!("ws://{}/api/v1/live", station.api);
+    let mut request = tungstenite::client::IntoClientRequest::into_client_request(url).unwrap();
+    request
+        .headers_mut()
+        .insert("cookie", viewer.cookie.as_deref().unwrap().parse().unwrap());
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    let mut next = async || -> Value {
+        let message = tokio::time::timeout(Duration::from_secs(10), socket.next())
+            .await
+            .expect("live message")
+            .unwrap()
+            .unwrap();
+        serde_json::from_str(message.to_text().unwrap()).unwrap()
+    };
+    assert_eq!(next().await["type"], "state");
+    let (status, saved) = admin
+        .send(Method::PUT, "/settings/agc", settings.clone())
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let mut agc_message = None;
+    let mut agc_levels = None;
+    for _ in 0..100 {
+        let message = next().await;
+        if message["type"] == "agc" {
+            agc_message = Some(message);
+        } else if message["type"] == "levels" && message["levels"]["agc"].is_object() {
+            agc_levels = Some(message);
+        }
+        if agc_message.is_some() && agc_levels.is_some() {
+            break;
+        }
+    }
+    assert_eq!(agc_message.expect("an agc message")["settings"], saved);
+    let levels = agc_levels.expect("the chain's meters")["levels"]["agc"].clone();
+    assert_eq!(levels["five_band_db"].as_array().unwrap().len(), 5);
+    assert_eq!(levels["dual_band_db"].as_array().unwrap().len(), 2);
+    assert!(levels["final_stage_db"].as_f64().unwrap() <= 0.0);
+    assert!(levels["input"]["peak_left"].is_number());
+    let config = station
+        .state
+        .stations
+        .first()
+        .engine
+        .config()
+        .await
+        .unwrap();
+    let engine_agc: heron_core::AgcSettings =
+        serde_json::from_str(&config.agc_settings_json).unwrap();
+    assert_eq!(serde_json::to_value(engine_agc).unwrap(), saved);
+    assert_eq!(admin.get("/settings/agc").await, saved);
+
+    // Presets: save, rename, delete; names are unique.
+    let blocks = pop["settings"].clone();
+    let (status, _) = viewer
+        .send(
+            Method::POST,
+            "/agc-presets",
+            json!({"name": "Morning", "settings": blocks}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, preset) = admin
+        .send(
+            Method::POST,
+            "/agc-presets",
+            json!({"name": "Morning", "settings": {"gated_agc": {"enabled": true}}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{preset}");
+    assert_eq!(preset["settings"]["gated_agc"]["enabled"], true);
+    assert_eq!(preset["settings"]["final_stage"]["ceiling_db"], -1.0);
+    let id = preset["id"].as_u64().unwrap();
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/agc-presets",
+            json!({"name": "pop", "settings": blocks}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = admin
+        .send(
+            Method::POST,
+            "/agc-presets",
+            json!({"name": "Bypassed", "settings": {"bypass_all": true}}),
+        )
+        .await;
+    assert!(status.is_client_error());
+    let (status, renamed) = admin
+        .send(
+            Method::PUT,
+            &format!("/agc-presets/{id}"),
+            json!({"name": "Morning show", "settings": blocks}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    assert_eq!(renamed["name"], "Morning show");
+    assert_eq!(renamed["settings"], blocks);
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/agc-presets/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = admin
+        .request(Method::DELETE, &format!("/agc-presets/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // The chain keeps what was loaded.
+    assert_eq!(admin.get("/settings/agc").await, saved);
+    station.stop().await;
+}
+
 /// Two stations, each with its own engine, play at once from the same
 /// library, each with its own clocks, queue and history; the routes of a
 /// single station still serve the first.
@@ -5762,6 +5925,8 @@ async fn configuration(admin: &Client, tracks: &[u64]) -> Value {
         "/webhooks",
         "/users",
         "/eq-presets",
+        "/settings/agc",
+        "/agc-presets",
         "/stations",
         "/medleys",
         "/settings/medleys",
@@ -6016,6 +6181,19 @@ async fn a_backup_restores_onto_an_empty_database() {
         .await;
     assert_eq!(status, StatusCode::CREATED);
     let token = token["token"].as_str().unwrap().to_owned();
+    // The AGC chain and a preset of its own.
+    let (status, body) = admin
+        .send(
+            Method::POST,
+            "/agc-presets",
+            json!({"name": "Morning", "settings": {"gated_agc": {"enabled": true, "max_gain_db": 9}}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let mut agc = admin.get("/settings/agc").await;
+    agc["final_stage"]["ceiling_db"] = json!(-2.0);
+    let (status, body) = admin.send(Method::PUT, "/settings/agc", agc).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     let configured = configuration(&admin, &t).await;
 
     // Backed up, then restored onto another Heron's empty database with

@@ -9,7 +9,8 @@
 //! - `positions` twice a second;
 //! - `levels` ten times a second (unless `?levels=false`);
 //! - `track` for each track change reported by the engine;
-//! - `eq` whenever the deck EQ settings change.
+//! - `eq` whenever the deck EQ settings change;
+//! - `agc` whenever the AGC settings change.
 
 use axum::extract::Query;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -53,6 +54,9 @@ pub enum LiveMessage {
     },
     Eq {
         settings: heron_core::EqSettings,
+    },
+    Agc {
+        settings: heron_core::AgcSettings,
     },
 }
 
@@ -116,6 +120,7 @@ async fn serve(
     let mut player = station.engine.state();
     let mut events = station.engine.events();
     let mut eq_changes = station.eq_changes.subscribe();
+    let mut agc_changes = station.agc_changes.subscribe();
     let mut levels = with_levels.then(|| station.engine.levels());
 
     let current = player.borrow_and_update().clone();
@@ -152,6 +157,11 @@ async fn serve(
             },
             eq = eq_changes.recv() => match eq {
                 Ok(settings) => send(&mut socket, &LiveMessage::Eq { settings }).await?,
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => return Ok(()),
+            },
+            agc = agc_changes.recv() => match agc {
+                Ok(settings) => send(&mut socket, &LiveMessage::Agc { settings }).await?,
                 Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => return Ok(()),
             },

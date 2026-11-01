@@ -88,7 +88,7 @@ Each station has a name, a code (1 to 32 lowercase letters and digits, unique), 
 |---|---|---|
 | `state` | On connection, then whenever the decks, the queue, the outputs or the engine's reachability change | `player`: the same as `GET /player`, `null` while the engine is unreachable |
 | `positions` | Twice a second | Each deck's position and length |
-| `levels` | Ten times a second, unless the URL has `?levels=false` | Peak and RMS (dBFS) of the master bus and each deck; while the AGC chain is on, `agc`: its input and output peak and RMS, the AGC's gain, and the gain reduction (dB) of each band and of the final stage |
+| `levels` | Ten times a second, unless the URL has `?levels=false` | Peak and RMS (dBFS) of the master bus, after the AGC chain, and of each deck; while the chain is on, `agc`: the peak and RMS of its `input` (the master bus before it), the AGC's gain, and the gain reduction (dB) of each band and of the final stage |
 | `agc` | Whenever the AGC settings change | `settings`: the same as `GET /settings/agc` |
 | `eq` | Whenever the deck EQ settings change | `settings`: the same as `GET /settings/eq` |
 | `track` | Each track change | `event`: `started` or `ended` (with `played_ms` and `reason`: finished, skipped, stopped, replaced) |

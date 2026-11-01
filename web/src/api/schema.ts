@@ -3,6 +3,48 @@
 // Generated from openapi.json by `npm run generate-api`. Do not edit.
 
 export interface paths {
+    "/api/v1/agc-presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every AGC preset, by name. */
+        get: operations["list_agc_presets"];
+        put?: never;
+        /** Saves a chain's blocks as a new preset. Operators and admins. */
+        post: operations["create_agc_preset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agc-presets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Renames a preset or saves new blocks in it. The chains it was loaded
+         *     into keep their settings. Operators and admins.
+         */
+        put: operations["update_agc_preset"];
+        post?: never;
+        /**
+         * Deletes a preset. The chains it was loaded into keep their settings.
+         *     Operators and admins.
+         */
+        delete: operations["delete_agc_preset"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/artist-names/{id}": {
         parameters: {
             query?: never;
@@ -1734,6 +1776,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/agc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The station's AGC chain. */
+        get: operations["get_agc"];
+        /**
+         * Replaces the station's AGC chain (missing fields take the defaults) and
+         *     pushes it to the engine at once, where it glides in. Every open live
+         *     WebSocket gets an `agc` message. Operators and admins.
+         */
+        put: operations["put_agc"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/analysis": {
         parameters: {
             query?: never;
@@ -2761,6 +2825,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/stations/{station_id}/settings/agc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The station's AGC chain. */
+        get: operations["get_agc_on_station"];
+        /**
+         * Replaces the station's AGC chain (missing fields take the defaults) and
+         *     pushes it to the engine at once, where it glides in. Every open live
+         *     WebSocket gets an `agc` message. Operators and admins.
+         */
+        put: operations["put_agc_on_station"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/stations/{station_id}/settings/eq": {
         parameters: {
             query?: never;
@@ -3634,6 +3720,309 @@ export interface components {
              */
             track_min: number;
         };
+        /** @description The AGC chain's meters. Gain reductions are in dB, 0 or less. */
+        AgcLevels: {
+            /**
+             * Format: float
+             * @description The gated AGC's gain, while it is on.
+             */
+            agc_gain_db?: number | null;
+            /** @description The dual-band processor's low and high bands. */
+            dual_band_db: number[];
+            /** Format: float */
+            final_stage_db: number;
+            /** @description Each band of the 5-band processor, from the lowest. */
+            five_band_db: number[];
+            /** @description The master bus before the chain (`master` is after it). */
+            input: components["schemas"]["ChannelLevels"];
+        };
+        AgcPreset: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            settings: components["schemas"]["AgcPresetSettings"];
+        };
+        AgcPresetInput: {
+            /** @description Unique, ignoring case. */
+            name: string;
+            /** @description Missing fields take the defaults. */
+            settings: components["schemas"]["AgcPresetSettings"];
+        };
+        /**
+         * @description The blocks of an AGC chain, as a preset keeps them: the chain's
+         *     settings without `bypass_all`.
+         */
+        AgcPresetSettings: {
+            /**
+             * @default {
+             *       "enabled": false,
+             *       "frequency_hz": 100,
+             *       "gain_db": 0,
+             *       "shape": "shelf"
+             *     }
+             */
+            bass_eq: components["schemas"]["BassEqSettings"];
+            /**
+             * @default {
+             *       "bands": [
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         },
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         }
+             *       ],
+             *       "crossover_hz": 200,
+             *       "enabled": false,
+             *       "link": false
+             *     }
+             */
+            dual_band: components["schemas"]["DualBandSettings"];
+            /**
+             * @default {
+             *       "ceiling_db": -1,
+             *       "enabled": true,
+             *       "mode": "limiter",
+             *       "release_ms": 100
+             *     }
+             */
+            final_stage: components["schemas"]["FinalStageSettings"];
+            /**
+             * @default {
+             *       "bands": [
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         },
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         },
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         },
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         },
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         }
+             *       ],
+             *       "crossovers_hz": [
+             *         100,
+             *         400,
+             *         1600,
+             *         6400
+             *       ],
+             *       "enabled": false,
+             *       "links": [
+             *         false,
+             *         false,
+             *         false,
+             *         false
+             *       ],
+             *       "overdrive_db": 0
+             *     }
+             */
+            five_band: components["schemas"]["FiveBandSettings"];
+            /**
+             * @default {
+             *       "enabled": false,
+             *       "gate_lufs": -45,
+             *       "max_gain_db": 6
+             *     }
+             */
+            gated_agc: components["schemas"]["GatedAgcSettings"];
+            /**
+             * @default {
+             *       "depth": 50,
+             *       "enabled": false,
+             *       "level": 50,
+             *       "threshold_db": -40
+             *     }
+             */
+            stereo_expander: components["schemas"]["StereoExpanderSettings"];
+        };
+        /**
+         * @description The whole chain. Bypassed by default; turned on as it is, it is the final
+         *     limiter alone.
+         */
+        AgcSettings: {
+            /**
+             * @default {
+             *       "enabled": false,
+             *       "frequency_hz": 100,
+             *       "gain_db": 0,
+             *       "shape": "shelf"
+             *     }
+             */
+            bass_eq: components["schemas"]["BassEqSettings"];
+            /**
+             * @description Skips the chain, whatever the blocks' switches say.
+             * @default true
+             */
+            bypass_all: boolean;
+            /**
+             * @default {
+             *       "bands": [
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         },
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         }
+             *       ],
+             *       "crossover_hz": 200,
+             *       "enabled": false,
+             *       "link": false
+             *     }
+             */
+            dual_band: components["schemas"]["DualBandSettings"];
+            /**
+             * @default {
+             *       "ceiling_db": -1,
+             *       "enabled": true,
+             *       "mode": "limiter",
+             *       "release_ms": 100
+             *     }
+             */
+            final_stage: components["schemas"]["FinalStageSettings"];
+            /**
+             * @default {
+             *       "bands": [
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         },
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         },
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         },
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         },
+             *         {
+             *           "attack_ms": 20,
+             *           "gain_db": 0,
+             *           "hold_ms": 0,
+             *           "mode": "compressor",
+             *           "ratio": 3,
+             *           "release_ms": 250,
+             *           "threshold_db": -20
+             *         }
+             *       ],
+             *       "crossovers_hz": [
+             *         100,
+             *         400,
+             *         1600,
+             *         6400
+             *       ],
+             *       "enabled": false,
+             *       "links": [
+             *         false,
+             *         false,
+             *         false,
+             *         false
+             *       ],
+             *       "overdrive_db": 0
+             *     }
+             */
+            five_band: components["schemas"]["FiveBandSettings"];
+            /**
+             * @default {
+             *       "enabled": false,
+             *       "gate_lufs": -45,
+             *       "max_gain_db": 6
+             *     }
+             */
+            gated_agc: components["schemas"]["GatedAgcSettings"];
+            /**
+             * @default {
+             *       "depth": 50,
+             *       "enabled": false,
+             *       "level": 50,
+             *       "threshold_db": -40
+             *     }
+             */
+            stereo_expander: components["schemas"]["StereoExpanderSettings"];
+        };
         AnalysisQueueStatus: {
             /** Format: int64 */
             failed: number;
@@ -3799,6 +4188,70 @@ export interface components {
             /** @description Its time and kind: `2026-11-03T03-30-00Z-daily`. */
             name: string;
         };
+        /** @enum {string} */
+        BandMode: "compressor" | "expander" | "limiter";
+        /** @description One band of the 5-band or the dual-band processor. */
+        BandSettings: {
+            /**
+             * Format: float
+             * @description 0.5 to 200 ms.
+             * @default 20
+             */
+            attack_ms: number;
+            /**
+             * Format: float
+             * @description After the dynamics, −12 to +12 dB.
+             * @default 0
+             */
+            gain_db: number;
+            /**
+             * Format: float
+             * @description 0 to 500 ms.
+             * @default 0
+             */
+            hold_ms: number;
+            /** @default compressor */
+            mode: components["schemas"]["BandMode"];
+            /**
+             * Format: float
+             * @description 1 to 20 (ignored by the limiter).
+             * @default 3
+             */
+            ratio: number;
+            /**
+             * Format: float
+             * @description 10 to 2,000 ms.
+             * @default 250
+             */
+            release_ms: number;
+            /**
+             * Format: float
+             * @description −60 to 0 dBFS.
+             * @default -20
+             */
+            threshold_db: number;
+        };
+        /** @description The bass EQ: one shelf or peak. */
+        BassEqSettings: {
+            /** @default false */
+            enabled: boolean;
+            /**
+             * Format: float
+             * @description 40 to 250 Hz.
+             * @default 100
+             */
+            frequency_hz: number;
+            /**
+             * Format: float
+             * @description −12 to +12 dB.
+             * @default 0
+             */
+            gain_db: number;
+            /** @default shelf */
+            shape: components["schemas"]["BassShape"];
+        };
+        /** @enum {string} */
+        BassShape: "shelf" | "peak";
         Batch: {
             /** Format: int64 */
             created_at_unix_ms: number;
@@ -4282,6 +4735,43 @@ export interface components {
              */
             discarded: number;
         };
+        /** @description The dual-band processor. */
+        DualBandSettings: {
+            /**
+             * @description Low, then high.
+             * @default [
+             *       {
+             *         "attack_ms": 20,
+             *         "gain_db": 0,
+             *         "hold_ms": 0,
+             *         "mode": "compressor",
+             *         "ratio": 3,
+             *         "release_ms": 250,
+             *         "threshold_db": -20
+             *       },
+             *       {
+             *         "attack_ms": 20,
+             *         "gain_db": 0,
+             *         "hold_ms": 0,
+             *         "mode": "compressor",
+             *         "ratio": 3,
+             *         "release_ms": 250,
+             *         "threshold_db": -20
+             *       }
+             *     ]
+             */
+            bands: components["schemas"]["BandSettings"][];
+            /**
+             * Format: float
+             * @description 60 to 2,000 Hz.
+             * @default 200
+             */
+            crossover_hz: number;
+            /** @default false */
+            enabled: boolean;
+            /** @default false */
+            link: boolean;
+        };
         /** @description How the engine will play the track: analysis and overrides combined. */
         EffectivePlayout: {
             /** Format: int32 */
@@ -4525,6 +5015,108 @@ export interface components {
         FileSelection: {
             file_ids: number[];
         };
+        /** @enum {string} */
+        FinalMode: "limiter" | "clipper";
+        /** @description The final stage. */
+        FinalStageSettings: {
+            /**
+             * Format: float
+             * @description −6 to 0 dBFS.
+             * @default -1
+             */
+            ceiling_db: number;
+            /** @default true */
+            enabled: boolean;
+            /** @default limiter */
+            mode: components["schemas"]["FinalMode"];
+            /**
+             * Format: float
+             * @description The limiter's, 10 to 1,000 ms.
+             * @default 100
+             */
+            release_ms: number;
+        };
+        /** @description The 5-band processor. */
+        FiveBandSettings: {
+            /**
+             * @default [
+             *       {
+             *         "attack_ms": 20,
+             *         "gain_db": 0,
+             *         "hold_ms": 0,
+             *         "mode": "compressor",
+             *         "ratio": 3,
+             *         "release_ms": 250,
+             *         "threshold_db": -20
+             *       },
+             *       {
+             *         "attack_ms": 20,
+             *         "gain_db": 0,
+             *         "hold_ms": 0,
+             *         "mode": "compressor",
+             *         "ratio": 3,
+             *         "release_ms": 250,
+             *         "threshold_db": -20
+             *       },
+             *       {
+             *         "attack_ms": 20,
+             *         "gain_db": 0,
+             *         "hold_ms": 0,
+             *         "mode": "compressor",
+             *         "ratio": 3,
+             *         "release_ms": 250,
+             *         "threshold_db": -20
+             *       },
+             *       {
+             *         "attack_ms": 20,
+             *         "gain_db": 0,
+             *         "hold_ms": 0,
+             *         "mode": "compressor",
+             *         "ratio": 3,
+             *         "release_ms": 250,
+             *         "threshold_db": -20
+             *       },
+             *       {
+             *         "attack_ms": 20,
+             *         "gain_db": 0,
+             *         "hold_ms": 0,
+             *         "mode": "compressor",
+             *         "ratio": 3,
+             *         "release_ms": 250,
+             *         "threshold_db": -20
+             *       }
+             *     ]
+             */
+            bands: components["schemas"]["BandSettings"][];
+            /**
+             * @description Rising, at least a third of an octave apart, 40 to 16,000 Hz.
+             * @default [
+             *       100,
+             *       400,
+             *       1600,
+             *       6400
+             *     ]
+             */
+            crossovers_hz: number[];
+            /** @default false */
+            enabled: boolean;
+            /**
+             * @description `links[i]` links band `i` and band `i + 1`.
+             * @default [
+             *       false,
+             *       false,
+             *       false,
+             *       false
+             *     ]
+             */
+            links: boolean[];
+            /**
+             * Format: float
+             * @description 0 to 12 dB.
+             * @default 0
+             */
+            overdrive_db: number;
+        };
         /** @description What keeps backups from being written. */
         FolderProblem: {
             /** @description The system's error (`Permission denied`…). */
@@ -4537,6 +5129,23 @@ export interface components {
              *     theirs.
              */
             uid: number;
+        };
+        /** @description The gated AGC: a slow gain to the station's loudness target. */
+        GatedAgcSettings: {
+            /** @default false */
+            enabled: boolean;
+            /**
+             * Format: float
+             * @description Under this momentary loudness (LUFS) the gain holds: −70 to −20.
+             * @default -45
+             */
+            gate_lufs: number;
+            /**
+             * Format: float
+             * @description The gain stays within ± this, in dB: 0 to 18.
+             * @default 6
+             */
+            max_gain_db: number;
         };
         /** @enum {string} */
         GroupSource: "upload" | "incoming";
@@ -5003,9 +5612,11 @@ export interface components {
             parts: components["schemas"]["Placed"][];
         };
         Levels: {
+            agc?: components["schemas"]["AgcLevels"] | null;
             deck_a: components["schemas"]["ChannelLevels"];
             deck_b: components["schemas"]["ChannelLevels"];
             fx: components["schemas"]["ChannelLevels"];
+            /** @description After the AGC chain: what the listeners hear. */
             master: components["schemas"]["ChannelLevels"];
         };
         /** @description Changes to the library settings: missing fields are kept. */
@@ -5153,6 +5764,10 @@ export interface components {
             settings: components["schemas"]["EqSettings"];
             /** @enum {string} */
             type: "eq";
+        } | {
+            settings: components["schemas"]["AgcSettings"];
+            /** @enum {string} */
+            type: "agc";
         };
         LoginRequest: {
             password: string;
@@ -6874,6 +7489,29 @@ export interface components {
             service: string;
             version: string;
         };
+        /** @description The stereo expander: widens programmes close to mono. */
+        StereoExpanderSettings: {
+            /**
+             * Format: float
+             * @description How much of the missing width is made up, 0 to 100 %.
+             * @default 50
+             */
+            depth: number;
+            /** @default false */
+            enabled: boolean;
+            /**
+             * Format: float
+             * @description Most boost of the side, 0 to 100 % of 6 dB.
+             * @default 50
+             */
+            level: number;
+            /**
+             * Format: float
+             * @description Programme level (dBFS) under which nothing is boosted: −60 to 0.
+             * @default -40
+             */
+            threshold_db: number;
+        };
         SuggestionReview: {
             /** @description `true` marks the artists similar; `false` dismisses the suggestion. */
             accept: boolean;
@@ -7648,6 +8286,124 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_agc_presets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgcPreset"][];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_agc_preset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgcPresetInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgcPreset"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    update_agc_preset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgcPresetInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgcPreset"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_agc_preset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     move_name: {
         parameters: {
             query?: never;
@@ -11448,6 +12204,64 @@ export interface operations {
             };
         };
     };
+    get_agc: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgcSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_agc: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgcSettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgcSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_analysis: {
         parameters: {
             query?: never;
@@ -14037,6 +14851,70 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_agc_on_station: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The station's ID */
+                station_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgcSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_agc_on_station: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The station's ID */
+                station_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgcSettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgcSettings"];
+                };
             };
             "4XX": {
                 headers: {
