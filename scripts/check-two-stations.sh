@@ -65,6 +65,8 @@ export COMPOSE_PROFILES=icecast
 pass() { echo "  ok   $*"; }
 fail() {
     echo "  FAIL $*"
+    # An annotation of the CI run, read without the logs.
+    [ -z "${GITHUB_ACTIONS:-}" ] || echo "::error::check-two-stations: $*"
     failures=$((failures + 1))
 }
 step() { printf '\n== %s\n' "$*"; }
