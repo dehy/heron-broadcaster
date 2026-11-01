@@ -36,6 +36,7 @@ Design: [Several stations](../stations.md).
 - `heron-api`: stations, per-station routes and roles, one queue manager and engine client per station, plays per station, public endpoints and webhooks per station, the single-station routes for the first station.
 - `heron-librarian`: rendered medleys into each of their stations' medley categories.
 - `heron-web`: station switcher, Stations page, category and medley badges and station tags, roles per station, plays per station, translations.
+- CI: `scripts/check-two-stations.sh` runs a second station with its own engine next to the first in the Compose job, upgrades both, and restores a backup while both stream.
 - Docs: [Several stations](../stations.md), [Data model](../data-model.md#stations), [Rotation](../rotation.md#rules-across-stations), [API](../api.md), [Web UI](../web.md), [Upgrading](../upgrading.md) (one engine service per station).
 
 ## Acceptance criteria

@@ -30,6 +30,7 @@ A station is set by hand, over months: stations, clocks, schedules, categories, 
 - `heron-api`: the configuration file (format 1), the database dump, the daily schedule and retention, `backup create|list|restore` subcommands, routes under `/api/v1/backups`, the `backups` settings group. `mariadb-dump` in its image.
 - `docker-compose.yml`: the backup folder on `heron-api`, `HERON_BACKUP_DIR`, `HERON_BACKUP_FOLDER`.
 - `heron-web`: the Backups page.
+- CI: a backup restored while two stations stream (`scripts/check-two-stations.sh`).
 - Docs: [Backups](../backups.md), [API](../api.md), [Data model](../data-model.md#settings), [Web UI](../web.md#pages), the README.
 
 ## Acceptance criteria
