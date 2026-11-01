@@ -18,7 +18,7 @@ Local users only for now ([Decisions](decisions.md#decisions-made-after-the-hand
 | Role | Can |
 |---|---|
 | `viewer` | See everything except users and secrets (output passwords, the AcoustID key are never sent back to anyone) |
-| `operator` | Also run the station: queue, skip, pause, FX, the deck EQ and its presets, track overrides, intro and hook points and categories, queue and rotation settings, clocks, the schedule, restrictions, artists, simulations, the review of identifications |
+| `operator` | Also run the station: queue, skip, pause, FX, the deck EQ, the AGC and their presets, track overrides, intro and hook points and categories, queue and rotation settings, clocks, the schedule, restrictions, artists, simulations, the review of identifications |
 | `admin` | Also playout, analysis, library and station (time zone) settings, organizing the library and undoing batches, encoder profiles, outputs, webhooks and users |
 
 With [several stations](stations.md#roles), these roles are given per station, plus a shared role for the library and what the stations share: a station's routes follow the role on that station.
@@ -40,7 +40,7 @@ Then:
 
 ## Routes
 
-What belongs to a station (its engine and decks, queue, history, clocks, schedules, selection log and simulations, outputs, webhooks, listener statistics, live WebSocket and its own settings: `playout`, `eq`, `queue`, `rotation`, `station`) is served under **`/stations/{id}/…`**: `GET /stations/2/queue`, `PUT /stations/2/settings/playout`. The same routes without the prefix (`GET /queue`) serve the **first station**, so scripts and station websites written for one station keep working ([Several stations](stations.md#api)). Everything else is shared by the stations and has no prefix; a shared route under a station answers `404`.
+What belongs to a station (its engine and decks, queue, history, clocks, schedules, selection log and simulations, outputs, webhooks, listener statistics, live WebSocket and its own settings: `playout`, `eq`, `agc`, `queue`, `rotation`, `station`) is served under **`/stations/{id}/…`**: `GET /stations/2/queue`, `PUT /stations/2/settings/playout`. The same routes without the prefix (`GET /queue`) serve the **first station**, so scripts and station websites written for one station keep working ([Several stations](stations.md#api)). Everything else is shared by the stations and has no prefix; a shared route under a station answers `404`.
 
 | Area | Routes |
 |---|---|
@@ -62,6 +62,7 @@ What belongs to a station (its engine and decks, queue, history, clocks, schedul
 | Rotation | `GET`, `POST /clocks`; `GET`, `PUT`, `DELETE /clocks/{id}` (name, `looping` and slots, replaced as a whole); `POST /clocks/preview` (`{"slots", "looping"}`, saved or not: expected starts, categories running short); `GET`, `PUT /schedule` (the default schedule's whole week); `GET /schedules` (each schedule with its periods and how many hours it paints, the one playing now and the next change: `active_id`, `next_change` with its time and schedule), `POST /schedules` (`name`, `copy_from`: a schedule whose hours it starts with), `GET`, `PUT`, `DELETE /schedules/{id}` (`name`, `hours` and `periods`, replaced as a whole; the default schedule cannot be deleted or given periods); `GET /restrictions` (`target`, `target_id`, `station_id`), `POST /restrictions`, `PUT`, `DELETE /restrictions/{id}` (`station_ids`: the stations it applies to, every one when empty); `GET /rotation/picks` (the selection log: `before`, `track_id`, `limit`); `POST /rotation/simulate` (`hours`, `start_unix_ms`, `seed`, `clock_id`) |
 | History | `GET /history` (`before`, `after`, `track_id`, `exclude_fx`, `limit`) |
 | Deck EQ | `GET`, `PUT /settings/eq`; `GET`, `POST /eq-presets`; `PUT`, `DELETE /eq-presets/{id}` — see [below](#deck-eq) |
+| AGC | `GET`, `PUT /settings/agc`; `GET`, `POST /agc-presets`; `PUT`, `DELETE /agc-presets/{id}` — see [below](#agc) |
 | Settings | `GET`, `PUT /settings/playout`, `/settings/analysis`, `/settings/queue`, `/settings/rotation`, `/settings/station`, `/settings/programming`, `/settings/statistics`, `/settings/medleys`; `GET`, `PATCH /settings/library` |
 | Outputs | `GET`, `POST /encoder-profiles`; `GET`, `PUT`, `DELETE /encoder-profiles/{id}`; `GET`, `POST /outputs`; `GET`, `PUT`, `DELETE /outputs/{id}` (with each output's live state, and its `statistics` settings: the stream server's admin credentials) |
 | Webhooks (admins) | `GET`, `POST /webhooks`; `GET`, `PUT`, `DELETE /webhooks/{id}`; `POST /webhooks/{id}/secret`; `POST /webhooks/{id}/test`; `GET /webhooks/{id}/deliveries` (`before`, `status`, `limit`); `POST /webhook-deliveries/{id}/retry` — see [below](#webhooks) |
@@ -69,7 +70,7 @@ What belongs to a station (its engine and decks, queue, history, clocks, schedul
 | Public | `GET /public/now-playing`, `GET /public/history` (`before`, `limit`), `GET /public/queue`, and the same per station under `/public/stations/{code}/…` — no sign-in, see [below](#public-endpoints) |
 | Live | `GET /live` (WebSocket) |
 
-Every engine action is there: queue (enqueue, remove, clear, move, and replace, which the queue manager uses), transport (skip, pause, resume), FX player, state, levels, track changes (WebSocket), playout settings, outputs and the deck EQ. Tracks the engine plays from its fallback directory show with the source `fallback`; autofill does not count them as queued, and anything queued replaces a cued one.
+Every engine action is there: queue (enqueue, remove, clear, move, and replace, which the queue manager uses), transport (skip, pause, resume), FX player, state, levels, track changes (WebSocket), playout settings, outputs, the deck EQ and the AGC chain. Tracks the engine plays from its fallback directory show with the source `fallback`; autofill does not count them as queued, and anything queued replaces a cued one.
 
 ## Stations
 
@@ -87,7 +88,8 @@ Each station has a name, a code (1 to 32 lowercase letters and digits, unique), 
 |---|---|---|
 | `state` | On connection, then whenever the decks, the queue, the outputs or the engine's reachability change | `player`: the same as `GET /player`, `null` while the engine is unreachable |
 | `positions` | Twice a second | Each deck's position and length |
-| `levels` | Ten times a second, unless the URL has `?levels=false` | Peak and RMS (dBFS) of the master bus and each deck |
+| `levels` | Ten times a second, unless the URL has `?levels=false` | Peak and RMS (dBFS) of the master bus and each deck; while the AGC chain is on, `agc`: its input and output peak and RMS, the AGC's gain, and the gain reduction (dB) of each band and of the final stage |
+| `agc` | Whenever the AGC settings change | `settings`: the same as `GET /settings/agc` |
 | `eq` | Whenever the deck EQ settings change | `settings`: the same as `GET /settings/eq` |
 | `track` | Each track change | `event`: `started` or `ended` (with `played_ms` and `reason`: finished, skipped, stopped, replaced) |
 
@@ -214,9 +216,17 @@ The [deck EQ](audio-engine.md#deck-eq) of the music (Decks A and B) and of the F
 - Presets: `GET /eq-presets`; `POST /eq-presets` (`{"name", "gains_db"}`, the name unique); `PUT /eq-presets/{id}` (rename, or new gains); `DELETE /eq-presets/{id}`. Loading a preset is the web UI copying its gains into an EQ with `PUT /settings/eq`: presets are never sent to the engine.
 - When the API first reaches an engine that has EQ settings and the database has none (set with `ctl set-eq` before the API ran), it adopts the engine's, as it does for the playout settings.
 
+## AGC
+
+The [AGC chain](audio-engine.md#master-agc-chain) of a station, operators only.
+
+- `GET /settings/agc` gives the whole chain; `PUT /settings/agc` replaces it: `bypass_all`, and each block with `enabled` and its settings ([Audio engine – Chain settings](audio-engine.md#chain-settings)). A value out of its range, crossovers not rising or too close, a band or link too many or missing, or an unknown mode is refused with `422`. The API saves the chain, pushes it to the engine at once and sends the `agc` live message, so every open AGC page follows. The web UI sends a dragged control at most every 100 ms; the engine glides between the values it receives.
+- Presets, shared by the stations: `GET /agc-presets`; `POST /agc-presets` (`{"name", "settings"}`, the name unique, `settings` the chain without `bypass_all`); `PUT /agc-presets/{id}` (rename, or new settings); `DELETE /agc-presets/{id}`. Loading a preset is the web UI copying its settings into the chain with `PUT /settings/agc`, keeping `bypass_all`: presets are never sent to the engine.
+- When the API first reaches an engine that has AGC settings and the database has none (set with `ctl set-agc` before the API ran), it adopts the engine's, as it does for the playout settings and the EQ.
+
 ## Engine configuration
 
-Playout settings, the deck EQ, encoder profiles and outputs are stored in MariaDB and edited through the API. The API pushes them to the engine (`SetPlayoutSettings`, `SetEqSettings`, `SetOutputs`) when they change, when the engine starts or becomes reachable again, and checks once a minute; `GET /engine` says whether the engine runs the stored configuration (`synced`, `pending` while it is unreachable, `failed` with the engine's error). Encoder profiles and outputs are checked as a whole configuration before they are saved, the way the engine does: an invalid change saves nothing.
+Playout settings, the deck EQ, the AGC chain, encoder profiles and outputs are stored in MariaDB and edited through the API. The API pushes them to the engine (`SetPlayoutSettings`, `SetEqSettings`, `SetAgcSettings`, `SetOutputs`) when they change, when the engine starts or becomes reachable again, and checks once a minute; `GET /engine` says whether the engine runs the stored configuration (`synced`, `pending` while it is unreachable, `failed` with the engine's error). Encoder profiles and outputs are checked as a whole configuration before they are saved, the way the engine does: an invalid change saves nothing.
 
 Output settings never show their password, nor the stream server's admin password of their statistics settings; an update that leaves one out keeps the stored one. The statistics settings are not pushed to the engine.
 

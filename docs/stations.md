@@ -29,7 +29,7 @@ An existing Heron becomes **one station**, named after the station name setting 
 | **Categories** | Categories and category types, a track's categories and weights | Which categories a station can use: those tagged with it ([Categories](#categories)) |
 | **Programming** | — | Clocks, schedule, rotation settings (separation windows, fallback category, weights), selection log, simulations |
 | **Restrictions** | — | Each restriction applies to the stations it names, all by default ([Restrictions](#restrictions)) |
-| **Queue and playout** | — | Queue, autofill, playout (crossfade, loudness), deck EQ; EQ presets are shared |
+| **Queue and playout** | — | Queue, autofill, playout (crossfade, loudness), deck EQ, AGC chain; EQ and AGC presets are shared |
 | **History** | Plays in total | Each play is a station's ([Plays](#plays)) |
 | **Medleys** | Medleys, their recipes and parts, rendered files | Which stations a medley plays on ([Medleys](#medleys)) |
 | **Outputs** | Encoder profiles | Outputs, their listener statistics |
@@ -51,6 +51,7 @@ An existing Heron becomes **one station**, named after the station name setting 
 | `station` (time zone) | | ✓ |
 | `playout` (crossfade, loudness) | | ✓ |
 | `eq` (the music and FX EQs) | | ✓ |
+| `agc` (the AGC chain) | | ✓ |
 | `queue` (autofill, tracks waiting) | | ✓ |
 | `engine` (whether the API manages the engine's configuration) | | ✓ |
 | `rotation` (separation windows, rules across stations, fallback category, categories kept out, weights) | | ✓ |
@@ -135,7 +136,7 @@ An existing user keeps their role, as their shared role and their role on the fi
 
 ## API
 
-- What is per station lives under **`/api/v1/stations/{id}/…`**: queue, player, deck controls, history, clocks, schedules, restrictions, rotation and its simulations, selection log, playout, EQ, queue and rotation settings, outputs, webhooks, listener statistics.
+- What is per station lives under **`/api/v1/stations/{id}/…`**: queue, player, deck controls, history, clocks, schedules, restrictions, rotation and its simulations, selection log, playout, EQ, AGC, queue and rotation settings, outputs, webhooks, listener statistics.
 - `GET`, `POST /stations`; `GET`, `PUT`, `DELETE /stations/{id}` (admins).
 - Shared resources keep their routes: tracks, artists, categories (with `station_ids`), medleys (with `station_ids`), labels, encoder profiles, users (with their roles per station).
 - Track and artist answers carry their plays and last play per station and in total.

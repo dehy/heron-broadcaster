@@ -22,7 +22,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | M7b | [Listener statistics](m7b-listener-statistics.md) | M4 | Done ([#34](https://github.com/dehy/heron-broadcaster/pull/34)) |
 | M8 | [Hot engine upgrades](m8-hot-engine-upgrade.md) | M3 | Done ([#32](https://github.com/dehy/heron-broadcaster/pull/32)) |
 | M9 | [Deck EQ](m9-deck-eq.md) | M2 | Done ([#37](https://github.com/dehy/heron-broadcaster/pull/37)) |
-| M10 | [AGC & multiband processing](m10-agc-multiband.md) | M9 | Not started |
+| M10 | [AGC & multiband processing](m10-agc-multiband.md) | M9 | In progress |
 | M11 | [More encoders, sinks & live DJ](m11-sinks-live-dj.md) | M3 | Not started |
 | M12 | [Backups](m12-config-backups.md) | M4, M13, M14 | Done ([#114](https://github.com/dehy/heron-broadcaster/pull/114)) |
 | M13 | [Several stations](m13-several-stations.md) | M6, M7, M7b, M8 | Done ([#119](https://github.com/dehy/heron-broadcaster/pull/119)) |
