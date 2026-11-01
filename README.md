@@ -6,7 +6,7 @@ The name comes from "air on" sounding like *héron*: keeping the air on, 24/7.
 
 ![The On air page: decks A and B with their categories, the next tracks, levels, the FX player counting down to a liner, outputs and the engine's state](docs/images/on-air.png)
 
-> **Status:** early development, but it plays. Heron imports and analyzes a music library, takes new music by upload or through an incoming folder and files it once you import it, plays a queue with crossfades to Icecast servers, picks the music with categories, clocks and a weekly schedule, keeps the air on when the database, the API or the library goes away, and when Heron itself is upgraded, tells websites and bots what plays through signed webhooks and public now-playing endpoints, counts its listeners from the stream servers, shapes the sound with a deck EQ, and is operated from a web interface in English or French. Next: the AGC and multiband processing (M10). See the [roadmap](docs/roadmap/README.md).
+> **Status:** early development, but it plays. Heron imports and analyzes a music library, takes new music by upload or through an incoming folder and files it once you import it, plays a queue with crossfades to Icecast servers, picks the music with categories, clocks and a weekly schedule, keeps the air on when the database, the API or the library goes away, and when Heron itself is upgraded, tells websites and bots what plays through signed webhooks and public now-playing endpoints, counts its listeners from the stream servers, shapes the sound with a deck EQ, mixes medleys of song hooks and liners, runs several stations from one library, and is operated from a web interface in English or French. Next: the AGC and multiband processing (M10). See the [roadmap](docs/roadmap/README.md).
 
 Heron runs on Linux, amd64 and arm64, down to a Raspberry Pi.
 
@@ -63,18 +63,18 @@ The services run the `latest` release by default; `edge` follows `main`. To pin 
 ```yaml
 services:
   heron-api:
-    image: ghcr.io/dehy/heron-api:0.1.0
+    image: ghcr.io/dehy/heron-api:0.2.0
   heron-analyzer:
-    image: ghcr.io/dehy/heron-analyzer:0.1.0
+    image: ghcr.io/dehy/heron-analyzer:0.2.0
   heron-librarian:
-    image: ghcr.io/dehy/heron-librarian:0.1.0
+    image: ghcr.io/dehy/heron-librarian:0.2.0
   heron-engine:
-    image: ghcr.io/dehy/heron-engine:0.1.0
+    image: ghcr.io/dehy/heron-engine:0.2.0
   heron-web:
-    image: ghcr.io/dehy/heron-web:0.1.0
+    image: ghcr.io/dehy/heron-web:0.2.0
 ```
 
-Then `docker compose pull && docker compose up -d --wait`. Setting `HERON_VERSION=0.1.0` in `.env` does the same for all five services at once. A fork's CI publishes its own images, under `ghcr.io/<owner>`: set `HERON_REGISTRY=ghcr.io/<owner>` in `.env` to run them. To upgrade, change the version and run the same two commands; migrations run when `heron-api` starts. Restarting the engine this way leaves a few seconds of fallback on the stream; `scripts/upgrade.sh` instead hands the stream over from the running engine to the new one, without a gap for the listeners. See [Upgrading](docs/upgrading.md), for Compose and Swarm.
+Then `docker compose pull && docker compose up -d --wait`. Setting `HERON_VERSION=0.2.0` in `.env` does the same for all five services at once. A fork's CI publishes its own images, under `ghcr.io/<owner>`: set `HERON_REGISTRY=ghcr.io/<owner>` in `.env` to run them. To upgrade, change the version and run the same two commands; migrations run when `heron-api` starts. Restarting the engine this way leaves a few seconds of fallback on the stream; `scripts/upgrade.sh` instead hands the stream over from the running engine to the new one, without a gap for the listeners. See [Upgrading](docs/upgrading.md), for Compose and Swarm, and the [changelog](CHANGELOG.md) for what each release brings.
 
 Point `HERON_MUSIC_DIR` at your music: new and changed files are picked up automatically, and the **Tracks** page shows them as they are analyzed. See [Import and analysis](docs/analysis.md).
 
