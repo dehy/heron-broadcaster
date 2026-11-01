@@ -998,3 +998,27 @@ fn the_eq_plays_the_filter_gains_solved_from_the_sliders() {
         "{solved:.2} and {unsolved:.2} dB"
     );
 }
+
+#[test]
+fn a_loudness_target_the_mixer_was_too_busy_for_is_tried_again() {
+    let mut station = Station::new();
+    // The mixer does not run: its commands fill up.
+    let agc = *station.player.agc();
+    while station.player.set_agc(agc, true).is_ok() {}
+    let mut settings = *station.player.settings();
+    let before = settings.loudness.target_lufs;
+    settings.loudness.target_lufs = before - 3.0;
+    assert!(matches!(
+        station.player.set_settings(settings),
+        Err(PlayerError::Busy)
+    ));
+    assert_eq!(
+        station.player.settings().loudness.target_lufs,
+        before,
+        "nothing changed"
+    );
+    // Once the mixer has run, the same settings go through.
+    station.play(0.1);
+    station.player.set_settings(settings).unwrap();
+    assert_eq!(station.player.settings().loudness.target_lufs, before - 3.0);
+}

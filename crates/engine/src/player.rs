@@ -624,11 +624,16 @@ impl Player {
     /// New settings apply to the next transitions planned. A new loudness
     /// target is the gated AGC's new target too: it glides there.
     pub fn set_settings(&mut self, settings: PlayoutSettings) -> Result<(), PlayerError> {
-        let target_changed = settings.loudness.target_lufs != self.settings.loudness.target_lufs;
-        self.settings = settings;
-        if target_changed {
-            self.set_agc(self.agc, true)?;
+        if settings.loudness.target_lufs != self.settings.loudness.target_lufs {
+            // Sent first: when the mixer is busy, nothing has changed, and
+            // the same settings sent again try again.
+            let params = crate::agc::chain_params(&self.agc, settings.loudness.target_lufs);
+            self.send(Command::SetAgc {
+                params,
+                glide: true,
+            })?;
         }
+        self.settings = settings;
         Ok(())
     }
 
