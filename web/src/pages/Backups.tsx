@@ -97,7 +97,7 @@ export function Backups() {
         onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
-          if (file && window.confirm(t("backups.restoreQuestion", { name: file.name }))) {
+          if (file && window.confirm(t("backups.restoreFileQuestion", { name: file.name }))) {
             void restoreFile(file);
           }
         }}
