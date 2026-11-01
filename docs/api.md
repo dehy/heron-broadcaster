@@ -222,7 +222,7 @@ The [AGC chain](audio-engine.md#master-agc-chain) of a station, operators only.
 
 - `GET /settings/agc` gives the whole chain; `PUT /settings/agc` replaces it: `bypass_all`, and each block with `enabled` and its settings ([Audio engine – Chain settings](audio-engine.md#chain-settings)). A value out of its range, crossovers not rising or too close, a band or link too many or missing, or an unknown mode is refused with `422`. The API saves the chain, pushes it to the engine at once and sends the `agc` live message, so every open AGC page follows. The web UI sends a dragged control at most every 100 ms; the engine glides between the values it receives.
 - Presets, shared by the stations: `GET /agc-presets`; `POST /agc-presets` (`{"name", "settings"}`, the name unique, `settings` the chain without `bypass_all`); `PUT /agc-presets/{id}` (rename, or new settings); `DELETE /agc-presets/{id}`. Loading a preset is the web UI copying its settings into the chain with `PUT /settings/agc`, keeping `bypass_all`: presets are never sent to the engine.
-- When the API first reaches an engine that has AGC settings and the database has none (set with `ctl set-agc` before the API ran), it adopts the engine's, as it does for the playout settings and the EQ.
+- When the API reaches an engine that has AGC settings and the database has none, it adopts the engine's, as it does for the playout settings and the EQ: set with `ctl set-agc` before the API ran, or on a station the API already managed before M10.
 
 ## Engine configuration
 
