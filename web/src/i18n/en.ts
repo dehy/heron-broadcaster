@@ -1888,6 +1888,14 @@ const en = {
   "rotationPage.heldByPlay": "the track it wanted played on {station} at {time}",
   "rotationPage.heldByQueue": "the track it wanted is in {station}'s queue for {time}",
   "rotationPage.acrossWindows": "Across stations",
+  "library.sort.levelMin": "Lowest level",
+  "library.sort.levelMax": "Highest level",
+  "library.column.levelMin": "Lowest level",
+  "library.column.levelMax": "Highest level",
+  "track.levels": "Levels",
+  "track.levelsRange": "{min} to {max}",
+  "track.levelsHelp": "The lowest and highest peak between the cue-in and the cue-out, in dBFS (0: full scale), from the waveform: the silences at both ends are left out.",
+  "track.levelHelp": "The peak at the playhead, in dBFS (0: full scale)",
 } as const;
 
 export default en;

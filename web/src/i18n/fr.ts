@@ -1897,6 +1897,14 @@ const fr = {
   "rotationPage.heldByPlay": "le morceau voulu est passé sur {station} à {time}",
   "rotationPage.heldByQueue": "le morceau voulu est dans la file de {station} pour {time}",
   "rotationPage.acrossWindows": "Entre stations",
+  "library.sort.levelMin": "Niveau le plus bas",
+  "library.sort.levelMax": "Niveau le plus haut",
+  "library.column.levelMin": "Niveau min.",
+  "library.column.levelMax": "Niveau max.",
+  "track.levels": "Niveaux",
+  "track.levelsRange": "{min} à {max}",
+  "track.levelsHelp": "Le pic le plus bas et le plus haut entre le point d'entrée et le point de sortie, en dBFS (0 : pleine échelle), d'après la forme d'onde : les silences du début et de la fin ne comptent pas.",
+  "track.levelHelp": "Le pic au point de lecture, en dBFS (0 : pleine échelle)",
 } satisfies Catalog;
 
 export default fr;

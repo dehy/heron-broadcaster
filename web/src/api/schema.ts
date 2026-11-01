@@ -7104,7 +7104,7 @@ export interface components {
             track_ids?: number[] | null;
         };
         /** @enum {string} */
-        TrackSort: "artist" | "title" | "album" | "added" | "last_played" | "play_count" | "bitrate" | "duration" | "year" | "bpm" | "mood" | "sound_code" | "genre";
+        TrackSort: "artist" | "title" | "album" | "added" | "last_played" | "play_count" | "bitrate" | "duration" | "year" | "bpm" | "mood" | "sound_code" | "genre" | "level_min" | "level_max";
         TrackSummary: {
             /**
              * Format: int64
@@ -7150,6 +7150,14 @@ export interface components {
              *     settings' `min_play_s`).
              */
             last_played_at_unix_ms?: number | null;
+            /** Format: double */
+            level_max_db?: number | null;
+            /**
+             * Format: double
+             * @description The lowest and highest peak between the cue points, in dBFS (−72:
+             *     that or below); none until computed from the waveform.
+             */
+            level_min_db?: number | null;
             missing: boolean;
             mood?: string | null;
             /** @description Relative to the library root. */
@@ -14386,7 +14394,7 @@ export interface operations {
                 year_max?: number;
                 bpm_min?: number;
                 bpm_max?: number;
-                sort?: "artist" | "title" | "album" | "added" | "last_played" | "play_count" | "bitrate" | "duration" | "year" | "bpm" | "mood" | "sound_code" | "genre";
+                sort?: "artist" | "title" | "album" | "added" | "last_played" | "play_count" | "bitrate" | "duration" | "year" | "bpm" | "mood" | "sound_code" | "genre" | "level_min" | "level_max";
                 /** @description Reverses the order of `sort`. */
                 desc?: boolean;
                 /** @description 1 to 500, 50 by default. */
