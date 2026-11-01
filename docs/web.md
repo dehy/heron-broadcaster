@@ -88,7 +88,7 @@ Points dragged on the waveform become the track's overrides once saved. *Next st
 
 ## Times
 
-Every time and date is shown in the station's time zone (`station` settings, see [Rotation](rotation.md)), whatever the browser's: the history's days, the queue's start times, the selection log and the schedule agree with the clocks and restrictions. The History and Schedule pages name the zone.
+Every time and date is shown in the station's time zone (`station` settings, see [Rotation](rotation.md)), whatever the browser's: the history's days, the queue's start times, the selection log and the schedule agree with the clocks and restrictions. The History and Schedule pages name the zone. When the clocks go back, the day has 25 hours and the repeated hour shows which it is, the way on-air logs write it: `02:40 (summer time)`, then `02:40 (winter time)`; the other times are shown as they are. When they go forward, the times run from 01:59 to 03:00. Either way, the history has a line where the clocks changed, between the last play before it and the first one after: *Change to summer time* or *Change to winter time*.
 
 ## Themes
 
