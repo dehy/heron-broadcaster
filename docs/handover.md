@@ -76,7 +76,7 @@ flowchart LR
 
 ## Roles and the socket
 
-The active engine listens on `$HERON_STATE_DIR/handover.sock`. It binds it under another name and renames it over the path, so an engine taking over replaces its predecessor's socket atomically, while that one is still running.
+The active engine listens on `$HERON_STATE_DIR/handover.sock`. It binds it under another name and renames it over the path, so an engine taking over replaces its predecessor's socket atomically, while that one is still running. An engine that handed over leaves the socket alone when it exits: it belongs to its successor now. One that stops without handing over removes it, unless another engine's socket has replaced it, so a starting engine finds nobody on air instead of a socket nobody answers.
 
 On start, an engine connects to that socket, and goes through these roles:
 
