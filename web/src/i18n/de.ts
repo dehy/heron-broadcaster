@@ -36,6 +36,7 @@ const de = {
   "app.checkOutputs": "Ausgänge prüfen",
   "app.versionMismatch":
     "Die Weboberfläche ({web}) und die API ({api}) haben nicht dieselbe Version: Einige Seiten funktionieren eventuell nicht. Laden Sie beide Images neu und starten Sie sie erneut (docker compose pull, dann docker compose up -d).",
+  "app.backupFolder": "Backups können nicht geschrieben werden ({error}): Der Backup-Ordner gehört nicht dem Benutzer der API. Übergeben Sie ihn auf dem Host diesem Benutzer mit {command} auf HERON_BACKUP_FOLDER (standardmäßig ./data/backups). {link}",
   "app.clockWarning": "{label} {warning}. Geplante Sendungen starten eventuell zur falschen Zeit.",
   "app.clockLabel": "Systemuhr:",
   "app.title": "{page} · Heron Broadcaster",

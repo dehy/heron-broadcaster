@@ -36,12 +36,13 @@ Design: [Several stations](../stations.md).
 - `heron-api`: stations, per-station routes and roles, one queue manager and engine client per station, plays per station, public endpoints and webhooks per station, the single-station routes for the first station.
 - `heron-librarian`: rendered medleys into each of their stations' medley categories.
 - `heron-web`: station switcher, Stations page, category and medley badges and station tags, roles per station, plays per station, translations.
+- CI: `scripts/check-two-stations.sh` runs a second station with its own engine next to the first in the Compose job, upgrades both, and restores a backup while both stream.
 - Docs: [Several stations](../stations.md), [Data model](../data-model.md#stations), [Rotation](../rotation.md#rules-across-stations), [API](../api.md), [Web UI](../web.md), [Upgrading](../upgrading.md) (one engine service per station).
 
 ## Acceptance criteria
 
-- [ ] An existing Heron upgrades to one station holding all its categories, clocks, schedule, restrictions, history, outputs, webhooks and settings, and plays on through the upgrade (hot handover) with nothing to set.
-- [ ] Two stations, each with its own engine, play at once from the same library, each with its own clocks, schedule, queue, playout settings, EQ and outputs; a hot handover of one does not touch the other.
+- [x] An existing Heron upgrades to one station holding all its categories, clocks, schedule, restrictions, history, outputs, webhooks and settings, and plays on through the upgrade (hot handover) with nothing to set.
+- [x] Two stations, each with its own engine, play at once from the same library, each with its own clocks, schedule, queue, playout settings, EQ and outputs; a hot handover of one does not touch the other.
 - [x] A category tagged with two stations is offered by both, one tagged with one is offered by that one only; untagging a station that uses the category is refused and lists what uses it.
 - [x] Plays are recorded per station; a track and an artist show plays and last play per station and in total.
 - [x] With an artist window across stations of 30 minutes, a week simulated on two stations never plays an artist on one within 30 minutes of the other (played or planned), unless the selection log shows that rule relaxed; the same for titles and tracks.
