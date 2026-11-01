@@ -36,6 +36,9 @@ pub use file::{ConfigFile, Kind, RestoreReport};
 const KEEP_BEFORE_RESTORE: usize = 7;
 /// The largest configuration file uploaded.
 const MAX_UPLOAD: usize = 512 * 1024 * 1024;
+/// Locked by a backup or restore, in the backup folder: one at a time
+/// across processes, the API and `heron-api backup`.
+const LOCK_FILE: &str = ".heron-backup.lock";
 
 /// The `backups` settings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -116,7 +119,8 @@ pub struct FolderProblem {
 pub struct Backups {
     dir: PathBuf,
     database_url: String,
-    /// One backup or restore at a time.
+    /// One backup or restore at a time in this process; `LOCK_FILE` for
+    /// the others.
     lock: tokio::sync::Mutex<()>,
     /// Whether the folder could be written, when last checked.
     problem: std::sync::Mutex<Option<FolderProblem>>,
@@ -315,8 +319,39 @@ impl Backups {
     }
 
     /// Takes a backup: the configuration file, then the database dump.
+    /// Waits for the backup or restore under way, here or in another
+    /// process; the next one waits until both are dropped.
+    async fn exclusive(
+        &self,
+    ) -> ApiResult<(tokio::sync::MutexGuard<'_, ()>, Option<std::fs::File>)> {
+        let guard = self.lock.lock().await;
+        self.check_folder()
+            .map_err(|error| folder_error(&self.dir, &error))?;
+        let path = self.dir.join(LOCK_FILE);
+        let file = tokio::task::spawn_blocking(move || {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .mode(0o600)
+                .open(&path)
+                .map(|file| match file.lock() {
+                    Ok(()) => Some(file),
+                    // A share without locks: the API still takes one at a time.
+                    Err(error) => {
+                        tracing::warn!(%error, "cannot lock {}: backups taken on the command line may run at the same time", path.display());
+                        None
+                    }
+                })
+        })
+        .await
+        .map_err(|error| ApiError::Internal(error.to_string()))?
+        .map_err(|error| folder_error(&self.dir, &error))?;
+        Ok((guard, file))
+    }
+
     pub async fn create(&self, pool: &MySqlPool, kind: Kind) -> ApiResult<BackupView> {
-        let _guard = self.lock.lock().await;
+        let _exclusive = self.exclusive().await?;
         self.create_locked(pool, kind, None).await
     }
 
@@ -417,7 +452,7 @@ impl Backups {
         bytes: &[u8],
         upload: bool,
     ) -> ApiResult<RestoreReport> {
-        let _guard = self.lock.lock().await;
+        let _exclusive = self.exclusive().await?;
         let file: ConfigFile = serde_json::from_slice(bytes).map_err(|error| {
             ApiError::Invalid(format!("this is not a Heron configuration file: {error}"))
         })?;
@@ -828,5 +863,24 @@ mod tests {
         });
         assert!(failed.is_err());
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn one_backup_at_a_time_across_processes() {
+        let dir = tempfile::tempdir().unwrap();
+        // Two processes: each its own `Backups`, the folder in common.
+        let api = Backups::new(dir.path().to_owned(), String::new());
+        let command_line = Backups::new(dir.path().to_owned(), String::new());
+        let held = api.exclusive().await.unwrap();
+        assert!(held.1.is_some(), "locked");
+        let waiting = tokio::spawn(async move { command_line.exclusive().await.map(|_| ()) });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!waiting.is_finished(), "waits for the other");
+        drop(held);
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("goes on once the other is done")
+            .unwrap()
+            .unwrap();
     }
 }
