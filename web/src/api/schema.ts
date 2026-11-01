@@ -4525,6 +4525,19 @@ export interface components {
         FileSelection: {
             file_ids: number[];
         };
+        /** @description What keeps backups from being written. */
+        FolderProblem: {
+            /** @description The system's error (`Permission denied`…). */
+            error: string;
+            /** Format: int32 */
+            gid: number;
+            /**
+             * Format: int32
+             * @description The user and group the API runs as: the backup folder must be
+             *     theirs.
+             */
+            uid: number;
+        };
         /** @enum {string} */
         GroupSource: "upload" | "incoming";
         /** @description A track another station's play or planned track held back. */
@@ -6841,6 +6854,7 @@ export interface components {
             retention_days: number;
         };
         Status: {
+            backups?: components["schemas"]["FolderProblem"] | null;
             /** @description The server clock's synchronization (the host's: containers share it). */
             clock: components["schemas"]["ClockStatus"];
             /** @description `ok` or `unavailable`. */

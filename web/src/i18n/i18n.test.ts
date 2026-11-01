@@ -40,8 +40,9 @@ describe("messages", () => {
 describe("choosing the language", () => {
   it("follows the browser's languages, English otherwise", () => {
     expect(systemLanguage(["fr-CA", "en-US"])).toBe("fr");
-    expect(systemLanguage(["de-DE", "fr"])).toBe("fr");
-    expect(systemLanguage(["de-DE", "it"])).toBe("en");
+    expect(systemLanguage(["de-DE", "fr"])).toBe("de");
+    expect(systemLanguage(["it-IT", "es-MX"])).toBe("es");
+    expect(systemLanguage(["it", "pt-BR"])).toBe("en");
     expect(systemLanguage([])).toBe("en");
   });
 

@@ -37,6 +37,7 @@ const fr = {
   "app.checkOutputs": "Vérifier les sorties",
   "app.versionMismatch":
     "L'interface web ({web}) et l'API ({api}) ne sont pas de la même version : certaines pages peuvent échouer. Récupérez les deux images et redémarrez-les (docker compose pull, puis docker compose up -d).",
+  "app.backupFolder": "Les sauvegardes ne peuvent pas être écrites ({error}) : le dossier des sauvegardes n'appartient pas à l'utilisateur de l'API. Sur la machine, donnez-le-lui avec {command} sur HERON_BACKUP_FOLDER (./data/backups par défaut). {link}",
   "app.clockWarning": "{label} {warning}. La programmation peut démarrer au mauvais moment.",
   "app.clockLabel": "Horloge :",
   "app.title": "{page} · Heron Broadcaster",
@@ -377,6 +378,7 @@ const fr = {
   "library.lastPlayed": "Dernière diffusion",
   "library.actions": "Actions",
   "library.previous": "Précédente",
+  "library.nextPage": "Suivante",
   "library.page": "Page {page} sur {pages}",
   "library.analyzed": { one: "{count} analysée", other: "{count} analysées" },
   "library.analyzing": { one: "{count} en cours d'analyse", other: "{count} en cours d'analyse" },
@@ -1927,6 +1929,7 @@ const fr = {
   "backups.restore": "Restaurer",
   "backups.restoring": "Restauration…",
   "backups.restoreQuestion": "Restaurer la sauvegarde du {name} ? Tout ce qu'elle contient remplace la configuration actuelle, y compris les réglages des titres ; la configuration actuelle est sauvegardée avant. Tout le monde se reconnecte.",
+  "backups.restoreFileQuestion": "Restaurer le fichier {name} ? Tout ce qu'il contient remplace la configuration actuelle, y compris les réglages des titres ; la configuration actuelle est sauvegardée avant. Tout le monde se reconnecte.",
   "backups.delete": "Supprimer la sauvegarde",
   "backups.deleteQuestion": "Supprimer la sauvegarde du {name} et sa copie de la base ?",
   "backups.settings": "Sauvegarde quotidienne",

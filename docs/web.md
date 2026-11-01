@@ -33,7 +33,7 @@
 | **Backups** | The backups, newest first (kind, time, the size of its two files, a failed dump), *Back up now*, download either file, restore a backup or an uploaded configuration file (with what it will replace, then its report), delete; the `backups` settings | admin |
 | **Account** | Theme, language, width, password, API tokens | |
 
-Viewers see every page (except users and webhooks) without the controls. Every page shows a banner when something needs attention: the API, the database or the engine unreachable, live updates disconnected, the engine refusing the configuration, the web UI and the API **not from the same version** (an image pulled without the other: pull and start both again), or the **server clock** not synchronized or off by more than about a second (from `GET /api/v1/status`, see [API](api.md#authentication)).
+Viewers see every page (except users and webhooks) without the controls. Every page shows a banner when something needs attention: the API, the database or the engine unreachable, live updates disconnected, the engine refusing the configuration, the **backup folder** not writable (admins), the web UI and the API **not from the same version** (an image pulled without the other: pull and start both again), or the **server clock** not synchronized or off by more than about a second (from `GET /api/v1/status`, see [API](api.md#authentication)).
 
 ## Several stations
 
@@ -98,7 +98,7 @@ Pages are a centred column by default. *Use the whole width of the screen* (Acco
 
 ## Languages
 
-English and French. *System* (the default) follows the browser's languages (`navigator.languages`: the first one the web UI has, English otherwise); a fixed language is saved per user by the API (`PUT /api/v1/auth/preferences`, `{"language": "fr"}`) and remembered by the browser, like the theme, so the sign-in page and the first paint already use it. `<html lang>` follows.
+English, French, Spanish and German. *System* (the default) follows the browser's languages (`navigator.languages`: the first one the web UI has, English otherwise); a fixed language is saved per user by the API (`PUT /api/v1/auth/preferences`, `{"language": "fr"}`) and remembered by the browser, like the theme, so the sign-in page and the first paint already use it. `<html lang>` follows.
 
 Dates, times, numbers, sizes, levels, relative times and plurals are written the language's way (`-1,5 dB`, *il y a 5 minutes*, *2 pistes*), with the browser's own variant of it when it has one (`en-GB` writes 24-hour times). Duration fields take a comma as well as a dot (`1:23,5`). Only the language changes, never the time zone (see [Times](#times)).
 

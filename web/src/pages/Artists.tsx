@@ -140,7 +140,7 @@ function ArtistList() {
                 disabled={offset + PAGE >= artists.data.total}
                 onClick={() => setOffset(offset + PAGE)}
               >
-                {t("dashboard.next")}
+                {t("library.nextPage")}
               </button>
             </div>
           </div>

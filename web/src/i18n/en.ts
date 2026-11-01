@@ -34,6 +34,7 @@ const en = {
   "app.checkOutputs": "Check the outputs",
   "app.versionMismatch":
     "The web interface ({web}) and the API ({api}) are not from the same version: some pages may fail. Pull both images and start them again (docker compose pull, then docker compose up -d).",
+  "app.backupFolder": "Backups cannot be written ({error}): the backup folder is not the API's user's. On the host, give it to that user with {command} on HERON_BACKUP_FOLDER (./data/backups by default). {link}",
   "app.clockWarning": "{label} {warning}. Scheduled programming may start at the wrong time.",
   "app.clockLabel": "Clock:",
   "app.title": "{page} · Heron Broadcaster",
@@ -374,6 +375,7 @@ const en = {
   "library.lastPlayed": "Last played",
   "library.actions": "Actions",
   "library.previous": "Previous",
+  "library.nextPage": "Next",
   "library.page": "Page {page} of {pages}",
   "library.analyzed": { one: "{count} analyzed", other: "{count} analyzed" },
   "library.analyzing": { one: "{count} being analyzed", other: "{count} being analyzed" },
@@ -1918,6 +1920,7 @@ const en = {
   "backups.restore": "Restore",
   "backups.restoring": "Restoring…",
   "backups.restoreQuestion": "Restore the backup of {name}? Everything it holds replaces the current configuration, what is set on tracks included; the current configuration is backed up first. Everyone signs in again.",
+  "backups.restoreFileQuestion": "Restore the file {name}? Everything it holds replaces the current configuration, what is set on tracks included; the current configuration is backed up first. Everyone signs in again.",
   "backups.delete": "Delete the backup",
   "backups.deleteQuestion": "Delete the backup of {name} and its database dump?",
   "backups.settings": "Daily backup",

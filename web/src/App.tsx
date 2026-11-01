@@ -345,6 +345,8 @@ function OnAirBadge() {
 
 /** Problems worth knowing on every page. */
 function Warnings() {
+  // Backups are shared: the shared role, not the role on the station shown.
+  const isAdmin = useUser().role === "admin";
   const connected = useLive((live) => live.connected);
   const player = useLive((live) => live.player);
   const status = useQuery({ queryKey: ["status"], queryFn: () => fetchStatus(), refetchInterval: 15_000 });
@@ -384,6 +386,16 @@ function Warnings() {
       rich("app.configRefused", {
         error: engine.data.config.error,
         link: <Link to="/outputs">{t("app.checkOutputs")}</Link>,
+      }),
+    );
+  }
+  if (isAdmin && status.data?.backups) {
+    const { uid, gid, error } = status.data.backups;
+    warnings.push(
+      rich("app.backupFolder", {
+        error,
+        command: <code className="mono">{`chown ${uid}:${gid}`}</code>,
+        link: <Link to="/backups">{t("nav.backups")}</Link>,
       }),
     );
   }
