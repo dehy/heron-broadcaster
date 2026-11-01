@@ -135,20 +135,18 @@ export function timeZone(): string | undefined {
 const HOUR_MS = 3_600_000;
 
 /**
- * When the clocks go back, the hour that repeats says which pass it is:
- * `02:40 (summer time)` an hour before `02:40 (winter time)`. Other times
- * are written as they are.
+ * The hour before and the hour after the clocks change say which time they
+ * are in: when they go back, `02:40 (summer time)` then `02:40 (winter
+ * time)`; when they go forward, `01:40 (winter time)` then `03:20 (summer
+ * time)`. Other times are written as they are.
  */
 function withPass(unixMs: number, text: string): string {
-  const { wall } = current();
-  const here = wall.format(unixMs);
-  if (here === wall.format(unixMs + HOUR_MS)) {
-    return t("format.summerTime", { time: text });
+  const here = offset(unixMs);
+  const other = [offset(unixMs - HOUR_MS), offset(unixMs + HOUR_MS)].find((value) => value !== here);
+  if (other === undefined) {
+    return text;
   }
-  if (here === wall.format(unixMs - HOUR_MS)) {
-    return t("format.winterTime", { time: text });
-  }
-  return text;
+  return t(here > other ? "format.summerTime" : "format.winterTime", { time: text });
 }
 
 /** How far ahead of UTC the zone's clocks are at a Unix time, in ms. */
@@ -163,17 +161,33 @@ function offset(unixMs: number): number {
   return local - (unixMs - (((unixMs % 1000) + 1000) % 1000));
 }
 
+/** The clocks changing: forward to summer time or back to winter time, `from` and `to` on the wall clock. */
+export type ClockChange = { kind: "summer" | "winter"; from: string; to: string };
+
 /**
- * Whether the clocks changed between two Unix times in ms: `"summer"` when
- * they went forward, `"winter"` when they went back, `null` otherwise.
+ * Whether the clocks changed between two Unix times in ms, and how: at
+ * 03:00 they went back to 02:00, at 02:00 forward to 03:00.
  */
-export function clockChange(earlierMs: number, laterMs: number): "summer" | "winter" | null {
+export function clockChange(earlierMs: number, laterMs: number): ClockChange | null {
   const before = offset(earlierMs);
   const after = offset(laterMs);
-  if (after > before) {
-    return "summer";
+  if (before === after) {
+    return null;
   }
-  return after < before ? "winter" : null;
+  // The first minute on the new offset.
+  let low = Math.floor(earlierMs / 60_000);
+  let high = Math.ceil(laterMs / 60_000);
+  while (high - low > 1) {
+    const middle = Math.floor((low + high) / 2);
+    if (offset(middle * 60_000) === before) {
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
+  const at = high * 60_000;
+  const wall = new Intl.DateTimeFormat(locale(), { timeStyle: "short", timeZone: "UTC" });
+  return { kind: after > before ? "summer" : "winter", from: wall.format(at + before), to: wall.format(at + after) };
 }
 
 /** Time of day of a Unix time in ms. */

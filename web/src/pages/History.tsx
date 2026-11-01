@@ -5,7 +5,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { type Play, api, query, unwrap } from "../api";
-import { Card, Empty, ErrorView, Loading, PageHead } from "../components/ui";
+import { Card, Empty, ErrorView, Icon, Loading, PageHead } from "../components/ui";
 import { t } from "../i18n";
 import { clockChange, clockTime, duration, fullDate } from "../lib/format";
 import { endingLabel, sourceLabel } from "../lib/labels";
@@ -116,9 +116,15 @@ function DayRows({ day, plays, above }: { day: string; plays: Play[]; above?: Pl
         return (
           <Fragment key={play.id}>
             {change && (
-              <tr className="clock-change">
+              <tr className={`clock-change ${change.kind}`}>
                 <td colSpan={5}>
-                  <span>{t(change === "summer" ? "history.toSummerTime" : "history.toWinterTime")}</span>
+                  <span>
+                    <Icon name={change.kind === "summer" ? "sun" : "snow"} size={16} />
+                    {t(change.kind === "summer" ? "history.toSummerTime" : "history.toWinterTime", {
+                      from: change.from,
+                      to: change.to,
+                    })}
+                  </span>
                 </td>
               </tr>
             )}

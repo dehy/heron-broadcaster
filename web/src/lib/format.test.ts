@@ -109,21 +109,36 @@ describe("time zone", () => {
     expect(clockTime(first)).toBe(time("UTC", first));
   });
 
-  it("skips the hour lost when the clocks go forward", () => {
+  it("labels the hours around the one lost when the clocks go forward", () => {
     setTimeZone("Europe/Paris");
-    // 2026-03-29: 01:59 is followed by 03:00, without a label.
+    // 2026-03-29: 01:59 winter time is followed by 03:00 summer time.
     const before = Date.UTC(2026, 2, 29, 0, 59);
     const after = Date.UTC(2026, 2, 29, 1, 0);
-    expect(clockTime(before)).toBe(time("Europe/Paris", before));
-    expect(clockTime(after)).toBe(time("Europe/Paris", after));
-    expect(shortTime(before)).toMatch(/1:59/);
-    expect(shortTime(after)).toMatch(/3:00/);
+    expect(clockTime(before)).toBe(`${time("Europe/Paris", before)} (winter time)`);
+    expect(clockTime(after)).toBe(`${time("Europe/Paris", after)} (summer time)`);
+    expect(shortTime(before)).toMatch(/^0?1:59.*\(winter time\)$/);
+    expect(shortTime(after)).toMatch(/^0?3:00.*\(summer time\)$/);
+    // Midnight and 04:00 are written as they are.
+    const midnight = Date.UTC(2026, 2, 28, 23, 30);
+    const four = Date.UTC(2026, 2, 29, 2, 30);
+    expect(clockTime(midnight)).toBe(time("Europe/Paris", midnight));
+    expect(clockTime(four)).toBe(time("Europe/Paris", four));
   });
 
   it("finds when the clocks change", () => {
     setTimeZone("Europe/Paris");
-    expect(clockChange(Date.UTC(2026, 2, 29, 0, 59), Date.UTC(2026, 2, 29, 1))).toBe("summer");
-    expect(clockChange(Date.UTC(2026, 9, 25, 0, 59), Date.UTC(2026, 9, 25, 1))).toBe("winter");
+    const wall = (hour: number) =>
+      new Intl.DateTimeFormat(locale(), { timeStyle: "short", timeZone: "UTC" }).format(Date.UTC(2026, 0, 1, hour));
+    expect(clockChange(Date.UTC(2026, 2, 29, 0, 50), Date.UTC(2026, 2, 29, 1, 10))).toEqual({
+      kind: "summer",
+      from: wall(2),
+      to: wall(3),
+    });
+    expect(clockChange(Date.UTC(2026, 9, 24, 23, 50), Date.UTC(2026, 9, 25, 1, 30))).toEqual({
+      kind: "winter",
+      from: wall(3),
+      to: wall(2),
+    });
     expect(clockChange(Date.UTC(2026, 9, 25, 1), Date.UTC(2026, 9, 25, 2))).toBeNull();
     setTimeZone("UTC");
     expect(clockChange(Date.UTC(2026, 9, 25, 0, 59), Date.UTC(2026, 9, 25, 1))).toBeNull();
