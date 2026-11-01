@@ -195,7 +195,12 @@ async fn execute(args: Args, library_dir: &Path) -> anyhow::Result<()> {
             let playout: serde_json::Value = serde_json::from_str(&config.playout_settings_json)?;
             let outputs: serde_json::Value = serde_json::from_str(&config.outputs_json)?;
             let eq: serde_json::Value = serde_json::from_str(&config.eq_settings_json)?;
-            let agc: serde_json::Value = serde_json::from_str(&config.agc_settings_json)?;
+            // Engines from before M10 send none: `null`.
+            let agc: serde_json::Value = if config.agc_settings_json.is_empty() {
+                serde_json::Value::Null
+            } else {
+                serde_json::from_str(&config.agc_settings_json)?
+            };
             println!(
                 "{}",
                 serde_json::to_string_pretty(&serde_json::json!({
