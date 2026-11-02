@@ -212,6 +212,8 @@ scripts/upgrade.sh --swarm heron 0.2.0
 
 It pulls the images on the node first, so the update does not wait for the download, then runs `docker service update --image …` for each Heron service but the relays, the engines last (`heron-engine`, then `heron-engine-<code>`, one at a time), with `start-first`, a rollback on failure and a 30 s stop grace period (set even if the stack file lacks them). The engines are always updated (`--force`), even when their image did not change. Swarm starts the new engine, waits for it to be healthy (the standby), then stops the old one, which hands over.
 
+Each service gets the image by the digest just pulled (`ghcr.io/dehy/heron-api:edge@sha256:…`), not by its tag alone. A moving tag like `edge` is then upgraded too: by its tag, `docker service update` changes nothing when the service already names that tag and Docker cannot look the new digest up on the registry. With `--no-pull`, the digest is the one of the image already on the node; when the node has none, the service is updated by its tag, with `--force`.
+
 Deploying the stack again (`docker stack deploy`, after changing `HERON_VERSION` in `.env`) upgrades it the same way, `start-first`, with one difference: `docker stack deploy` checks every image again, so it also replaces `heron-relay` whenever its image changed, a short break covered by the fallback mount. To leave the relay running, give it a version of its own in `.env` (`HERON_RELAY_VERSION`), changed only when a release says so.
 
 ## Checking an upgrade
