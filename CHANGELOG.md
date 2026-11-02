@@ -2,6 +2,12 @@
 
 What changed in each release of Heron. Before upgrading, read the release's notes in [Upgrading](docs/upgrading.md#release-notes).
 
+## Unreleased
+
+### Changed
+
+- **Clearer page names**, in all four languages: *Buffer* is now **Import music**, *Import* is **Migrate**, *Review & organize* is **To organize**, *Selection log* is **Rotation log** and *AGC* is **Processing**. Their addresses changed with them (`/import-music`, `/migrate`, `/to-organize`, `/rotation-log`, `/processing`) and the old ones are not redirected: update any bookmark. The API is unchanged.
+
 ## 0.2.0 – 2026-11-01
 
 Milestones M9 (deck EQ), M13 (several stations, see [Not yet](#not-yet)) and M14 (several schedules), medleys, category types, imports from another software and the external FFmpeg encoder. Upgrading from 0.1.0 keeps the station on air: see [0.1.0 to 0.2.0](docs/upgrading.md#010-to-020).

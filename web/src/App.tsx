@@ -107,7 +107,7 @@ function route(pathname: string): ReactNode {
       return <Statistics />;
     case "/library":
       return <Library />;
-    case "/buffer":
+    case "/import-music":
       return <Buffer />;
     case "/trash":
       return <Trash />;
@@ -125,17 +125,17 @@ function route(pathname: string): ReactNode {
       return <Schedule />;
     case "/restrictions":
       return <Restrictions />;
-    case "/rotation":
+    case "/rotation-log":
       return <Rotation />;
-    case "/review":
+    case "/to-organize":
       return <Review />;
-    case "/import":
+    case "/migrate":
       return <Import />;
     case "/playout":
       return <Playout />;
     case "/eq":
       return <Eq />;
-    case "/agc":
+    case "/processing":
       return <Agc />;
     case "/outputs":
       return <Outputs />;
@@ -272,12 +272,12 @@ function Shell() {
                   aria-current={isCurrent(page.path, pathname) ? "page" : undefined}
                 >
                   <Icon name={page.icon} /> {t(page.label)}
-                  {page.path === "/review" && reviewCount > 0 && (
+                  {page.path === "/to-organize" && reviewCount > 0 && (
                     <span className="count" title={t("nav.reviewCount")}>
                       {reviewCount}
                     </span>
                   )}
-                  {page.path === "/buffer" && readyCount > 0 && (
+                  {page.path === "/import-music" && readyCount > 0 && (
                     <span className="count" title={t("nav.bufferCount")}>
                       {readyCount}
                     </span>
