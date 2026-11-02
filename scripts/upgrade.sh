@@ -74,12 +74,14 @@ is_relay() {
 # look the new digest up on the registry: a moving tag like edge would stay
 # where it was.
 pinned() {
-    for digest in $(docker image inspect -f '{{join .RepoDigests " "}}' "$1" 2>/dev/null); do
+    local image=$1 digest
+    for digest in $(docker image inspect -f '{{join .RepoDigests " "}}' "$image" 2>/dev/null); do
         case $digest in
-        "${1%:*}"@*)
-            echo "$1@${digest#*@}"
+        "${image%:*}"@*)
+            echo "$image@${digest#*@}"
             return
             ;;
+        *) ;;
         esac
     done
 }
