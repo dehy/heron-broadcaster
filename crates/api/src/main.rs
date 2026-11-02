@@ -518,7 +518,7 @@ mod tests {
     }
 
     /// An existing Heron upgrades to one station holding all it had: its
-    /// clocks, schedule, history, selection log, outputs, webhooks,
+    /// clocks, schedule, history, rotation log, outputs, webhooks,
     /// listener totals and per-station settings.
     #[tokio::test]
     async fn an_existing_heron_becomes_its_first_station() {

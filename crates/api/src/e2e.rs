@@ -5439,7 +5439,7 @@ async fn categories_restrictions_and_medleys_follow_their_stations() {
 }
 
 /// A station keeps the artists it plays apart from another station's plays
-/// and queue, and says so in its selection log; plays are counted per
+/// and queue, and says so in its rotation log; plays are counted per
 /// station and in total.
 #[tokio::test(flavor = "multi_thread")]
 async fn rules_across_stations_and_plays_per_station() {

@@ -1688,7 +1688,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The selection log, most recent first. */
+        /** The rotation log, most recent first. */
         get: operations["list_picks"];
         put?: never;
         post?: never;
@@ -2737,7 +2737,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The selection log, most recent first. */
+        /** The rotation log, most recent first. */
         get: operations["list_picks_on_station"];
         put?: never;
         post?: never;
@@ -4923,7 +4923,7 @@ export interface components {
             /** @description For people. */
             message: string;
         };
-        /** @description Why a track was picked: the selection log. */
+        /** @description Why a track was picked: the rotation log. */
         Explanation: {
             /** @description Windows across stations applied at this step. */
             across?: components["schemas"]["AcrossWindows"];
