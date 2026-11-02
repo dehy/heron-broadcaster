@@ -116,7 +116,7 @@ Targets are not foreign keys: restrictions on a deleted category go with it, mer
 | `schedules` | id, station_id, name (unique for the station), is_default (one per station) — see [Rotation – Scheduling](rotation.md#scheduling) |
 | `schedule_periods` | id, schedule_id (not the default one), starts_at, ends_at (station time, on the hour, the end excluded), every_year (the years are ignored; the range may run over the new year) |
 | `clock_schedule` | schedule_id, day_of_week (ISO: 1 = Monday), hour (station time), clock_id |
-| `rotation_picks` | id, track_id, planned_at, clock_id, slot, hour_start, category_id, step, explanation (JSON, see [Rotation](rotation.md#rotation-model)), engine_started_at and entry_id (the engine's queue entry), play_id — the selection log |
+| `rotation_picks` | id, track_id, planned_at, clock_id, slot, hour_start, category_id, step, explanation (JSON, see [Rotation](rotation.md#rotation-model)), engine_started_at and entry_id (the engine's queue entry), play_id — the rotation log |
 
 ## History
 
