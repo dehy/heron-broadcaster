@@ -1,10 +1,12 @@
-# M15 – Encrypted backups
+# M15 – Encrypted and tested backups
 
 **Depends on:** M12.
 
 ## Why
 
-A backup holds every secret of the station: output and stream server passwords, webhook secrets, the AcoustID key, password and token hashes. M12 writes it readable by the API's user only, and asks for copies off the machine: on a share, in a synchronized folder, downloaded. There, file permissions no longer protect anything. Encrypted with a key that only the station's admins hold, a backup can go anywhere. Design: [Backups – Encryption](../backups.md#encryption).
+A backup holds every secret of the station: output and stream server passwords, webhook secrets, the AcoustID key, password and token hashes. M12 writes it readable by the API's user only, and asks for copies off the machine: on a share, in a synchronized folder, downloaded. There, file permissions no longer protect anything. Encrypted with a key that only the station's admins hold, a backup can go anywhere.
+
+And a backup that was never read back is only a hope: a dump cut short, a file damaged on a share or a lost key show up the day a restore is needed. Design: [Backups – Encryption](../backups.md#encryption), [Testing backups](../backups.md#testing-backups).
 
 ## Scope
 
@@ -17,6 +19,10 @@ A backup holds every secret of the station: output and stream server passwords, 
 - **Regular checks, per admin:** Heron asks each admin to type the key back after 1, 3, 7 and 14 days, then every 30 days, so a lost key is noticed before a restore needs it.
 - **Restore with the key:** from the Backups page, from the API, with `heron-api backup restore --key-file`. A configuration file in clear (an older backup) is still accepted.
 - **The encryption setting and the checks are not in the configuration file**, and a restore does not change them.
+- **Every backup checked as it is written:** the configuration file read back and checked as a restore would, the dump whole (`-- Dump completed`), the checksums of both files written next to them (`sha256sum` format) and checked every day: a file missing, cut short or changed is marked damaged.
+- **A test read with the key:** each key check also decrypts the newest backup encrypted with that key, checks its configuration file and reads its dump to the end, without writing or restoring anything. *Test* does the same for any backup. Backups in clear are tested every day without a key.
+- **The last test on the Backups page**, a banner when it failed or when none has passed for 30 days, and metrics for the last backup and the last test that passed.
+- **A restore drill, documented:** a second Heron, without its engine, the dump and the configuration file restored into it.
 
 ## Out of scope
 
@@ -26,6 +32,8 @@ A backup holds every secret of the station: output and stream server passwords, 
 - Decrypting in the browser, downloading a backup decrypted.
 - Recovering a lost key: there is none, by design.
 - Encrypting the database, the library or the secrets inside Heron's database.
+- Restoring into a database automatically to test a backup: that is the drill, by hand.
+- Checking copies of the backups outside the backup folder.
 
 ## Deliverables
 
@@ -34,13 +42,15 @@ A backup holds every secret of the station: output and stream server passwords, 
   - the `backup_encryption` setting, left out of the configuration file and of restores;
   - the routes under `/api/v1/backups/key`, and the key on restores;
   - the checks per admin, and `backups` in `GET /auth/me`;
+  - the checks of each backup as it is written, the checksums file and the daily check, the test read, the `backup_tests` setting and the metrics;
   - `heron-api backup restore --key-file`.
 - `heron-web`:
   - the encryption card on the Backups page: set, check, change or turn off the key;
   - the key on restores;
-  - the "not encrypted" banner, and the check dialog.
+  - the "not encrypted", "damaged" and "not tested" banners, and the check dialog;
+  - *Test* on each backup, and the last test.
 - CI: `scripts/check-two-stations.sh` restores an encrypted backup.
-- Docs: [Backups](../backups.md#encryption), [API](../api.md), [Data model](../data-model.md), [Web UI](../web.md#pages), [Architecture](../architecture.md), [Locked decisions](../decisions.md), the README.
+- Docs: [Backups](../backups.md#encryption) (with [Testing backups](../backups.md#testing-backups) and the drill), [Monitoring](../monitoring.md#heron-api), [API](../api.md), [Data model](../data-model.md), [Web UI](../web.md#pages), [Architecture](../architecture.md), [Locked decisions](../decisions.md), the README.
 
 ## Acceptance criteria
 
@@ -53,9 +63,15 @@ A backup holds every secret of the station: output and stream server passwords, 
 - [ ] Each admin is asked to check the key at the documented intervals. A correct key moves their next check further away; *Later* asks again the next day. A key change asks every other admin at once.
 - [ ] While encryption is off, admins see the "not encrypted" banner; other roles do not.
 - [ ] Only admins can set, check, change or turn off the key.
-- [ ] The engines play on through encrypting the folder, a backup and a restore.
+- [ ] A configuration file a restore would refuse, or a dump cut short (the `mariadb-dump` process killed), fails the backup, as reported on the Backups page.
+- [ ] `sha256sum -c` passes on every backup's checksums file. A backup file deleted, truncated or changed in the folder is marked damaged at the next daily check, with a banner for admins.
+- [ ] Checking the key tests the newest backup encrypted with it: a good backup passes; a backup whose files were changed fails, saying which file. *Test* on an older backup passes with its own key and fails with another. Nothing is written to the database or the folder by a test.
+- [ ] The Backups page shows the last test. Admins see a banner when it failed, or when no test has passed for 30 days. The metrics give the time of the last backup and of the last test that passed.
+- [ ] The restore drill, followed as documented next to a running station, restores a backup into a second Heron without touching the station: it keeps streaming, its library and its stream servers untouched.
+- [ ] The engines play on through encrypting the folder, a backup, a test and a restore.
 
 ## References
 
 - [Backups – Encryption](../backups.md#encryption)
+- [Backups – Testing backups](../backups.md#testing-backups)
 - [age format specification](https://age-encryption.org/v1)

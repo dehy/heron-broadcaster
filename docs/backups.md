@@ -9,7 +9,7 @@ Each backup is **two files** taken at the same time:
 | `heron-config-<time>-<kind>.json` | Everything set by hand, readable, restored from the web UI or the command line on top of a library scanned again ([What it holds](#what-the-configuration-file-holds)) |
 | `heron-database-<time>-<kind>.sql.gz` | A dump of the whole database, history and listener statistics included, restored with MariaDB's own tools ([Restoring the database](#restoring-the-database-dump)) |
 
-With [encryption](#encryption) on, both files are encrypted with the station's key and end in `.age`.
+With [encryption](#encryption) on, both files are encrypted with the station's key and end in `.age`. A third file, `heron-checksums-<time>-<kind>.sha256`, holds the checksums of both as written ([Testing backups](#testing-backups)).
 
 The configuration file is what a station restores after a bad change or a lost database: it fits any Heron of its version or newer, and leaves the library's own data (analysis, waveforms, fingerprints) to the scan. The database dump is the last resort: everything as it was, history included, but only into the same version of Heron.
 
@@ -58,11 +58,11 @@ The configuration file is what a station restores after a bad change or a lost d
 
 - **Folder:** `HERON_BACKUP_DIR` in `heron-api` (`/var/lib/heron/backups` in the image). `docker-compose.yml` mounts a folder of the host there, `./data/backups` unless `HERON_BACKUP_FOLDER` says another: **to keep copies off the machine, point it at a folder that is**, a network share or a folder another tool synchronizes. Only `heron-api` writes there, as `HERON_LIBRARIAN_USER`: create the folder before starting Heron (`mkdir -p data/backups`), owned by that user, as for the buffer zone. Docker creates a missing folder owned by root, which the API cannot write: the API checks the folder when it starts and before each backup, and every page shows a banner, for admins, until it can write there: with the command that fixes it (`chown`) when the folder is not the API's user's, with the system's error otherwise (a full disk, a read-only share).
 - **Daily backup:** at 03:30 in the first station's time zone (`backups.time`). A day the API is down is caught up when it starts, if the last daily backup is more than a day old.
-- **Kept:** the last 7 daily backups (`backups.keep_days`, 1 to 90), the backups taken before the last 7 restores, and every manual and uploaded backup until it is deleted. Older daily backups are deleted after a successful one, never before. A backup's two files go together.
+- **Kept:** the last 7 daily backups (`backups.keep_days`, 1 to 90), the backups taken before the last 7 restores, and every manual and uploaded backup until it is deleted. Older daily backups are deleted after a successful one, never before. A backup's files go together.
 - **Manual backup:** *Back up now* on the Backups page, `POST /backups`, or `heron-api backup create`.
 - **One at a time:** a backup or restore holds a lock on `.heron-backup.lock` in the folder, so `heron-api backup` on the command line waits for one the API is taking, and the other way round (on a share without file locks, the API only waits for its own, and logs a warning).
 - **The database dump** is taken with `mariadb-dump --single-transaction` (the station plays on), over TCP to the host and port of `HERON_DATABASE_URL` (an IPv6 address in brackets too), compressed, for every backup but `uploaded` ones; `backups.database` turns it off. A failed dump is reported on the Backups page and in the logs, and does not stop the configuration file.
-- Each file is written to a temporary file, synced, then renamed: a crash never leaves half a file under a backup's name.
+- Each file is written to a temporary file, synced, then renamed: a crash never leaves half a file under a backup's name. Each one is checked before it counts ([Testing backups](#testing-backups)).
 
 ## Restoring the configuration
 
@@ -144,7 +144,7 @@ The key travels to Heron only to be checked or to restore a backup, over the web
 
 So that a lost key is noticed before a restore needs it, Heron asks each admin, now and then, to type the key back, as messaging apps do with a recovery PIN. A dialog opens on any page:
 
-- **Check:** a correct key moves the next check further away: 1, 3, 7 and 14 days, then every 30 days. A wrong key is only refused, and can be typed again.
+- **Check:** a correct key also [tests the newest backup](#with-the-key-a-test-read), and moves the next check further away: 1, 3, 7 and 14 days, then every 30 days. A wrong key is only refused, and can be typed again.
 - **Later:** asks again the next day.
 - **I don't have it:** says who set the key and when, and how to change it. A new key does not make older backups readable: whoever has the old key should keep it until those backups are deleted.
 
@@ -161,6 +161,45 @@ Each admin has their own checks: everyone who may need to restore a backup prove
 - The backup taken before a restore is encrypted with the current key: undoing the restore needs that key.
 - **The encryption setting and the checks are not in the configuration file.** A restore keeps the current key, keeps encryption on or off as it is, and keeps every admin's checks: restoring a backup from before a key change does not bring the old key back.
 
+## Testing backups
+
+A backup that was never read back is only a hope. Heron checks its backups at three levels.
+
+### Every backup, as it is written
+
+- **The configuration file** is read back and checked as a restore checks it (format, schema, every table) before it is encrypted. A file a restore would refuse fails the backup.
+- **The database dump** must be whole: the compressed stream ends cleanly, and `mariadb-dump`'s last line, `-- Dump completed`, is there. A dump cut short fails like a dump that did not run (a `.failed` file, shown on the Backups page).
+- **Checksums:** the SHA-256 of each file as written goes into `heron-checksums-<name>.sha256`, in `sha256sum`'s format: `sha256sum -c` checks a copy anywhere. Every day, before older backups are deleted, Heron checks every backup in the folder against its checksums: a file missing, cut short or changed on the share is marked **damaged** on the Backups page, and admins see a banner.
+
+These checks need no key: Heron does them on encrypted backups too.
+
+### With the key: a test read
+
+Reading an encrypted backup needs the key, which Heron does not have. **Each time an admin checks the key** ([Checking the key](#checking-the-key)), Heron also reads the newest backup encrypted with it: it decrypts both files, checks the configuration file as a restore would, and decompresses the dump to its last line. Nothing is written to disk and nothing is restored: the test proves at once that the key in the admin's hands opens the backups really stored. The check answers straight away; the test runs after it, with the key kept in memory until it ends, then dropped.
+
+*Test* on a backup of the Backups page does the same for any backup, with the key it needs (an earlier key for an older backup). Backups in clear are tested without a key, every day, after the checksums.
+
+The Backups page shows the last test (when, which backup, by whom, its result). Admins see a banner when the last test failed, or when no test has passed for 30 days.
+
+### By hand: a restore drill
+
+Only a real restore shows what no test can: a value missing from `.env`, a share that is not mounted on a new server, a step forgotten in the procedure. Restore a backup, now and then, into a **second Heron** started next to the station, from another folder, without its engine:
+
+1. In a new folder, copy `docker-compose.yml` and the station's `.env`, then change in `.env`: `COMPOSE_PROJECT_NAME=heron-drill`, another `HERON_HTTP_PORT`, `HERON_BACKUP_FOLDER` pointing at a copy of the backups, and `HERON_STAGING_FOLDER` at an empty folder; remove every `HERON_ENGINE_URL_…`: the drill must not reach a station's engine. The library (`HERON_MUSIC_DIR`) can stay the station's: the API mounts it read-only.
+2. Start the database alone, restore the dump into it ([Restoring the database dump](#restoring-the-database-dump)), then start the API and the web UI, **and nothing else**:
+
+   ```sh
+   docker compose up -d mariadb
+   age -d -i heron-backup-key.txt backups/heron-database-2026-11-03T03-30-00Z-daily.sql.gz.age \
+     | gunzip -c \
+     | docker compose exec -T mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" heron'
+   docker compose up -d heron-api heron-web
+   ```
+
+   Do not start `heron-engine`, `heron-librarian` or `heron-analyzer`: the engine would stream to the station's own stream servers, the librarian would move files of the station's library.
+3. Sign in on the drill's port and look around: stations, clocks, schedules, outputs, users. Restore the configuration file too (`heron-api backup restore … --key-file -`), to try both.
+4. Remove the drill and its database: `docker compose down -v`, from the drill's folder only.
+
 ## Settings
 
 `backups` in the `settings` table:
@@ -172,4 +211,4 @@ Each admin has their own checks: everyone who may need to restore a backup prove
 | `keep_days` | 7 |
 | `database` | true: a database dump with each backup |
 
-`backup_encryption` in the `settings` table holds the public key, when and by whom it was set, and the earlier public keys with the times they were used. It is changed only from the Backups page and its routes (`/backups/key`, see [API](api.md#routes)), never by a restore, and is not in the configuration file.
+`backup_encryption` in the `settings` table holds the public key, when and by whom it was set, and the earlier public keys with the times they were used. It is changed only from the Backups page and its routes (`/backups/key`, see [API](api.md#routes)), never by a restore, and is not in the configuration file. `backup_tests` holds the last test and the last one that passed; neither is it in the configuration file, nor changed by a restore.
