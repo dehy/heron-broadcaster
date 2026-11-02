@@ -199,6 +199,7 @@ heron-broadcaster/
 | HTTP / WebSocket | `axum`, `tokio` |
 | OpenAPI | `utoipa`, `utoipa-axum` (generated from the handlers); `openapi-typescript` and `openapi-fetch` on the web side |
 | Passwords | `argon2` (Argon2id) |
+| Backup encryption | `age` (the age format, X25519 recipients) |
 | gRPC | `tonic`, `prost`; `protox` compiles the `.proto` files in Rust, so builds need no `protoc` |
 | Database | `sqlx` (MySQL/MariaDB) |
 | Logging / metrics | `tracing`, `metrics` + Prometheus exporter |

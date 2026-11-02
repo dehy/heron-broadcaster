@@ -9,6 +9,8 @@ Each backup is **two files** taken at the same time:
 | `heron-config-<time>-<kind>.json` | Everything set by hand, readable, restored from the web UI or the command line on top of a library scanned again ([What it holds](#what-the-configuration-file-holds)) |
 | `heron-database-<time>-<kind>.sql.gz` | A dump of the whole database, history and listener statistics included, restored with MariaDB's own tools ([Restoring the database](#restoring-the-database-dump)) |
 
+With [encryption](#encryption) on, both files are encrypted with the station's key and end in `.age`.
+
 The configuration file is what a station restores after a bad change or a lost database: it fits any Heron of its version or newer, and leaves the library's own data (analysis, waveforms, fingerprints) to the scan. The database dump is the last resort: everything as it was, history included, but only into the same version of Heron.
 
 ## What the configuration file holds
@@ -28,7 +30,7 @@ The configuration file is what a station restores after a bad change or a lost d
 | Users (password hashes, shared roles, roles per station, preferences) and API tokens (hashes) | |
 | **What is set on each track:** enabled, categories and weights, labels, overrides (cue points, crossfade, where the next track starts), intro and hook markers, BPM, mood and sound code, tags kept in Heron | |
 
-**Secrets are in both files.** Output and stream server passwords, webhook secrets, the AcoustID key, password and token hashes: a restore gives back a working station, with nothing to type again. The files are written readable by the API's user only (`0600`). Treat them like the database: do not mail them, and keep copies off the machine somewhere private.
+**Secrets are in both files.** Output and stream server passwords, webhook secrets, the AcoustID key, password and token hashes: a restore gives back a working station, with nothing to type again. The files are written readable by the API's user only (`0600`). In clear, treat them like the database: do not mail them, and keep copies off the machine somewhere private. [Encrypted](#encryption), they can go anywhere: without the key they are unreadable.
 
 **Tracks and artists are referred to by what does not change.** A track is named by its library path, an artist by its name: the scan gives them other IDs. On a restore they are matched with the database: whatever names a track or artist that is not found (a track's settings, a restriction, a medley's part) is left out and listed in the restore's report. What the file holds whole (stations, categories, clocks, users…) keeps its IDs, so that what refers to it, in the file and in the settings, still does.
 
@@ -72,6 +74,12 @@ docker compose exec heron-api heron-api backup restore 2026-11-03T03-30-00Z-dail
 docker compose restart heron-api    # the engines get the restored configuration
 ```
 
+An encrypted backup needs its key: from the web UI and the API, it is typed with the restore. On the command line, it is read from a file, or from the standard input with `-`:
+
+```sh
+docker compose exec -T heron-api heron-api backup restore 2026-11-03T03-30-00Z-daily --key-file - < heron-backup-key.txt
+```
+
 1. The file is checked first: its format, its schema, every part of it. A file that does not pass changes nothing.
 2. The current configuration is backed up (`before_restore`), so a restore can itself be undone.
 3. Everything the file holds replaces what the database has, in one transaction: a restore applies whole or not at all. Rows are matched by ID: what the database has and the file does not (a category made since) is deleted, except stations, which are left as they are with their history. What is set on tracks is replaced for every track: a track the file does not name (added since) loses its categories and settings. What the file does not hold (the tracks themselves, history…) is not touched.
@@ -93,12 +101,65 @@ gunzip -c data/backups/heron-database-2026-11-03T03-30-00Z-daily.sql.gz \
 docker compose start heron-api heron-librarian heron-analyzer
 ```
 
+An encrypted dump is decrypted with [age](https://age-encryption.org) (or `rage`), which most systems package, and the key:
+
+```sh
+age -d -i heron-backup-key.txt data/backups/heron-database-2026-11-03T03-30-00Z-daily.sql.gz.age \
+  | gunzip -c \
+  | docker compose exec -T mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" heron'
+```
+
 The engines play on throughout, with what they have queued.
 
 ## Downloading and uploading
 
 - `GET /backups` lists the backups (name, kind, time, the size of each file, whether the dump failed); `GET /backups/{name}/config` and `GET /backups/{name}/database` download its files; `DELETE /backups/{name}` deletes both. Admins only: the files hold secrets.
-- Uploading a configuration file restores it; it is kept as an `uploaded` backup.
+- Uploading a configuration file restores it; it is kept as an `uploaded` backup. An encrypted file is kept as it is; a file in clear is encrypted first when encryption is on.
+- Encrypted backups download encrypted: Heron cannot decrypt them.
+
+## Encryption
+
+Backups can be encrypted with [age](https://age-encryption.org/v1), a standard and documented file format (X25519 and ChaCha20-Poly1305): a backup cannot be read without the key, and a changed file is refused. Encryption is optional and off until an admin sets a key. Until then, admins see a banner: *backups are not encrypted*. Built in [M15](roadmap/m15-encrypted-backups.md).
+
+**What it protects:** the copies off the machine (a share, a synchronized folder, a download), and backups downloaded with a stolen admin session. **What it does not:** someone with access to the server itself, who can read the database the backups come from.
+
+### The key
+
+**Heron keeps only the public key.** It encrypts every backup with it, daily ones too, with nobody signed in, and cannot decrypt any of them: restoring an encrypted backup asks for the key. The key is a single line, `AGE-SECRET-KEY-1…`, 74 characters: save it in a password manager, and keep it somewhere that does not depend on this server.
+
+**There is no way to recover a lost key.** Backups encrypted with it cannot be read by anyone, Heron included.
+
+On the **Backups** page, *Encrypt backups*:
+
+1. Heron generates a key and shows it once, with a copy button and `heron-backup-key.txt` to download (an age identity file, which `age -i` reads). It does not keep it, and no page or route shows it again.
+2. Type the key back. Encryption is turned on only when it matches: this is the first check, and the proof that the key was saved.
+3. Heron encrypts the backups already in the folder: each file is written encrypted, synced, and only then is the file in clear deleted. Copies of them already elsewhere (on a share, downloaded) stay in clear: delete them.
+4. Heron takes a backup, so there is always one with the new key.
+
+An admin who already has an age key (made with `age-keygen`) can give its public key, `age1…`, instead of having Heron generate one. Step 1 is then skipped; the key is still typed back.
+
+The key travels to Heron only to be checked or to restore a backup, over the web UI's connection. It is used in memory, then dropped, and never logged.
+
+### Checking the key
+
+So that a lost key is noticed before a restore needs it, Heron asks each admin, now and then, to type the key back, as messaging apps do with a recovery PIN. A dialog opens on any page:
+
+- **Check:** a correct key moves the next check further away: 1, 3, 7 and 14 days, then every 30 days. A wrong key is only refused, and can be typed again.
+- **Later:** asks again the next day.
+- **I don't have it:** says who set the key and when, and how to change it. A new key does not make older backups readable: whoever has the old key should keep it until those backups are deleted.
+
+Each admin has their own checks: everyone who may need to restore a backup proves they can. Typing the key back on the Backups page (*Check the key*) counts too. The dialog is only a reminder: it does not block anything.
+
+### Changing the key, turning encryption off
+
+- **Change the key:** as when turning encryption on. New backups use the new key; existing ones keep the key they were encrypted with, and the list marks those that need an earlier key. Heron cannot encrypt them again, as it cannot read them. Every other admin is asked to check the new key at once.
+- **Turn encryption off:** new backups are written in clear; existing ones stay encrypted.
+
+### Restores and the key
+
+- An encrypted backup restores only with its key; a wrong key changes nothing. A configuration file in clear, an older backup, still restores.
+- The backup taken before a restore is encrypted with the current key: undoing the restore needs that key.
+- **The encryption setting and the checks are not in the configuration file.** A restore keeps the current key, keeps encryption on or off as it is, and keeps every admin's checks: restoring a backup from before a key change does not bring the old key back.
 
 ## Settings
 
@@ -110,3 +171,5 @@ The engines play on throughout, with what they have queued.
 | `time` | `03:30`, in the first station's time zone |
 | `keep_days` | 7 |
 | `database` | true: a database dump with each backup |
+
+`backup_encryption` in the `settings` table holds the public key, when and by whom it was set, and the earlier public keys with the times they were used. It is changed only from the Backups page and its routes (`/backups/key`, see [API](api.md#routes)), never by a restore, and is not in the configuration file.
