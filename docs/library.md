@@ -34,7 +34,7 @@ Like iTunes' "Keep Music folder organized": new files, uploaded from the browser
 
 ## The buffer zone
 
-New files wait in `HERON_STAGING_FOLDER`, one folder per group, until they are imported or discarded. The web UI's **Buffer** page shows them; files never expire.
+New files wait in `HERON_STAGING_FOLDER`, one folder per group, until they are imported or discarded. The web UI's **Import music** page shows them; files never expire.
 
 **Uploads** (web UI, or `POST /api/v1/staging/…`, see [API](api.md#buffer-zone)): the browser creates a group, announces each file (refused when it is not one of the scanner's audio extensions, when it is larger than `max_upload_mb`, or when it would leave less than `min_free_mb` free on the disk), then sends it in chunks of at most 16 MiB at the offset the server has. After a dropped connection it asks how far the server got and carries on from there. A file is written under a hidden temporary name and shows as complete only once its last byte has arrived. Uploads that make no progress for a day are given up.
 
@@ -59,7 +59,7 @@ New files wait in `HERON_STAGING_FOLDER`, one folder per group, until they are i
 
 **Discard:** the file is removed from the buffer zone, with what it was prepared with. It never reached the library.
 
-**Finding imported tracks:** when an import ends, the Buffer page links to its tracks in the library (`GET /tracks?batch_id=`). Their date added is the time of the import.
+**Finding imported tracks:** when an import ends, the Import music page links to its tracks in the library (`GET /tracks?batch_id=`). Their date added is the time of the import.
 
 ## Identification
 
@@ -84,7 +84,7 @@ A match is **confident** when its AcoustID score is at least `min_score` (0.9) a
 | `the audio could not be fingerprinted` | Undecodable, or too short |
 | `identification failed: …` | AcoustID or MusicBrainz unreachable three times (the folder waits 1, then 2 minutes between tries) |
 
-Tracks imported while they need review wait on the **review screen** of the web UI (*Review & organize*; `heron-librarian review` lists them too). For each track, pick one of its candidate releases, or keep the file's own tags (`kept`). A picked release is applied by the librarian like an import: MusicBrainz tags written into the file, filed where the layout says, cover saved, as a `review` batch that can be undone (the track then needs review again).
+Tracks imported while they need review wait on the **review screen** of the web UI (*To organize*; `heron-librarian review` lists them too). For each track, pick one of its candidate releases, or keep the file's own tags (`kept`). A picked release is applied by the librarian like an import: MusicBrainz tags written into the file, filed where the layout says, cover saved, as a `review` batch that can be undone (the track then needs review again).
 
 **Rate limits:** one request per second to MusicBrainz and to the Cover Art Archive, three per second to AcoustID, with a User-Agent that identifies Heron (`HeronBroadcaster/<version> ( https://heronbroadcaster.org )`). Each request waits a full interval after the previous response, so requests never arrive closer than the limit, even when one was delayed on the way. A `503` or `429` answer slows down and retries.
 
@@ -170,7 +170,7 @@ The one replacement Heron makes is re-tagging a file in place: the re-tagged cop
 
 ## Reorganizing an existing library
 
-Only on request, after a dry run: from the web UI (*Review & organize*, admins), or on the command line:
+Only on request, after a dry run: from the web UI (*To organize*, admins), or on the command line:
 
 ```sh
 docker compose exec heron-librarian heron-librarian organize           # dry run: lists every move, changes nothing

@@ -76,7 +76,7 @@ pub struct AppState {
         (name = "labels", description = "Keywords on tracks, to sort the library"),
         (name = "medleys", description = "Medleys built from song hooks and liners"),
         (name = "artists", description = "Artists, their names and similar artists"),
-        (name = "rotation", description = "Clocks, the schedule, restrictions, the selection log and simulations"),
+        (name = "rotation", description = "Clocks, the schedule, restrictions, the rotation log and simulations"),
         (name = "history", description = "What was played"),
         (name = "stations", description = "The stations, each with its own engine and programming"),
         (name = "settings", description = "Settings: shared ones, and each station's own"),

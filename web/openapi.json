@@ -4991,7 +4991,7 @@
         "tags": [
           "rotation"
         ],
-        "summary": "The selection log, most recent first.",
+        "summary": "The rotation log, most recent first.",
         "operationId": "list_picks",
         "parameters": [
           {
@@ -8612,7 +8612,7 @@
         "tags": [
           "rotation"
         ],
-        "summary": "The selection log, most recent first.",
+        "summary": "The rotation log, most recent first.",
         "operationId": "list_picks_on_station",
         "parameters": [
           {
@@ -14339,7 +14339,7 @@
       },
       "Explanation": {
         "type": "object",
-        "description": "Why a track was picked: the selection log.",
+        "description": "Why a track was picked: the rotation log.",
         "required": [
           "at_unix_ms",
           "method",
@@ -22763,7 +22763,7 @@
     },
     {
       "name": "rotation",
-      "description": "Clocks, the schedule, restrictions, the selection log and simulations"
+      "description": "Clocks, the schedule, restrictions, the rotation log and simulations"
     },
     {
       "name": "history",
