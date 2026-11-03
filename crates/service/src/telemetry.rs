@@ -72,6 +72,23 @@ pub struct Telemetry {
     _sentry: Option<sentry::ClientInitGuard>,
 }
 
+/// What Sentry gets from `tracing`: spans at INFO and above as traces, WARN
+/// events as breadcrumbs, ERROR events as error events.
+fn sentry_layers<S>() -> Vec<Box<dyn Layer<S> + Send + Sync>>
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    vec![
+        SpanLayer::new().with_filter(LevelFilter::INFO).boxed(),
+        BreadcrumbLayer::new()
+            .with_filter(filter_fn(|metadata| {
+                *metadata.level() == tracing::Level::WARN
+            }))
+            .boxed(),
+        ErrorLayer::new().with_filter(LevelFilter::ERROR).boxed(),
+    ]
+}
+
 /// Installs the global `tracing` subscriber, and Sentry when configured.
 pub fn init_tracing(args: &LogArgs, service: &'static str) -> Result<Telemetry, Error> {
     // Problems with the settings, logged once logging works.
@@ -130,13 +147,7 @@ pub fn init_tracing(args: &LogArgs, service: &'static str) -> Result<Telemetry, 
     let init = tracing_subscriber::registry()
         .with(filter)
         .with(output)
-        .with(enabled.then(|| SpanLayer::new().with_filter(LevelFilter::INFO)))
-        .with(enabled.then(|| {
-            BreadcrumbLayer::new().with_filter(filter_fn(|metadata| {
-                *metadata.level() == tracing::Level::WARN
-            }))
-        }))
-        .with(enabled.then(|| ErrorLayer::new().with_filter(LevelFilter::ERROR)))
+        .with(enabled.then(sentry_layers))
         .try_init();
     init.map_err(|error| Error::Tracing(error.to_string()))?;
     if sentry.is_some() {
@@ -200,6 +211,18 @@ fn redact_event(event: &mut sentry::protocol::Event<'static>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sentry_layers_take_spans_and_events() {
+        let subscriber = tracing_subscriber::registry().with(sentry_layers());
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("work");
+            let _entered = span.enter();
+            tracing::debug!("not kept");
+            tracing::warn!("a breadcrumb");
+            tracing::error!("an error event");
+        });
+    }
 
     #[test]
     fn sample_rates_are_read_leniently() {
