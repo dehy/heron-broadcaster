@@ -177,7 +177,7 @@ These checks need no key: Heron does them on encrypted backups too.
 
 Reading an encrypted backup needs the key, which Heron does not have. **Each time an admin checks the key** ([Checking the key](#checking-the-key)), Heron also reads the newest backup encrypted with it: it decrypts both files, checks the configuration file as a restore would, and decompresses the dump to its last line. Nothing is written to disk and nothing is restored: the test proves at once that the key in the admin's hands opens the backups really stored. The check answers straight away; the test runs after it, with the key kept in memory until it ends, then dropped.
 
-*Test* on a backup of the Backups page does the same for any backup, with the key it needs (an earlier key for an older backup). Backups in clear are tested without a key, every day, after the checksums.
+*Test* on a backup of the Backups page does the same for any backup, with the key it needs (an earlier key for an older backup). Backups in clear are tested without a key: each daily backup as soon as it is taken, and the newest backup when the API starts.
 
 The Backups page shows the last test (when, which backup, by whom, its result). Admins see a banner when the last test failed, or when no test has passed for 30 days.
 

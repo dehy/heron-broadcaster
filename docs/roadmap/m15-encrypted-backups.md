@@ -20,7 +20,7 @@ And a backup that was never read back is only a hope: a dump cut short, a file d
 - **Restore with the key:** from the Backups page, from the API, with `heron-api backup restore --key-file`. A configuration file in clear (an older backup) is still accepted.
 - **The encryption setting and the checks are not in the configuration file**, and a restore does not change them.
 - **Every backup checked as it is written:** the configuration file read back and checked as a restore would, the dump whole (`-- Dump completed`), the checksums of both files written next to them (`sha256sum` format) and checked every day: a file missing, cut short or changed is marked damaged.
-- **A test read with the key:** each key check also decrypts the newest backup encrypted with that key, checks its configuration file and reads its dump to the end, without writing or restoring anything. *Test* does the same for any backup. Backups in clear are tested every day without a key.
+- **A test read with the key:** each key check also decrypts the newest backup encrypted with that key, checks its configuration file and reads its dump to the end, without writing or restoring anything. *Test* does the same for any backup. Backups in clear are tested without a key, each daily one as soon as it is taken.
 - **The last test on the Backups page**, a banner when it failed or when none has passed for 30 days, and metrics for the last backup and the last test that passed.
 - **A restore drill, documented:** a second Heron, without its engine, the dump and the configuration file restored into it.
 
@@ -41,7 +41,7 @@ And a backup that was never read back is only a hope: a dump cut short, a file d
   - age encryption of both files, the dump streamed through it;
   - the `backup_encryption` setting, left out of the configuration file and of restores;
   - the routes under `/api/v1/backups/key`, and the key on restores;
-  - the checks per admin, and `backups` in `GET /auth/me`;
+  - the checks per admin, and `GET /backups/state` for the banners;
   - the checks of each backup as it is written, the checksums file and the daily check, the test read, the `backup_tests` setting and the metrics;
   - `heron-api backup restore --key-file`.
 - `heron-web`:
