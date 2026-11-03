@@ -6508,7 +6508,9 @@ async fn an_encrypted_backup_opens_with_its_key_only() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|backup| backup["encrypted"] == true && backup["key"] == "current"),
+            .all(|backup| backup["encrypted"] == true
+                && backup["key"] == "current"
+                && backup["recipient"] == recipient.as_str()),
         "{backups}"
     );
 
@@ -6697,14 +6699,15 @@ async fn an_encrypted_backup_opens_with_its_key_only() {
     let newest = confirmed["backup"].as_str().unwrap().to_owned();
     let backups = admin.get("/backups").await;
     for backup in backups.as_array().unwrap() {
-        let expected = if backup["name"] == newest.as_str() {
-            "current"
+        let (expected, public) = if backup["name"] == newest.as_str() {
+            ("current", second["recipient"].clone())
         } else if backup["kind"] == "uploaded" {
-            "unknown"
+            ("unknown", Value::Null)
         } else {
-            "earlier"
+            ("earlier", json!(recipient))
         };
         assert_eq!(backup["key"], expected, "{backup}");
+        assert_eq!(backup["recipient"], public, "{backup}");
     }
     tested(&admin).await;
 

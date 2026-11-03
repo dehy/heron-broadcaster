@@ -134,6 +134,9 @@ pub struct BackupView {
     pub encrypted: bool,
     /// Which key opens it, when it is encrypted.
     pub key: Option<BackupKey>,
+    /// The public key of that key, `age1…`, when it is known: the key typed
+    /// for it must match.
+    pub recipient: Option<String>,
     /// What fails its checksums, at the last check: a file missing, cut
     /// short or changed.
     pub damaged: Option<String>,
@@ -614,6 +617,7 @@ impl Backups {
                     .map(|error| error.trim().to_owned()),
                 encrypted: files.encrypted(),
                 key: None,
+                recipient: None,
                 damaged: damaged.get(&name).cloned(),
                 name,
             });
@@ -627,7 +631,9 @@ impl Backups {
         let mut backups = self.list()?;
         for backup in &mut backups {
             if backup.encrypted {
-                backup.key = Some(encryption.key_of(backup.created_at_unix_ms, backup.kind));
+                let (key, recipient) = encryption.key_of(backup.created_at_unix_ms, backup.kind);
+                backup.key = Some(key);
+                backup.recipient = recipient;
             }
         }
         Ok(backups)

@@ -94,21 +94,23 @@ impl Encryption {
             .transpose()
     }
 
-    /// Which key opens a backup taken at `created_at_unix_ms`: the first
-    /// key still in use after that time. A backup in clear then is
-    /// encrypted with the next key set.
-    pub fn key_of(&self, created_at_unix_ms: i64, kind: Kind) -> BackupKey {
+    /// Which key opens a backup taken at `created_at_unix_ms`, and its
+    /// public key: the first key still in use after that time. A backup in
+    /// clear then is encrypted with the next key set.
+    pub fn key_of(&self, created_at_unix_ms: i64, kind: Kind) -> (BackupKey, Option<String>) {
         if kind == Kind::Uploaded {
-            return BackupKey::Unknown;
+            return (BackupKey::Unknown, None);
         }
         match self
             .previous
             .iter()
             .find(|key| key.until_unix_ms > created_at_unix_ms)
         {
-            Some(_) => BackupKey::Earlier,
-            None if self.current.is_some() => BackupKey::Current,
-            None => BackupKey::Unknown,
+            Some(key) => (BackupKey::Earlier, Some(key.recipient.clone())),
+            None => match &self.current {
+                Some(key) => (BackupKey::Current, Some(key.recipient.clone())),
+                None => (BackupKey::Unknown, None),
+            },
         }
     }
 
@@ -567,7 +569,10 @@ mod tests {
     #[test]
     fn each_backup_names_the_key_that_opens_it() {
         let mut encryption = Encryption::default();
-        assert_eq!(encryption.key_of(10, Kind::Daily), BackupKey::Unknown);
+        assert_eq!(
+            encryption.key_of(10, Kind::Daily),
+            (BackupKey::Unknown, None)
+        );
         encryption.current = Some(key("age1b", 300));
         encryption.previous.push(EarlierKey {
             recipient: "age1a".to_owned(),
@@ -575,16 +580,18 @@ mod tests {
             until_unix_ms: 200,
             set_by: "admin".to_owned(),
         });
+        let earlier = (BackupKey::Earlier, Some("age1a".to_owned()));
+        let current = (BackupKey::Current, Some("age1b".to_owned()));
         // In clear before the first key, then encrypted with it.
-        assert_eq!(encryption.key_of(50, Kind::Daily), BackupKey::Earlier);
-        assert_eq!(encryption.key_of(150, Kind::Manual), BackupKey::Earlier);
+        assert_eq!(encryption.key_of(50, Kind::Daily), earlier);
+        assert_eq!(encryption.key_of(150, Kind::Manual), earlier);
         // In clear while encryption was off, then encrypted with the next.
-        assert_eq!(encryption.key_of(250, Kind::Daily), BackupKey::Current);
+        assert_eq!(encryption.key_of(250, Kind::Daily), current);
+        assert_eq!(encryption.key_of(350, Kind::BeforeRestore), current);
         assert_eq!(
-            encryption.key_of(350, Kind::BeforeRestore),
-            BackupKey::Current
+            encryption.key_of(350, Kind::Uploaded),
+            (BackupKey::Unknown, None)
         );
-        assert_eq!(encryption.key_of(350, Kind::Uploaded), BackupKey::Unknown);
         assert_eq!(encryption.state(), KeyState::On);
         encryption.pending = Some(key("age1c", 400));
         assert_eq!(encryption.state(), KeyState::Pending);
