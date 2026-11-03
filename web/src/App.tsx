@@ -3,6 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { api, can, done, errorMessage, fetchStatus, unwrap } from "./api";
+import { BackupWarnings } from "./components/BackupKey";
 import { Banner, Icon, Loading, Logo } from "./components/ui";
 import { type PlainKey, rich, setLanguage, t, toSetting, useLanguage } from "./i18n";
 import { setTimeZone } from "./lib/format";
@@ -423,6 +424,7 @@ function Warnings() {
           {warning}
         </Banner>
       ))}
+      {isAdmin && <BackupWarnings />}
     </>
   );
 }

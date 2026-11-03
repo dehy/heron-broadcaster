@@ -45,10 +45,11 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
 ENTRYPOINT ["heron-engine"]
 
 FROM runtime AS heron-api
-# mariadb-dump and gzip: the database dump of each backup (docs/backups.md).
+# mariadb-dump: the database dump of each backup (docs/backups.md); the API
+# compresses and encrypts it itself.
 USER root
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends mariadb-client gzip \
+    && apt-get install -y --no-install-recommends mariadb-client \
     && rm -rf /var/lib/apt/lists/*
 USER heron
 # The commit the image is built from: the web UI checks it is its own.

@@ -290,6 +290,45 @@ impl Client {
     }
 }
 
+impl Client {
+    /// A download, as it is.
+    async fn get_bytes(&self, path: &str) -> Vec<u8> {
+        let mut request = self.http.get(format!("{}{path}", self.base));
+        if let Some(cookie) = &self.cookie {
+            request = request.header("cookie", cookie);
+        }
+        let response = request.send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "GET {path}");
+        response.bytes().await.unwrap().to_vec()
+    }
+
+    /// Uploads a file, with a backup key in its header.
+    async fn post_bytes(
+        &self,
+        path: &str,
+        bytes: Vec<u8>,
+        key: Option<&str>,
+    ) -> (StatusCode, Value) {
+        let mut request = self
+            .http
+            .post(format!("{}{path}", self.base))
+            .header("content-type", "application/octet-stream")
+            .body(bytes);
+        if let Some(cookie) = &self.cookie {
+            request = request
+                .header("cookie", cookie)
+                .header("x-requested-with", "test");
+        }
+        if let Some(key) = key {
+            request = request.header("x-heron-backup-key", key);
+        }
+        let response = request.send().await.unwrap();
+        let status = response.status();
+        let value = response.json().await.unwrap_or(Value::Null);
+        (status, value)
+    }
+}
+
 /// Polls `check` until it returns something, for at most `timeout`.
 async fn eventually<T, F: Future<Output = Option<T>>>(
     what: &str,
@@ -6355,6 +6394,342 @@ async fn a_backup_restores_onto_an_empty_database() {
     );
     assert!(different.is_empty(), "{}", different.join("\n"));
     other.stop().await;
+}
+
+/// Waits for the backup test under way, and returns the last one.
+async fn tested(admin: &Client) -> Value {
+    eventually("the backup test", Duration::from_secs(60), || async {
+        let tests = admin.get("/backups/tests").await;
+        (tests["testing"].is_null() && !tests["last"].is_null()).then_some(tests)
+    })
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_encrypted_backup_opens_with_its_key_only() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let dir = station.state.backups.dir().to_owned();
+    let admin = station.signed_in("admin").await;
+    let viewer = station.signed_in("viewer").await;
+
+    // A backup in clear, with its checksums.
+    let (status, clear) = admin.send(Method::POST, "/backups", json!({})).await;
+    assert_eq!(status, StatusCode::CREATED, "{clear}");
+    assert_eq!(clear["encrypted"], false);
+    assert_eq!(clear["database_error"], Value::Null, "\n::error::{clear}");
+    let clear = clear["name"].as_str().unwrap().to_owned();
+    let checksums =
+        std::fs::read_to_string(dir.join(format!("heron-checksums-{clear}.sha256"))).unwrap();
+    assert!(
+        checksums.contains(&format!("  heron-config-{clear}.json\n")),
+        "{checksums}"
+    );
+    assert!(
+        checksums.contains(&format!("  heron-database-{clear}.sql.gz\n")),
+        "{checksums}"
+    );
+    let state = admin.get("/backups/state").await;
+    assert_eq!(state["encryption"], "off");
+    assert_eq!(state["check_due"], false);
+
+    // Only admins set a key; it is shown once, then typed back.
+    let (status, _) = viewer.send(Method::POST, "/backups/key", json!({})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, new) = admin.send(Method::POST, "/backups/key", json!({})).await;
+    assert_eq!(status, StatusCode::CREATED, "{new}");
+    let key = new["key"].as_str().unwrap().to_owned();
+    let recipient = new["recipient"].as_str().unwrap().to_owned();
+    assert!(new["key_file"].as_str().unwrap().contains(&key));
+    let view = admin.get("/backups/key").await;
+    assert_eq!(view["state"], "pending");
+    assert!(!view.to_string().contains(&key), "{view}");
+    let (other_key, _) = crate::backups::generate_key();
+    let (status, body) = admin
+        .send(
+            Method::POST,
+            "/backups/key/confirm",
+            json!({"key": other_key}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, confirmed) = admin
+        .send(
+            Method::POST,
+            "/backups/key/confirm",
+            json!({"key": key.to_lowercase()}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{confirmed}");
+    assert_eq!(confirmed["key"]["state"], "on");
+    assert_eq!(confirmed["encrypted"], json!([clear]));
+    let with_key = confirmed["backup"].as_str().unwrap().to_owned();
+    // The new backup is tested with the key just typed.
+    let tests = tested(&admin).await;
+    assert_eq!(tests["last"]["name"], with_key, "{tests}");
+    assert_eq!(tests["last"]["ok"], true, "{tests}");
+
+    // Encrypted in place: the files in clear are gone, the checksums follow.
+    assert!(!dir.join(format!("heron-config-{clear}.json")).exists());
+    assert!(!dir.join(format!("heron-database-{clear}.sql.gz")).exists());
+    for name in [&clear, &with_key] {
+        let config = std::fs::read(dir.join(format!("heron-config-{name}.json.age"))).unwrap();
+        assert!(config.starts_with(b"age-encryption.org/v1\n"));
+        assert!(
+            dir.join(format!("heron-database-{name}.sql.gz.age"))
+                .exists()
+        );
+        let checksums =
+            std::fs::read_to_string(dir.join(format!("heron-checksums-{name}.sha256"))).unwrap();
+        assert!(
+            checksums.contains(&format!("  heron-config-{name}.json.age\n")),
+            "{checksums}"
+        );
+        assert!(
+            checksums.contains(&format!("  heron-database-{name}.sql.gz.age\n")),
+            "{checksums}"
+        );
+    }
+    // Nothing Heron keeps holds the secret key.
+    let stored: Vec<String> = sqlx::query_scalar("SELECT CAST(value AS CHAR) FROM settings")
+        .fetch_all(&station.db.pool)
+        .await
+        .unwrap();
+    assert!(stored.iter().all(|value| !value.contains("AGE-SECRET-KEY")));
+    assert!(stored.iter().any(|value| value.contains(&recipient)));
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let bytes = std::fs::read(entry.unwrap().path()).unwrap_or_default();
+        assert!(!String::from_utf8_lossy(&bytes).contains("AGE-SECRET-KEY"));
+    }
+    let backups = admin.get("/backups").await;
+    assert!(
+        backups
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|backup| backup["encrypted"] == true
+                && backup["key"] == "current"
+                && backup["recipient"] == recipient.as_str()),
+        "{backups}"
+    );
+
+    // A restore asks for the key; a wrong one changes nothing.
+    let (status, body) = admin
+        .send(
+            Method::POST,
+            &format!("/backups/{with_key}/restore"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(
+        body["message"].as_str().unwrap().contains("encrypted"),
+        "{body}"
+    );
+    let (status, body) = admin
+        .send(
+            Method::POST,
+            &format!("/backups/{with_key}/restore"),
+            json!({"key": other_key}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        admin.get("/backups").await.as_array().unwrap().len(),
+        2,
+        "nothing taken"
+    );
+    let (status, report) = admin
+        .send(
+            Method::POST,
+            &format!("/backups/{with_key}/restore"),
+            json!({"key": key}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    let admin = station.signed_in("admin").await;
+
+    // An encrypted file uploaded, with its key in the header; kept as it is.
+    let file = admin.get_bytes(&format!("/backups/{clear}/config")).await;
+    let (status, body) = admin
+        .post_bytes("/backups/restore", file.clone(), None)
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, report) = admin
+        .post_bytes("/backups/restore", file.clone(), Some(&key))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    let admin = station.signed_in("admin").await;
+    let uploaded = admin
+        .get("/backups")
+        .await
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|backup| backup["kind"] == "uploaded")
+        .cloned()
+        .unwrap();
+    assert_eq!(uploaded["key"], "unknown", "{uploaded}");
+    let name = uploaded["name"].as_str().unwrap();
+    assert_eq!(
+        std::fs::read(dir.join(format!("heron-config-{name}.json.age"))).unwrap(),
+        file
+    );
+
+    // A restore keeps the key, whatever the file says.
+    let plain = crate::backups::decrypt_with(&key, &file);
+    let mut plain: Value = serde_json::from_slice(&plain).unwrap();
+    plain["tables"]["settings"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"name": "backup_encryption", "value": {"current": null}}));
+    let (status, report) = admin.send(Method::POST, "/backups/restore", plain).await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    let admin = station.signed_in("admin").await;
+    let view = admin.get("/backups/key").await;
+    assert_eq!(view["current"]["recipient"], recipient.as_str(), "{view}");
+
+    // Each admin checks the key: a new one at once, then further away.
+    let (status, body) = admin
+        .send(
+            Method::POST,
+            "/users",
+            json!({"username": "night", "password": "correct horse", "role": "admin"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let night = station.signed_in("night").await;
+    assert_eq!(admin.get("/backups/state").await["check_due"], false);
+    assert_eq!(night.get("/backups/state").await["check_due"], true);
+    let (status, _) = night
+        .send(
+            Method::POST,
+            "/backups/key/check",
+            json!({"key": other_key}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        night.get("/backups/state").await["check_due"],
+        true,
+        "a wrong key changes nothing"
+    );
+    let (status, _) = night
+        .send(Method::POST, "/backups/key/later", json!({}))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        night.get("/backups/state").await["check_due"],
+        false,
+        "asked again tomorrow"
+    );
+    let (status, checked) = night
+        .send(Method::POST, "/backups/key/check", json!({"key": key}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{checked}");
+    let next = checked["next_check_unix_ms"].as_i64().unwrap();
+    let in_a_day = jiff::Timestamp::now().as_millisecond() + 24 * 3600 * 1000;
+    assert!((next - in_a_day).abs() < 60_000, "{checked}");
+    let tests = tested(&night).await;
+    assert_eq!(tests["last"]["by"], "night", "{tests}");
+    assert_eq!(tests["last"]["ok"], true, "{tests}");
+
+    // A file changed in the folder: damaged at the next check, and its test fails.
+    let dump = dir.join(format!("heron-database-{clear}.sql.gz.age"));
+    let mut bytes = std::fs::read(&dump).unwrap();
+    let middle = bytes.len() / 2;
+    bytes[middle] ^= 1;
+    std::fs::write(&dump, bytes).unwrap();
+    station.state.backups.verify_all().await.unwrap();
+    let damaged = admin
+        .get("/backups")
+        .await
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|backup| backup["name"] == clear.as_str())
+        .cloned()
+        .unwrap();
+    assert!(
+        damaged["damaged"].as_str().unwrap().contains("changed"),
+        "{damaged}"
+    );
+    assert_eq!(admin.get("/backups/state").await["damaged"], 1);
+    let (status, body) = admin
+        .send(Method::POST, &format!("/backups/{clear}/test"), json!({}))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "the key is needed: {body}"
+    );
+    let (status, body) = admin
+        .send(
+            Method::POST,
+            &format!("/backups/{clear}/test"),
+            json!({"key": key}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let tests = tested(&admin).await;
+    assert_eq!(tests["last"]["ok"], false, "{tests}");
+    assert!(
+        tests["last"]["error"]
+            .as_str()
+            .unwrap()
+            .contains(".sql.gz.age"),
+        "{tests}"
+    );
+    assert_eq!(admin.get("/backups/state").await["test_due"], true);
+
+    // A new key: the backup taken with it opens with it, the older ones
+    // need the earlier key, even within the same second.
+    let (status, second) = admin.send(Method::POST, "/backups/key", json!({})).await;
+    assert_eq!(status, StatusCode::CREATED, "{second}");
+    let (status, confirmed) = admin
+        .send(
+            Method::POST,
+            "/backups/key/confirm",
+            json!({"key": second["key"]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{confirmed}");
+    assert_eq!(confirmed["encrypted"], json!([]), "nothing left in clear");
+    let newest = confirmed["backup"].as_str().unwrap().to_owned();
+    let backups = admin.get("/backups").await;
+    for backup in backups.as_array().unwrap() {
+        let (expected, public) = if backup["name"] == newest.as_str() {
+            ("current", second["recipient"].clone())
+        } else if backup["kind"] == "uploaded" {
+            ("unknown", Value::Null)
+        } else {
+            ("earlier", json!(recipient))
+        };
+        assert_eq!(backup["key"], expected, "{backup}");
+        assert_eq!(backup["recipient"], public, "{backup}");
+    }
+    tested(&admin).await;
+
+    // Turned off: new backups in clear, the others stay encrypted.
+    let (status, view) = admin.send(Method::DELETE, "/backups/key", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(view["state"], "off");
+    assert_eq!(view["previous"][0]["recipient"], recipient.as_str());
+    assert_eq!(view["previous"][1]["recipient"], second["recipient"]);
+    let (status, backup) = admin.send(Method::POST, "/backups", json!({})).await;
+    assert_eq!(status, StatusCode::CREATED, "{backup}");
+    assert_eq!(backup["encrypted"], false);
+    let backups = admin.get("/backups").await;
+    let earlier = backups
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|backup| backup["name"] == with_key.as_str())
+        .cloned()
+        .unwrap();
+    assert_eq!(earlier["key"], "earlier", "{earlier}");
+    station.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

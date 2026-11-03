@@ -217,6 +217,9 @@ Every service also exports `heron_build_info{service, version}` (always 1), and,
 | `heron_api_logins_total` | counter | `result` (`ok`, `failed`) | Sign-ins |
 | `heron_listeners` | gauge | `output` | Listeners of the output at the last minute, from its stream server; `NaN` while the server cannot be read ([Listener statistics](statistics.md)) |
 | `heron_api_listener_polls_total` | counter | `result` (`ok`, `error`) | Requests to stream servers for listener statistics |
+| `heron_api_backup_last_success_timestamp_seconds` | gauge | | When the last backup that passed its checks was taken |
+| `heron_api_backup_last_test_success_timestamp_seconds` | gauge | | When a backup last passed a [test read](backups.md#testing-backups) |
+| `heron_api_backups_damaged` | gauge | | Backups whose files failed the daily checksum check |
 | `heron_library_files` | gauge | | Audio files found by the last library scan |
 | `heron_library_scan_duration_seconds` | gauge | | Duration of the last scan |
 | `heron_library_scans_total` | counter | `result` (`ok`, `error`) | Library scans |

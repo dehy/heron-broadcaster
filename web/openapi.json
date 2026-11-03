@@ -832,17 +832,223 @@
         }
       }
     },
+    "/api/v1/backups/key": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "The backup key: its public key, when and by whom it was set, the\nearlier ones. Never the secret key. Admins only.",
+        "operationId": "get_key",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "A new key, waiting to be typed back (`/backups/key/confirm`): generated\nand returned this once, or the admin's own public key. Admins only.",
+        "operationId": "new_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewKey"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Drops the key waiting to be typed back; with none, turns encryption\noff: new backups are written in clear. Admins only.",
+        "operationId": "drop_key",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backups/key/check": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Checks the key an admin types back: their next check further away, and\nthe newest backup encrypted with it tested in the background. A wrong\nkey changes nothing. Admins only.",
+        "operationId": "check_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Checked"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backups/key/confirm": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Turns encryption on with the key waiting, once typed back: the backups\nin clear are encrypted, a backup is taken and tested. Admins only.",
+        "operationId": "confirm_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Confirmed"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backups/key/later": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Asks this admin for the key again the next day. Admins only.",
+        "operationId": "later",
+        "responses": {
+          "204": {},
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/backups/restore": {
       "post": {
         "tags": [
           "backups"
         ],
-        "summary": "Restores an uploaded configuration file (the request's body), kept as an\n`uploaded` backup. Admins only.",
+        "summary": "Restores an uploaded configuration file (the request's body), kept as an\n`uploaded` backup. An encrypted one needs its key, in the\n`X-Heron-Backup-Key` header. Admins only.",
         "operationId": "upload_and_restore",
+        "parameters": [
+          {
+            "name": "X-Heron-Backup-Key",
+            "in": "header",
+            "description": "The key of an encrypted file",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
         "requestBody": {
-          "description": "A configuration file",
+          "description": "A configuration file, `.json` or `.json.age`",
           "content": {
-            "application/json": {
+            "application/octet-stream": {
               "schema": {
                 "type": "string"
               }
@@ -856,6 +1062,64 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RestoreReport"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backups/state": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "What the banners and the key check need, for the admin asking. Admins\nonly.",
+        "operationId": "get_state",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backups/tests": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "The last backup test, the last one that passed, and the one under way.\nAdmins only.",
+        "operationId": "get_tests",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestsView"
                 }
               }
             }
@@ -908,7 +1172,7 @@
         "tags": [
           "backups"
         ],
-        "summary": "Downloads a backup's configuration file. Admins only: it holds secrets.",
+        "summary": "Downloads a backup's configuration file, encrypted when it is. Admins\nonly: it holds secrets.",
         "operationId": "download_config",
         "parameters": [
           {
@@ -943,7 +1207,7 @@
         "tags": [
           "backups"
         ],
-        "summary": "Downloads a backup's database dump. Admins only: it holds secrets.",
+        "summary": "Downloads a backup's database dump, encrypted when it is. Admins only:\nit holds secrets.",
         "operationId": "download_database",
         "parameters": [
           {
@@ -990,12 +1254,85 @@
             }
           }
         ],
+        "requestBody": {
+          "description": "The key of an encrypted backup",
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/WithKey"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RestoreReport"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backups/{name}/test": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Tests a backup in the background: read back to its end with its key\nwhen it is encrypted, nothing restored. Its result is in\n`/backups/tests`. Admins only.",
+        "operationId": "test_backup",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The key of an encrypted backup",
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/WithKey"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Testing"
                 }
               }
             }
@@ -12653,6 +12990,15 @@
           }
         }
       },
+      "BackupKey": {
+        "type": "string",
+        "description": "Which key opens an encrypted backup.",
+        "enum": [
+          "current",
+          "earlier",
+          "unknown"
+        ]
+      },
       "BackupSettings": {
         "type": "object",
         "description": "The `backups` settings.",
@@ -12682,6 +13028,34 @@
         },
         "additionalProperties": false
       },
+      "BackupState": {
+        "type": "object",
+        "description": "What the banners say about backups, for the admin asking.",
+        "required": [
+          "encryption",
+          "check_due",
+          "damaged",
+          "test_due"
+        ],
+        "properties": {
+          "check_due": {
+            "type": "boolean",
+            "description": "This admin's key check is due."
+          },
+          "damaged": {
+            "type": "integer",
+            "description": "Backups that fail their checksums.",
+            "minimum": 0
+          },
+          "encryption": {
+            "$ref": "#/components/schemas/KeyState"
+          },
+          "test_due": {
+            "type": "boolean",
+            "description": "The last test failed, or none passed for 30 days."
+          }
+        }
+      },
       "BackupView": {
         "type": "object",
         "description": "A backup in the folder.",
@@ -12689,7 +13063,8 @@
           "name",
           "kind",
           "created_at_unix_ms",
-          "config_size"
+          "config_size",
+          "encrypted"
         ],
         "properties": {
           "config_size": {
@@ -12701,6 +13076,13 @@
           "created_at_unix_ms": {
             "type": "integer",
             "format": "int64"
+          },
+          "damaged": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What fails its checksums, at the last check: a file missing, cut\nshort or changed."
           },
           "database_error": {
             "type": [
@@ -12718,12 +13100,34 @@
             "description": "Bytes; missing without a dump.",
             "minimum": 0
           },
+          "encrypted": {
+            "type": "boolean",
+            "description": "Its files are encrypted."
+          },
+          "key": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BackupKey",
+                "description": "Which key opens it, when it is encrypted."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "kind": {
             "$ref": "#/components/schemas/Kind"
           },
           "name": {
             "type": "string",
             "description": "Its time and kind: `2026-11-03T03-30-00Z-daily`."
+          },
+          "recipient": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The public key of that key, `age1…`, when it is known: the key typed\nfor it must match."
           }
         }
       },
@@ -13299,6 +13703,26 @@
           }
         }
       },
+      "Checked": {
+        "type": "object",
+        "required": [
+          "next_check_unix_ms"
+        ],
+        "properties": {
+          "next_check_unix_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When this admin's next check is due."
+          },
+          "testing": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The backup being tested with the key."
+          }
+        }
+      },
       "ChoiceRequest": {
         "oneOf": [
           {
@@ -13484,6 +13908,40 @@
             "items": {
               "$ref": "#/components/schemas/ClockSlot"
             }
+          }
+        }
+      },
+      "Confirmed": {
+        "type": "object",
+        "required": [
+          "key",
+          "encrypted",
+          "left_in_clear"
+        ],
+        "properties": {
+          "backup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The backup taken with the new key."
+          },
+          "encrypted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Backups that were in clear, now encrypted."
+          },
+          "key": {
+            "$ref": "#/components/schemas/KeyView"
+          },
+          "left_in_clear": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Backups left in clear: their files fail their checksums, or could\nnot be written."
           }
         }
       },
@@ -13965,6 +14423,31 @@
           }
         },
         "additionalProperties": false
+      },
+      "EarlierKey": {
+        "type": "object",
+        "required": [
+          "recipient",
+          "since_unix_ms",
+          "until_unix_ms",
+          "set_by"
+        ],
+        "properties": {
+          "recipient": {
+            "type": "string"
+          },
+          "set_by": {
+            "type": "string"
+          },
+          "since_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "until_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
       },
       "EffectivePlayout": {
         "type": "object",
@@ -15575,6 +16058,86 @@
         },
         "additionalProperties": false
       },
+      "KeyRecord": {
+        "type": "object",
+        "required": [
+          "recipient",
+          "since_unix_ms",
+          "set_by"
+        ],
+        "properties": {
+          "recipient": {
+            "type": "string",
+            "description": "The public key, `age1…`."
+          },
+          "set_by": {
+            "type": "string",
+            "description": "Who set it."
+          },
+          "since_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "KeyRequest": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The secret key, `AGE-SECRET-KEY-1…`, or the contents of its file."
+          }
+        },
+        "additionalProperties": false
+      },
+      "KeyState": {
+        "type": "string",
+        "enum": [
+          "off",
+          "pending",
+          "on"
+        ]
+      },
+      "KeyView": {
+        "type": "object",
+        "required": [
+          "state",
+          "previous"
+        ],
+        "properties": {
+          "current": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/KeyRecord",
+                "description": "The key backups are encrypted with."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pending_recipient": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The public key waiting to be typed back."
+          },
+          "previous": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EarlierKey"
+            },
+            "description": "The keys used before, oldest first."
+          },
+          "state": {
+            "$ref": "#/components/schemas/KeyState"
+          }
+        }
+      },
       "Kind": {
         "type": "string",
         "description": "Why a backup was taken.",
@@ -16740,6 +17303,44 @@
           "name": {
             "type": "string",
             "description": "What the files are, for people (`Album 2024`, the dropped folder)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "NewKey": {
+        "type": "object",
+        "required": [
+          "recipient"
+        ],
+        "properties": {
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The secret key, `AGE-SECRET-KEY-1…`: shown this once, never stored.\nMissing for the admin's own key."
+          },
+          "key_file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`heron-backup-key.txt`, an age identity file, with the secret key."
+          },
+          "recipient": {
+            "type": "string"
+          }
+        }
+      },
+      "NewKeyRequest": {
+        "type": "object",
+        "properties": {
+          "recipient": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The admin's own public key, `age1…`; left out: Heron generates one."
           }
         },
         "additionalProperties": false
@@ -20848,6 +21449,86 @@
           "failed"
         ]
       },
+      "TestRecord": {
+        "type": "object",
+        "description": "A backup read back to its end, nothing restored.",
+        "required": [
+          "name",
+          "at_unix_ms",
+          "ok"
+        ],
+        "properties": {
+          "at_unix_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who gave the key; none: Heron, for a backup in clear."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What failed, and in which file."
+          },
+          "name": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Testing": {
+        "type": "object",
+        "required": [
+          "testing"
+        ],
+        "properties": {
+          "testing": {
+            "type": "string",
+            "description": "The backup being tested."
+          }
+        }
+      },
+      "TestsView": {
+        "type": "object",
+        "properties": {
+          "last": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TestRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_ok": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TestRecord",
+                "description": "The last test that passed."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "testing": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The backup being tested."
+          }
+        }
+      },
       "Theme": {
         "type": "string",
         "description": "The web UI's theme.",
@@ -22686,6 +23367,20 @@
             "description": "Do not play the same track within.",
             "default": 240,
             "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "WithKey": {
+        "type": "object",
+        "description": "The key of an encrypted backup.",
+        "properties": {
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The secret key, `AGE-SECRET-KEY-1…`, or the contents of its file."
           }
         },
         "additionalProperties": false

@@ -31,10 +31,10 @@
 | **Webhooks** | Webhooks on track changes: address, events, FX or not, the default JSON body or a template; the secret, shown once (and a new one); a test ping; each webhook's deliveries, with their status, attempts, what was sent and answered, and send again | admin |
 | **Stations** | The stations: add one with the address of its engine, rename, change its code, its engine or its position, enable or disable, delete ([Several stations](stations.md)) | admin |
 | **Users** | Users and roles, passwords, enable or disable; with several stations, a shared role and a role on each station | admin |
-| **Backups** | The backups, newest first (kind, time, the size of its two files, a failed dump), *Back up now*, download either file, restore a backup or an uploaded configuration file (with what it will replace, then its report), delete; the `backups` settings | admin |
+| **Backups** | The backups, newest first (kind, time, the size of its two files, a failed dump), *Back up now*, download either file, restore a backup or an uploaded configuration file (with what it will replace, then its report; the key for an encrypted one), delete; the `backups` settings; encryption: encrypt backups (the key shown once, then typed back, or the admin's own public key), check the key, change it, turn encryption off, which backups need an earlier key, the public key each key typed must match ([Backups – Encryption](backups.md#encryption)); *Test* on a backup, the last test, damaged backups ([Testing backups](backups.md#testing-backups)) | admin |
 | **Account** | Theme, language, width, password, API tokens | |
 
-Viewers see every page (except users and webhooks) without the controls. Every page shows a banner when something needs attention: the API, the database or the engine unreachable, live updates disconnected, the engine refusing the configuration, the **backup folder** not writable (admins), the web UI and the API **not from the same version** (an image pulled without the other: pull and start both again), or the **server clock** not synchronized or off by more than about a second (from `GET /api/v1/status`, see [API](api.md#authentication)).
+Viewers see every page (except users and webhooks) without the controls. Every page shows a banner when something needs attention: the API, the database or the engine unreachable, live updates disconnected, the engine refusing the configuration, the **backup folder** not writable (admins), **backups not encrypted**, **damaged** or **not tested** (admins), the web UI and the API **not from the same version** (an image pulled without the other: pull and start both again), or the **server clock** not synchronized or off by more than about a second (from `GET /api/v1/status`, see [API](api.md#authentication)). When an admin's [key check](backups.md#checking-the-key) is due, a dialog asks for the backup key, on any page.
 
 ## Several stations
 
@@ -136,11 +136,13 @@ The breadcrumb is built from the navigation's own list of pages, so a page added
 cd web
 npm ci
 HERON_API_URL=http://localhost:8000 npm run dev   # against a running station's heron-web
-npm test                                          # unit tests (Vitest), catalogs included
+npm test                                          # unit and component tests (Vitest), catalogs included
 npm run typecheck && npm run build
 ```
 
 Open a page with `?lang=pseudo` to check translations ([Pseudo-locale](#pseudo-locale)). `HERON_API_URL` defaults to `http://localhost:8080`, a `heron-api` run with `cargo run -p heron-api`. The API client is typed from the OpenAPI document ([API – Web client](api.md#web-client)). The app uses TanStack Query for requests and dnd-kit for dragging; routing is a small module on the History API (`src/lib/router.tsx`), since nginx answers every path with `index.html`.
+
+Logic lives in `src/lib`, tested on its own. Components are tested rendered in jsdom with Testing Library: a test file starts with `// @vitest-environment jsdom`, and `src/test/render.tsx` renders with the app's providers, signed in, against API answers the test gives.
 
 ## Limitations
 

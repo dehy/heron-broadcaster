@@ -152,7 +152,13 @@ enum BackupCommand {
     /// Restore a backup's configuration file, by its name
     /// (`2026-11-03T03-30-00Z-daily`). Restart heron-api afterwards, so the
     /// engines get the restored configuration; everyone signs in again.
-    Restore { name: String },
+    Restore {
+        name: String,
+        /// The key of an encrypted backup: a file holding it, or `-` to
+        /// read it from the standard input.
+        #[arg(long)]
+        key_file: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -273,6 +279,18 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 }
 
 /// Reads a password without echoing it on a terminal.
+/// The backup key from `--key-file`: a file, or `-` for the standard input.
+fn read_key_file(path: &std::path::Path) -> anyhow::Result<String> {
+    if path.as_os_str() == "-" {
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)
+            .context("cannot read the key from the standard input")?;
+        Ok(text)
+    } else {
+        std::fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))
+    }
+}
+
 fn read_password(prompt: &str) -> anyhow::Result<String> {
     let stdin = std::io::stdin();
     let terminal = stdin.is_terminal();
@@ -399,11 +417,19 @@ async fn manage_backups(
                 );
             }
         }
-        BackupCommand::Restore { name } => {
-            let bytes = std::fs::read(backups.dir().join(format!("heron-config-{name}.json")))
-                .with_context(|| format!("no backup {name}: see `heron-api backup list`"))?;
+        BackupCommand::Restore { name, key_file } => {
+            let bytes = backups
+                .read(&name)
+                .map_err(|error| anyhow::anyhow!("{error}: see `heron-api backup list`"))?;
+            let identity = match key_file {
+                None => None,
+                Some(path) => {
+                    let text = tokio::task::spawn_blocking(move || read_key_file(&path)).await??;
+                    Some(backups::parse_key(&text).map_err(fail)?)
+                }
+            };
             let report = backups
-                .restore(&pool, None, &bytes, false)
+                .restore(&pool, None, &bytes, false, identity.as_ref())
                 .await
                 .map_err(fail)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
