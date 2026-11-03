@@ -15,6 +15,8 @@
 
 use std::collections::BTreeMap;
 
+use sentry::integrations::tracing::{BreadcrumbLayer, ErrorLayer, SpanLayer};
+use tracing_subscriber::filter::{LevelFilter, filter_fn};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
@@ -124,21 +126,17 @@ pub fn init_tracing(args: &LogArgs, service: &'static str) -> Result<Telemetry, 
             .flatten_event(true)
             .boxed(),
     };
-    // sentry 0.49.5 deprecates the combined layer for SpanLayer + LogLayer; the
-    // migration changes what is sent, so it is left for its own change.
-    #[allow(deprecated)]
+    let enabled = sentry.is_some();
     let init = tracing_subscriber::registry()
         .with(filter)
         .with(output)
-        .with(sentry.is_some().then(|| {
-            sentry::integrations::tracing::layer().event_filter(|metadata| {
-                match *metadata.level() {
-                    tracing::Level::ERROR => sentry::integrations::tracing::EventFilter::Event,
-                    tracing::Level::WARN => sentry::integrations::tracing::EventFilter::Breadcrumb,
-                    _ => sentry::integrations::tracing::EventFilter::Ignore,
-                }
-            })
+        .with(enabled.then(|| SpanLayer::new().with_filter(LevelFilter::INFO)))
+        .with(enabled.then(|| {
+            BreadcrumbLayer::new().with_filter(filter_fn(|metadata| {
+                *metadata.level() == tracing::Level::WARN
+            }))
         }))
+        .with(enabled.then(|| ErrorLayer::new().with_filter(LevelFilter::ERROR)))
         .try_init();
     init.map_err(|error| Error::Tracing(error.to_string()))?;
     if sentry.is_some() {
