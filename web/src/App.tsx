@@ -348,6 +348,38 @@ function OnAirBadge() {
   ) : null;
 }
 
+/**
+ * For admins: backups not encrypted, damaged or not tested lately, and the
+ * reminder to check the backup key when it is due.
+ */
+function BackupWarnings() {
+  const state = useQuery({
+    queryKey: ["backups", "state"],
+    queryFn: () => unwrap(api.GET("/api/v1/backups/state")),
+    refetchInterval: 60_000,
+  });
+  const [keyCheckClosed, setKeyCheckClosed] = useState(false);
+  if (!state.data) {
+    return null;
+  }
+  const link = <Link to="/backups">{t("nav.backups")}</Link>;
+  const messages: Record<BackupWarning, ReactNode> = {
+    notEncrypted: rich("app.backupsNotEncrypted", { link }),
+    damaged: rich("app.backupsDamaged", { count: state.data.damaged, link }),
+    testDue: rich("app.backupsTestDue", { link }),
+  };
+  return (
+    <>
+      {backupWarnings(state.data).map((warning) => (
+        <Banner key={warning} kind="warn">
+          {messages[warning]}
+        </Banner>
+      ))}
+      {state.data.check_due && !keyCheckClosed && <KeyCheckDialog reminder onClose={() => setKeyCheckClosed(true)} />}
+    </>
+  );
+}
+
 /** Problems worth knowing on every page. */
 function Warnings() {
   // Backups are shared: the shared role, not the role on the station shown.
@@ -360,13 +392,6 @@ function Warnings() {
     queryFn: () => unwrap(api.GET("/api/v1/stations/{station_id}/engine", { params: { path: here() } })),
     refetchInterval: 15_000,
   });
-  const backupState = useQuery({
-    queryKey: ["backups", "state"],
-    queryFn: () => unwrap(api.GET("/api/v1/backups/state")),
-    enabled: isAdmin,
-    refetchInterval: 60_000,
-  });
-  const [keyCheckClosed, setKeyCheckClosed] = useState(false);
   const [disconnectedSince, setDisconnectedSince] = useState<number | null>(null);
   useEffect(() => {
     setDisconnectedSince(connected ? null : Date.now());
@@ -414,17 +439,6 @@ function Warnings() {
         : rich("app.backupFolderError", { error, link }),
     );
   }
-  if (isAdmin && backupState.data) {
-    const link = <Link to="/backups">{t("nav.backups")}</Link>;
-    const messages: Record<BackupWarning, ReactNode> = {
-      notEncrypted: rich("app.backupsNotEncrypted", { link }),
-      damaged: rich("app.backupsDamaged", { count: backupState.data.damaged, link }),
-      testDue: rich("app.backupsTestDue", { link }),
-    };
-    for (const warning of backupWarnings(backupState.data)) {
-      warnings.push(messages[warning]);
-    }
-  }
   if (status.data && differentBuilds(webBuild(), status.data)) {
     warnings.push(
       t("app.versionMismatch", { web: buildLabel(webBuild()), api: buildLabel(status.data) }),
@@ -443,9 +457,7 @@ function Warnings() {
           {warning}
         </Banner>
       ))}
-      {isAdmin && backupState.data?.check_due && !keyCheckClosed && (
-        <KeyCheckDialog reminder onClose={() => setKeyCheckClosed(true)} />
-      )}
+      {isAdmin && <BackupWarnings />}
     </>
   );
 }

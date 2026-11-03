@@ -28,12 +28,10 @@ export function PublicKey({ recipient }: Readonly<{ recipient: string }>) {
 export function KeyInput({
   value,
   onChange,
-  autoFocus,
   recipient,
 }: Readonly<{
   value: string;
   onChange: (value: string) => void;
-  autoFocus?: boolean;
   recipient?: string | null | undefined;
 }>) {
   return (
@@ -44,7 +42,6 @@ export function KeyInput({
           type="password"
           autoComplete="off"
           spellCheck={false}
-          autoFocus={autoFocus}
           placeholder="AGE-SECRET-KEY-1…"
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -59,8 +56,8 @@ export function KeyInput({
   );
 }
 
-/** Invalidated whenever the key or a backup changes. */
-export const BACKUP_KEYS = [["backups"], ["backups", "key"], ["backups", "state"], ["backups", "tests"]];
+/** Invalidated whenever the key or a backup changes: every query under `backups`. */
+export const BACKUP_KEYS = [["backups"]];
 
 /**
  * Asks an admin to type the backup key back: their next check further
@@ -78,11 +75,7 @@ export function KeyCheckDialog({ reminder, onClose }: Readonly<{ reminder: boole
     queryKey: ["backups", "key"],
     queryFn: () => unwrap(api.GET("/api/v1/backups/key")),
   });
-  const refresh = async () => {
-    for (const queryKey of BACKUP_KEYS) {
-      await client.invalidateQueries({ queryKey });
-    }
-  };
+  const refresh = () => client.invalidateQueries({ queryKey: ["backups"] });
   const check = async () => {
     setBusy(true);
     setError(null);
@@ -96,8 +89,8 @@ export function KeyCheckDialog({ reminder, onClose }: Readonly<{ reminder: boole
       setKey("");
       await refresh();
       onClose();
-    } catch (failure) {
-      setError(errorMessage(failure));
+    } catch (error_) {
+      setError(errorMessage(error_));
     } finally {
       setBusy(false);
     }
@@ -105,8 +98,8 @@ export function KeyCheckDialog({ reminder, onClose }: Readonly<{ reminder: boole
   const later = async () => {
     try {
       await done(api.POST("/api/v1/backups/key/later"));
-    } catch (failure) {
-      toast(errorMessage(failure), true);
+    } catch (error_) {
+      toast(errorMessage(error_), true);
     }
     await refresh();
     onClose();
@@ -154,7 +147,7 @@ export function KeyCheckDialog({ reminder, onClose }: Readonly<{ reminder: boole
         }}
       >
         <p style={{ margin: 0 }}>{reminder ? t("backupKey.reminder") : t("backupKey.checkHint")}</p>
-        <KeyInput value={key} onChange={setKey} autoFocus recipient={owner?.recipient} />
+        <KeyInput value={key} onChange={setKey} recipient={owner?.recipient} />
         {error && <Banner kind="bad">{error}</Banner>}
         {missing && (
           <Banner kind="warn">

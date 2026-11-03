@@ -286,8 +286,8 @@ function RestoreDialog({
       }
       onClose();
       onRestored(report);
-    } catch (failure) {
-      setError(errorMessage(failure));
+    } catch (error_) {
+      setError(errorMessage(error_));
     } finally {
       setBusy(false);
     }
@@ -329,7 +329,6 @@ function RestoreDialog({
             <KeyInput
               value={key}
               onChange={setKey}
-              autoFocus
               recipient={"backup" in restoring ? restoring.backup.recipient : null}
             />
             {!("backup" in restoring) && (
@@ -386,7 +385,7 @@ function TestDialog({ backup, onClose }: Readonly<{ backup: BackupView; onClose:
             {t("backups.restoreEarlierKey")}
           </p>
         )}
-        <KeyInput value={key} onChange={setKey} autoFocus recipient={backup.recipient} />
+        <KeyInput value={key} onChange={setKey} recipient={backup.recipient} />
       </div>
     </Modal>
   );
@@ -489,18 +488,14 @@ function SetupDialog({ start, onClose }: Readonly<{ start: "new" | "confirm"; on
     queryKey: ["backups", "key"],
     queryFn: () => unwrap(api.GET("/api/v1/backups/key")),
   });
-  const refresh = async () => {
-    for (const queryKey of BACKUP_KEYS) {
-      await client.invalidateQueries({ queryKey });
-    }
-  };
+  const refresh = () => client.invalidateQueries({ queryKey: ["backups"] });
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     setError(null);
     try {
       await action();
-    } catch (failure) {
-      setError(errorMessage(failure));
+    } catch (error_) {
+      setError(errorMessage(error_));
     } finally {
       setBusy(false);
     }
@@ -614,7 +609,6 @@ function SetupDialog({ start, onClose }: Readonly<{ start: "new" | "confirm"; on
         <KeyInput
           value={typed}
           onChange={setTyped}
-          autoFocus
           recipient={created?.recipient ?? pending.data?.pending_recipient}
         />
       </>
