@@ -41,7 +41,7 @@ jiff = { version = "0.2.38", default-features = false, features = ["std", "serde
 lofty = "0.25.5"
 metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
-mp3lame-encoder = "0.2.5"
+mp3lame-encoder = "0.3.0"
 notify = "8.2.0"
 percent-encoding = "2.3.2"
 prost = "0.14.4"
@@ -65,12 +65,12 @@ tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread", "signal", "net", "time"] }
 tokio-stream = "0.1.19"
-tokio-tungstenite = "0.29.0"
+tokio-tungstenite = "0.30.0"
 tonic = "0.14.6"
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
 tower = "0.5.3"
-tower-http = { version = "0.6.11", features = ["fs"] }
+tower-http = { version = "0.7.1", features = ["fs"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 unicode-normalization = "0.1.25"
