@@ -38,7 +38,7 @@ getrandom = "0.4.3"
 hmac = "0.13.0"
 hound = "3.5.1"
 jiff = { version = "0.2.38", default-features = false, features = ["std", "serde", "tzdb-bundle-always", "tzdb-zoneinfo", "tz-system"] }
-lofty = "0.25.4"
+lofty = "0.25.5"
 metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
 mp3lame-encoder = "0.2.5"

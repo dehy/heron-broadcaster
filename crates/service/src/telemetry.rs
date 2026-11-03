@@ -124,7 +124,10 @@ pub fn init_tracing(args: &LogArgs, service: &'static str) -> Result<Telemetry, 
             .flatten_event(true)
             .boxed(),
     };
-    tracing_subscriber::registry()
+    // sentry 0.49.5 deprecates the combined layer for SpanLayer + LogLayer; the
+    // migration changes what is sent, so it is left for its own change.
+    #[allow(deprecated)]
+    let init = tracing_subscriber::registry()
         .with(filter)
         .with(output)
         .with(sentry.is_some().then(|| {
@@ -136,8 +139,8 @@ pub fn init_tracing(args: &LogArgs, service: &'static str) -> Result<Telemetry, 
                 }
             })
         }))
-        .try_init()
-        .map_err(|error| Error::Tracing(error.to_string()))?;
+        .try_init();
+    init.map_err(|error| Error::Tracing(error.to_string()))?;
     if sentry.is_some() {
         tracing::info!(environment = %args.sentry_environment, "reporting errors to Sentry");
     }
