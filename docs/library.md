@@ -25,7 +25,7 @@ Like iTunes' "Keep Music folder organized": new files, uploaded from the browser
 
 ## The incoming folder
 
-- **When:** at startup, after file system events (debounced 2 s), and every `HERON_INCOMING_INTERVAL` seconds (default 60). Set `HERON_INCOMING_WATCH=false` where watching does not work (some network shares).
+- **When:** at startup, after file system changes (debounced 2 s; reads do not count), and every `HERON_INCOMING_INTERVAL` seconds (default 60). Set `HERON_INCOMING_WATCH=false` where watching does not work (some network shares).
 - **What:** the same audio extensions as the scanner. Hidden files and other files (cover art, playlists, notes) are left in place.
 - **Files still being copied:** files modified less than `HERON_IMPORT_SETTLE` seconds ago (default 5) wait. A file that changes while it is being imported is left for the next pass.
 - **Siblings:** the files of one folder form a **group** in the buffer zone, so the files of an album agree on their release.
