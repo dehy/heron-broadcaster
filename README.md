@@ -139,7 +139,7 @@ cargo test --workspace
 
 # Database tests create and drop scratch databases, so they need an admin URL:
 docker run -d --rm --name heron-test-db -p 127.0.0.1:33306:3306 \
-  -e MARIADB_ROOT_PASSWORD=root mariadb:11.8
+  -e MARIADB_ROOT_PASSWORD=root mariadb:12.3
 HERON_TEST_DATABASE_URL=mysql://root:root@127.0.0.1:33306 cargo test --workspace
 
 # Soak test of the engine: two Icecast servers, the library for an hour:

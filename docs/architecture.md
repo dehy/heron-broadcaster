@@ -50,7 +50,7 @@ flowchart TB
         librarian["<b>heron-librarian</b><br/>[Container: Rust]<br/>Buffer zone: identifies new files;<br/>tags and files them on import;<br/>organizes, deletes to a trash, undoes;<br/>journaled moves"]:::container
         engine["<b>heron-engine</b><br/>[Container: Rust, real time]<br/>Decks, mixer, crossfades, loudness,<br/>encoders, outputs. Plays on when<br/>everything else is down"]:::container
         relay["<b>heron-relay</b><br/>[Container: Rust]<br/>Holds the engine's connections<br/>to stream servers across<br/>engine upgrades"]:::container
-        db[("<b>mariadb</b><br/>[Container: MariaDB 11]<br/>Tracks, analysis, jobs, users,<br/>settings, outputs, history,<br/>webhook deliveries, move journal")]:::container
+        db[("<b>mariadb</b><br/>[Container: MariaDB 12]<br/>Tracks, analysis, jobs, users,<br/>settings, outputs, history,<br/>webhook deliveries, move journal")]:::container
         state[("<b>engine-state</b><br/>[Volume: JSON]<br/>The engine's copy of its<br/>outputs and playout settings")]:::container
     end
 

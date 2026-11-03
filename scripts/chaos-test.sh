@@ -35,7 +35,7 @@ HERON_ICECAST_PORT=$(setting HERON_ICECAST_PORT 8010)
 export HERON_HTTP_PORT HERON_ICECAST_PORT
 icecast=http://localhost:$HERON_ICECAST_PORT
 music=$(setting HERON_MUSIC_DIR ./data/music)
-ffmpeg_image=linuxserver/ffmpeg:7.1.1
+ffmpeg_image=linuxserver/ffmpeg:9.0.2
 work=$(mktemp -d)
 # The silent file of step 5: a name of its own, removed only once created.
 silence=chaos-silence-$$.wav
