@@ -46,7 +46,7 @@ And a backup that was never read back is only a hope: a dump cut short, a file d
   - `heron-api backup restore --key-file`.
 - `heron-web`:
   - the encryption card on the Backups page: set, check, change or turn off the key;
-  - the key on restores;
+  - the key on restores, with the public key it must match wherever a key is typed;
   - the "not encrypted", "damaged" and "not tested" banners, and the check dialog;
   - *Test* on each backup, and the last test.
 - CI: `scripts/check-two-stations.sh` restores an encrypted backup.
@@ -60,6 +60,7 @@ And a backup that was never read back is only a hope: a dump cut short, a file d
 - [ ] A listed or uploaded backup restores with its key, from the web UI, the API and the command line. A wrong key, or none, is refused with a clear message and changes nothing. A tampered file is refused. A configuration file in clear is still restored.
 - [ ] Restoring a backup taken before the key changed, or before encryption was turned on, keeps the current key, keeps encryption on or off as it is, and keeps every admin's checks.
 - [ ] After a key change, the list shows the backups that need an earlier key, and new backups use the new one.
+- [ ] Wherever a key is typed (typed back, a check, a restore or a test of a listed backup), the public key it must match is shown; the generated key is shown with its public key.
 - [ ] Each admin is asked to check the key at the documented intervals. A correct key moves their next check further away; *Later* asks again the next day. A key change asks every other admin at once.
 - [ ] While encryption is off, admins see the "not encrypted" banner; other roles do not.
 - [ ] Only admins can set, check, change or turn off the key.

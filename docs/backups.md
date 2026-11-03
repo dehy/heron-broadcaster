@@ -131,7 +131,7 @@ Backups can be encrypted with [age](https://age-encryption.org/v1), a standard a
 
 On the **Backups** page, *Encrypt backups*:
 
-1. Heron generates a key and shows it once, with a copy button and `heron-backup-key.txt` to download (an age identity file, which `age -i` reads). It does not keep it, and no page or route shows it again.
+1. Heron generates a key and shows it once, with its public key, a copy button and `heron-backup-key.txt` to download (an age identity file, which `age -i` reads, with the public key in a comment). It does not keep it, and no page or route shows it again.
 2. Type the key back. Encryption is turned on only when it matches: this is the first check, and the proof that the key was saved.
 3. Heron encrypts the backups already in the folder: each file is written encrypted, synced, and only then is the file in clear deleted. Copies of them already elsewhere (on a share, downloaded) stay in clear: delete them.
 4. Heron takes a backup, so there is always one with the new key.
@@ -139,6 +139,8 @@ On the **Backups** page, *Encrypt backups*:
 An admin who already has an age key (made with `age-keygen`) can give its public key, `age1…`, instead of having Heron generate one. Step 1 is then skipped; the key is still typed back.
 
 The key travels to Heron only to be checked or to restore a backup, over the web UI's connection. It is used in memory, then dropped, and never logged.
+
+**Which key to type.** Wherever a key is asked for (typed back, checked, for a restore or a test), the page shows the public key it must match: the pending one, the current one, or the earlier one a backup was encrypted with. Save the public key with the key in the password manager: after a key change, it tells which saved key opens which backup. An uploaded encrypted file has no public key shown, as an age file does not name its key.
 
 ### Checking the key
 
