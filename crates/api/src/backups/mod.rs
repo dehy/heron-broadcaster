@@ -773,9 +773,12 @@ impl Backups {
             }
         }
         let text = check::checksums_text(&checksums);
-        write_atomically(&self.dir.join(checksums_file(&name)), |file| {
-            file.write_all(text.as_bytes())
+        let path = self.dir.join(checksums_file(&name));
+        tokio::task::spawn_blocking(move || {
+            write_atomically(&path, |file| file.write_all(text.as_bytes()))
         })
+        .await
+        .map_err(|error| ApiError::Internal(error.to_string()))?
         .map_err(|error| folder_error(&self.dir, &error))?;
         if whole {
             metrics::gauge!("heron_api_backup_last_success_timestamp_seconds")

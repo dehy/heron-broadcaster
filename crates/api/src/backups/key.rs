@@ -76,7 +76,7 @@ pub struct EarlierKey {
 }
 
 impl Encryption {
-    pub const SETTINGS_NAME: &'static str = "backup_encryption";
+    pub const SETTINGS_NAME: &str = "backup_encryption";
 
     pub async fn load(pool: &MySqlPool) -> ApiResult<Self> {
         crate::settings::load(pool, Self::SETTINGS_NAME).await
@@ -154,7 +154,7 @@ pub struct TestRecord {
 }
 
 impl Tests {
-    pub const SETTINGS_NAME: &'static str = "backup_tests";
+    pub const SETTINGS_NAME: &str = "backup_tests";
 
     pub async fn load(pool: &MySqlPool) -> ApiResult<Self> {
         crate::settings::load(pool, Self::SETTINGS_NAME).await

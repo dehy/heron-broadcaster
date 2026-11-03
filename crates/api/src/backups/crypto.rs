@@ -120,7 +120,8 @@ mod tests {
     #[test]
     fn a_generated_key_opens_what_its_public_key_encrypts() {
         let (secret, public) = generate();
-        assert!(secret.starts_with("AGE-SECRET-KEY-1"), "{secret}");
+        // Never printed, even by a failing test.
+        assert!(secret.starts_with("AGE-SECRET-KEY-1"));
         assert_eq!(secret.len(), 74);
         assert!(public.starts_with("age1"), "{public}");
         let identity = parse_identity(&secret).unwrap();

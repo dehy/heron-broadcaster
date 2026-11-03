@@ -279,6 +279,18 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 }
 
 /// Reads a password without echoing it on a terminal.
+/// The backup key from `--key-file`: a file, or `-` for the standard input.
+fn read_key_file(path: &std::path::Path) -> anyhow::Result<String> {
+    if path.as_os_str() == "-" {
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)
+            .context("cannot read the key from the standard input")?;
+        Ok(text)
+    } else {
+        std::fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))
+    }
+}
+
 fn read_password(prompt: &str) -> anyhow::Result<String> {
     let stdin = std::io::stdin();
     let terminal = stdin.is_terminal();
@@ -412,14 +424,7 @@ async fn manage_backups(
             let identity = match key_file {
                 None => None,
                 Some(path) => {
-                    let mut text = String::new();
-                    if path.as_os_str() == "-" {
-                        std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)
-                            .context("cannot read the key from the standard input")?;
-                    } else {
-                        text = std::fs::read_to_string(&path)
-                            .with_context(|| format!("cannot read {}", path.display()))?;
-                    }
+                    let text = tokio::task::spawn_blocking(move || read_key_file(&path)).await??;
                     Some(backups::parse_key(&text).map_err(fail)?)
                 }
             };
