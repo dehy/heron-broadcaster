@@ -18,7 +18,7 @@ library=${1:?usage: soak-test.sh <library dir> <seconds> [work dir]}
 duration=${2:?usage: soak-test.sh <library dir> <seconds> [work dir]}
 work=${3:-$(mktemp -d)}
 engine=${HERON_ENGINE_BIN:-target/release/heron-engine}
-image=libretime/icecast:2.4.4
+image=libretime/icecast:2.5.0
 
 library=$(cd "$library" && pwd)
 mkdir -p "$work/state"

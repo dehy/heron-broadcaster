@@ -176,7 +176,7 @@ And Icecast with its fallback mount, from the files next to the stack:
 
 ```yaml
   icecast:
-    image: libretime/icecast:2.4.4
+    image: libretime/icecast:2.5.0
     # The image edits its configuration in place: start from a copy of ours.
     entrypoint: ["sh", "-c", "cp /etc/heron/icecast.xml /etc/icecast.xml && exec docker-entrypoint \"$$@\"", "--"]
     command: ["icecast", "-c", "/etc/icecast.xml"]
@@ -190,7 +190,7 @@ And Icecast with its fallback mount, from the files next to the stack:
       - "8000:8000"
 
   icecast-fallback:
-    image: linuxserver/ffmpeg:7.1.1
+    image: linuxserver/ffmpeg:9.0.2
     entrypoint: ["/fallback-source.sh"]
     command: ["/fallback", "icecast://source:${HERON_ICECAST_SOURCE_PASSWORD}@icecast:8000/fallback"]
     volumes:
