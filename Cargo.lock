@@ -1685,6 +1685,7 @@ dependencies = [
  "heron-service",
  "hound",
  "lofty",
+ "notify",
  "serde",
  "sqlx",
  "tempfile",
