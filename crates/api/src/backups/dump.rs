@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The database dump: `mariadb-dump --single-transaction`, compressed by
-//! `gzip`, the station playing on.
+//! The database dump: `mariadb-dump --single-transaction`, the station
+//! playing on, compressed (gzip) and, with a key set, encrypted.
 
-use std::io::Write;
+use std::io::{BufWriter, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
+
+use age::x25519::Recipient;
+use flate2::Compression;
+use flate2::write::GzEncoder;
+
+use super::check::{Checksum, HashingWriter, copy_dump};
+use super::crypto;
 
 /// The parts of `HERON_DATABASE_URL` (`mysql://user:password@host:port/db`).
 #[derive(Debug, PartialEq, Eq)]
@@ -87,9 +94,26 @@ fn quoted(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// Dumps the database to `target`, written whole or not at all.
-pub async fn dump(database_url: &str, target: &Path) -> Result<(), String> {
+/// Dumps the database to `target`, compressed, encrypted for `recipient`
+/// when there is one, written whole or not at all: the checksum of what
+/// was written.
+pub async fn dump(
+    database_url: &str,
+    target: &Path,
+    recipient: Option<Recipient>,
+) -> Result<Checksum, String> {
     let database = parse(database_url)?;
+    let target = target.to_owned();
+    tokio::task::spawn_blocking(move || dump_blocking(&database, &target, recipient.as_ref()))
+        .await
+        .map_err(|error| format!("the dump stopped: {error}"))?
+}
+
+fn dump_blocking(
+    database: &Target,
+    target: &Path,
+    recipient: Option<&Recipient>,
+) -> Result<Checksum, String> {
     let dir = target.parent().ok_or("no backup folder")?;
     // The password goes in an option file, not on the command line. TCP,
     // as SQLx: for `localhost`, the client would take a socket instead,
@@ -122,8 +146,8 @@ pub async fn dump(database_url: &str, target: &Path) -> Result<(), String> {
         .mode(0o600)
         .open(&temporary)
         .map_err(|error| format!("cannot write {}: {error}", temporary.display()))?;
-    let result = async {
-        let mut dump = tokio::process::Command::new("mariadb-dump")
+    let result = (|| {
+        let mut child = Command::new("mariadb-dump")
             .arg(format!(
                 "--defaults-extra-file={}",
                 options.path().display()
@@ -140,51 +164,77 @@ pub async fn dump(database_url: &str, target: &Path) -> Result<(), String> {
             .arg(&database.database)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
             .spawn()
             .map_err(|error| format!("cannot run mariadb-dump: {error}"))?;
-        let stdout: Stdio = dump
-            .stdout
-            .take()
-            .ok_or("no output from mariadb-dump")?
-            .try_into()
-            .map_err(|error| format!("cannot read mariadb-dump: {error}"))?;
-        let gzip = tokio::process::Command::new("gzip")
-            .arg("-c")
-            .stdin(stdout)
-            .stdout(output)
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|error| format!("cannot run gzip: {error}"))?;
-        let (dumped, zipped) = tokio::join!(dump.wait_with_output(), gzip.wait_with_output());
-        let dumped = dumped.map_err(|error| format!("mariadb-dump: {error}"))?;
-        if !dumped.status.success() {
-            return Err(format!(
-                "mariadb-dump failed: {}",
-                String::from_utf8_lossy(&dumped.stderr).trim()
-            ));
+        // Read aside: a full pipe of errors would stop the dump.
+        let stderr = child.stderr.take();
+        let errors = std::thread::spawn(move || {
+            let mut text = String::new();
+            if let Some(mut stderr) = stderr {
+                let _ = stderr.read_to_string(&mut text);
+            }
+            text
+        });
+        let written = match child.stdout.take() {
+            Some(mut stdout) => write(&mut stdout, output, recipient),
+            None => Err(std::io::Error::other("no output from mariadb-dump")),
+        };
+        if written.is_err() {
+            let _ = child.kill();
         }
-        let zipped = zipped.map_err(|error| format!("gzip: {error}"))?;
-        if !zipped.status.success() {
-            return Err(format!(
-                "gzip failed: {}",
-                String::from_utf8_lossy(&zipped.stderr).trim()
-            ));
+        let status = child
+            .wait()
+            .map_err(|error| format!("mariadb-dump: {error}"))?;
+        let errors = errors.join().unwrap_or_default();
+        if !status.success() {
+            return Err(format!("mariadb-dump failed: {}", errors.trim()));
         }
-        let file = std::fs::File::open(&temporary).map_err(|error| error.to_string())?;
+        let (file, checksum, whole) =
+            written.map_err(|error| format!("cannot write the dump: {error}"))?;
+        if !whole {
+            return Err(
+                "the dump is cut short: mariadb-dump stopped before its end (no \"-- Dump completed\")"
+                    .to_owned(),
+            );
+        }
         file.sync_all().map_err(|error| error.to_string())?;
         std::fs::rename(&temporary, target).map_err(|error| error.to_string())?;
         std::fs::File::open(dir)
             .and_then(|dir| dir.sync_all())
             .map_err(|error| error.to_string())?;
-        Ok(())
-    }
-    .await;
+        Ok(checksum)
+    })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
     }
     result
+}
+
+/// Compresses the dump read from `input` into `output`, encrypted for
+/// `recipient`: the file, the checksum of what was written, and whether
+/// the dump is whole.
+fn write(
+    input: &mut impl Read,
+    output: std::fs::File,
+    recipient: Option<&Recipient>,
+) -> std::io::Result<(std::fs::File, Checksum, bool)> {
+    let hashing = HashingWriter::new(BufWriter::new(output));
+    let (hashing, whole) = match recipient {
+        Some(recipient) => {
+            let encrypted = crypto::encrypt_to(recipient, hashing)?;
+            let mut compressed = GzEncoder::new(encrypted, Compression::default());
+            let whole = copy_dump(input, &mut compressed)?;
+            (compressed.finish()?.finish()?, whole)
+        }
+        None => {
+            let mut compressed = GzEncoder::new(hashing, Compression::default());
+            let whole = copy_dump(input, &mut compressed)?;
+            (compressed.finish()?, whole)
+        }
+    };
+    let (buffered, checksum) = hashing.finish();
+    let file = buffered.into_inner().map_err(|error| error.into_error())?;
+    Ok((file, checksum, whole))
 }
 
 #[cfg(test)]
