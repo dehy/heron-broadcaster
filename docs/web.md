@@ -136,11 +136,13 @@ The breadcrumb is built from the navigation's own list of pages, so a page added
 cd web
 npm ci
 HERON_API_URL=http://localhost:8000 npm run dev   # against a running station's heron-web
-npm test                                          # unit tests (Vitest), catalogs included
+npm test                                          # unit and component tests (Vitest), catalogs included
 npm run typecheck && npm run build
 ```
 
 Open a page with `?lang=pseudo` to check translations ([Pseudo-locale](#pseudo-locale)). `HERON_API_URL` defaults to `http://localhost:8080`, a `heron-api` run with `cargo run -p heron-api`. The API client is typed from the OpenAPI document ([API – Web client](api.md#web-client)). The app uses TanStack Query for requests and dnd-kit for dragging; routing is a small module on the History API (`src/lib/router.tsx`), since nginx answers every path with `index.html`.
+
+Logic lives in `src/lib`, tested on its own. Components are tested rendered in jsdom with Testing Library: a test file starts with `// @vitest-environment jsdom`, and `src/test/render.tsx` renders with the app's providers, signed in, against API answers the test gives.
 
 ## Limitations
 

@@ -24,6 +24,7 @@
 ## Tests
 
 - Unit tests per crate.
+- Web: unit tests for `src/lib`, component tests in jsdom ([Web – Development](web.md#development)).
 - Generated audio fixtures for analysis and DSP: sine waves, silence, blips, quiet outros.
 - Integration tests against MariaDB in Docker.
 - Chaos tests for reliability.
