@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// The backup key: typed for a check, a restore or a test (docs/backups.md#encryption).
+// The backup key: typed for a check, a restore or a test, and the backup
+// banners of every page (docs/backups.md#encryption).
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Link } from "../lib/router";
 import { api, done, errorMessage, unwrap } from "../api";
 import { rich, t } from "../i18n";
-import { looksLikeKey } from "../lib/backups";
+import { type BackupWarning, backupWarnings, looksLikeKey } from "../lib/backups";
 import { dateTime } from "../lib/format";
 import { Banner, Field, Modal, useToast } from "./ui";
 
@@ -166,5 +167,37 @@ export function KeyCheckDialog({ reminder, onClose }: Readonly<{ reminder: boole
         )}
       </form>
     </Modal>
+  );
+}
+
+/**
+ * For admins: backups not encrypted, damaged or not tested lately, and the
+ * reminder to check the backup key when it is due.
+ */
+export function BackupWarnings() {
+  const state = useQuery({
+    queryKey: ["backups", "state"],
+    queryFn: () => unwrap(api.GET("/api/v1/backups/state")),
+    refetchInterval: 60_000,
+  });
+  const [keyCheckClosed, setKeyCheckClosed] = useState(false);
+  if (!state.data) {
+    return null;
+  }
+  const link = <Link to="/backups">{t("nav.backups")}</Link>;
+  const messages: Record<BackupWarning, ReactNode> = {
+    notEncrypted: rich("app.backupsNotEncrypted", { link }),
+    damaged: rich("app.backupsDamaged", { count: state.data.damaged, link }),
+    testDue: rich("app.backupsTestDue", { link }),
+  };
+  return (
+    <>
+      {backupWarnings(state.data).map((warning) => (
+        <Banner key={warning} kind="warn">
+          {messages[warning]}
+        </Banner>
+      ))}
+      {state.data.check_due && !keyCheckClosed && <KeyCheckDialog reminder onClose={() => setKeyCheckClosed(true)} />}
+    </>
   );
 }

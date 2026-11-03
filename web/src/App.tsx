@@ -3,10 +3,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { api, can, done, errorMessage, fetchStatus, unwrap } from "./api";
-import { KeyCheckDialog } from "./components/BackupKey";
+import { BackupWarnings } from "./components/BackupKey";
 import { Banner, Icon, Loading, Logo } from "./components/ui";
 import { type PlainKey, rich, setLanguage, t, toSetting, useLanguage } from "./i18n";
-import { type BackupWarning, backupWarnings } from "./lib/backups";
 import { setTimeZone } from "./lib/format";
 import { PAGES, isCurrent, placeOf } from "./lib/pages";
 import { startLive, stopLive, useLive } from "./lib/live";
@@ -346,38 +345,6 @@ function OnAirBadge() {
       <span className="dot" style={{ background: "#fff" }} /> {t("app.onAirBadge")}
     </span>
   ) : null;
-}
-
-/**
- * For admins: backups not encrypted, damaged or not tested lately, and the
- * reminder to check the backup key when it is due.
- */
-function BackupWarnings() {
-  const state = useQuery({
-    queryKey: ["backups", "state"],
-    queryFn: () => unwrap(api.GET("/api/v1/backups/state")),
-    refetchInterval: 60_000,
-  });
-  const [keyCheckClosed, setKeyCheckClosed] = useState(false);
-  if (!state.data) {
-    return null;
-  }
-  const link = <Link to="/backups">{t("nav.backups")}</Link>;
-  const messages: Record<BackupWarning, ReactNode> = {
-    notEncrypted: rich("app.backupsNotEncrypted", { link }),
-    damaged: rich("app.backupsDamaged", { count: state.data.damaged, link }),
-    testDue: rich("app.backupsTestDue", { link }),
-  };
-  return (
-    <>
-      {backupWarnings(state.data).map((warning) => (
-        <Banner key={warning} kind="warn">
-          {messages[warning]}
-        </Banner>
-      ))}
-      {state.data.check_due && !keyCheckClosed && <KeyCheckDialog reminder onClose={() => setKeyCheckClosed(true)} />}
-    </>
-  );
 }
 
 /** Problems worth knowing on every page. */
