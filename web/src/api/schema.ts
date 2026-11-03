@@ -298,6 +298,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backups/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The backup key: its public key, when and by whom it was set, the
+         *     earlier ones. Never the secret key. Admins only.
+         */
+        get: operations["get_key"];
+        put?: never;
+        /**
+         * A new key, waiting to be typed back (`/backups/key/confirm`): generated
+         *     and returned this once, or the admin's own public key. Admins only.
+         */
+        post: operations["new_key"];
+        /**
+         * Drops the key waiting to be typed back; with none, turns encryption
+         *     off: new backups are written in clear. Admins only.
+         */
+        delete: operations["drop_key"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backups/key/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Checks the key an admin types back: their next check further away, and
+         *     the newest backup encrypted with it tested in the background. A wrong
+         *     key changes nothing. Admins only.
+         */
+        post: operations["check_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backups/key/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Turns encryption on with the key waiting, once typed back: the backups
+         *     in clear are encrypted, a backup is taken and tested. Admins only.
+         */
+        post: operations["confirm_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backups/key/later": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Asks this admin for the key again the next day. Admins only. */
+        post: operations["later"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backups/restore": {
         parameters: {
             query?: never;
@@ -309,9 +395,50 @@ export interface paths {
         put?: never;
         /**
          * Restores an uploaded configuration file (the request's body), kept as an
-         *     `uploaded` backup. Admins only.
+         *     `uploaded` backup. An encrypted one needs its key, in the
+         *     `X-Heron-Backup-Key` header. Admins only.
          */
         post: operations["upload_and_restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backups/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What the banners and the key check need, for the admin asking. Admins
+         *     only.
+         */
+        get: operations["get_state"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backups/tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The last backup test, the last one that passed, and the one under way.
+         *     Admins only.
+         */
+        get: operations["get_tests"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -342,7 +469,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Downloads a backup's configuration file. Admins only: it holds secrets. */
+        /**
+         * Downloads a backup's configuration file, encrypted when it is. Admins
+         *     only: it holds secrets.
+         */
         get: operations["download_config"];
         put?: never;
         post?: never;
@@ -359,7 +489,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Downloads a backup's database dump. Admins only: it holds secrets. */
+        /**
+         * Downloads a backup's database dump, encrypted when it is. Admins only:
+         *     it holds secrets.
+         */
         get: operations["download_database"];
         put?: never;
         post?: never;
@@ -383,6 +516,27 @@ export interface paths {
          *     configuration. Everyone signs in again. Admins only.
          */
         post: operations["restore_backup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backups/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tests a backup in the background: read back to its end with its key
+         *     when it is encrypted, nothing restored. Its result is in
+         *     `/backups/tests`. Admins only.
+         */
+        post: operations["test_backup"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4144,6 +4298,11 @@ export interface components {
             /** @description `names` or `musicbrainz`. */
             source: string;
         };
+        /**
+         * @description Which key opens an encrypted backup.
+         * @enum {string}
+         */
+        BackupKey: "current" | "earlier" | "unknown";
         /** @description The `backups` settings. */
         BackupSettings: {
             /**
@@ -4168,6 +4327,16 @@ export interface components {
              */
             time: string;
         };
+        /** @description What the banners say about backups, for the admin asking. */
+        BackupState: {
+            /** @description This admin's key check is due. */
+            check_due: boolean;
+            /** @description Backups that fail their checksums. */
+            damaged: number;
+            encryption: components["schemas"]["KeyState"];
+            /** @description The last test failed, or none passed for 30 days. */
+            test_due: boolean;
+        };
         /** @description A backup in the folder. */
         BackupView: {
             /**
@@ -4177,6 +4346,11 @@ export interface components {
             config_size: number;
             /** Format: int64 */
             created_at_unix_ms: number;
+            /**
+             * @description What fails its checksums, at the last check: a file missing, cut
+             *     short or changed.
+             */
+            damaged?: string | null;
             /** @description Why the dump failed. */
             database_error?: string | null;
             /**
@@ -4184,6 +4358,9 @@ export interface components {
              * @description Bytes; missing without a dump.
              */
             database_size?: number | null;
+            /** @description Its files are encrypted. */
+            encrypted: boolean;
+            key?: components["schemas"]["BackupKey"] | null;
             kind: components["schemas"]["Kind"];
             /** @description Its time and kind: `2026-11-03T03-30-00Z-daily`. */
             name: string;
@@ -4461,6 +4638,15 @@ export interface components {
             /** Format: float */
             rms_right: number;
         };
+        Checked: {
+            /**
+             * Format: int64
+             * @description When this admin's next check is due.
+             */
+            next_check_unix_ms: number;
+            /** @description The backup being tested with the key. */
+            testing?: string | null;
+        };
         ChoiceRequest: {
             /** @enum {string} */
             kind: "release";
@@ -4531,6 +4717,18 @@ export interface components {
              */
             scheduled_hours: number;
             slots: components["schemas"]["ClockSlot"][];
+        };
+        Confirmed: {
+            /** @description The backup taken with the new key. */
+            backup?: string | null;
+            /** @description Backups that were in clear, now encrypted. */
+            encrypted: string[];
+            key: components["schemas"]["KeyView"];
+            /**
+             * @description Backups left in clear: their files fail their checksums, or could
+             *     not be written.
+             */
+            left_in_clear: string[];
         };
         CreatedToken: {
             /** Format: int64 */
@@ -4771,6 +4969,14 @@ export interface components {
             enabled: boolean;
             /** @default false */
             link: boolean;
+        };
+        EarlierKey: {
+            recipient: string;
+            set_by: string;
+            /** Format: int64 */
+            since_unix_ms: number;
+            /** Format: int64 */
+            until_unix_ms: number;
         };
         /** @description How the engine will play the track: analysis and overrides combined. */
         EffectivePlayout: {
@@ -5522,6 +5728,28 @@ export interface components {
              */
             intro_ms?: number | null;
         };
+        KeyRecord: {
+            /** @description The public key, `age1…`. */
+            recipient: string;
+            /** @description Who set it. */
+            set_by: string;
+            /** Format: int64 */
+            since_unix_ms: number;
+        };
+        KeyRequest: {
+            /** @description The secret key, `AGE-SECRET-KEY-1…`, or the contents of its file. */
+            key: string;
+        };
+        /** @enum {string} */
+        KeyState: "off" | "pending" | "on";
+        KeyView: {
+            current?: components["schemas"]["KeyRecord"] | null;
+            /** @description The public key waiting to be typed back. */
+            pending_recipient?: string | null;
+            /** @description The keys used before, oldest first. */
+            previous: components["schemas"]["EarlierKey"][];
+            state: components["schemas"]["KeyState"];
+        };
         /**
          * @description Why a backup was taken.
          * @enum {string}
@@ -6029,6 +6257,20 @@ export interface components {
         NewGroup: {
             /** @description What the files are, for people (`Album 2024`, the dropped folder). */
             name: string;
+        };
+        NewKey: {
+            /**
+             * @description The secret key, `AGE-SECRET-KEY-1…`: shown this once, never stored.
+             *     Missing for the admin's own key.
+             */
+            key?: string | null;
+            /** @description `heron-backup-key.txt`, an age identity file, with the secret key. */
+            key_file?: string | null;
+            recipient: string;
+        };
+        NewKeyRequest: {
+            /** @description The admin's own public key, `age1…`; left out: Heron generates one. */
+            recipient?: string | null;
         };
         NewSchedule: {
             /**
@@ -7641,6 +7883,27 @@ export interface components {
         };
         /** @enum {string} */
         TaskStatus: "pending" | "running" | "done" | "failed";
+        /** @description A backup read back to its end, nothing restored. */
+        TestRecord: {
+            /** Format: int64 */
+            at_unix_ms: number;
+            /** @description Who gave the key; none: Heron, for a backup in clear. */
+            by?: string | null;
+            /** @description What failed, and in which file. */
+            error?: string | null;
+            name: string;
+            ok: boolean;
+        };
+        Testing: {
+            /** @description The backup being tested. */
+            testing: string;
+        };
+        TestsView: {
+            last?: components["schemas"]["TestRecord"] | null;
+            last_ok?: components["schemas"]["TestRecord"] | null;
+            /** @description The backup being tested. */
+            testing?: string | null;
+        };
         /**
          * @description The web UI's theme.
          * @enum {string}
@@ -8282,6 +8545,11 @@ export interface components {
              */
             track_min: number;
         };
+        /** @description The key of an encrypted backup. */
+        WithKey: {
+            /** @description The secret key, `AGE-SECRET-KEY-1…`, or the contents of its file. */
+            key?: string | null;
+        };
         /** Format: int64 */
         u64: number;
     };
@@ -8919,17 +9187,192 @@ export interface operations {
             };
         };
     };
-    upload_and_restore: {
+    get_key: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** @description A configuration file */
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    new_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
         requestBody: {
             content: {
-                "application/json": string;
+                "application/json": components["schemas"]["NewKeyRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewKey"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    drop_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyView"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    check_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeyRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Checked"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    confirm_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeyRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Confirmed"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    later: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    upload_and_restore: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The key of an encrypted file */
+                "X-Heron-Backup-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** @description A configuration file, `.json` or `.json.age` */
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
             };
         };
         responses: {
@@ -8939,6 +9382,60 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RestoreReport"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupState"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_tests: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestsView"];
                 };
             };
             "4XX": {
@@ -9045,7 +9542,12 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        /** @description The key of an encrypted backup */
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["WithKey"] | null;
+            };
+        };
         responses: {
             200: {
                 headers: {
@@ -9053,6 +9555,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RestoreReport"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    test_backup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        /** @description The key of an encrypted backup */
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["WithKey"] | null;
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Testing"];
                 };
             };
             "4XX": {

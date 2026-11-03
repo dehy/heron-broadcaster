@@ -3,8 +3,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { api, can, done, errorMessage, fetchStatus, unwrap } from "./api";
+import { KeyCheckDialog } from "./components/BackupKey";
 import { Banner, Icon, Loading, Logo } from "./components/ui";
 import { type PlainKey, rich, setLanguage, t, toSetting, useLanguage } from "./i18n";
+import { type BackupWarning, backupWarnings } from "./lib/backups";
 import { setTimeZone } from "./lib/format";
 import { PAGES, isCurrent, placeOf } from "./lib/pages";
 import { startLive, stopLive, useLive } from "./lib/live";
@@ -358,6 +360,13 @@ function Warnings() {
     queryFn: () => unwrap(api.GET("/api/v1/stations/{station_id}/engine", { params: { path: here() } })),
     refetchInterval: 15_000,
   });
+  const backupState = useQuery({
+    queryKey: ["backups", "state"],
+    queryFn: () => unwrap(api.GET("/api/v1/backups/state")),
+    enabled: isAdmin,
+    refetchInterval: 60_000,
+  });
+  const [keyCheckClosed, setKeyCheckClosed] = useState(false);
   const [disconnectedSince, setDisconnectedSince] = useState<number | null>(null);
   useEffect(() => {
     setDisconnectedSince(connected ? null : Date.now());
@@ -405,6 +414,17 @@ function Warnings() {
         : rich("app.backupFolderError", { error, link }),
     );
   }
+  if (isAdmin && backupState.data) {
+    const link = <Link to="/backups">{t("nav.backups")}</Link>;
+    const messages: Record<BackupWarning, ReactNode> = {
+      notEncrypted: rich("app.backupsNotEncrypted", { link }),
+      damaged: rich("app.backupsDamaged", { count: backupState.data.damaged, link }),
+      testDue: rich("app.backupsTestDue", { link }),
+    };
+    for (const warning of backupWarnings(backupState.data)) {
+      warnings.push(messages[warning]);
+    }
+  }
   if (status.data && differentBuilds(webBuild(), status.data)) {
     warnings.push(
       t("app.versionMismatch", { web: buildLabel(webBuild()), api: buildLabel(status.data) }),
@@ -423,6 +443,9 @@ function Warnings() {
           {warning}
         </Banner>
       ))}
+      {isAdmin && backupState.data?.check_due && !keyCheckClosed && (
+        <KeyCheckDialog reminder onClose={() => setKeyCheckClosed(true)} />
+      )}
     </>
   );
 }

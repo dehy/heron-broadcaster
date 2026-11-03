@@ -65,6 +65,12 @@ export type WebhookEvent = Schemas["WebhookEvent"];
 export type DeliveryView = Schemas["DeliveryView"];
 export type BackupView = Schemas["BackupView"];
 export type BackupSettings = Schemas["BackupSettings"];
+export type BackupKeyView = Schemas["KeyView"];
+export type BackupState = Schemas["BackupState"];
+export type BackupTests = Schemas["TestsView"];
+export type BackupTest = Schemas["TestRecord"];
+export type NewBackupKey = Schemas["NewKey"];
+export type KeyConfirmed = Schemas["Confirmed"];
 export type RestoreReport = Schemas["RestoreReport"];
 
 export type TrackFilter = NonNullable<
