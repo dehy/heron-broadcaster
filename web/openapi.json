@@ -13121,6 +13121,13 @@
           "name": {
             "type": "string",
             "description": "Its time and kind: `2026-11-03T03-30-00Z-daily`."
+          },
+          "recipient": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The public key of that key, `age1…`, when it is known: the key typed\nfor it must match."
           }
         }
       },

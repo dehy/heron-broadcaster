@@ -18,7 +18,7 @@ import {
   errorMessage,
   unwrap,
 } from "../api";
-import { BACKUP_KEYS, KeyCheckDialog, KeyInput } from "../components/BackupKey";
+import { BACKUP_KEYS, KeyCheckDialog, KeyInput, PublicKey } from "../components/BackupKey";
 import {
   Banner,
   Card,
@@ -326,7 +326,17 @@ function RestoreDialog({
                 ? t("backups.restoreEarlierKey")
                 : t("backups.restoreKey")}
             </p>
-            <KeyInput value={key} onChange={setKey} autoFocus />
+            <KeyInput
+              value={key}
+              onChange={setKey}
+              autoFocus
+              recipient={"backup" in restoring ? restoring.backup.recipient : null}
+            />
+            {!("backup" in restoring) && (
+              <p className="muted small" style={{ margin: 0 }}>
+                {t("backupKey.noPublicKey")}
+              </p>
+            )}
           </>
         )}
         {error && <Banner kind="bad">{error}</Banner>}
@@ -376,7 +386,7 @@ function TestDialog({ backup, onClose }: Readonly<{ backup: BackupView; onClose:
             {t("backups.restoreEarlierKey")}
           </p>
         )}
-        <KeyInput value={key} onChange={setKey} autoFocus />
+        <KeyInput value={key} onChange={setKey} autoFocus recipient={backup.recipient} />
       </div>
     </Modal>
   );
@@ -474,6 +484,11 @@ function SetupDialog({ start, onClose }: Readonly<{ start: "new" | "confirm"; on
   const [confirmed, setConfirmed] = useState<KeyConfirmed | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The key waiting to be typed back, when the dialog opens on it.
+  const pending = useQuery({
+    queryKey: ["backups", "key"],
+    queryFn: () => unwrap(api.GET("/api/v1/backups/key")),
+  });
   const refresh = async () => {
     for (const queryKey of BACKUP_KEYS) {
       await client.invalidateQueries({ queryKey });
@@ -566,6 +581,12 @@ function SetupDialog({ start, onClose }: Readonly<{ start: "new" | "confirm"; on
           aria-label={t("backupKey.key")}
           onFocus={(event) => event.target.select()}
         />
+        <dl className="facts">
+          <dt>{t("backups.publicKey")}</dt>
+          <dd>
+            <PublicKey recipient={created.recipient} />
+          </dd>
+        </dl>
         <div className="row">
           <button type="button" className="btn small" onClick={() => void copy(secret)}>
             {t("backups.copyKey")}
@@ -577,7 +598,7 @@ function SetupDialog({ start, onClose }: Readonly<{ start: "new" | "confirm"; on
           )}
         </div>
         <p className="muted small" style={{ margin: 0 }}>
-          {t("backups.saveKeyHint")}
+          {t("backups.saveKeyHint")} {t("backups.savePublicKey")}
         </p>
       </>
     );
@@ -590,7 +611,12 @@ function SetupDialog({ start, onClose }: Readonly<{ start: "new" | "confirm"; on
     body = (
       <>
         <p style={{ margin: 0 }}>{t("backups.typeBackHint")}</p>
-        <KeyInput value={typed} onChange={setTyped} autoFocus />
+        <KeyInput
+          value={typed}
+          onChange={setTyped}
+          autoFocus
+          recipient={created?.recipient ?? pending.data?.pending_recipient}
+        />
       </>
     );
     footer = (

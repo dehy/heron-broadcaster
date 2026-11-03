@@ -4364,6 +4364,11 @@ export interface components {
             kind: components["schemas"]["Kind"];
             /** @description Its time and kind: `2026-11-03T03-30-00Z-daily`. */
             name: string;
+            /**
+             * @description The public key of that key, `age1…`, when it is known: the key typed
+             *     for it must match.
+             */
+            recipient?: string | null;
         };
         /** @enum {string} */
         BandMode: "compressor" | "expander" | "limiter";

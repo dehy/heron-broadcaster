@@ -11,25 +11,51 @@ import { looksLikeKey } from "../lib/backups";
 import { dateTime } from "../lib/format";
 import { Banner, Field, Modal, useToast } from "./ui";
 
-/** A field for the secret key: hidden as a password, never kept. */
+/** A public key in full, `age1…`: what tells one saved key from another. */
+export function PublicKey({ recipient }: Readonly<{ recipient: string }>) {
+  return (
+    <code className="mono" style={{ overflowWrap: "anywhere" }}>
+      {recipient}
+    </code>
+  );
+}
+
+/**
+ * A field for the secret key: hidden as a password, never kept. With
+ * `recipient`, the public key it must match, so that the right one is
+ * picked from the password manager.
+ */
 export function KeyInput({
   value,
   onChange,
   autoFocus,
-}: Readonly<{ value: string; onChange: (value: string) => void; autoFocus?: boolean }>) {
+  recipient,
+}: Readonly<{
+  value: string;
+  onChange: (value: string) => void;
+  autoFocus?: boolean;
+  recipient?: string | null | undefined;
+}>) {
   return (
-    <Field label={t("backupKey.key")} hint={t("backupKey.keyHint")}>
-      <input
-        className="input mono"
-        type="password"
-        autoComplete="off"
-        spellCheck={false}
-        autoFocus={autoFocus}
-        placeholder="AGE-SECRET-KEY-1…"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </Field>
+    <>
+      <Field label={t("backupKey.key")} hint={t("backupKey.keyHint")}>
+        <input
+          className="input mono"
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          autoFocus={autoFocus}
+          placeholder="AGE-SECRET-KEY-1…"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </Field>
+      {recipient && (
+        <p className="muted small" style={{ margin: 0 }}>
+          {rich("backupKey.matches", { key: <PublicKey recipient={recipient} /> })}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -51,7 +77,6 @@ export function KeyCheckDialog({ reminder, onClose }: Readonly<{ reminder: boole
   const current = useQuery({
     queryKey: ["backups", "key"],
     queryFn: () => unwrap(api.GET("/api/v1/backups/key")),
-    enabled: missing,
   });
   const refresh = async () => {
     for (const queryKey of BACKUP_KEYS) {
@@ -129,7 +154,7 @@ export function KeyCheckDialog({ reminder, onClose }: Readonly<{ reminder: boole
         }}
       >
         <p style={{ margin: 0 }}>{reminder ? t("backupKey.reminder") : t("backupKey.checkHint")}</p>
-        <KeyInput value={key} onChange={setKey} autoFocus />
+        <KeyInput value={key} onChange={setKey} autoFocus recipient={owner?.recipient} />
         {error && <Banner kind="bad">{error}</Banner>}
         {missing && (
           <Banner kind="warn">
