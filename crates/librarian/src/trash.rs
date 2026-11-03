@@ -238,7 +238,7 @@ pub(crate) async fn restore(
     undo_batch: u64,
 ) -> Result<BatchReport, Error> {
     let rows = sqlx::query(
-        "SELECT m.id, m.track_id, m.from_path, m.to_path, t.path AS current_path,
+        "SELECT m.id, m.track_id, m.from_path, m.to_path, t.path AS track_path,
                 t.deleted_at IS NOT NULL AS deleted
          FROM library_moves m LEFT JOIN tracks t ON t.id = m.track_id
          WHERE m.batch_id = ? AND m.status = 'done'
@@ -258,7 +258,7 @@ pub(crate) async fn restore(
             let track_id: Option<u64> = row.try_get("track_id")?;
             let original = LibraryPath::from_stored(row.try_get("from_path")?);
             let in_bin = LibraryPath::from_stored(row.try_get("to_path")?);
-            let current: Option<String> = row.try_get("current_path")?;
+            let current: Option<String> = row.try_get("track_path")?;
             let deleted: Option<bool> = row.try_get("deleted")?;
             let outcome = match (track_id, current) {
                 // Restored already, by a restore interrupted before recording it.
