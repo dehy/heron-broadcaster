@@ -20,7 +20,7 @@ export function decodePeaks(base64: string): Uint8Array {
   const text = atob(base64);
   const peaks = new Uint8Array(text.length);
   for (let i = 0; i < text.length; i += 1) {
-    peaks[i] = text.charCodeAt(i);
+    peaks[i] = text.codePointAt(i) ?? 0;
   }
   return peaks;
 }

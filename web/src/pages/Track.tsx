@@ -311,20 +311,18 @@ function TrackView({ track, settings }: Readonly<{ track: TrackDetail; settings:
     },
   ];
   // Always shown: on the cue-out when the next track follows back to back.
-  {
-    markers.push({
-      id: "mix",
-      label: mixPoint !== null ? t("transition.nextStarts") : t("transition.nextStartsBackToBack"),
-      ms: mixPoint ?? cueOut,
-      color: "var(--accent)",
-      end: true,
-      row: 1,
-      // Dragging it sets a fixed crossfade for this track.
-      ...(canEdit && {
-        onDrag: (ms: number) => setDraft((d) => withNextStart(d, ms, cueOut)),
-      }),
-    });
-  }
+  markers.push({
+    id: "mix",
+    label: mixPoint !== null ? t("transition.nextStarts") : t("transition.nextStartsBackToBack"),
+    ms: mixPoint ?? cueOut,
+    color: "var(--accent)",
+    end: true,
+    row: 1,
+    // Dragging it sets a fixed crossfade for this track.
+    ...(canEdit && {
+      onDrag: (ms: number) => setDraft((d) => withNextStart(d, ms, cueOut)),
+    }),
+  });
   const regions: Region[] = [];
   if (mixPoint !== null && fadeOut?.enabled && !shortTrack) {
     regions.push({

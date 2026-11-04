@@ -167,7 +167,7 @@ export function Outputs() {
                       </td>
                       <td className="hide-narrow mono small">
                         {typeof config.host === "string"
-                          ? `${config.host}:${String(config.port ?? 8000)}${String(config.mount ?? "")}`
+                          ? `${config.host}:${typeof config.port === "number" || typeof config.port === "string" ? config.port : 8000}${text(config.mount)}`
                           : "–"}
                       </td>
                       <td className="hide-narrow">{profileName(output.encoder_profile_id)}</td>

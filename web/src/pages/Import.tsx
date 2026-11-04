@@ -48,7 +48,7 @@ const VALUE_KEY: Record<Field, keyof Values> = {
   next_soft: "next_soft_ms",
   next_hard: "next_hard_ms",
 };
-const TEXT_FIELDS: Field[] = ["title", "artist", "year"];
+const TEXT_FIELDS = new Set<Field>(["title", "artist", "year"]);
 
 function fieldLabel(field: Field): string {
   return t(`import.field.${field}`);
@@ -60,7 +60,7 @@ function show(field: Field, values: Values): string {
   if (value === null || value === undefined) {
     return "–";
   }
-  return TEXT_FIELDS.includes(field) ? String(value) : duration(Number(value), true);
+  return TEXT_FIELDS.has(field) ? String(value) : duration(Number(value), true);
 }
 
 /** Reads a JSON Lines export (or a JSON array). */
@@ -95,7 +95,7 @@ function resolved(row: Row, resolution: Resolution | undefined): Values {
       const edited = resolution.values[field]?.trim();
       if (!edited) {
         delete values[key];
-      } else if (TEXT_FIELDS.includes(field)) {
+      } else if (TEXT_FIELDS.has(field)) {
         (values as Record<string, unknown>)[key] = edited;
       } else {
         (values as Record<string, unknown>)[key] = Math.round(Number(edited.replace(",", ".")) * 1000);
@@ -654,7 +654,7 @@ function ImportRowView({
                           values: Object.fromEntries(
                             row.conflicts.map((field) => [
                               field,
-                              TEXT_FIELDS.includes(field)
+                              TEXT_FIELDS.has(field)
                                 ? String(row.values[VALUE_KEY[field]] ?? "")
                                 : String(Number(row.values[VALUE_KEY[field]] ?? 0) / 1000),
                             ]),
@@ -684,9 +684,9 @@ function ImportRowView({
                     className="input"
                     style={{ maxWidth: "16rem" }}
                     value={edit[field] ?? ""}
-                    inputMode={TEXT_FIELDS.includes(field) ? undefined : "decimal"}
+                    inputMode={TEXT_FIELDS.has(field) ? undefined : "decimal"}
                     aria-label={t("import.editField", { field: fieldLabel(field) })}
-                    placeholder={TEXT_FIELDS.includes(field) ? undefined : t("import.seconds")}
+                    placeholder={TEXT_FIELDS.has(field) ? undefined : t("import.seconds")}
                     onChange={(event) =>
                       onResolve({ kind: "edit", values: { ...edit, [field]: event.target.value } })
                     }

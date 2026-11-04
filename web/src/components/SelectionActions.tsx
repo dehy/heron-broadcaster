@@ -560,7 +560,7 @@ export function TagsDialog({
   const edited = Object.values(changes).filter((change) => change && change.kind !== "keep");
   const invalid = TAG_FIELDS.some(({ field, number }) => {
     const change = changes[field];
-    return change?.kind === "set" && (!change.value.trim() || (number && !(Number(change.value) >= 1)));
+    return change?.kind === "set" && (!change.value.trim() || (number && (Number.isNaN(Number(change.value)) || Number(change.value) < 1)));
   });
   const report = status.data?.report;
   return (

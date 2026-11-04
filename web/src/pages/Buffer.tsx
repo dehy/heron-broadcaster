@@ -908,7 +908,7 @@ function TagsDialog({
   const edited = Object.values(changes).some((change) => change && change.kind !== "keep");
   const invalid = EDITABLE.some(({ field, number }) => {
     const change = changes[field];
-    return change?.kind === "set" && (!change.value.trim() || (number && !(Number(change.value) >= 1)));
+    return change?.kind === "set" && (!change.value.trim() || (number && (Number.isNaN(Number(change.value)) || Number(change.value) < 1)));
   });
   return (
     <Modal

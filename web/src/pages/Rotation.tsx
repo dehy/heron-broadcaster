@@ -167,7 +167,7 @@ function PicksCard() {
     refetchInterval: cursor === undefined ? 15_000 : false,
   });
   const rows: RotationPick[] = picks.data ?? [];
-  const last = rows[rows.length - 1];
+  const last = rows.at(-1);
   return (
     <Card title={t("rotationPage.picks")} flush>
       {picks.isPending && <Loading />}

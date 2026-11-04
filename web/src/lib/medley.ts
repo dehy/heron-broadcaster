@@ -215,7 +215,7 @@ export function layout(parts: readonly LayoutPart[], recipe: MixRecipe): Layout 
   const gaps: number[][] = [[]];
   parts.forEach((part, index) => {
     if (isOver(part)) {
-      gaps[gaps.length - 1]?.push(index);
+      gaps.at(-1)?.push(index);
     } else {
       sequence.push(index);
       gaps.push([]);
@@ -357,7 +357,7 @@ export function duckWindows(medley: Layout): [number, number][] {
     .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   const windows: [number, number][] = [];
   for (const [start, stop] of liners) {
-    const last = windows[windows.length - 1];
+    const last = windows.at(-1);
     if (last && start < last[1] + reach) {
       last[1] = Math.max(last[1], stop);
     } else {
