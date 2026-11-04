@@ -91,6 +91,7 @@ Each station has a name, a code (1 to 32 lowercase letters and digits, unique), 
 | `levels` | Ten times a second, unless the URL has `?levels=false` | Peak and RMS (dBFS) of the master bus, after the AGC chain, and of each deck; while the chain is on, `agc`: the peak and RMS of its `input` (the master bus before it), the AGC's gain, and the gain reduction (dB) of each band and of the final stage |
 | `agc` | Whenever the AGC settings change | `settings`: the same as `GET /settings/agc` |
 | `eq` | Whenever the deck EQ settings change | `settings`: the same as `GET /settings/eq` |
+| `system` | On connection, then every 3 seconds; **operators and admins only**, viewers never receive it | `cpu_percent` and `mem_percent` (0 to 100), `load_avg` (1, 5 and 15 minutes) and `cores`, of the machine the API runs on. Under Docker, the load average is the host's while the CPU and memory may be the container's ([Monitoring](monitoring.md#what-else-could-be-monitored)) |
 | `track` | Each track change | `event`: `started` (with `resumed`: the track on air going on in a restarted engine, or one taking over, not a new play) or `ended` (with `played_ms` and `reason`: finished, skipped, stopped, replaced) |
 
 The API polls the engine's state twice a second and its levels ten times a second, only while someone watches them.

@@ -32,6 +32,7 @@
   --radius: 8px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --statusbar-h: 1.5rem;
   color-scheme: light;
 }
 
@@ -177,12 +178,14 @@ code,
   display: grid;
   grid-template-columns: 13.5rem minmax(0, 1fr);
   min-height: 100vh;
+  /* Room for the status bar fixed at the bottom. */
+  padding-bottom: var(--statusbar-h);
 }
 
 .sidebar {
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: calc(100vh - var(--statusbar-h));
   overflow-y: auto;
   border-right: 1px solid var(--border);
   background: var(--surface);
@@ -2315,4 +2318,92 @@ ul.steps .bar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem 1rem;
+}
+
+/* Status bar -------------------------------------------------------------- */
+
+.statusbar {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 20;
+  height: var(--statusbar-h);
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0 0.75rem;
+  overflow: hidden;
+  white-space: nowrap;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font: 0.75rem/1 var(--mono);
+}
+
+.statusbar-offline {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.statusbar-deck {
+  display: flex;
+  gap: 0.4rem;
+  min-width: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
+.statusbar-deck-letter {
+  font-weight: 700;
+}
+
+.statusbar-deck-a .statusbar-deck-letter {
+  color: var(--deck-a);
+}
+
+.statusbar-deck-b .statusbar-deck-letter {
+  color: var(--deck-b);
+}
+
+.statusbar-deck-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusbar-on-air .statusbar-deck-text,
+.statusbar-on-air .statusbar-deck-symbol {
+  color: var(--fg);
+}
+
+.statusbar-on-air .statusbar-deck-symbol {
+  color: var(--on-air);
+}
+
+.statusbar-part {
+  flex: none;
+  display: flex;
+  gap: 0.75rem;
+}
+
+.statusbar-warn {
+  color: var(--warn);
+}
+
+.statusbar-bad {
+  color: var(--bad);
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .statusbar {
+    gap: 0.75rem;
+  }
+
+  /* The machine's load goes first. */
+  .statusbar-system {
+    display: none;
+  }
+
+  .statusbar-deck-text {
+    display: none;
+  }
 }

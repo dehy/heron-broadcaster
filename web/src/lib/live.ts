@@ -5,7 +5,16 @@
 // of. Reconnects with a growing delay when the connection drops.
 
 import { useSyncExternalStore } from "react";
-import type { AgcSettings, DeckPosition, EqSettings, Levels, LiveMessage, PlayerState, TrackEvent } from "../api";
+import type {
+  AgcSettings,
+  DeckPosition,
+  EqSettings,
+  Levels,
+  LiveMessage,
+  PlayerState,
+  SystemLoad,
+  TrackEvent,
+} from "../api";
 import { stationUrl } from "./station";
 
 export interface Positions {
@@ -26,6 +35,8 @@ export interface LiveState {
   eq: EqSettings | null;
   /** The AGC chain as last changed while connected, `null` before. */
   agc: AgcSettings | null;
+  /** The machine's load, sent to operators and admins only: `null` otherwise. */
+  system: SystemLoad | null;
 }
 
 const MAX_EVENTS = 20;
@@ -39,6 +50,7 @@ const EMPTY: LiveState = {
   events: [],
   eq: null,
   agc: null,
+  system: null,
 };
 let state: LiveState = EMPTY;
 const listeners = new Set<() => void>();
@@ -74,6 +86,11 @@ function handle(message: LiveMessage) {
     case "agc":
       set({ agc: message.settings });
       break;
+    case "system": {
+      const { type: _type, ...system } = message;
+      set({ system });
+      break;
+    }
   }
 }
 
@@ -109,7 +126,7 @@ function connect() {
     }
     socket = null;
     // Changes made while disconnected are not known: read them again.
-    set({ connected: false, levels: null, eq: null, agc: null });
+    set({ connected: false, levels: null, eq: null, agc: null, system: null });
     if (wanted) {
       retry = setTimeout(connect, delay);
       delay = Math.min(delay * 2, MAX_DELAY_MS);

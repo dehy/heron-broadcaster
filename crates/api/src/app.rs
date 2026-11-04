@@ -50,6 +50,8 @@ pub struct AppState {
     pub listeners: Arc<Collector>,
     /// The backup folder.
     pub backups: Arc<Backups>,
+    /// The machine's load, for operators' status bar.
+    pub system: crate::system::SystemWatch,
 }
 
 #[derive(OpenApi)]

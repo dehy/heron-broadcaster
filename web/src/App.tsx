@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { api, can, done, errorMessage, fetchStatus, unwrap } from "./api";
 import { BackupWarnings } from "./components/BackupKey";
+import { StatusBar } from "./components/StatusBar";
 import { Banner, Icon, Loading, Logo } from "./components/ui";
 import { type PlainKey, rich, setLanguage, t, toSetting, useLanguage } from "./i18n";
 import { setTimeZone } from "./lib/format";
@@ -333,6 +334,7 @@ function Shell() {
           )}
         </main>
       </div>
+      {station !== null && <StatusBar key={station} />}
     </div>
   );
 }

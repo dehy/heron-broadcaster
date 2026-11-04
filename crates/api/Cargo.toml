@@ -44,6 +44,8 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
+# Reads the CPU, memory and load average for the status bar.
+sysinfo.workspace = true
 # The backups' option file.
 tempfile.workspace = true
 thiserror.workspace = true
