@@ -62,6 +62,22 @@ jobs:
           cargo run -q -p heron-api --locked -- openapi > web/openapi.json
           git diff --exit-code web/openapi.json
 
+  rust-aac:
+    name: Rust (AAC-LC encoder)
+    runs-on: ubuntu-latest
+    # The `aac` feature links libavcodec 7.1, which Debian trixie ships (the
+    # runner's Ubuntu does not): same base image as docker/rust.Dockerfile.
+    container: rust:1.99.1-slim-trixie
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: >
+          apt-get update && apt-get install -y --no-install-recommends
+          g++ make pkg-config clang libclang-dev
+          libavcodec-dev libavformat-dev libavutil-dev libswresample-dev
+      - run: rustup component add clippy
+      - run: cargo clippy -p heron-outputs --features aac --all-targets --locked -- -D warnings
+      - run: cargo test -p heron-outputs --features aac --locked
+
   web:
     name: Web (typecheck, test, build)
     runs-on: ubuntu-latest
