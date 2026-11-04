@@ -137,7 +137,7 @@ export function TryTransition({
         </div>
         {preview.isError && <ErrorView error={preview.error} />}
         {other === null && <Empty>{t("tryTransition.none")}</Empty>}
-        {!(other === null) &&
+        {other !== null &&
           (preview.data ? (
             <TransitionGraph
               preview={preview.data}

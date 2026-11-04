@@ -572,7 +572,8 @@ function HourCard({
   };
   const inARow = slots.filter((slot, index) => {
     const type = unrepeatable(slot);
-    const before = index > 0 ? slots[index - 1] : slots.length > 1 ? slots.at(-1) : undefined;
+    const wrapped = slots.length > 1 ? slots.at(-1) : undefined;
+    const before = index > 0 ? slots[index - 1] : wrapped;
     return type !== null && unrepeatable(before) === type;
   });
   const span = looping && preview ? Math.max(HOUR_MS, preview.duration_ms) : HOUR_MS;

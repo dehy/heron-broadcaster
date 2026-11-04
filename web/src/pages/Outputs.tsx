@@ -166,9 +166,7 @@ export function Outputs() {
                         <div className="muted small">{KINDS.find((k) => k.value === output.kind)?.label()}</div>
                       </td>
                       <td className="hide-narrow mono small">
-                        {typeof config.host === "string"
-                          ? `${config.host}:${typeof config.port === "number" || typeof config.port === "string" ? config.port : 8000}${text(config.mount)}`
-                          : "–"}
+                        {streamTarget(config)}
                       </td>
                       <td className="hide-narrow">{profileName(output.encoder_profile_id)}</td>
                       <td>
@@ -340,6 +338,12 @@ function SaveFooter({ form, onClose, busy }: Readonly<{ form: string; onClose: (
 }
 
 /** Text of an optional string setting. */
+function streamTarget(config: Record<string, unknown>): string {
+  if (typeof config.host !== "string") return "–";
+  const port = typeof config.port === "number" || typeof config.port === "string" ? config.port : 8000;
+  return `${config.host}:${port}${text(config.mount)}`;
+}
+
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 
 function OutputDialog({
