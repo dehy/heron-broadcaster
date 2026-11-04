@@ -81,7 +81,7 @@ function normalize(overrides: TrackOverrides): TrackOverrides {
   };
 }
 
-export function Track({ id }: Readonly<{ id: number }>) {
+export function Track({ id }: { id: number }) {
   const track = useQuery({
     queryKey: ["track", id],
     queryFn: () => unwrap(api.GET("/api/v1/tracks/{id}", { params: { path: { id } } })),
@@ -113,23 +113,7 @@ export function effectiveCues(track: TrackDetail, overrides: TrackOverrides) {
   return { length, cueIn: Math.min(cueIn, cueOut), cueOut };
 }
 
-function nextStartsHint(shortTrack: boolean, mixPoint: number | null, cueOut: number): string {
-  if (mixPoint !== null) return t("track.nextStartsNow", { value: duration(mixPoint, true) });
-  if (shortTrack) return t("track.nextStartsShort");
-  return t("track.nextStartsNow", { value: t("track.backToBackAt", { at: duration(cueOut, true) }) });
-}
-
-function channelsLabel(channels: number): string {
-  if (channels === 1) return t("track.mono");
-  return channels === 2 ? t("track.stereo") : t("track.channels", { count: channels });
-}
-
-function OwnTags({ status }: Readonly<{ status: string | undefined }>) {
-  if (status === "needs_review") return <span className="warn">{t("library.filter.needsReview")}</span>;
-  return <>{status === "kept" ? t("track.reviewedOwnTags") : t("track.ownTags")}</>;
-}
-
-function TrackView({ track, settings }: Readonly<{ track: TrackDetail; settings: PlayoutSettings | undefined }>) {
+function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutSettings | undefined }) {
   const canEdit = useCan("operator");
   const waveform = useWaveform(track.id);
   const saved = normalize(track.overrides);
@@ -271,12 +255,17 @@ function TrackView({ track, settings }: Readonly<{ track: TrackDetail; settings:
     overrides.crossfade !== false && overrides.mode === "fixed" && overrides.fixed_ms != null
       ? cueOut - overrides.fixed_ms
       : null;
-  const inside = (point: number | null) => (point !== null && point >= cueIn && point < cueOut ? point : null);
-  let mixPoint: number | null;
-  if (shortTrack) mixPoint = inside(ownPoint);
-  else if (!crossfades) mixPoint = null;
-  else if (mode === "fixed") mixPoint = Math.max(cueIn, cueOut - fixedMs);
-  else mixPoint = inside(autoPoint);
+  const mixPoint = shortTrack
+    ? ownPoint !== null && ownPoint >= cueIn && ownPoint < cueOut
+      ? ownPoint
+      : null
+    : !crossfades
+      ? null
+      : mode === "fixed"
+        ? Math.max(cueIn, cueOut - fixedMs)
+        : autoPoint !== null && autoPoint >= cueIn && autoPoint < cueOut
+          ? autoPoint
+          : null;
   const fadeOut: Fade | undefined = overrides.fade_out ?? crossfade?.fade_out;
   const fadeIn: Fade | undefined = overrides.fade_in ?? crossfade?.fade_in;
 
@@ -311,18 +300,20 @@ function TrackView({ track, settings }: Readonly<{ track: TrackDetail; settings:
     },
   ];
   // Always shown: on the cue-out when the next track follows back to back.
-  markers.push({
-    id: "mix",
-    label: mixPoint !== null ? t("transition.nextStarts") : t("transition.nextStartsBackToBack"),
-    ms: mixPoint ?? cueOut,
-    color: "var(--accent)",
-    end: true,
-    row: 1,
-    // Dragging it sets a fixed crossfade for this track.
-    ...(canEdit && {
-      onDrag: (ms: number) => setDraft((d) => withNextStart(d, ms, cueOut)),
-    }),
-  });
+  {
+    markers.push({
+      id: "mix",
+      label: mixPoint !== null ? t("transition.nextStarts") : t("transition.nextStartsBackToBack"),
+      ms: mixPoint ?? cueOut,
+      color: "var(--accent)",
+      end: true,
+      row: 1,
+      // Dragging it sets a fixed crossfade for this track.
+      ...(canEdit && {
+        onDrag: (ms: number) => setDraft((d) => withNextStart(d, ms, cueOut)),
+      }),
+    });
+  }
   const regions: Region[] = [];
   if (mixPoint !== null && fadeOut?.enabled && !shortTrack) {
     regions.push({
@@ -387,9 +378,12 @@ function TrackView({ track, settings }: Readonly<{ track: TrackDetail; settings:
     });
   }
 
-  let view: [number, number] | undefined;
-  if (zoom === "intro") view = [Math.max(0, cueIn - 5_000), Math.min(length, cueIn + 20_000)];
-  else if (zoom === "outro") view = [Math.max(0, (mixPoint ?? cueOut) - 15_000), Math.min(length, cueOut + 5_000)];
+  const view: [number, number] | undefined =
+    zoom === "intro"
+      ? [Math.max(0, cueIn - 5_000), Math.min(length, cueIn + 20_000)]
+      : zoom === "outro"
+        ? [Math.max(0, (mixPoint ?? cueOut) - 15_000), Math.min(length, cueOut + 5_000)]
+        : undefined;
 
   const playFrom = (ms: number) => {
     const element = audio.current;
@@ -718,7 +712,7 @@ function currentTags(track: TrackDetail): TagValues {
   };
 }
 
-function ProgrammingCard({ track, canEdit }: Readonly<{ track: TrackDetail; canEdit: boolean }>) {
+function ProgrammingCard({ track, canEdit }: { track: TrackDetail; canEdit: boolean }) {
   const [dialog, setDialog] = useState<"labels" | "programming" | null>(null);
   const measured = track.analysis?.bpm;
   const mb = track.musicbrainz;
@@ -841,13 +835,13 @@ function CueInput({
   placeholder,
   onChange,
   disabled,
-}: Readonly<{
+}: {
   value: number | null;
   /** Shown when empty; nothing when missing. */
   placeholder?: number;
   onChange: (ms: number | null) => void;
   disabled: boolean;
-}>) {
+}) {
   const [text, setText] = useState(value === null ? "" : duration(value, true));
   useEffect(() => {
     setText(value === null ? "" : duration(value, true));
@@ -879,10 +873,7 @@ function CueInput({
 type Hook = { in: number | null; out: number | null };
 
 type Tri = "default" | "on" | "off";
-const tri = (value: boolean | null): Tri => {
-  if (value === null) return "default";
-  return value ? "on" : "off";
-};
+const tri = (value: boolean | null): Tri => (value === null ? "default" : value ? "on" : "off");
 const fromTri = (value: Tri): boolean | null => (value === "default" ? null : value === "on");
 
 function OverridesCard({
@@ -906,7 +897,7 @@ function OverridesCard({
   onRevert,
   onClear,
   saving,
-}: Readonly<{
+}: {
   track: TrackDetail;
   settings: PlayoutSettings | undefined;
   draft: TrackOverrides;
@@ -932,7 +923,7 @@ function OverridesCard({
   onRevert: () => void;
   onClear: () => void;
   saving: boolean;
-}>) {
+}) {
   const disabled = !canEdit;
   const analysis = track.analysis;
   const station = settings?.crossfade;
@@ -989,7 +980,11 @@ function OverridesCard({
           <Field
             label={t("transition.nextStarts")}
             hint={
-              nextStartsHint(shortTrack, mixPoint, cueOut)
+              shortTrack && mixPoint === null
+                ? t("track.nextStartsShort")
+                : mixPoint === null
+                  ? t("track.nextStartsNow", { value: t("track.backToBackAt", { at: duration(cueOut, true) }) })
+                  : t("track.nextStartsNow", { value: duration(mixPoint, true) })
             }
           >
             <CueInput
@@ -1168,14 +1163,14 @@ function OverrideFade({
   station,
   disabled,
   onChange,
-}: Readonly<{
+}: {
   label: string;
   kind: "in" | "out";
   value: Fade | null;
   station: Fade | undefined;
   disabled: boolean;
   onChange: (fade: Fade | null) => void;
-}>) {
+}) {
   return (
     <div className="stack">
       <label className="check">
@@ -1192,7 +1187,7 @@ function OverrideFade({
   );
 }
 
-function CategoriesCard({ track, canEdit }: Readonly<{ track: TrackDetail; canEdit: boolean }>) {
+function CategoriesCard({ track, canEdit }: { track: TrackDetail; canEdit: boolean }) {
   const categories = useQuery({
     queryKey: ["categories"],
     queryFn: () => unwrap(api.GET("/api/v1/categories")),
@@ -1285,7 +1280,7 @@ function CategoriesCard({ track, canEdit }: Readonly<{ track: TrackDetail; canEd
   );
 }
 
-function DetailsCard({ track }: Readonly<{ track: TrackDetail }>) {
+function DetailsCard({ track }: { track: TrackDetail }) {
   const analysis = track.analysis;
   return (
     <Card title={t("track.details")}>
@@ -1317,7 +1312,13 @@ function DetailsCard({ track }: Readonly<{ track: TrackDetail }>) {
           {bitrate(track)}
           {track.file.sample_rate && ` · ${t("track.kilohertz", { rate: track.file.sample_rate / 1000 })}`}
           {track.file.channels &&
-            ` · ${channelsLabel(track.file.channels)}`}
+            ` · ${
+              track.file.channels === 1
+                ? t("track.mono")
+                : track.file.channels === 2
+                  ? t("track.stereo")
+                  : t("track.channels", { count: track.file.channels })
+            }`}
         </dd>
         <dt>{t("track.size")}</dt>
         <dd>{bytes(track.file.size)}</dd>
@@ -1333,8 +1334,12 @@ function DetailsCard({ track }: Readonly<{ track: TrackDetail }>) {
             >
               {t("track.musicbrainzRelease")}
             </a>
+          ) : track.identification?.status === "needs_review" ? (
+            <span className="warn">{t("library.filter.needsReview")}</span>
+          ) : track.identification?.status === "kept" ? (
+            t("track.reviewedOwnTags")
           ) : (
-            <OwnTags status={track.identification?.status} />
+            t("track.ownTags")
           )}
         </dd>
       </dl>
@@ -1342,7 +1347,7 @@ function DetailsCard({ track }: Readonly<{ track: TrackDetail }>) {
   );
 }
 
-function PlaysCard({ track }: Readonly<{ track: TrackDetail }>) {
+function PlaysCard({ track }: { track: TrackDetail }) {
   const trackId = track.id;
   const plays = useQuery({
     queryKey: ["history", "track", trackId],

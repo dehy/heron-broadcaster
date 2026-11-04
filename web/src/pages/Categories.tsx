@@ -50,10 +50,9 @@ export function Categories() {
   const [sort, setSort] = useState<{ by: SortKey; descending: boolean }>({ by: "name", descending: false });
   const types = useCategoryTypes();
   const shown = sortCategories(
-    (categories.data ?? []).filter((category) => {
-      if (type === "all") return true;
-      return type === "none" ? category.type_id == null : category.type_id === type;
-    }),
+    (categories.data ?? []).filter((category) =>
+      type === "all" ? true : type === "none" ? category.type_id == null : category.type_id === type,
+    ),
     sort.by,
     sort.descending,
   );
@@ -61,7 +60,7 @@ export function Categories() {
     <th
       className={className}
       title={title}
-      aria-sort={sort.by === by ? ariaSort(sort.descending) : undefined}
+      aria-sort={sort.by === by ? (sort.descending ? "descending" : "ascending") : undefined}
     >
       <button
         type="button"
@@ -213,9 +212,7 @@ export function Categories() {
   );
 }
 
-const ariaSort = (descending: boolean) => (descending ? "descending" : "ascending");
-
-function CategoryDialog({ category, onClose }: Readonly<{ category: Category | null; onClose: () => void }>) {
+function CategoryDialog({ category, onClose }: { category: Category | null; onClose: () => void }) {
   const [name, setName] = useState(category?.name ?? "");
   const [color, setColor] = useState(category?.color ?? COLORS[0] ?? "#2f6fd6");
   const [fxPlayer, setFxPlayer] = useState(category?.fx_player ?? false);
@@ -324,7 +321,7 @@ function CategoryDialog({ category, onClose }: Readonly<{ category: Category | n
 }
 
 /** Puts every track with a label in the category. */
-function FillDialog({ category, onClose }: Readonly<{ category: Category; onClose: () => void }>) {
+function FillDialog({ category, onClose }: { category: Category; onClose: () => void }) {
   const labels = useLabels();
   const [label, setLabel] = useState("");
   const fill = useAction(

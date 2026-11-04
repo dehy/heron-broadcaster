@@ -100,7 +100,7 @@ function groupByDay(plays: Play[]): [string, Play[]][] {
 }
 
 /** A day's plays; `above` is the play shown just before them, the next day's first. */
-function DayRows({ day, plays, above }: Readonly<{ day: string; plays: Play[]; above?: Play | undefined }>) {
+function DayRows({ day, plays, above }: { day: string; plays: Play[]; above?: Play | undefined }) {
   return (
     <>
       <tr>

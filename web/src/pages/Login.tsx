@@ -27,12 +27,12 @@ export function Login() {
         api.POST("/api/v1/auth/login", { body: { username: username.trim(), password } }),
       );
       client.setQueryData(ME_KEY, user);
-    } catch (error_) {
+    } catch (failure) {
       // A wrong username or password answers 401, like a missing session.
       setError(
-        error_ instanceof ApiError && error_.code === "unauthorized"
+        failure instanceof ApiError && failure.code === "unauthorized"
           ? t("login.wrong")
-          : errorMessage(error_),
+          : errorMessage(failure),
       );
       setBusy(false);
     }

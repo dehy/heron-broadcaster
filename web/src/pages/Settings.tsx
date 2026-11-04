@@ -41,7 +41,7 @@ function SettingsCard<T>({
   saving,
   canEdit,
   children,
-}: Readonly<{
+}: {
   title: string;
   description?: ReactNode;
   value: T;
@@ -49,7 +49,7 @@ function SettingsCard<T>({
   saving: boolean;
   canEdit: boolean;
   children: (draft: T, set: (changes: Partial<T>) => void) => ReactNode;
-}>) {
+}) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(value);
@@ -320,12 +320,12 @@ function CategorySelect({
   noneLabel,
   disabled,
   onChange,
-}: Readonly<{
+}: {
   value: number | null | undefined;
   noneLabel: string;
   disabled: boolean;
   onChange: (id: number | null) => void;
-}>) {
+}) {
   const categories = useStationCategories();
   return (
     <select
@@ -714,11 +714,11 @@ function ScaleInput({
   value,
   onChange,
   disabled,
-}: Readonly<{
+}: {
   value: string[];
   onChange: (value: string[]) => void;
   disabled: boolean;
-}>) {
+}) {
   const [text, setText] = useState(value.join(", "));
   useEffect(() => {
     setText((current) => (split(current).join(",") === value.join(",") ? current : value.join(", ")));

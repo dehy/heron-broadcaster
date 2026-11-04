@@ -112,11 +112,11 @@ function StationDialog({
   station,
   first,
   onClose,
-}: Readonly<{
+}: {
   station: StationInfo | null;
   first: boolean;
   onClose: () => void;
-}>) {
+}) {
   const [draft, setDraft] = useState<Draft>({
     name: station?.name ?? "",
     code: station?.code ?? "",
@@ -167,7 +167,7 @@ function StationDialog({
         </Field>
         <Field
           label={t("stations.code")}
-          hint={codeHint(codeLocked, first)}
+          hint={codeLocked ? t("stations.codeLocked") : first ? t("stations.codeFirstHint") : t("stations.codeHint")}
         >
           <input
             className="input"
@@ -206,27 +206,20 @@ function StationDialog({
   );
 }
 
-function codeHint(codeLocked: boolean, first: boolean): string {
-  if (codeLocked) return t("stations.codeLocked");
-  return first ? t("stations.codeFirstHint") : t("stations.codeHint");
-}
-
 /** A station's engine variable, and whether heron-api has it. */
-function EngineVariable({ station }: Readonly<{ station: StationInfo }>) {
+function EngineVariable({ station }: { station: StationInfo }) {
   return (
     <span>
       <code className="mono">{station.engine_variable}</code>{" "}
-      {station.engine_taken_by && (
+      {station.engine_taken_by ? (
         <span className="badge warn" title={t("stations.engineTakenHint")}>
           {t("stations.engineTaken", { code: station.engine_taken_by })}
         </span>
+      ) : station.engine_configured ? (
+        <span className="badge good">{t("stations.engineConfigured")}</span>
+      ) : (
+        <span className="badge warn">{t("stations.engineMissing")}</span>
       )}
-      {!station.engine_taken_by &&
-        (station.engine_configured ? (
-          <span className="badge good">{t("stations.engineConfigured")}</span>
-        ) : (
-          <span className="badge warn">{t("stations.engineMissing")}</span>
-        ))}
     </span>
   );
 }

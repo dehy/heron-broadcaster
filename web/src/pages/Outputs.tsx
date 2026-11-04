@@ -166,7 +166,9 @@ export function Outputs() {
                         <div className="muted small">{KINDS.find((k) => k.value === output.kind)?.label()}</div>
                       </td>
                       <td className="hide-narrow mono small">
-                        {streamTarget(config)}
+                        {typeof config.host === "string"
+                          ? `${config.host}:${String(config.port ?? 8000)}${String(config.mount ?? "")}`
+                          : "–"}
                       </td>
                       <td className="hide-narrow">{profileName(output.encoder_profile_id)}</td>
                       <td>
@@ -312,10 +314,12 @@ function aacProfileLabel(name: string): string {
 function describeProfile(profile: EncoderProfileView): string {
   const encoder = ENCODERS.find((e) => e.value === profile.encoder)?.label() ?? profile.encoder;
   const options = profile.options as Record<string, unknown>;
-  let mode = typeof options.mode === "string" ? ` ${options.mode.toUpperCase()}` : "";
-  if (profile.encoder === "external_ffmpeg") {
-    mode = [options.codec, options.profile].filter((part) => typeof part === "string").map((part) => ` ${part}`).join("");
-  }
+  const mode =
+    profile.encoder === "external_ffmpeg"
+      ? [options.codec, options.profile].filter((part) => typeof part === "string").map((part) => ` ${part}`).join("")
+      : typeof options.mode === "string"
+        ? ` ${options.mode.toUpperCase()}`
+        : "";
   const bitrate = profile.bitrate_kbps ? ` ${t("outputs.kbps", { rate: profile.bitrate_kbps })}` : "";
   const rate = t("outputs.khz", {
     rate: number(profile.sample_rate / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
@@ -324,7 +328,7 @@ function describeProfile(profile: EncoderProfileView): string {
   return `${encoder}${mode}${bitrate}, ${rate} ${channels}`;
 }
 
-function SaveFooter({ form, onClose, busy }: Readonly<{ form: string; onClose: () => void; busy: boolean }>) {
+function SaveFooter({ form, onClose, busy }: { form: string; onClose: () => void; busy: boolean }) {
   return (
     <>
       <button type="button" className="btn" onClick={onClose}>
@@ -338,23 +342,17 @@ function SaveFooter({ form, onClose, busy }: Readonly<{ form: string; onClose: (
 }
 
 /** Text of an optional string setting. */
-function streamTarget(config: Record<string, unknown>): string {
-  if (typeof config.host !== "string") return "–";
-  const port = typeof config.port === "number" || typeof config.port === "string" ? config.port : 8000;
-  return `${config.host}:${port}${text(config.mount)}`;
-}
-
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 
 function OutputDialog({
   output,
   profiles,
   onClose,
-}: Readonly<{
+}: {
   output: OutputView | null;
   profiles: EncoderProfileView[];
   onClose: () => void;
-}>) {
+}) {
   const initial = (output?.config ?? {}) as Record<string, unknown>;
   const [name, setName] = useState(output?.name ?? "");
   const [kind, setKind] = useState<Kind>(output?.kind ?? "icecast");
@@ -571,7 +569,7 @@ function OutputDialog({
   );
 }
 
-function ProfileDialog({ profile, onClose }: Readonly<{ profile: EncoderProfileView | null; onClose: () => void }>) {
+function ProfileDialog({ profile, onClose }: { profile: EncoderProfileView | null; onClose: () => void }) {
   const options = (profile?.options ?? {}) as Record<string, unknown>;
   const [name, setName] = useState(profile?.name ?? "");
   const [encoder, setEncoder] = useState<Encoder>(profile?.encoder ?? "mp3");
@@ -587,7 +585,6 @@ function ProfileDialog({ profile, onClose }: Readonly<{ profile: EncoderProfileV
   const [ffmpegVbr, setFfmpegVbr] = useState(typeof options.vbr === "number" ? options.vbr : 0);
   const [format, setFormat] = useState(text(options.format));
   const external = encoder === "external_ffmpeg";
-  const isVbr = external ? ffmpegVbr > 0 : mode === "vbr";
   const chooseEncoder = (next: Encoder) => {
     setEncoder(next);
     if (next === "external_ffmpeg" && !profile) {
@@ -610,17 +607,19 @@ function ProfileDialog({ profile, onClose }: Readonly<{ profile: EncoderProfileV
   const bitrates = external ? FFMPEG_BITRATES : MP3_BITRATES;
   const save = useAction(
     () => {
-      const encoderOptions = () => {
-        if (encoder === "mp3") return mode === "vbr" ? { mode, quality, vbr_quality: vbrQuality } : { mode, quality };
-        return external ? ffmpegOptions() : options;
-      };
       const body = {
         name,
         encoder,
         bitrate_kbps: external && ffmpegVbr > 0 ? null : bitrate,
         sample_rate: sampleRate,
         channels,
-        options: encoderOptions() as Record<string, never>,
+        options: (encoder === "mp3"
+          ? mode === "vbr"
+            ? { mode, quality, vbr_quality: vbrQuality }
+            : { mode, quality }
+          : external
+            ? ffmpegOptions()
+            : options) as Record<string, never>,
       };
       return profile
         ? unwrap(api.PUT("/api/v1/encoder-profiles/{id}", { params: { path: { id: profile.id } }, body }))
@@ -666,7 +665,7 @@ function ProfileDialog({ profile, onClose }: Readonly<{ profile: EncoderProfileV
             </select>,
           )}
           {row(
-            isVbr ? t("outputs.bitrateVbr") : t("outputs.bitrate"),
+            (external ? ffmpegVbr > 0 : mode === "vbr") ? t("outputs.bitrateVbr") : t("outputs.bitrate"),
             <select className="input" value={bitrate} onChange={(e) => setBitrate(Number(e.target.value))}>
               {[...new Set([...bitrates, bitrate])].sort((a, b) => a - b).map((b) => (
                 <option key={b} value={b}>

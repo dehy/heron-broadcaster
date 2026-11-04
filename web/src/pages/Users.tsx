@@ -192,7 +192,7 @@ export function Users() {
   );
 }
 
-function NewUserDialog({ onClose }: Readonly<{ onClose: () => void }>) {
+function NewUserDialog({ onClose }: { onClose: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("operator");
@@ -252,7 +252,7 @@ function NewUserDialog({ onClose }: Readonly<{ onClose: () => void }>) {
   );
 }
 
-function PasswordDialog({ user, onClose }: Readonly<{ user: User; onClose: () => void }>) {
+function PasswordDialog({ user, onClose }: { user: User; onClose: () => void }) {
   const [password, setPassword] = useState("");
   const reset = useAction(
     () => unwrap(api.PATCH("/api/v1/users/{id}", { params: { path: { id: user.id } }, body: { password } })),

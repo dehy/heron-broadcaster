@@ -129,7 +129,7 @@ export function Backups() {
       <Card flush>
         {backups.isPending && <Loading />}
         {backups.isError && <ErrorView error={backups.error} />}
-        {backups.data?.length === 0 && <div className="empty">{t("backups.none")}</div>}
+        {backups.data && backups.data.length === 0 && <div className="empty">{t("backups.none")}</div>}
         {backups.data && backups.data.length > 0 && (
           <div className="table-wrap">
             <table className="table">
@@ -172,7 +172,17 @@ export function Backups() {
                       )}
                     </td>
                     <td className="hide-narrow">
-                      <DatabaseCell backup={backup} />
+                      {backup.database_size !== null && backup.database_size !== undefined ? (
+                        <a href={`/api/v1/backups/${encodeURIComponent(backup.name)}/database`} download>
+                          {bytes(backup.database_size)}
+                        </a>
+                      ) : backup.database_error ? (
+                        <span className="badge bad" title={backup.database_error}>
+                          {t("backups.databaseFailed")}
+                        </span>
+                      ) : (
+                        <span className="muted">–</span>
+                      )}
                     </td>
                     <td className="hide-narrow">
                       <EncryptionBadge backup={backup} />
@@ -217,24 +227,6 @@ export function Backups() {
       {report && <ReportDialog report={report} />}
     </>
   );
-}
-
-function DatabaseCell({ backup }: Readonly<{ backup: BackupView }>) {
-  if (backup.database_size !== null && backup.database_size !== undefined) {
-    return (
-      <a href={`/api/v1/backups/${encodeURIComponent(backup.name)}/database`} download>
-        {bytes(backup.database_size)}
-      </a>
-    );
-  }
-  if (backup.database_error) {
-    return (
-      <span className="badge bad" title={backup.database_error}>
-        {t("backups.databaseFailed")}
-      </span>
-    );
-  }
-  return <span className="muted">–</span>;
 }
 
 function EncryptionBadge({ backup }: Readonly<{ backup: BackupView }>) {
@@ -782,7 +774,7 @@ function SettingsCard() {
 }
 
 /** What a restore did; everyone signs in again after it. */
-function ReportDialog({ report }: Readonly<{ report: RestoreReport }>) {
+function ReportDialog({ report }: { report: RestoreReport }) {
   const leftOut = Object.entries(report.left_out ?? {});
   const restored = Object.entries(report.restored ?? {}).filter(([, count]) => count > 0);
   return (

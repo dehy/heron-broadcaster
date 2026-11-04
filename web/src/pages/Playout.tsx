@@ -48,7 +48,7 @@ interface Pick {
   name: string;
 }
 
-function PlayoutForm({ saved }: Readonly<{ saved: PlayoutSettings }>) {
+function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
   const isAdmin = useCan("admin");
   const [draft, setDraft] = useState(saved);
   useEffect(() => setDraft(saved), [saved]);
@@ -231,7 +231,7 @@ function PlayoutForm({ saved }: Readonly<{ saved: PlayoutSettings }>) {
                 disabled={disabled}
                 onChange={(event) => setWatchdog({ enabled: event.target.checked })}
               />
-              <span>Skip tracks that stay silent</span>
+              Skip tracks that stay silent
             </label>
             <div className="form-grid">
               <Field label="After" hint="Silence is below -50 dBFS">
@@ -259,7 +259,7 @@ function PlayoutForm({ saved }: Readonly<{ saved: PlayoutSettings }>) {
 }
 
 /** The transition between two tracks with the settings being edited. */
-function Preview({ settings }: Readonly<{ settings: PlayoutSettings }>) {
+function Preview({ settings }: { settings: PlayoutSettings }) {
   const player = useLive((live) => live.player);
   const [outgoing, setOutgoing] = useState<Pick | null>(null);
   const [incoming, setIncoming] = useState<Pick | null>(null);
@@ -360,8 +360,11 @@ function Preview({ settings }: Readonly<{ settings: PlayoutSettings }>) {
             }}
           >
             <Icon name={active ? "stop" : "play"} size={14} />{" "}
-            {listening.loading && t("playout.loadingTransition")}
-            {!listening.loading && (active ? t("playout.stopTransition") : t("playout.listen"))}
+            {listening.loading
+              ? t("playout.loadingTransition")
+              : active
+                ? t("playout.stopTransition")
+                : t("playout.listen")}
           </button>
           {preview.data && (
             <span className="muted small">
@@ -370,18 +373,18 @@ function Preview({ settings }: Readonly<{ settings: PlayoutSettings }>) {
           )}
         </div>
         {preview.isError && <ErrorView error={preview.error} />}
-        {!outgoing || !incoming && <Empty>{t("playout.pickTwo")}</Empty>}
-        {!(!outgoing || !incoming) &&
-          (preview.data ? (
-            <TransitionGraph
-              preview={preview.data}
-              outgoingWave={outgoingWave.data ?? null}
-              incomingWave={incomingWave.data ?? null}
-              playhead={listening.position}
-            />
-          ) : (
-            <Loading />
-          ))}
+        {!outgoing || !incoming ? (
+          <Empty>{t("playout.pickTwo")}</Empty>
+        ) : preview.data ? (
+          <TransitionGraph
+            preview={preview.data}
+            outgoingWave={outgoingWave.data ?? null}
+            incomingWave={incomingWave.data ?? null}
+            playhead={listening.position}
+          />
+        ) : (
+          <Loading />
+        )}
       </div>
       <Modal
         title={picking === "outgoing" ? t("playout.outgoingTrack") : t("playout.incomingTrack")}

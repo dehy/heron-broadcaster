@@ -30,7 +30,7 @@ export function Rotation() {
   );
 }
 
-function StepBadge({ explanation }: Readonly<{ explanation: Explanation }>) {
+function StepBadge({ explanation }: { explanation: Explanation }) {
   if (!explanation.enforce_rules) {
     return <span className="badge">{t("rotationPage.rulesOff")}</span>;
   }
@@ -44,7 +44,7 @@ function StepBadge({ explanation }: Readonly<{ explanation: Explanation }>) {
   );
 }
 
-function Where({ explanation }: Readonly<{ explanation: Explanation }>) {
+function Where({ explanation }: { explanation: Explanation }) {
   const categories = useCategories();
   const name = (id: number | null | undefined) =>
     id === null || id === undefined ? undefined : categories.data?.find((c) => c.id === id)?.name;
@@ -76,7 +76,7 @@ function Where({ explanation }: Readonly<{ explanation: Explanation }>) {
   );
 }
 
-function Details({ explanation }: Readonly<{ explanation: Explanation }>) {
+function Details({ explanation }: { explanation: Explanation }) {
   const stations = useStations();
   const blocked = explanation.blocked;
   const held = [
@@ -167,7 +167,7 @@ function PicksCard() {
     refetchInterval: cursor === undefined ? 15_000 : false,
   });
   const rows: RotationPick[] = picks.data ?? [];
-  const last = rows.at(-1);
+  const last = rows[rows.length - 1];
   return (
     <Card title={t("rotationPage.picks")} flush>
       {picks.isPending && <Loading />}
@@ -290,7 +290,7 @@ function SimulationCard() {
   );
 }
 
-function SimulationSummary({ report }: Readonly<{ report: SimulationReport }>) {
+function SimulationSummary({ report }: { report: SimulationReport }) {
   const simulation = report.simulation;
   const [shown, setShown] = useState(100);
   const names = new Map(report.tracks.map((track) => [track.id, track]));
@@ -354,10 +354,10 @@ function SimulationSummary({ report }: Readonly<{ report: SimulationReport }>) {
             </tr>
           </thead>
           <tbody>
-            {simulation.picks.slice(0, shown).map((pick) => {
+            {simulation.picks.slice(0, shown).map((pick, index) => {
               const track = names.get(pick.track_id);
               return (
-                <tr key={`${pick.start_unix_ms}-${pick.track_id}`}>
+                <tr key={index}>
                   <td className="num small">{dateTime(pick.start_unix_ms)}</td>
                   <td className="title-cell">
                     <Link to={`/library/${pick.track_id}`}>

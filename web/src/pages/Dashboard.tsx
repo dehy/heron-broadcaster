@@ -49,22 +49,6 @@ const DECK_COLORS: Record<string, string> = {
   fx: "var(--fx)",
 };
 
-const SYNC_CLASS: Record<string, string> = { failed: "bad", synced: "good" };
-const syncClass = (sync: string | undefined) => (sync && SYNC_CLASS[sync]) || "muted";
-
-function syncLabel(sync: string | undefined): string {
-  switch (sync) {
-    case "synced":
-      return t("dashboard.inSync");
-    case "pending":
-      return t("dashboard.waitingEngine");
-    case "failed":
-      return t("dashboard.refused");
-    default:
-      return t("dashboard.unknown");
-  }
-}
-
 export function Dashboard() {
   const player = useLive((live) => live.player);
   const levels = useLive((live) => live.levels);
@@ -198,15 +182,15 @@ export function Dashboard() {
               )
             }
           >
-            {fx?.entry && <FxState deck={fx} />}
-            {!fx?.entry &&
-              (player?.pending_jingle && onAirDeck ? (
-                <FxCountdown jingle={player.pending_jingle} deck={onAirDeck} paused={player.paused} />
-              ) : (
-                <p className="muted small" style={{ margin: 0 }}>
-                  {t("dashboard.fxHelp")}
-                </p>
-              ))}
+            {fx?.entry ? (
+              <FxState deck={fx} />
+            ) : player?.pending_jingle && onAirDeck ? (
+              <FxCountdown jingle={player.pending_jingle} deck={onAirDeck} paused={player.paused} />
+            ) : (
+              <p className="muted small" style={{ margin: 0 }}>
+                {t("dashboard.fxHelp")}
+              </p>
+            )}
           </Card>
 
           <OutputsCard outputs={player?.outputs ?? []} />
@@ -238,7 +222,7 @@ function storedFxTab(): number | null {
  * power intros, voice tracks) first, the last one used open, then the
  * whole library.
  */
-function FxPicker({ play, playing }: Readonly<{ play: (trackId: number) => void; playing: boolean }>) {
+function FxPicker({ play, playing }: { play: (trackId: number) => void; playing: boolean }) {
   // The FX categories of the station shown.
   const categories = useStationCategories();
   const [chosen, setChosen] = useState<number | "library" | null>(storedFxTab);
@@ -307,7 +291,7 @@ function Deck({
   cued,
   pendingJingle,
   categories,
-}: Readonly<{
+}: {
   deck: DeckState;
   paused: boolean;
   /** The next track, shown on the idle deck. */
@@ -316,7 +300,7 @@ function Deck({
   pendingJingle: QueueEntry | null;
   /** The track's categories. */
   categories: CategoryRef[] | undefined;
-}>) {
+}) {
   const positions = useLive((live) => live.positions);
   const now = useTicker(deck.on_air ? 10 : 2);
   const live = positionNow(positions, deck.deck, paused, now);
@@ -341,13 +325,13 @@ function Deck({
         <div className="row between" style={{ flexWrap: "nowrap" }}>
           <div className="row" style={{ flexWrap: "nowrap", minWidth: 0 }}>
             <span className="deck-label">{DECK_NAMES[deck.deck]}</span>
-            {deck.on_air && <span className="on-air-pill">{t("app.onAirBadge")}</span>}
-            {!deck.on_air &&
-              (track ? (
-                <span className="badge accent">{t("dashboard.next")}</span>
-              ) : (
-                <span className="badge">{t("dashboard.empty")}</span>
-              ))}
+            {deck.on_air ? (
+              <span className="on-air-pill">{t("app.onAirBadge")}</span>
+            ) : track ? (
+              <span className="badge accent">{t("dashboard.next")}</span>
+            ) : (
+              <span className="badge">{t("dashboard.empty")}</span>
+            )}
           </div>
           <div className="row" style={{ flexWrap: "nowrap" }}>
             {shaping && (
@@ -419,7 +403,7 @@ function Deck({
 }
 
 /** The jingle waiting for the intro of the track on air, and when it starts. */
-function FxCountdown({ jingle, deck, paused }: Readonly<{ jingle: QueueEntry; deck: DeckState; paused: boolean }>) {
+function FxCountdown({ jingle, deck, paused }: { jingle: QueueEntry; deck: DeckState; paused: boolean }) {
   const positions = useLive((live) => live.positions);
   const now = useTicker(10);
   const song = deck.entry?.track;
@@ -440,7 +424,7 @@ function FxCountdown({ jingle, deck, paused }: Readonly<{ jingle: QueueEntry; de
   );
 }
 
-function FxState({ deck }: Readonly<{ deck: DeckState }>) {
+function FxState({ deck }: { deck: DeckState }) {
   const positions = useLive((live) => live.positions);
   const now = useTicker(5);
   const live = positionNow(positions, "fx", false, now);
@@ -466,7 +450,7 @@ const OUTPUT_STATES: Record<string, { label: PlainKey; dot: string }> = {
   stopped: { label: "output.stopped", dot: "" },
 };
 
-export function OutputState({ status }: Readonly<{ status: OutputStatus | null | undefined }>) {
+export function OutputState({ status }: { status: OutputStatus | null | undefined }) {
   if (!status) {
     return <span className="badge">{t("output.notRunning")}</span>;
   }
@@ -480,7 +464,7 @@ export function OutputState({ status }: Readonly<{ status: OutputStatus | null |
 }
 
 /** Opens the stream as listeners hear it. */
-export function ListenLink({ url }: Readonly<{ url: string }>) {
+export function ListenLink({ url }: { url: string }) {
   return (
     <a className="btn small" href={url} target="_blank" rel="noreferrer" title={url}>
       <Icon name="play" /> {t("output.listen")}
@@ -488,7 +472,7 @@ export function ListenLink({ url }: Readonly<{ url: string }>) {
   );
 }
 
-function OutputsCard({ outputs }: Readonly<{ outputs: OutputStatus[] }>) {
+function OutputsCard({ outputs }: { outputs: OutputStatus[] }) {
   // The live state has no settings: the listen links come from the outputs.
   const configured = useQuery({ queryKey: ["outputs"], queryFn: () => unwrap(api.GET("/api/v1/stations/{station_id}/outputs", { params: { path: here() } })) });
   const listenUrl = (id: number) => configured.data?.find((output) => output.id === id)?.listen_url;
@@ -529,10 +513,9 @@ function OutputsCard({ outputs }: Readonly<{ outputs: OutputStatus[] }>) {
                 <div className="muted small">
                   {output.state === "connected" && output.connected_since_unix_ms
                     ? t("dashboard.outputSince", { time: clockTime(output.connected_since_unix_ms), sent: bytes(output.bytes_sent) })
-                    : null}
-                  {!(output.state === "connected" && output.connected_since_unix_ms) && output.error && (
-                    <span className="bad">{output.error}</span>
-                  )}
+                    : output.error
+                      ? <span className="bad">{output.error}</span>
+                      : null}
                   {listenersOf(output.id) !== undefined && listenersOf(output.id) !== null && (
                     <span> · {t("dashboard.listeners", { count: listenersOf(output.id) ?? 0 })}</span>
                   )}
@@ -563,7 +546,15 @@ function EngineCard() {
         <dt>{t("dashboard.runningSince")}</dt>
         <dd>{player ? ago(player.engine_started_at_unix_ms) : "–"}</dd>
         <dt>{t("dashboard.configuration")}</dt>
-        <dd className={syncClass(sync)}>{syncLabel(sync)}</dd>
+        <dd className={sync === "failed" ? "bad" : sync === "synced" ? "good" : "muted"}>
+          {sync === "synced"
+            ? t("dashboard.inSync")
+            : sync === "pending"
+              ? t("dashboard.waitingEngine")
+              : sync === "failed"
+                ? t("dashboard.refused")
+                : t("dashboard.unknown")}
+        </dd>
         <dt>{t("dashboard.underruns")}</dt>
         <dd className={player && player.underruns > 0 ? "warn num" : "num"}>
           {player ? number(player.underruns) : "–"}

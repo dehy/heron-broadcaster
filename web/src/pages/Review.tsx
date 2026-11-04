@@ -93,7 +93,7 @@ function Identifications() {
   );
 }
 
-function ReviewItem({ item }: Readonly<{ item: Schemas["ReviewItem"] }>) {
+function ReviewItem({ item }: { item: Schemas["ReviewItem"] }) {
   const canEdit = useCan("operator");
   const client = useQueryClient();
   const toast = useToast();
@@ -375,7 +375,7 @@ function Organize() {
   );
 }
 
-function BatchReport({ report }: Readonly<{ report: Schemas["BatchReport"] }>) {
+function BatchReport({ report }: { report: Schemas["BatchReport"] }) {
   return (
     <div className="stack">
       <span>
@@ -413,22 +413,6 @@ function kindLabel(kind: string): string {
   return key ? t(key) : kind;
 }
 
-function undoneMessage(report: Schemas["BatchReport"] | null | undefined): string {
-  if (!report) return t("review.undone");
-  return report.skipped.length
-    ? t("review.undoneSkipped", { count: report.done, skipped: report.skipped.length })
-    : t("review.undoneCount", { count: report.done });
-}
-
-function BatchBadge({ batch }: Readonly<{ batch: { undone_by?: number | null; finished_at_unix_ms?: number | null } }>) {
-  if (batch.undone_by) return <span className="badge">{t("review.undoneBy", { batch: String(batch.undone_by) })}</span>;
-  return batch.finished_at_unix_ms ? (
-    <span className="badge good">{t("review.done")}</span>
-  ) : (
-    <span className="badge warn">{t("review.unfinished")}</span>
-  );
-}
-
 function Batches() {
   const isAdmin = useCan("admin");
   const client = useQueryClient();
@@ -447,7 +431,13 @@ function Batches() {
     const status = undoing.data?.status;
     if (status === "done") {
       const report = undoing.data?.report;
-      toast(undoneMessage(report));
+      toast(
+        report
+          ? report.skipped.length
+            ? t("review.undoneSkipped", { count: report.done, skipped: report.skipped.length })
+            : t("review.undoneCount", { count: report.done })
+          : t("review.undone"),
+      );
       void client.invalidateQueries({ queryKey: ["library-batches"] });
       void client.invalidateQueries({ queryKey: ["review"] });
     } else if (status === "failed") {
@@ -495,7 +485,13 @@ function Batches() {
                   <td>{dateTime(batch.created_at_unix_ms)}</td>
                   <td className="num">{number(batch.files)}</td>
                   <td>
-                    <BatchBadge batch={batch} />
+                    {batch.undone_by ? (
+                      <span className="badge">{t("review.undoneBy", { batch: String(batch.undone_by) })}</span>
+                    ) : batch.finished_at_unix_ms ? (
+                      <span className="badge good">{t("review.done")}</span>
+                    ) : (
+                      <span className="badge warn">{t("review.unfinished")}</span>
+                    )}
                   </td>
                   <td className="actions">
                     {isAdmin && batch.kind !== "undo" && batch.kind !== "purge" && !batch.undone_by && batch.files > 0 && (

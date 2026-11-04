@@ -32,11 +32,11 @@ function DisplayCard({
   theme,
   language,
   fullWidth,
-}: Readonly<{
+}: {
   theme: Theme;
   language: LanguageSetting;
   fullWidth: boolean;
-}>) {
+}) {
   const client = useQueryClient();
   const save = useAction(
     (preferences: { theme?: Theme; language?: LanguageSetting; full_width?: boolean }) =>

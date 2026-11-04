@@ -109,9 +109,11 @@ export function Medleys() {
                   </td>
                   <td className="num">{number(medley.parts.filter((part) => part.kind === "hook").length)}</td>
                   <td className="small muted">
-                    {medley.task_status === "failed" && t("medleys.renderFailed")}
-                    {medley.task_status !== "failed" &&
-                      (medley.rendered_at_unix_ms ? ago(medley.rendered_at_unix_ms) : t("medleys.notRendered"))}
+                    {medley.task_status === "failed"
+                      ? t("medleys.renderFailed")
+                      : medley.rendered_at_unix_ms
+                        ? ago(medley.rendered_at_unix_ms)
+                        : t("medleys.notRendered")}
                   </td>
                 </tr>
               ))}
@@ -124,7 +126,7 @@ export function Medleys() {
 }
 
 /** One medley: its recipe, its current version, and building a new one. */
-export function MedleyEditor({ id }: Readonly<{ id: number | null }>) {
+export function MedleyEditor({ id }: { id: number | null }) {
   const canEdit = useCan("operator");
   const medleys = useMedleys();
   const settings = useMedleySettings();
@@ -153,11 +155,11 @@ function RecipeCard({
   medley,
   settings,
   canEdit,
-}: Readonly<{
+}: {
   medley: Medley | null;
   settings: MedleySettings;
   canEdit: boolean;
-}>) {
+}) {
   const categories = useCategories();
   const labels = useLabels();
   const station = useStation();
@@ -555,11 +557,11 @@ export function FadeCurveSelect({
   value,
   disabled,
   onChange,
-}: Readonly<{
+}: {
   value: Recipe["fade_out_curve"];
   disabled: boolean;
   onChange: (curve: Recipe["fade_out_curve"]) => void;
-}>) {
+}) {
   return (
     <select
       className="input"
@@ -581,12 +583,12 @@ export function DuckPlaceSelect({
   value,
   disabled,
   onChange,
-}: Readonly<{
+}: {
   ramp: "attack" | "release";
   value: Recipe["duck_attack_at"];
   disabled: boolean;
   onChange: (place: Recipe["duck_attack_at"]) => void;
-}>) {
+}) {
   const options: [Recipe["duck_attack_at"], PlainKey][] =
     ramp === "attack"
       ? [
@@ -615,7 +617,7 @@ export function DuckPlaceSelect({
   );
 }
 
-function BuildCard({ medley, settings, canEdit }: Readonly<{ medley: Medley; settings: MedleySettings; canEdit: boolean }>) {
+function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: MedleySettings; canEdit: boolean }) {
   const player = useMedleyPlayer();
   // A new version being built; the current one otherwise.
   const [plan, setPlan] = useState<PartView[] | null>(null);
@@ -803,7 +805,7 @@ function BuildCard({ medley, settings, canEdit }: Readonly<{ medley: Medley; set
   const placed = shown.parts;
   // The file playing does not last as long as the timeline says.
   const fileLength =
-    !plan && player.source?.kind === "medley" && player.source.url === renderedSource?.url
+    !plan && player.source?.kind === "medley" && renderedSource && player.source.url === renderedSource.url
       ? player.length_ms
       : null;
   const outOfStep =
@@ -817,9 +819,12 @@ function BuildCard({ medley, settings, canEdit }: Readonly<{ medley: Medley; set
   const setMove = (index: number, move_ms: number) =>
     setPlan((current) => (current ?? []).map((part, i) => (i === index ? { ...part, move_ms } : part)));
   const source = player.source;
-  const sourcePart = source?.kind === "part" ? placed[source.index] : undefined;
-  const partPlayhead = sourcePart ? (sourcePart.at_ms ?? 0) + player.position_ms - (sourcePart.from_ms ?? 0) : null;
-  const playhead = source?.kind === "medley" ? player.position_ms : partPlayhead;
+  const playhead =
+    source?.kind === "medley"
+      ? player.position_ms
+      : source?.kind === "part" && placed[source.index]
+        ? (placed[source.index]?.at_ms ?? 0) + player.position_ms - (placed[source.index]?.from_ms ?? 0)
+        : null;
   const medleySource = plan ? previewSource : renderedSource;
   const playingMedley = source?.kind === "medley" && medleySource !== null && source.url === medleySource.url;
   const move = (index: number, by: number) =>
@@ -942,8 +947,11 @@ function BuildCard({ medley, settings, canEdit }: Readonly<{ medley: Medley; set
               }}
             >
               <Icon name={playingMedley && player.playing ? "pause" : "play"} size={14} />{" "}
-              {playingMedley && player.playing && t("medleys.pause")}
-              {!(playingMedley && player.playing) && (plan ? t("medleys.listenVersion") : t("medleys.listenMedley"))}
+              {playingMedley && player.playing
+                ? t("medleys.pause")
+                : plan
+                  ? t("medleys.listenVersion")
+                  : t("medleys.listenMedley")}
             </button>
             {source && (
               <button type="button" className="btn small" onClick={() => player.stop()}>
@@ -1164,7 +1172,7 @@ function BuildCard({ medley, settings, canEdit }: Readonly<{ medley: Medley; set
 }
 
 /** Moves a point by 0.1 s. */
-function Nudge({ label, text, onClick }: Readonly<{ label: string; text: string; onClick: () => void }>) {
+function Nudge({ label, text, onClick }: { label: string; text: string; onClick: () => void }) {
   return (
     <button type="button" className="btn small nudge" aria-label={label} title={label} onClick={onClick}>
       {text}
@@ -1187,12 +1195,12 @@ function ChoiceSelect({
   placeholder,
   choices,
   onChoose,
-}: Readonly<{
+}: {
   label: string;
   placeholder: string;
   choices: PartView[];
   onChoose: (chosen: PartView) => void;
-}>) {
+}) {
   return (
     <select
       className="input"

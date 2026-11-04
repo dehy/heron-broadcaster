@@ -52,8 +52,7 @@ function fromGrid(grid: Grid): ScheduledHour[] {
 
 /** The name shown for a schedule: the default one has none of its own. */
 function scheduleName(schedule: Pick<ScheduleSummary, "name" | "is_default"> | undefined): string {
-  if (!schedule) return "?";
-  return schedule.is_default ? t("schedules.default") : schedule.name;
+  return !schedule ? "?" : schedule.is_default ? t("schedules.default") : schedule.name;
 }
 
 function samePeriods(a: Period[], b: Period[]): boolean {
@@ -83,7 +82,7 @@ export function Schedule() {
   });
   const [grid, setGrid] = useState<Grid>(new Map());
   // The clock painted; null paints "no clock", undefined until one is picked.
-  const [picked, setPicked] = useState<number | null | undefined>(undefined);
+  const [picked, setBrush] = useState<number | null | undefined>(undefined);
   const brush = picked === undefined ? (clocks.data?.[0]?.id ?? null) : picked;
   const [onlyEmpty, setOnlyEmpty] = useState(false);
   // The weeks before each stroke, to undo them.
@@ -239,7 +238,7 @@ export function Schedule() {
                     role="radio"
                     aria-checked={brush === clock.id}
                     className={brush === clock.id ? "btn small brush active" : "btn small brush"}
-                    onClick={() => setPicked(clock.id)}
+                    onClick={() => setBrush(clock.id)}
                   >
                     <span className="swatch" style={{ background: colors.get(clock.id) }} />
                     {clock.name}
@@ -251,7 +250,7 @@ export function Schedule() {
                   role="radio"
                   aria-checked={brush === null}
                   className={brush === null ? "btn small brush active" : "btn small brush"}
-                  onClick={() => setPicked(null)}
+                  onClick={() => setBrush(null)}
                 >
                   <span className="swatch empty-swatch" /> {t("schedule.noClockBrush")}
                 </button>
@@ -454,7 +453,7 @@ function SchedulesCard({
   canEdit,
   onSelect,
   onPeriods,
-}: Readonly<{
+}: {
   list: ScheduleSummary[];
   activeId: number;
   nextChange: { at: string; schedule_id: number } | null;
@@ -463,7 +462,7 @@ function SchedulesCard({
   canEdit: boolean;
   onSelect: (id: number) => void;
   onPeriods: (periods: Period[]) => void;
-}>) {
+}) {
   const byId = new Map(list.map((schedule) => [schedule.id, schedule]));
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState(false);
