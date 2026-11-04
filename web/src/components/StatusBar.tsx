@@ -10,23 +10,25 @@ import { useListenersNow } from "../lib/listeners";
 import { positionNow, useLive } from "../lib/live";
 import { type DeckSummary, listenersText, summarizeDeck, summarizeSystem } from "../lib/statusbar";
 
-/** Elapsed times move on once a second. */
-function useSecond() {
-  const [, tick] = useState(0);
+/** The time now, in the clock `positionNow` uses, moved on once a second. */
+function useNow() {
+  const [now, setNow] = useState(() => performance.now());
   useEffect(() => {
-    const timer = setInterval(() => tick((n) => n + 1), 1_000);
+    const timer = setInterval(() => setNow(performance.now()), 1_000);
     return () => clearInterval(timer);
   }, []);
+  return now;
 }
 
-function Deck({ summary }: { summary: DeckSummary }) {
+function Deck({ summary }: Readonly<{ summary: DeckSummary }>) {
   const state = t(`statusbar.${summary.status}`);
+  const spoken = t("statusbar.deck", { deck: summary.letter, state });
   return (
     <span
       className={`statusbar-deck statusbar-deck-${summary.letter.toLowerCase()}${summary.onAir ? " statusbar-on-air" : ""}`}
-      role="group"
-      aria-label={`${t("statusbar.deck", { deck: summary.letter, state })}${summary.text ? `, ${summary.text}` : ""}`}
     >
+      {/* What the symbols and the cut title say, for screen readers. */}
+      <span className="visually-hidden">{summary.text ? `${spoken}, ${summary.text}` : spoken}</span>
       <span className="statusbar-deck-letter" aria-hidden="true">
         {summary.letter}
       </span>
@@ -43,7 +45,7 @@ function Deck({ summary }: { summary: DeckSummary }) {
 }
 
 export function StatusBar() {
-  useSecond();
+  const now = useNow();
   const connected = useLive((live) => live.connected);
   const player = useLive((live) => live.player);
   const positions = useLive((live) => live.positions);
@@ -54,7 +56,7 @@ export function StatusBar() {
   const deckSummary = (letter: "A" | "B") => {
     const name = letter.toLowerCase();
     const deck = player?.decks.find((d) => d.deck === name);
-    const position = positionNow(positions, name, paused);
+    const position = positionNow(positions, name, paused, now);
     return summarizeDeck(letter, deck, paused, position?.position_ms ?? null);
   };
   const summary = system ? summarizeSystem(system) : null;

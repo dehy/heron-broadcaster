@@ -57,8 +57,9 @@ describe("StatusBar", () => {
       ]),
     );
     expect(screen.getByText("Jamiroquai – Space Cowboy 2:31")).toBeTruthy();
-    expect(screen.getByRole("group", { name: /Deck B: empty/ })).toBeTruthy();
-    expect(screen.getByRole("group", { name: /Deck A: playing, Jamiroquai – Space Cowboy/ })).toBeTruthy();
+    // What a screen reader gets, in place of the symbols.
+    expect(screen.getByText("Deck B: empty")).toBeTruthy();
+    expect(screen.getByText("Deck A: playing, Jamiroquai – Space Cowboy 2:31")).toBeTruthy();
     await waitFor(() => expect(screen.getByText("listeners 42")).toBeTruthy());
   });
 
