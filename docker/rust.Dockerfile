@@ -16,10 +16,12 @@ WORKDIR /src
 COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY migrations ./migrations
+# Two builds: cargo unifies features inside one, and only the engine links
+# libavcodec (the other images have none).
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked --features heron-engine/aac \
-        --bin heron-engine --bin heron-api --bin heron-analyzer --bin heron-librarian \
+    cargo build --release --locked -p heron-engine --features aac \
+    && cargo build --release --locked -p heron-api -p heron-analyzer -p heron-librarian \
     && mkdir -p /out \
     && cp target/release/heron-engine target/release/heron-api target/release/heron-analyzer \
         target/release/heron-librarian /out/
