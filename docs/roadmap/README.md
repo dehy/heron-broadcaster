@@ -28,6 +28,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | M13 | [Several stations](m13-several-stations.md) | M6, M7, M7b, M8 | Done ([#119](https://github.com/dehy/heron-broadcaster/pull/119)) |
 | M14 | [Several schedules](m14-schedules.md) | M6, M13 (the schedule per station) | Done ([#102](https://github.com/dehy/heron-broadcaster/pull/102)) |
 | M15 | [Encrypted and tested backups](m15-encrypted-backups.md) | M12 | In progress |
+| M16 | [Status bar](m16-status-bar.md) | M5, M7b, M13 | In progress |
 
 ## Dependency graph
 
