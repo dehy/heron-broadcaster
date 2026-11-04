@@ -139,12 +139,12 @@ pub fn free_path(
 pub fn stem_and_extension(path: &Path) -> (String, String) {
     let stem = path
         .file_stem()
-        .and_then(|stem| stem.to_str())
+        .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("track")
         .to_owned();
     let extension = path
         .extension()
-        .and_then(|extension| extension.to_str())
+        .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("")
         .to_owned();
     (stem, extension)

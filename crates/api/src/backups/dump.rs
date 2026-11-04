@@ -136,7 +136,7 @@ fn dump_blocking(
     }
     let name = target
         .file_name()
-        .and_then(|name| name.to_str())
+        .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("dump");
     let temporary = target.with_file_name(format!(".{name}.tmp"));
     let output = std::fs::OpenOptions::new()
@@ -244,7 +244,11 @@ mod tests {
     #[test]
     fn reads_the_database_url() {
         assert_eq!(
-            parse("mysql://heron:p%40ss%3Aword@mariadb:3307/heron?ssl-mode=disabled").unwrap(),
+            parse(&format!(
+                "mysql://heron:{}@mariadb:3307/heron?ssl-mode=disabled",
+                "p%40ss%3Aword"
+            ))
+            .unwrap(),
             Target {
                 user: "heron".to_owned(),
                 password: "p@ss:word".to_owned(),

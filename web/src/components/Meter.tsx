@@ -16,7 +16,7 @@ export function meterScale(db: number): number {
   return Math.min(1, Math.max(0, (db - FLOOR_DB) / -FLOOR_DB));
 }
 
-function Bar({ rms, peak, label }: { rms: number; peak: number; label: string }) {
+function Bar({ rms, peak, label }: Readonly<{ rms: number; peak: number; label: string }>) {
   return (
     <div className="meter-bar" title={t("meter.peak", { channel: label, level: number(peak, { maximumFractionDigits: 1, minimumFractionDigits: 1 }) })}>
       <div className="rms" style={{ height: `${meterScale(rms) * 100}%` }} />
@@ -26,7 +26,7 @@ function Bar({ rms, peak, label }: { rms: number; peak: number; label: string })
 }
 
 /** A vertical stereo meter. */
-export function StereoMeter({ levels, label }: { levels: ChannelLevels | null; label: string }) {
+export function StereoMeter({ levels, label }: Readonly<{ levels: ChannelLevels | null; label: string }>) {
   const silent = { peak_left: -200, peak_right: -200, rms_left: -200, rms_right: -200 };
   const l = levels ?? silent;
   const loudest = Math.max(l.peak_left, l.peak_right);
@@ -44,7 +44,7 @@ export function StereoMeter({ levels, label }: { levels: ChannelLevels | null; l
 }
 
 /** A thin horizontal meter (the louder channel's RMS). */
-export function LineMeter({ levels, label }: { levels: ChannelLevels | null; label: string }) {
+export function LineMeter({ levels, label }: Readonly<{ levels: ChannelLevels | null; label: string }>) {
   const rms = levels ? Math.max(levels.rms_left, levels.rms_right) : -200;
   const width = meterScale(rms) * 100;
   return (

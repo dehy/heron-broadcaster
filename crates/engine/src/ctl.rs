@@ -435,7 +435,7 @@ fn list_audio(dir: &Path, files: &mut Vec<PathBuf>) {
             list_audio(&path, files);
         } else if path
             .extension()
-            .and_then(|extension| extension.to_str())
+            .and_then(std::ffi::OsStr::to_str)
             .is_some_and(|extension| AUDIO_EXTENSIONS.contains(&extension.to_lowercase().as_str()))
         {
             files.push(path);

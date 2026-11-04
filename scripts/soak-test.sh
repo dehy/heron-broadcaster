@@ -64,7 +64,9 @@ sleep 2
 autofill_pid=$!
 
 metric() {
-    printf '%s\n' "$1" | awk -v name="$2" '$1 == name { print $2 }'
+    local text=$1
+    local key=$2
+    printf "%s\n" "$text" | awk -v name="$key" '$1 == name { print $2 }'
 }
 
 echo "elapsed_s,rendered_s,drift_s,max_late_s,underruns,dropped_blocks,clock_resets,bytes_a,bytes_b,reconnects_a,reconnects_b" > "$csv"

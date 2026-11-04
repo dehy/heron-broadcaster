@@ -306,8 +306,7 @@ impl Library {
                             report.updated += 1;
                         }
                         None => {
-                            let moved_from =
-                                vanished.get_mut(&info.hash[..]).and_then(|ids| ids.pop());
+                            let moved_from = vanished.get_mut(&info.hash[..]).and_then(Vec::pop);
                             if let Some(id) = moved_from {
                                 self.update_path(id, file, &info).await?;
                                 moved_ids.insert(id);

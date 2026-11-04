@@ -86,18 +86,20 @@ sign_in() {
 
 # A field of a JSON document on stdin: `json id`, `json 0.name`.
 json() {
+    local path=$1
     python3 -c '
 import json, sys
 value = json.load(sys.stdin)
 for part in sys.argv[1].split("."):
     value = value[int(part)] if isinstance(value, list) else value[part]
 print(value if not isinstance(value, (dict, list)) else json.dumps(value))
-' "$1"
+' "$path"
 }
 
 # When Icecast's source on a mount connected (empty when there is none):
 # it changes with a new connection.
 source_started() {
+    local mount=$1
     curl -fsS "$icecast/status-json.xsl" | python3 -c '
 import json, sys
 sources = json.load(sys.stdin)["icestats"].get("source", [])
@@ -105,7 +107,7 @@ sources = sources if isinstance(sources, list) else [sources]
 for source in sources:
     if source.get("listenurl", "").endswith(sys.argv[1]) and source.get("title"):
         print(source.get("stream_start_iso8601", ""))
-' "$1"
+' "$mount"
 }
 
 wait_for() {
@@ -118,12 +120,16 @@ wait_for() {
     done
 }
 
-on_mount() { [ -n "$(source_started "$1")" ]; }
+on_mount() {
+    local mount=$1
+    [ -n "$(source_started "$mount")" ]
+}
 
 # Bytes of a mount in 5 s: a 128 kbps stream gives 80 kB, plus the burst.
 streams() {
-    bytes=$(curl -s -m 5 "$icecast$1" | wc -c | tr -d ' ')
-    [ "$bytes" -ge 70000 ] && pass "$1 streams ($bytes bytes in 5 s)" || fail "$1: $bytes bytes in 5 s"
+    local mount=$1
+    bytes=$(curl -s -m 5 "$icecast$mount" | wc -c | tr -d ' ')
+    [ "$bytes" -ge 70000 ] && pass "$mount streams ($bytes bytes in 5 s)" || fail "$mount: $bytes bytes in 5 s"
 }
 
 main() {

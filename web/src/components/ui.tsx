@@ -68,7 +68,7 @@ const ICONS = {
 
 export type IconName = keyof typeof ICONS;
 
-export function Icon({ name, size = 18, label }: { name: IconName; size?: number; label?: string }) {
+export function Icon({ name, size = 18, label }: Readonly<{ name: IconName; size?: number; label?: string }>) {
   return (
     <svg
       width={size}
@@ -88,7 +88,7 @@ export function Icon({ name, size = 18, label }: { name: IconName; size?: number
   );
 }
 
-export function Logo({ size = 24 }: { size?: number }) {
+export function Logo({ size = 24 }: Readonly<{ size?: number }>) {
   // A heron's head and beak over a wave.
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
@@ -118,13 +118,13 @@ export function Card({
   children,
   flush,
   className,
-}: {
+}: Readonly<{
   title?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
   flush?: boolean;
   className?: string;
-}) {
+}>) {
   return (
     <section className={`card ${className ?? ""}`}>
       {(title !== undefined || actions !== undefined) && (
@@ -142,11 +142,11 @@ export function PageHead({
   title,
   description,
   actions,
-}: {
+}: Readonly<{
   title: string;
   description?: ReactNode;
   actions?: ReactNode;
-}) {
+}>) {
   useEffect(() => {
     document.title = t("app.title", { page: title });
   }, [title]);
@@ -162,7 +162,7 @@ export function PageHead({
   );
 }
 
-export function Banner({ kind, children }: { kind: "warn" | "bad"; children: ReactNode }) {
+export function Banner({ kind, children }: Readonly<{ kind: "warn" | "bad"; children: ReactNode }>) {
   return (
     <div className={`banner ${kind}`} role={kind === "bad" ? "alert" : "status"}>
       <Icon name="warn" />
@@ -171,7 +171,7 @@ export function Banner({ kind, children }: { kind: "warn" | "bad"; children: Rea
   );
 }
 
-export function Loading({ label = t("ui.loading") }: { label?: string }) {
+export function Loading({ label = t("ui.loading") }: Readonly<{ label?: string }>) {
   return (
     <div className="empty row" style={{ justifyContent: "center" }}>
       <span className="spinner" aria-hidden="true" /> {label}
@@ -179,11 +179,11 @@ export function Loading({ label = t("ui.loading") }: { label?: string }) {
   );
 }
 
-export function ErrorView({ error }: { error: unknown }) {
+export function ErrorView({ error }: Readonly<{ error: unknown }>) {
   return <Banner kind="bad">{errorMessage(error)}</Banner>;
 }
 
-export function Empty({ children }: { children: ReactNode }) {
+export function Empty({ children }: Readonly<{ children: ReactNode }>) {
   return <div className="empty">{children}</div>;
 }
 
@@ -193,11 +193,11 @@ export function Field({
   label,
   hint,
   children,
-}: {
+}: Readonly<{
   label: ReactNode;
   hint?: ReactNode;
   children: ReactNode;
-}) {
+}>) {
   return (
     <label className="field">
       <span>{label}</span>
@@ -217,7 +217,7 @@ export function NumberInput({
   disabled,
   suffix,
   label,
-}: {
+}: Readonly<{
   value: number;
   onChange: (value: number) => void;
   min?: number;
@@ -227,7 +227,7 @@ export function NumberInput({
   suffix?: string;
   /** Its accessible name, when no visible label names it. */
   label?: string;
-}) {
+}>) {
   const [text, setText] = useState(String(value));
   useEffect(() => {
     setText((current) => (Number(current) === value ? current : String(value)));
@@ -281,13 +281,13 @@ export function Segmented<T extends string>({
   onChange,
   label,
   disabled,
-}: {
+}: Readonly<{
   value: T;
   options: { value: T; label: ReactNode }[];
   onChange: (value: T) => void;
   label: string;
   disabled?: boolean;
-}) {
+}>) {
   return (
     <div className="segmented" role="group" aria-label={label}>
       {options.map((option) => (
@@ -314,14 +314,14 @@ export function Modal({
   children,
   footer,
   wide,
-}: {
+}: Readonly<{
   title: string;
   open: boolean;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
-}) {
+}>) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
@@ -367,7 +367,7 @@ export function ConfirmButton({
   className,
   disabled,
   title,
-}: {
+}: Readonly<{
   children: ReactNode;
   question: ReactNode;
   confirm: string;
@@ -375,7 +375,7 @@ export function ConfirmButton({
   className?: string;
   disabled?: boolean;
   title?: string;
-}) {
+}>) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -407,13 +407,13 @@ export function ConfirmDialog({
   question,
   confirm,
   onConfirm,
-}: {
+}: Readonly<{
   open: boolean;
   onClose: () => void;
   question: ReactNode;
   confirm: string;
   onConfirm: () => void;
-}) {
+}>) {
   return (
     <Modal
       title={t("ui.areYouSure")}
@@ -452,7 +452,7 @@ interface Toast {
 
 const ToastContext = createContext<(text: string, bad?: boolean) => void>(() => {});
 
-export function ToastProvider({ children }: { children: ReactNode }) {
+export function ToastProvider({ children }: Readonly<{ children: ReactNode }>) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const next = useRef(1);
   const show = useCallback((text: string, bad = false) => {

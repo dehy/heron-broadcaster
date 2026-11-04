@@ -46,7 +46,7 @@ pub struct QueueSettings {
 }
 
 impl QueueSettings {
-    pub const SETTINGS_NAME: &'static str = "queue";
+    pub const SETTINGS_NAME: &str = "queue";
 }
 
 impl Default for QueueSettings {
@@ -70,7 +70,7 @@ pub struct StationSettings {
 }
 
 impl StationSettings {
-    pub const SETTINGS_NAME: &'static str = "station";
+    pub const SETTINGS_NAME: &str = "station";
 
     /// The time zone; UTC if the stored one is unknown.
     pub fn time_zone(&self) -> TimeZone {
@@ -159,7 +159,7 @@ pub struct Era {
 }
 
 impl ProgrammingSettings {
-    pub const SETTINGS_NAME: &'static str = "programming";
+    pub const SETTINGS_NAME: &str = "programming";
 
     fn check(&self) -> Result<(), String> {
         if self.min_play_s > 3_600 {
@@ -284,7 +284,7 @@ pub struct EngineManagement {
 }
 
 impl EngineManagement {
-    pub const SETTINGS_NAME: &'static str = "engine";
+    pub const SETTINGS_NAME: &str = "engine";
 }
 
 /// The settings groups each station has its own of, in `station_settings`
