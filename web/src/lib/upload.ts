@@ -89,9 +89,9 @@ export async function uploadFile(
       try {
         offset = await transport.received(id);
         options.onProgress?.(offset);
-      } catch (error_) {
-        if (!isTransient(error_)) {
-          throw error_;
+      } catch (lookup) {
+        if (!isTransient(lookup)) {
+          throw lookup;
         }
       }
     }

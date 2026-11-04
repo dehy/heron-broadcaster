@@ -15,7 +15,7 @@ export interface MenuItem {
   danger?: boolean;
 }
 
-export function Menu({ items, label = t("ui.moreActions") }: Readonly<{ items: MenuItem[]; label?: string }>) {
+export function Menu({ items, label = t("ui.moreActions") }: { items: MenuItem[]; label?: string }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -56,7 +56,7 @@ export function Menu({ items, label = t("ui.moreActions") }: Readonly<{ items: M
       all[(at + step + all.length) % all.length]?.focus();
     } else if (event.key === "Home" || event.key === "End") {
       event.preventDefault();
-      (event.key === "Home" ? all[0] : all.at(-1))?.focus();
+      (event.key === "Home" ? all[0] : all[all.length - 1])?.focus();
     } else if (event.key === "Tab") {
       close(false);
     }

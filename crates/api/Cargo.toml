@@ -48,7 +48,7 @@ sqlx.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 # Runs mariadb-dump for backups.
-tokio = { workspace = true, features = ["sync", "process", "fs"] }
+tokio = { workspace = true, features = ["sync", "process"] }
 tokio-stream = { workspace = true, features = ["net"] }
 tonic.workspace = true
 # Track audio for previews, with range requests.

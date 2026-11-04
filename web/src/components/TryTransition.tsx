@@ -24,11 +24,11 @@ export function TryTransition({
   trackId,
   trackName: name,
   overrides,
-}: Readonly<{
+}: {
   trackId: number;
   trackName: string;
   overrides: TrackOverrides;
-}>) {
+}) {
   const [side, setSide] = useState<Side>("after");
   const [other, setOther] = useState<Other | null>(null);
   const [picking, setPicking] = useState(false);
@@ -126,8 +126,11 @@ export function TryTransition({
             }}
           >
             <Icon name={active ? "stop" : "play"} size={14} />{" "}
-            {listening.loading && t("playout.loadingTransition")}
-            {!listening.loading && (active ? t("playout.stopTransition") : t("playout.listen"))}
+            {listening.loading
+              ? t("playout.loadingTransition")
+              : active
+                ? t("playout.stopTransition")
+                : t("playout.listen")}
           </button>
           {preview.data && (
             <span className="muted small">
@@ -136,18 +139,18 @@ export function TryTransition({
           )}
         </div>
         {preview.isError && <ErrorView error={preview.error} />}
-        {other === null && <Empty>{t("tryTransition.none")}</Empty>}
-        {other !== null &&
-          (preview.data ? (
-            <TransitionGraph
-              preview={preview.data}
-              outgoingWave={outgoingWave.data ?? null}
-              incomingWave={incomingWave.data ?? null}
-              playhead={listening.position}
-            />
-          ) : (
-            <Loading />
-          ))}
+        {other === null ? (
+          <Empty>{t("tryTransition.none")}</Empty>
+        ) : preview.data ? (
+          <TransitionGraph
+            preview={preview.data}
+            outgoingWave={outgoingWave.data ?? null}
+            incomingWave={incomingWave.data ?? null}
+            playhead={listening.position}
+          />
+        ) : (
+          <Loading />
+        )}
       </div>
       <Modal
         title={side === "after" ? t("tryTransition.pickAfter") : t("tryTransition.pickBefore")}

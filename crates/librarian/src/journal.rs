@@ -295,10 +295,7 @@ pub async fn is_free(
     roots: &Roots,
     path: &LibraryPath,
 ) -> Result<bool, sqlx::Error> {
-    if tokio::fs::symlink_metadata(path.resolve(&roots.library))
-        .await
-        .is_ok()
-    {
+    if std::fs::symlink_metadata(path.resolve(&roots.library)).is_ok() {
         return Ok(false);
     }
     let taken: Option<i32> = sqlx::query_scalar("SELECT 1 FROM tracks WHERE path = ? LIMIT 1")
@@ -314,7 +311,7 @@ pub async fn execute(pool: &MySqlPool, roots: &Roots, op: Operation) -> Result<u
     let to = op.to.resolve(&roots.library);
     let in_place = op.from == Origin::Library(op.to.clone());
 
-    let source = match tokio::fs::metadata(&from).await {
+    let source = match std::fs::metadata(&from) {
         Ok(metadata) => FileStamp::from_metadata(&metadata),
         Err(error) if error.kind() == ErrorKind::NotFound => return Err(OpError::SourceMissing),
         Err(error) => return Err(error.into()),
@@ -355,7 +352,7 @@ pub async fn execute(pool: &MySqlPool, roots: &Roots, op: Operation) -> Result<u
             }
         }
         Err(error) => {
-            let _ = tokio::fs::remove_file(temp.resolve(&roots.library)).await;
+            let _ = std::fs::remove_file(temp.resolve(&roots.library));
             abandon(pool, move_id, &error.to_string()).await?;
             return Err(error);
         }
@@ -519,7 +516,7 @@ async fn transfer(
     in_place: bool,
 ) -> Result<Transfer, OpError> {
     if let Some(parent) = to.parent() {
-        tokio::fs::create_dir_all(parent).await?;
+        std::fs::create_dir_all(parent)?;
     }
     if op.retag.is_none() {
         let (from_owned, to_owned) = (from.to_path_buf(), to.to_path_buf());
@@ -573,12 +570,12 @@ async fn transfer(
     }
 
     // The original changed while it was copied: the copy is not the file.
-    if FileStamp::from_metadata(&tokio::fs::metadata(from).await?) != source {
+    if FileStamp::from_metadata(&std::fs::metadata(from)?) != source {
         return Err(OpError::SourceChanged);
     }
     if in_place {
         // The one replacement Heron does: the file by its own re-tagged copy.
-        tokio::fs::rename(&temp_abs, to).await?;
+        std::fs::rename(&temp_abs, to)?;
     } else {
         match fsops::rename_no_replace(&temp_abs, to) {
             Ok(()) => {}
@@ -665,7 +662,7 @@ async fn finish(
     read_details: bool,
     status: &str,
 ) -> Result<(), OpError> {
-    let stamp = FileStamp::from_metadata(&tokio::fs::metadata(to_abs).await?);
+    let stamp = FileStamp::from_metadata(&std::fs::metadata(to_abs)?);
     let path = to_abs.to_path_buf();
     let hash = blocking(move || heron_library::content_hash(&path)).await?;
     let details = if read_details {
@@ -838,7 +835,7 @@ pub async fn move_loose_file(
     .await?
     .last_insert_id();
     if let Some(parent) = to_abs.parent() {
-        tokio::fs::create_dir_all(parent).await?;
+        std::fs::create_dir_all(parent)?;
     }
     let renamed = {
         let (from_abs, to_abs) = (from_abs.clone(), to_abs.clone());
@@ -938,8 +935,7 @@ pub async fn recover(pool: &MySqlPool, roots: &Roots) -> Result<Recovery, OpErro
         }
 
         if let Some(temp) = temp {
-            let _ = tokio::fs::remove_file(LibraryPath::from_stored(temp).resolve(&roots.library))
-                .await;
+            let _ = std::fs::remove_file(LibraryPath::from_stored(temp).resolve(&roots.library));
         }
         let (from_exists, to_exists) = (from_abs.exists(), to_abs.exists());
         let landed = if in_place {

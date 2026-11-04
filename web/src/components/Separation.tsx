@@ -23,13 +23,13 @@ export function SeparationEditor({
   inherited,
   onChange,
   disabled,
-}: Readonly<{
+}: {
   value: SeparationOverrides;
   /** What applies where this does not override. */
   inherited: Windows | undefined;
   onChange: (value: SeparationOverrides) => void;
   disabled?: boolean;
-}>) {
+}) {
   return (
     <div className="stack">
       {WINDOW_FIELDS.map(([key]) => {
@@ -67,9 +67,11 @@ export function SeparationEditor({
               />
             ) : (
               <span className="muted small">
-                {fallback === undefined && t("separation.inherited")}
-                {fallback === 0 && t("separation.offInherited")}
-                {fallback !== undefined && fallback !== 0 && t("separation.minutesInherited", { minutes: number(fallback) })}
+                {fallback === undefined
+                  ? t("separation.inherited")
+                  : fallback === 0
+                    ? t("separation.offInherited")
+                    : t("separation.minutesInherited", { minutes: number(fallback) })}
               </span>
             )}
           </div>

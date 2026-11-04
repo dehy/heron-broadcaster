@@ -144,14 +144,12 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let _telemetry = heron_service::telemetry::init_tracing(&cli.log, SERVICE)?;
     let metrics = heron_service::ops::install_metrics(SERVICE, &cli.metrics)?;
 
-    tokio::fs::create_dir_all(&cli.state_dir)
-        .await
-        .with_context(|| {
-            format!(
-                "cannot create the state directory {}",
-                cli.state_dir.display()
-            )
-        })?;
+    std::fs::create_dir_all(&cli.state_dir).with_context(|| {
+        format!(
+            "cannot create the state directory {}",
+            cli.state_dir.display()
+        )
+    })?;
     // An engine running already hands over to this one (an upgrade).
     let state_dir = cli.state_dir.clone();
     let start = tokio::task::spawn_blocking(move || handover::start(&state_dir)).await?;
