@@ -30,13 +30,13 @@ While preparing the next hour in the Library or the Schedules, an operator canno
 
 ## Acceptance criteria
 
-- [ ] The bar is on every page, one line high at every width from a phone up, in light and dark themes, and never hides the end of a page.
-- [ ] Both decks follow the engine: loading, playing, pausing, skipping and emptying a deck change the bar within a second; the elapsed time moves smoothly.
-- [ ] The listener total equals the one the Statistics page shows, and a gap (`–`) when no server could be read.
-- [ ] An operator and an admin see the system load, moving with the machine's: a CPU burn makes the CPU rise within 10 s. A viewer receives no `system` message and sees no system part.
-- [ ] With the live connection down the bar says so; it recovers by itself.
-- [ ] Unit tests for the formatting, the `system` message and the roles; the component test covers viewer, operator, gap and offline.
-- [ ] Docs, translations (all catalogs) and screenshots are up to date.
+- [x] The bar is on every page, one line high at every width from a phone up, in light and dark themes, and never hides the end of a page.
+- [x] Both decks follow the engine: loading, playing, pausing, skipping and emptying a deck change the bar within a second; the elapsed time moves smoothly.
+- [x] The listener total equals the one the Statistics page shows, and a gap (`–`) when no server could be read.
+- [x] An operator and an admin see the system load, moving with the machine's: a CPU burn makes the CPU rise within 10 s. A viewer receives no `system` message and sees no system part.
+- [x] With the live connection down the bar says so; it recovers by itself.
+- [x] Unit tests for the formatting, the `system` message and the roles; the component test covers viewer, operator, gap and offline.
+- [x] Docs, translations (all catalogs) and screenshots are up to date.
 
 ## References
 
