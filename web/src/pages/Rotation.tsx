@@ -30,7 +30,7 @@ export function Rotation() {
   );
 }
 
-function StepBadge({ explanation }: { explanation: Explanation }) {
+function StepBadge({ explanation }: Readonly<{ explanation: Explanation }>) {
   if (!explanation.enforce_rules) {
     return <span className="badge">{t("rotationPage.rulesOff")}</span>;
   }
@@ -44,7 +44,7 @@ function StepBadge({ explanation }: { explanation: Explanation }) {
   );
 }
 
-function Where({ explanation }: { explanation: Explanation }) {
+function Where({ explanation }: Readonly<{ explanation: Explanation }>) {
   const categories = useCategories();
   const name = (id: number | null | undefined) =>
     id === null || id === undefined ? undefined : categories.data?.find((c) => c.id === id)?.name;
@@ -76,7 +76,7 @@ function Where({ explanation }: { explanation: Explanation }) {
   );
 }
 
-function Details({ explanation }: { explanation: Explanation }) {
+function Details({ explanation }: Readonly<{ explanation: Explanation }>) {
   const stations = useStations();
   const blocked = explanation.blocked;
   const held = [
@@ -290,7 +290,7 @@ function SimulationCard() {
   );
 }
 
-function SimulationSummary({ report }: { report: SimulationReport }) {
+function SimulationSummary({ report }: Readonly<{ report: SimulationReport }>) {
   const simulation = report.simulation;
   const [shown, setShown] = useState(100);
   const names = new Map(report.tracks.map((track) => [track.id, track]));

@@ -26,7 +26,7 @@ export function TrackSearch({
   playableOnly = true,
   categoryId,
   limit = 8,
-}: {
+}: Readonly<{
   /** Buttons for each result. */
   actions: (track: TrackSummary) => ReactNode;
   placeholder?: string;
@@ -34,7 +34,7 @@ export function TrackSearch({
   /** Only the tracks of this category, by title until a search. */
   categoryId?: number | undefined;
   limit?: number;
-}) {
+}>) {
   const [text, setText] = useState("");
   const q = useDebounced(text.trim());
   const results = useQuery({

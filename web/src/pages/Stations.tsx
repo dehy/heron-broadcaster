@@ -112,11 +112,11 @@ function StationDialog({
   station,
   first,
   onClose,
-}: {
+}: Readonly<{
   station: StationInfo | null;
   first: boolean;
   onClose: () => void;
-}) {
+}>) {
   const [draft, setDraft] = useState<Draft>({
     name: station?.name ?? "",
     code: station?.code ?? "",
@@ -207,7 +207,7 @@ function StationDialog({
 }
 
 /** A station's engine variable, and whether heron-api has it. */
-function EngineVariable({ station }: { station: StationInfo }) {
+function EngineVariable({ station }: Readonly<{ station: StationInfo }>) {
   return (
     <span>
       <code className="mono">{station.engine_variable}</code>{" "}

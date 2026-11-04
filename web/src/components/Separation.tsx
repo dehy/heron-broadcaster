@@ -23,13 +23,13 @@ export function SeparationEditor({
   inherited,
   onChange,
   disabled,
-}: {
+}: Readonly<{
   value: SeparationOverrides;
   /** What applies where this does not override. */
   inherited: Windows | undefined;
   onChange: (value: SeparationOverrides) => void;
   disabled?: boolean;
-}) {
+}>) {
   return (
     <div className="stack">
       {WINDOW_FIELDS.map(([key]) => {

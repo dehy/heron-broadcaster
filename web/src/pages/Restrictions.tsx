@@ -197,12 +197,12 @@ export function RestrictionDialog({
   restriction,
   target: fixedTarget,
   onClose,
-}: {
+}: Readonly<{
   restriction: RestrictionView | null;
   /** For a new restriction on a known target. */
   target?: { target: Target; name: string };
   onClose: () => void;
-}) {
+}>) {
   const categories = useCategories();
   const firstCategory = categories.data?.[0]?.id ?? 0;
   const [target, setTarget] = useState<Target | null>(restriction?.target ?? fixedTarget?.target ?? null);
@@ -372,7 +372,7 @@ export function RestrictionDialog({
   );
 }
 
-function RuleFields({ rule, onChange }: { rule: Rule; onChange: (rule: Rule) => void }) {
+function RuleFields({ rule, onChange }: Readonly<{ rule: Rule; onChange: (rule: Rule) => void }>) {
   const categories = useCategories();
   const mode =
     rule.kind === "not_after" ? null : (

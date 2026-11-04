@@ -48,7 +48,7 @@ interface Pick {
   name: string;
 }
 
-function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
+function PlayoutForm({ saved }: Readonly<{ saved: PlayoutSettings }>) {
   const isAdmin = useCan("admin");
   const [draft, setDraft] = useState(saved);
   useEffect(() => setDraft(saved), [saved]);
@@ -259,7 +259,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
 }
 
 /** The transition between two tracks with the settings being edited. */
-function Preview({ settings }: { settings: PlayoutSettings }) {
+function Preview({ settings }: Readonly<{ settings: PlayoutSettings }>) {
   const player = useLive((live) => live.player);
   const [outgoing, setOutgoing] = useState<Pick | null>(null);
   const [incoming, setIncoming] = useState<Pick | null>(null);

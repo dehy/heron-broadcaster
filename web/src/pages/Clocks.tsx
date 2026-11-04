@@ -160,7 +160,7 @@ interface Draft extends ClockSlot {
   key: number;
 }
 
-export function ClockEditor({ id }: { id: number | null }) {
+export function ClockEditor({ id }: Readonly<{ id: number | null }>) {
   const clock = useQuery({
     queryKey: ["clocks", id],
     queryFn: () => unwrap(api.GET("/api/v1/stations/{station_id}/clocks/{id}", { params: { path: here({ id: id ?? 0 }) } })),
@@ -175,7 +175,7 @@ export function ClockEditor({ id }: { id: number | null }) {
   return <Editor key={id ?? "new"} clock={clock.data ?? null} />;
 }
 
-function Editor({ clock }: { clock: ClockView | null }) {
+function Editor({ clock }: Readonly<{ clock: ClockView | null }>) {
   const canEdit = useCan("operator");
   const categories = useStationCategories();
   const rotation = useQuery({
@@ -417,7 +417,7 @@ function SlotRow({
   onChange,
   onSeparation,
   onRemove,
-}: {
+}: Readonly<{
   slot: Draft;
   index: number;
   categories: Category[];
@@ -426,7 +426,7 @@ function SlotRow({
   onChange: (changes: Partial<ClockSlot>) => void;
   onSeparation: () => void;
   onRemove: () => void;
-}) {
+}>) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: slot.key,
     disabled: !canEdit,
@@ -551,14 +551,14 @@ function HourCard({
   slots,
   looping,
   onRulesOff,
-}: {
+}: Readonly<{
   preview: ClockPreview | undefined;
   categories: Map<number, Category>;
   slots: ClockSlot[];
   looping: boolean;
   /** Turns enforce rules off on the slots running short; unset for viewers. */
   onRulesOff: (() => void) | undefined;
-}) {
+}>) {
   const short = preview?.slots.filter((slot) => slot.short) ?? [];
   // Two slots in a row calling a type that never plays twice in a row: the
   // second is passed over (the last slot is followed by the first).
@@ -667,7 +667,7 @@ function HourCard({
   );
 }
 
-function SimulateCard({ clockId, dirty }: { clockId: number; dirty: boolean }) {
+function SimulateCard({ clockId, dirty }: Readonly<{ clockId: number; dirty: boolean }>) {
   const canSimulate = useCan("operator");
   const [report, setReport] = useState<SimulationReport | null>(null);
   const simulate = useAction(

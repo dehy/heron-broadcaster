@@ -15,7 +15,7 @@ export interface MenuItem {
   danger?: boolean;
 }
 
-export function Menu({ items, label = t("ui.moreActions") }: { items: MenuItem[]; label?: string }) {
+export function Menu({ items, label = t("ui.moreActions") }: Readonly<{ items: MenuItem[]; label?: string }>) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);

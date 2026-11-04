@@ -222,7 +222,7 @@ function storedFxTab(): number | null {
  * power intros, voice tracks) first, the last one used open, then the
  * whole library.
  */
-function FxPicker({ play, playing }: { play: (trackId: number) => void; playing: boolean }) {
+function FxPicker({ play, playing }: Readonly<{ play: (trackId: number) => void; playing: boolean }>) {
   // The FX categories of the station shown.
   const categories = useStationCategories();
   const [chosen, setChosen] = useState<number | "library" | null>(storedFxTab);
@@ -291,7 +291,7 @@ function Deck({
   cued,
   pendingJingle,
   categories,
-}: {
+}: Readonly<{
   deck: DeckState;
   paused: boolean;
   /** The next track, shown on the idle deck. */
@@ -300,7 +300,7 @@ function Deck({
   pendingJingle: QueueEntry | null;
   /** The track's categories. */
   categories: CategoryRef[] | undefined;
-}) {
+}>) {
   const positions = useLive((live) => live.positions);
   const now = useTicker(deck.on_air ? 10 : 2);
   const live = positionNow(positions, deck.deck, paused, now);
@@ -403,7 +403,7 @@ function Deck({
 }
 
 /** The jingle waiting for the intro of the track on air, and when it starts. */
-function FxCountdown({ jingle, deck, paused }: { jingle: QueueEntry; deck: DeckState; paused: boolean }) {
+function FxCountdown({ jingle, deck, paused }: Readonly<{ jingle: QueueEntry; deck: DeckState; paused: boolean }>) {
   const positions = useLive((live) => live.positions);
   const now = useTicker(10);
   const song = deck.entry?.track;
@@ -424,7 +424,7 @@ function FxCountdown({ jingle, deck, paused }: { jingle: QueueEntry; deck: DeckS
   );
 }
 
-function FxState({ deck }: { deck: DeckState }) {
+function FxState({ deck }: Readonly<{ deck: DeckState }>) {
   const positions = useLive((live) => live.positions);
   const now = useTicker(5);
   const live = positionNow(positions, "fx", false, now);
@@ -450,7 +450,7 @@ const OUTPUT_STATES: Record<string, { label: PlainKey; dot: string }> = {
   stopped: { label: "output.stopped", dot: "" },
 };
 
-export function OutputState({ status }: { status: OutputStatus | null | undefined }) {
+export function OutputState({ status }: Readonly<{ status: OutputStatus | null | undefined }>) {
   if (!status) {
     return <span className="badge">{t("output.notRunning")}</span>;
   }
@@ -464,7 +464,7 @@ export function OutputState({ status }: { status: OutputStatus | null | undefine
 }
 
 /** Opens the stream as listeners hear it. */
-export function ListenLink({ url }: { url: string }) {
+export function ListenLink({ url }: Readonly<{ url: string }>) {
   return (
     <a className="btn small" href={url} target="_blank" rel="noreferrer" title={url}>
       <Icon name="play" /> {t("output.listen")}
@@ -472,7 +472,7 @@ export function ListenLink({ url }: { url: string }) {
   );
 }
 
-function OutputsCard({ outputs }: { outputs: OutputStatus[] }) {
+function OutputsCard({ outputs }: Readonly<{ outputs: OutputStatus[] }>) {
   // The live state has no settings: the listen links come from the outputs.
   const configured = useQuery({ queryKey: ["outputs"], queryFn: () => unwrap(api.GET("/api/v1/stations/{station_id}/outputs", { params: { path: here() } })) });
   const listenUrl = (id: number) => configured.data?.find((output) => output.id === id)?.listen_url;

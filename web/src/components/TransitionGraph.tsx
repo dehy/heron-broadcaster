@@ -38,13 +38,13 @@ export function TransitionGraph({
   outgoingWave,
   incomingWave,
   playhead,
-}: {
+}: Readonly<{
   preview: TransitionPreview;
   outgoingWave?: WaveformData | null;
   incomingWave?: WaveformData | null;
   /** Where the preview player is, on the outgoing track's timeline. */
   playhead?: number | null;
-}) {
+}>) {
   const out = preview.outgoing;
   const into = preview.incoming;
   const { from, to } = transitionWindow(preview);

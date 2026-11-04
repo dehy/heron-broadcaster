@@ -774,7 +774,7 @@ function SettingsCard() {
 }
 
 /** What a restore did; everyone signs in again after it. */
-function ReportDialog({ report }: { report: RestoreReport }) {
+function ReportDialog({ report }: Readonly<{ report: RestoreReport }>) {
   const leftOut = Object.entries(report.left_out ?? {});
   const restored = Object.entries(report.restored ?? {}).filter(([, count]) => count > 0);
   return (

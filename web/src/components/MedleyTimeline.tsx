@@ -68,7 +68,7 @@ export function MedleyTimeline({
   onShift,
   onMove,
   onSeek,
-}: {
+}: Readonly<{
   parts: readonly TimelinePart[];
   recipe: Parameters<typeof layout>[1];
   /** The layout the medley's file was rendered with: drawn instead of laying the parts out again. */
@@ -81,7 +81,7 @@ export function MedleyTimeline({
   onMove?: ((index: number, move_ms: number) => void) | undefined;
   /** Plays from `at_ms` on the timeline. */
   onSeek?: ((at_ms: number) => void) | undefined;
-}) {
+}>) {
   const box = useRef<HTMLDivElement>(null);
   const drag = useRef<{ index: number; x: number; shift: number } | null>(null);
   // A press on the lanes: a click (seek) or, once it moves, a drag of a part.
@@ -245,7 +245,7 @@ const LEVEL_POINTS = 160;
  * and for the music the ducking under liners and the medley's fade-in and
  * fade-out.
  */
-function Level({ medley, index }: { medley: Layout; index: number }) {
+function Level({ medley, index }: Readonly<{ medley: Layout; index: number }>) {
   const part = medley.parts[index];
   if (!part) {
     return null;

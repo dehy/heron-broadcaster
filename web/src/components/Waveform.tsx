@@ -107,7 +107,7 @@ export function WaveformView({
   playheadMs,
   onSeek,
   view,
-}: {
+}: Readonly<{
   data: WaveformData | null;
   durationMs: number;
   markers: Marker[];
@@ -116,7 +116,7 @@ export function WaveformView({
   onSeek?: (ms: number) => void;
   /** The part shown, in ms. The whole track by default. */
   view?: [number, number];
-}) {
+}>) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [width, setWidth] = useState(0);
@@ -240,11 +240,11 @@ function MarkerLine({
   marker,
   left,
   msAt,
-}: {
+}: Readonly<{
   marker: Marker;
   left: string;
   msAt: (clientX: number) => number;
-}) {
+}>) {
   const dragging = useRef(false);
   const editable = marker.onDrag !== undefined;
   const down = (event: PointerEvent<HTMLButtonElement>) => {
