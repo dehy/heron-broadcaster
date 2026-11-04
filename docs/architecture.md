@@ -194,7 +194,7 @@ heron-broadcaster/
 | Lock-free ring buffers | `rtrb` |
 | Filters | `biquad` or hand-written biquads |
 | MP3 / Opus / Vorbis encoding | LAME (`mp3lame-encoder`, built from source and linked statically), libopus, libvorbis bindings |
-| AAC-LC encoding | FFmpeg's native `aac` encoder via libavcodec (no `--enable-nonfree`, e.g. `ffmpeg-next` bindings) |
+| AAC-LC encoding | FFmpeg's native `aac` encoder from the system's libavcodec (no `--enable-nonfree`), linked dynamically through `ffmpeg-next`, behind the optional `aac` feature |
 | HLS segmenting | Hand-written segmenter, or libavformat's `hls` muxer |
 | HTTP / WebSocket | `axum`, `tokio` |
 | OpenAPI | `utoipa`, `utoipa-axum` (generated from the handlers); `openapi-typescript` and `openapi-fetch` on the web side |
