@@ -7,7 +7,6 @@
 //!
 //! See `docs/outputs.md`.
 
-#[cfg(feature = "aac")]
 pub mod aac;
 pub mod connection;
 pub mod encoder;

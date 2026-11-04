@@ -1,24 +1,37 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! AAC-LC with FFmpeg's native `aac` encoder, from the system's libavcodec
-//! (linked dynamically, LGPL). Behind the `aac` feature: it needs FFmpeg's
-//! development libraries to build and libavcodec to run. fdk-aac is never
-//! used. See `docs/outputs.md#built-in-aac`.
+//! (linked dynamically, LGPL). The encoder itself is behind the `aac`
+//! feature: it needs FFmpeg's development libraries to build and libavcodec
+//! to run. fdk-aac is never used. See `docs/outputs.md#built-in-aac`.
+//!
+//! A profile is checked the same way with or without the feature, so that
+//! the API, which does not link libavcodec, accepts AAC profiles. Without
+//! it, the profile's encoder fails at run time with a clear reason, and the
+//! other profiles are not affected.
 //!
 //! libavcodec gives raw AAC frames; the stream is ADTS, so each frame gets
 //! its 7-byte header here.
 
+#[cfg(feature = "aac")]
 use ffmpeg::codec::Id;
+#[cfg(feature = "aac")]
 use ffmpeg::util::channel_layout::ChannelLayout;
+#[cfg(feature = "aac")]
 use ffmpeg::util::format::sample::{Sample, Type};
+#[cfg(feature = "aac")]
 use ffmpeg_next as ffmpeg;
 use heron_core::EncoderProfile;
+#[cfg(feature = "aac")]
 use heron_dsp::StreamResampler;
 
 use crate::ConfigError;
-use crate::encoder::{EncodeError, Encoder, INPUT_CHANNELS, INPUT_RATE, StreamInfo};
+use crate::encoder::{EncodeError, Encoder, StreamInfo};
+#[cfg(feature = "aac")]
+use crate::encoder::{INPUT_CHANNELS, INPUT_RATE};
 
 /// Samples per channel in one AAC-LC frame.
+#[cfg(feature = "aac")]
 const FRAME: usize = 1024;
 /// ADTS sampling frequency indexes (ISO 14496-3).
 const RATES: [u32; 13] = [
@@ -26,7 +39,100 @@ const RATES: [u32; 13] = [
     7_350,
 ];
 
+/// What a valid AAC-LC profile asks for.
+// Read by the encoder only: unused in a build without the `aac` feature.
+#[cfg_attr(not(feature = "aac"), allow(dead_code))]
+struct Settings {
+    channels: usize,
+    rate_index: u8,
+    kbps: u16,
+}
+
+fn settings(profile: &EncoderProfile) -> Result<Settings, ConfigError> {
+    let invalid = |reason: String| ConfigError::Profile {
+        profile: profile.name.clone(),
+        reason,
+    };
+    let empty = profile.options.is_null()
+        || profile
+            .options
+            .as_object()
+            .is_some_and(serde_json::Map::is_empty);
+    if !empty {
+        return Err(invalid("the AAC-LC encoder has no options".to_owned()));
+    }
+    let channels = match profile.channels {
+        1 => 1,
+        2 => 2,
+        other => return Err(invalid(format!("{other} channels"))),
+    };
+    let rate_index = RATES
+        .iter()
+        .position(|rate| *rate == profile.sample_rate)
+        .and_then(|index| u8::try_from(index).ok())
+        .ok_or_else(|| invalid(format!("AAC does not support {} Hz", profile.sample_rate)))?;
+    let kbps = profile
+        .bitrate_kbps
+        .ok_or_else(|| invalid("a bitrate".to_owned()))?;
+    if !(8..=512).contains(&kbps) {
+        return Err(invalid(format!("{kbps} kbps")));
+    }
+    Ok(Settings {
+        channels,
+        rate_index,
+        kbps,
+    })
+}
+
+fn stream_info(profile: &EncoderProfile, settings: &Settings) -> StreamInfo {
+    StreamInfo {
+        content_type: "audio/aac",
+        sample_rate: profile.sample_rate,
+        channels: profile.channels,
+        bitrate_kbps: Some(settings.kbps),
+    }
+}
+
+/// The AAC-LC encoder of `profile`: libavcodec's, or, in a build without
+/// the `aac` feature, one that fails with a clear reason.
+pub fn build(profile: &EncoderProfile) -> Result<Box<dyn Encoder>, ConfigError> {
+    #[cfg(feature = "aac")]
+    {
+        Ok(Box::new(AacEncoder::new(profile)?))
+    }
+    #[cfg(not(feature = "aac"))]
+    {
+        Ok(Box::new(Unavailable {
+            info: stream_info(profile, &settings(profile)?),
+        }))
+    }
+}
+
+/// Stands for the AAC-LC encoder in a build without the `aac` feature.
+#[cfg(not(feature = "aac"))]
+struct Unavailable {
+    info: StreamInfo,
+}
+
+#[cfg(not(feature = "aac"))]
+impl Encoder for Unavailable {
+    fn info(&self) -> &StreamInfo {
+        &self.info
+    }
+
+    fn encode(&mut self, _pcm: &[f32], _out: &mut Vec<u8>) -> Result<(), EncodeError> {
+        Err(EncodeError::Aac(
+            "this Heron was built without AAC-LC (the `aac` feature of heron-outputs)".to_owned(),
+        ))
+    }
+
+    fn flush(&mut self, _out: &mut Vec<u8>) -> Result<(), EncodeError> {
+        Ok(())
+    }
+}
+
 /// AAC-LC, CBR.
+#[cfg(feature = "aac")]
 pub struct AacEncoder {
     info: StreamInfo,
     encoder: ffmpeg::codec::encoder::Audio,
@@ -40,36 +146,15 @@ pub struct AacEncoder {
     sent: i64,
 }
 
+#[cfg(feature = "aac")]
 impl AacEncoder {
     pub fn new(profile: &EncoderProfile) -> Result<Self, ConfigError> {
         let invalid = |reason: String| ConfigError::Profile {
             profile: profile.name.clone(),
             reason,
         };
-        let empty = profile.options.is_null()
-            || profile
-                .options
-                .as_object()
-                .is_some_and(serde_json::Map::is_empty);
-        if !empty {
-            return Err(invalid("the AAC-LC encoder has no options".to_owned()));
-        }
-        let channels = match profile.channels {
-            1 => 1,
-            2 => 2,
-            other => return Err(invalid(format!("{other} channels"))),
-        };
-        let rate_index = RATES
-            .iter()
-            .position(|rate| *rate == profile.sample_rate)
-            .and_then(|index| u8::try_from(index).ok())
-            .ok_or_else(|| invalid(format!("AAC does not support {} Hz", profile.sample_rate)))?;
-        let kbps = profile
-            .bitrate_kbps
-            .ok_or_else(|| invalid("a bitrate".to_owned()))?;
-        if !(8..=512).contains(&kbps) {
-            return Err(invalid(format!("{kbps} kbps")));
-        }
+        let settings = settings(profile)?;
+        let (channels, kbps) = (settings.channels, settings.kbps);
 
         ffmpeg::init().map_err(|error| invalid(format!("cannot start libavcodec: {error}")))?;
         let codec = ffmpeg::encoder::find(Id::AAC)
@@ -92,18 +177,13 @@ impl AacEncoder {
         let resampler = StreamResampler::new(INPUT_RATE, profile.sample_rate, INPUT_CHANNELS)
             .map_err(|error| invalid(error.to_string()))?;
         Ok(Self {
-            info: StreamInfo {
-                content_type: "audio/aac",
-                sample_rate: profile.sample_rate,
-                channels: profile.channels,
-                bitrate_kbps: Some(kbps),
-            },
+            info: stream_info(profile, &settings),
             encoder,
             resampler,
             resampled: Vec::new(),
             pending: Vec::new(),
-            channels,
-            rate_index,
+            channels: settings.channels,
+            rate_index: settings.rate_index,
             sent: 0,
         })
     }
@@ -160,6 +240,7 @@ impl AacEncoder {
     }
 }
 
+#[cfg(feature = "aac")]
 impl Encoder for AacEncoder {
     fn info(&self) -> &StreamInfo {
         &self.info
@@ -202,6 +283,7 @@ impl Encoder for AacEncoder {
     }
 }
 
+#[cfg(feature = "aac")]
 fn layout(channels: usize) -> ChannelLayout {
     if channels == 1 {
         ChannelLayout::MONO
@@ -210,6 +292,7 @@ fn layout(channels: usize) -> ChannelLayout {
     }
 }
 
+#[cfg(feature = "aac")]
 /// The ADTS header of one AAC-LC frame of `payload` bytes (no CRC).
 fn adts_header(payload: usize, rate_index: u8, channels: usize) -> [u8; 7] {
     let length = payload + 7;
@@ -226,6 +309,7 @@ fn adts_header(payload: usize, rate_index: u8, channels: usize) -> [u8; 7] {
 }
 
 #[cfg(test)]
+#[cfg(feature = "aac")]
 mod tests {
     use std::io::Cursor;
 
@@ -338,5 +422,32 @@ mod tests {
         let mut bad = profile(48_000, 2);
         bad.bitrate_kbps = None;
         assert!(AacEncoder::new(&bad).is_err(), "bitrate");
+    }
+}
+
+#[cfg(test)]
+#[cfg(not(feature = "aac"))]
+mod unavailable_tests {
+    use heron_core::EncoderKind;
+
+    use super::*;
+
+    #[test]
+    fn a_build_without_aac_accepts_the_profile_and_fails_when_encoding() {
+        let mut profile = EncoderProfile {
+            id: 1,
+            name: "AAC 96k".to_owned(),
+            encoder: EncoderKind::Aac,
+            bitrate_kbps: Some(96),
+            sample_rate: 48_000,
+            channels: 2,
+            options: serde_json::Value::Null,
+        };
+        let mut encoder = build(&profile).unwrap();
+        assert_eq!(encoder.info().content_type, "audio/aac");
+        let error = encoder.encode(&[0.0; 960], &mut Vec::new()).unwrap_err();
+        assert!(error.to_string().contains("without AAC-LC"), "{error}");
+        profile.sample_rate = 47_000;
+        assert!(build(&profile).is_err(), "still checked");
     }
 }

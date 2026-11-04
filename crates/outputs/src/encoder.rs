@@ -52,14 +52,7 @@ pub trait Encoder: Send {
 pub fn build(profile: &EncoderProfile) -> Result<Box<dyn Encoder>, ConfigError> {
     match profile.encoder {
         EncoderKind::Mp3 => Ok(Box::new(Mp3Encoder::new(profile)?)),
-        #[cfg(feature = "aac")]
-        EncoderKind::Aac => Ok(Box::new(crate::aac::AacEncoder::new(profile)?)),
-        #[cfg(not(feature = "aac"))]
-        EncoderKind::Aac => Err(ConfigError::Profile {
-            profile: profile.name.clone(),
-            reason: "this Heron was built without AAC-LC (the `aac` feature of heron-outputs)"
-                .to_owned(),
-        }),
+        EncoderKind::Aac => crate::aac::build(profile),
         EncoderKind::ExternalFfmpeg => {
             Ok(Box::new(crate::external::ExternalEncoder::new(profile)?))
         }
