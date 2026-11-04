@@ -94,7 +94,7 @@ impl Default for BackupSettings {
 }
 
 impl BackupSettings {
-    pub const SETTINGS_NAME: &'static str = "backups";
+    pub const SETTINGS_NAME: &str = "backups";
 
     fn at(&self) -> Option<(i8, i8)> {
         let (hour, minute) = self.time.split_once(':')?;
@@ -310,7 +310,7 @@ fn write_atomically(
 ) -> std::io::Result<()> {
     let name = path
         .file_name()
-        .and_then(|name| name.to_str())
+        .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("backup");
     let temporary = path.with_file_name(format!(".{name}.tmp"));
     let result = (|| {
@@ -768,7 +768,10 @@ impl Backups {
                     whole = false;
                     tracing::error!(backup = %name, %error, "the database dump failed");
                     let failed = self.dir.join(failed_file(&name));
-                    let _ = write_atomically(&failed, |file| file.write_all(error.as_bytes()));
+                    let _ = tokio::task::spawn_blocking(move || {
+                        write_atomically(&failed, |file| file.write_all(error.as_bytes()))
+                    })
+                    .await;
                 }
             }
         }

@@ -997,9 +997,10 @@ pub async fn recover(pool: &MySqlPool, roots: &Roots) -> Result<StagingRecovery,
     for (id, group, staged, original) in moves {
         let to = LibraryPath::from_stored(staged).resolve(&roots.staging);
         let from = LibraryPath::from_stored(original).resolve(&roots.incoming);
-        let _ = std::fs::remove_file(
+        let _ = tokio::fs::remove_file(
             LibraryPath::from_stored(format!("{group}/.heron-{id}")).resolve(&roots.staging),
-        );
+        )
+        .await;
         if to.is_file() {
             // A copy is renamed into place only once verified: the original
             // can go, unless it changed meanwhile (then both stay).
@@ -1010,7 +1011,7 @@ pub async fn recover(pool: &MySqlPool, roots: &Roots) -> Result<StagingRecovery,
                         (Ok(a), Ok(b)) if a == b
                     ))
             {
-                let _ = std::fs::remove_file(&from);
+                let _ = tokio::fs::remove_file(&from).await;
             }
             sqlx::query("UPDATE staged_files SET status = 'identifying' WHERE id = ?")
                 .bind(id)
@@ -1107,7 +1108,7 @@ pub async fn cleanup(pool: &MySqlPool, roots: &Roots) -> Result<(), sqlx::Error>
             .staging
             .join(group.to_string())
             .join(heron_core::library::upload_part_name(id));
-        let _ = std::fs::remove_file(part);
+        let _ = tokio::fs::remove_file(part).await;
         let given_up = sqlx::query(
             "UPDATE staged_files SET status = 'discarded', error = 'upload abandoned'
              WHERE id = ? AND status = 'receiving'",

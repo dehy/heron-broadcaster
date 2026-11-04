@@ -212,7 +212,8 @@ async fn execute(args: Args, library_dir: &Path) -> anyhow::Result<()> {
             );
         }
         CtlCommand::SetOutputs { file } => {
-            let outputs_json = std::fs::read_to_string(&file)
+            let outputs_json = tokio::fs::read_to_string(&file)
+                .await
                 .with_context(|| format!("cannot read {}", file.display()))?;
             client
                 .set_outputs(pb::SetOutputsRequest { outputs_json })
@@ -220,7 +221,8 @@ async fn execute(args: Args, library_dir: &Path) -> anyhow::Result<()> {
             println!("outputs applied");
         }
         CtlCommand::SetSettings { file } => {
-            let settings_json = std::fs::read_to_string(&file)
+            let settings_json = tokio::fs::read_to_string(&file)
+                .await
                 .with_context(|| format!("cannot read {}", file.display()))?;
             client
                 .set_playout_settings(pb::SetPlayoutSettingsRequest { settings_json })
@@ -435,7 +437,7 @@ fn list_audio(dir: &Path, files: &mut Vec<PathBuf>) {
             list_audio(&path, files);
         } else if path
             .extension()
-            .and_then(|extension| extension.to_str())
+            .and_then(std::ffi::OsStr::to_str)
             .is_some_and(|extension| AUDIO_EXTENSIONS.contains(&extension.to_lowercase().as_str()))
         {
             files.push(path);

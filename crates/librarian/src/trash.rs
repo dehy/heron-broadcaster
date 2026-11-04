@@ -417,9 +417,11 @@ pub async fn purge(
             report.tracks += 1;
             journal::crash_point("purged");
             if in_trash(path) {
-                match std::fs::remove_file(
+                match tokio::fs::remove_file(
                     LibraryPath::from_stored(path.clone()).resolve(&roots.library),
-                ) {
+                )
+                .await
+                {
                     Ok(()) => report.files += 1,
                     Err(error) if error.kind() == ErrorKind::NotFound => {}
                     Err(error) => tracing::warn!(path, %error, "cannot remove from the trash"),

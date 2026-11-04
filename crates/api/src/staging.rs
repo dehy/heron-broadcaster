@@ -542,7 +542,8 @@ async fn create_upload(
         )));
     }
     let group_dir = state.staging.join(upload.group_id.to_string());
-    std::fs::create_dir_all(&group_dir)
+    tokio::fs::create_dir_all(&group_dir)
+        .await
         .map_err(|error| ApiError::Internal(format!("cannot write to the buffer zone: {error}")))?;
     // Bytes still to come for the uploads in progress count as used.
     let pending: Option<i64> = sqlx::query_scalar(
@@ -576,10 +577,11 @@ async fn create_upload(
     .await?
     .last_insert_id();
     let part = group_dir.join(upload_part_name(id));
-    std::fs::OpenOptions::new()
+    tokio::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&part)
+        .await
         .map_err(|error| {
             ApiError::Internal(format!("cannot create {}: {error}", part.display()))
         })?;
@@ -608,7 +610,8 @@ async fn free_staged_path(state: &AppState, group_id: u64, name: &str) -> ApiRes
             layout::with_suffix(&desired, suffix)
         };
         let on_disk = LibraryPath::from_stored(candidate.clone()).resolve(&state.staging);
-        if !taken.contains(&candidate.to_lowercase()) && std::fs::symlink_metadata(on_disk).is_err()
+        if !taken.contains(&candidate.to_lowercase())
+            && tokio::fs::symlink_metadata(on_disk).await.is_err()
         {
             return Ok(candidate);
         }
@@ -762,7 +765,8 @@ async fn complete(state: &AppState, id: u64) -> ApiResult<()> {
     for suffix in 2.. {
         let target = LibraryPath::from_stored(candidate.clone()).resolve(&state.staging);
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)
+            tokio::fs::create_dir_all(parent)
+                .await
                 .map_err(|error| ApiError::Internal(error.to_string()))?;
         }
         match rename_no_replace(&part, &target) {
@@ -1262,7 +1266,7 @@ async fn discard_files(
                 .join(group_id.to_string())
                 .join(upload_part_name(id)),
         ] {
-            match std::fs::remove_file(&path) {
+            match tokio::fs::remove_file(&path).await {
                 Ok(()) => {
                     if let Some(parent) = path.parent() {
                         remove_empty_dirs(parent, &state.staging);
