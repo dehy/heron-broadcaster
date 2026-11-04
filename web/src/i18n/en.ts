@@ -35,7 +35,7 @@ const en = {
   "app.configRefused": "The engine refused the station's configuration: {error}. {link}",
   "app.checkOutputs": "Check the outputs",
   "app.versionMismatch":
-    "The web interface ({web}) and the API ({api}) are not from the same version: some pages may fail. Pull both images and start them again (docker compose pull, then docker compose up -d).",
+    "The web interface ({web}) and the API ({api}) are not from the same version: some pages may fail. If the application was just updated, reload the page (Ctrl+Shift+R) to get the new web interface. Otherwise, pull both images and start them again (docker compose pull, then docker compose up -d).",
   "app.backupFolder": "Backups cannot be written ({error}): the backup folder is not the API's user's. On the host, give it to that user with {command} on HERON_BACKUP_FOLDER (./data/backups by default). {link}",
   "app.backupFolderError": "Backups cannot be written in the backup folder: {error}. {link}",
   "app.backupsNotEncrypted": "Backups are not encrypted: their copies hold every password of the station. {link}",

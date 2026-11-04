@@ -37,7 +37,7 @@ const de = {
   "app.configRefused": "Die Engine hat die Konfiguration des Senders abgelehnt: {error}. {link}",
   "app.checkOutputs": "Ausgänge prüfen",
   "app.versionMismatch":
-    "Die Weboberfläche ({web}) und die API ({api}) haben nicht dieselbe Version: Einige Seiten funktionieren eventuell nicht. Laden Sie beide Images neu und starten Sie sie erneut (docker compose pull, dann docker compose up -d).",
+    "Die Weboberfläche ({web}) und die API ({api}) haben nicht dieselbe Version: Einige Seiten funktionieren eventuell nicht. Wurde die Anwendung gerade aktualisiert, laden Sie die Seite neu (Strg+Umschalt+R), um die neue Weboberfläche zu erhalten. Andernfalls laden Sie beide Images neu und starten Sie sie erneut (docker compose pull, dann docker compose up -d).",
   "app.backupFolder": "Backups können nicht geschrieben werden ({error}): Der Backup-Ordner gehört nicht dem Benutzer der API. Übergeben Sie ihn auf dem Host diesem Benutzer mit {command} auf HERON_BACKUP_FOLDER (standardmäßig ./data/backups). {link}",
   "app.backupFolderError": "Backups können nicht in den Backup-Ordner geschrieben werden: {error}. {link}",
   "app.backupsNotEncrypted": "Backups sind nicht verschlüsselt: Ihre Kopien enthalten alle Passwörter des Senders. {link}",
