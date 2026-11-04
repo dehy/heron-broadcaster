@@ -706,10 +706,10 @@ function SimulateCard({ clockId, dirty }: Readonly<{ clockId: number; dirty: boo
             <Banner kind="bad">{t("clocks.rulesBroken", { count: report.simulation.violations.length })}</Banner>
           )}
           <ol className="list compact">
-            {report.simulation.picks.map((pick, index) => {
+            {report.simulation.picks.map((pick) => {
               const track = names.get(pick.track_id);
               return (
-                <li key={index} className="row" style={{ flexWrap: "nowrap" }}>
+                <li key={`${pick.start_unix_ms}-${pick.track_id}`} className="row" style={{ flexWrap: "nowrap" }}>
                   <span className="num muted small">+{duration(pick.start_unix_ms - start)}</span>
                   <span className="ellipsis" style={{ flex: 1 }}>
                     <Link to={`/library/${pick.track_id}`}>

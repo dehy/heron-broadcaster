@@ -231,7 +231,7 @@ function PlayoutForm({ saved }: Readonly<{ saved: PlayoutSettings }>) {
                 disabled={disabled}
                 onChange={(event) => setWatchdog({ enabled: event.target.checked })}
               />
-              Skip tracks that stay silent
+              <span>Skip tracks that stay silent</span>
             </label>
             <div className="form-grid">
               <Field label="After" hint="Silence is below -50 dBFS">

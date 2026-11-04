@@ -1595,10 +1595,6 @@ ul.steps .bar {
 }
 
 /* A drop-down panel (the library's columns). */
-.menu {
-  position: relative;
-}
-
 .menu > summary {
   list-style: none;
   cursor: pointer;
@@ -2150,6 +2146,8 @@ ul.steps .bar {
 .medley-timeline .lanes {
   position: relative;
   height: 7.8rem;
+  user-select: none;
+  touch-action: pan-y;
 }
 .medley-timeline .block {
   position: absolute;
@@ -2242,10 +2240,6 @@ ul.steps .bar {
   border-left: 2px solid var(--on-air);
   pointer-events: none;
   z-index: 2;
-}
-.medley-timeline .lanes {
-  user-select: none;
-  touch-action: pan-y;
 }
 .medley-player {
   display: flex;
