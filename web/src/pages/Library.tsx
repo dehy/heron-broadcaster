@@ -109,6 +109,16 @@ const COLUMNS: { value: Column; label: PlainKey }[] = [
 const DEFAULT_COLUMNS: Column[] = ["album", "length", "last_played", "plays", "labels"];
 const COLUMNS_KEY = "heron.library.columns";
 
+function previewTitle(unplayable: boolean, previewing: boolean): string {
+  if (unplayable) return t("library.previewFailed");
+  return previewing ? t("library.stopPreview") : t("library.preview");
+}
+
+function previewIcon(unplayable: boolean, previewing: boolean): "warn" | "stop" | "play" {
+  if (unplayable) return "warn";
+  return previewing ? "stop" : "play";
+}
+
 function storedColumns(): Column[] {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(COLUMNS_KEY) ?? "null");
@@ -948,12 +958,12 @@ function Row({
           <button
             type="button"
             className={unplayable ? "btn ghost small icon warn" : "btn ghost small icon"}
-            title={unplayable ? t("library.previewFailed") : previewing ? t("library.stopPreview") : t("library.preview")}
+            title={previewTitle(unplayable, previewing)}
             aria-label={t(previewing ? "library.stopPreviewNamed" : "library.previewNamed", { name: track.title ?? file })}
             aria-pressed={previewing}
             onClick={() => preview.toggle(track)}
           >
-            <Icon name={unplayable ? "warn" : previewing ? "stop" : "play"} />
+            <Icon name={previewIcon(unplayable, previewing)} />
           </button>
         )}
       </td>

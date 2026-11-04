@@ -121,7 +121,7 @@ export function Import() {
   const typeNamed = (name: string) =>
     types.data?.find((categoryType) => categoryType.name.toLowerCase() === name)?.id ?? null;
   const typeOf = (choice: CategoryChoice, isJingle: boolean) =>
-    choice.type_id !== undefined ? choice.type_id : typeNamed(isJingle ? "jingle" : "song");
+    choice.type_id ?? typeNamed(isJingle ? "jingle" : "song");
 
   const history = useQuery({
     queryKey: ["imports"],
@@ -531,11 +531,9 @@ export function Import() {
       )}
 
       <Card title={t("import.historyTitle")}>
-        {history.isPending ? (
-          <Loading />
-        ) : !history.data?.length ? (
-          <Empty>{t("import.noHistory")}</Empty>
-        ) : (
+        {history.isPending && <Loading />}
+        {!history.isPending && !history.data?.length && <Empty>{t("import.noHistory")}</Empty>}
+        {!history.isPending && !!history.data?.length && (
           <div className="table-wrap">
             <table className="table">
               <thead>

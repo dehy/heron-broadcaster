@@ -59,6 +59,9 @@ import { useCategoryTypes } from "./CategoryTypes";
 
 const HOUR_MS = 3_600_000;
 
+const separationLabel = (canEdit: boolean) =>
+  canEdit ? t("clocks.overrideSeparation") : t("categories.separation");
+
 export function useCategories() {
   return useQuery({
     queryKey: ["categories"],
@@ -514,7 +517,7 @@ function SlotRow({
             </>
           )}
           <button type="button" className="link-button" onClick={onSeparation}>
-            {overrides ? t("clocks.separationValue", { windows: overrides }) : canEdit ? t("clocks.overrideSeparation") : t("categories.separation")}
+            {overrides ? t("clocks.separationValue", { windows: overrides }) : separationLabel(canEdit)}
           </button>
         </div>
       </div>
@@ -569,17 +572,15 @@ function HourCard({
   };
   const inARow = slots.filter((slot, index) => {
     const type = unrepeatable(slot);
-    const before = index > 0 ? slots[index - 1] : slots.length > 1 ? slots[slots.length - 1] : undefined;
+    const before = index > 0 ? slots[index - 1] : slots.length > 1 ? slots.at(-1) : undefined;
     return type !== null && unrepeatable(before) === type;
   });
   const span = looping && preview ? Math.max(HOUR_MS, preview.duration_ms) : HOUR_MS;
   return (
     <Card title={looping ? t("clocks.theLoop") : t("clocks.theHour")}>
-      {!preview ? (
-        <Loading />
-      ) : slots.length === 0 ? (
-        <Empty>{t("clocks.addSlotsToSee")}</Empty>
-      ) : (
+      {!preview && <Loading />}
+      {preview && slots.length === 0 && <Empty>{t("clocks.addSlotsToSee")}</Empty>}
+      {preview && slots.length > 0 && (
         <div className="stack">
           <div className="hour-bar" role="img" aria-label={looping ? t("clocks.barLoop") : t("clocks.barHour")}>
             {preview.slots.map((slot, index) => {

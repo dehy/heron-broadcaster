@@ -60,6 +60,23 @@ const FLAGS: Record<Schemas["StagedFlag"], { label: PlainKey; help: PlainKey }> 
   unsupported_format: { label: "buffer.flag.unsupported", help: "buffer.flag.unsupportedHelp" },
 };
 
+function UploadProgress({ upload }: Readonly<{ upload: Upload }>) {
+  if (upload.state === "sending" || upload.state === "waiting") {
+    return (
+      <div className="progress" title={t("buffer.sentOf", { sent: bytes(upload.sent), size: bytes(upload.size) })}>
+        <div style={{ width: `${upload.size ? (100 * upload.sent) / upload.size : 0}%` }} />
+      </div>
+    );
+  }
+  if (upload.state === "done") return <span className="good">{t("buffer.sent")}</span>;
+  if (upload.state === "cancelled") return <span className="muted">{t("buffer.cancelled")}</span>;
+  return (
+    <span className="bad" title={upload.error}>
+      {t("buffer.uploadFailed")}
+    </span>
+  );
+}
+
 /** Files that can still be prepared: not yet imported, not being imported. */
 function isPreparable(file: StagedFile): boolean {
   return file.status === "receiving" || file.status === "identifying" || file.status === "ready";
@@ -259,19 +276,7 @@ function Uploads({ state }: Readonly<{ state: ReturnType<typeof useUploads> }>) 
                   {upload.name}
                 </td>
                 <td className="num small" style={{ width: "9rem" }}>
-                  {upload.state === "sending" || upload.state === "waiting" ? (
-                    <div className="progress" title={t("buffer.sentOf", { sent: bytes(upload.sent), size: bytes(upload.size) })}>
-                      <div style={{ width: `${upload.size ? (100 * upload.sent) / upload.size : 0}%` }} />
-                    </div>
-                  ) : upload.state === "done" ? (
-                    <span className="good">{t("buffer.sent")}</span>
-                  ) : upload.state === "cancelled" ? (
-                    <span className="muted">{t("buffer.cancelled")}</span>
-                  ) : (
-                    <span className="bad" title={upload.error}>
-                      {t("buffer.uploadFailed")}
-                    </span>
-                  )}
+                  <UploadProgress upload={upload} />
                 </td>
                 <td className="small bad">{upload.state === "failed" && upload.error}</td>
                 <td className="actions">

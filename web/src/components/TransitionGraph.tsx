@@ -13,6 +13,11 @@ const H = 200;
 const PAD = { top: 12, right: 12, bottom: 26, left: 40 };
 const STEPS = 240;
 
+function tickAnchor(index: number, count: number): "start" | "middle" | "end" {
+  if (index === 0) return "start";
+  return index === count - 1 ? "end" : "middle";
+}
+
 function peakAt(data: WaveformData | null | undefined, ms: number): number {
   if (!data || ms < 0) {
     return 0;
@@ -147,7 +152,7 @@ export function TransitionGraph({
             key={ms}
             x={x(ms)}
             y={H - 8}
-            textAnchor={index === 0 ? "start" : index === timeTicks.length - 1 ? "end" : "middle"}
+            textAnchor={tickAnchor(index, timeTicks.length)}
             fontSize="11"
             fill="var(--muted)"
           >

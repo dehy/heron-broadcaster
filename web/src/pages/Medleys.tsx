@@ -109,11 +109,9 @@ export function Medleys() {
                   </td>
                   <td className="num">{number(medley.parts.filter((part) => part.kind === "hook").length)}</td>
                   <td className="small muted">
-                    {medley.task_status === "failed"
-                      ? t("medleys.renderFailed")
-                      : medley.rendered_at_unix_ms
-                        ? ago(medley.rendered_at_unix_ms)
-                        : t("medleys.notRendered")}
+                    {medley.task_status === "failed" && t("medleys.renderFailed")}
+                    {medley.task_status !== "failed" &&
+                      (medley.rendered_at_unix_ms ? ago(medley.rendered_at_unix_ms) : t("medleys.notRendered"))}
                   </td>
                 </tr>
               ))}
@@ -819,12 +817,9 @@ function BuildCard({ medley, settings, canEdit }: Readonly<{ medley: Medley; set
   const setMove = (index: number, move_ms: number) =>
     setPlan((current) => (current ?? []).map((part, i) => (i === index ? { ...part, move_ms } : part)));
   const source = player.source;
-  const playhead =
-    source?.kind === "medley"
-      ? player.position_ms
-      : source?.kind === "part" && placed[source.index]
-        ? (placed[source.index]?.at_ms ?? 0) + player.position_ms - (placed[source.index]?.from_ms ?? 0)
-        : null;
+  const sourcePart = source?.kind === "part" ? placed[source.index] : undefined;
+  const partPlayhead = sourcePart ? (sourcePart.at_ms ?? 0) + player.position_ms - (sourcePart.from_ms ?? 0) : null;
+  const playhead = source?.kind === "medley" ? player.position_ms : partPlayhead;
   const medleySource = plan ? previewSource : renderedSource;
   const playingMedley = source?.kind === "medley" && medleySource !== null && source.url === medleySource.url;
   const move = (index: number, by: number) =>
@@ -947,11 +942,8 @@ function BuildCard({ medley, settings, canEdit }: Readonly<{ medley: Medley; set
               }}
             >
               <Icon name={playingMedley && player.playing ? "pause" : "play"} size={14} />{" "}
-              {playingMedley && player.playing
-                ? t("medleys.pause")
-                : plan
-                  ? t("medleys.listenVersion")
-                  : t("medleys.listenMedley")}
+              {playingMedley && player.playing && t("medleys.pause")}
+              {!(playingMedley && player.playing) && (plan ? t("medleys.listenVersion") : t("medleys.listenMedley"))}
             </button>
             {source && (
               <button type="button" className="btn small" onClick={() => player.stop()}>

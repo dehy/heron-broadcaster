@@ -49,6 +49,22 @@ const DECK_COLORS: Record<string, string> = {
   fx: "var(--fx)",
 };
 
+const SYNC_CLASS: Record<string, string> = { failed: "bad", synced: "good" };
+const syncClass = (sync: string | undefined) => (sync && SYNC_CLASS[sync]) || "muted";
+
+function syncLabel(sync: string | undefined): string {
+  switch (sync) {
+    case "synced":
+      return t("dashboard.inSync");
+    case "pending":
+      return t("dashboard.waitingEngine");
+    case "failed":
+      return t("dashboard.refused");
+    default:
+      return t("dashboard.unknown");
+  }
+}
+
 export function Dashboard() {
   const player = useLive((live) => live.player);
   const levels = useLive((live) => live.levels);
@@ -182,15 +198,15 @@ export function Dashboard() {
               )
             }
           >
-            {fx?.entry ? (
-              <FxState deck={fx} />
-            ) : player?.pending_jingle && onAirDeck ? (
-              <FxCountdown jingle={player.pending_jingle} deck={onAirDeck} paused={player.paused} />
-            ) : (
-              <p className="muted small" style={{ margin: 0 }}>
-                {t("dashboard.fxHelp")}
-              </p>
-            )}
+            {fx?.entry && <FxState deck={fx} />}
+            {!fx?.entry &&
+              (player?.pending_jingle && onAirDeck ? (
+                <FxCountdown jingle={player.pending_jingle} deck={onAirDeck} paused={player.paused} />
+              ) : (
+                <p className="muted small" style={{ margin: 0 }}>
+                  {t("dashboard.fxHelp")}
+                </p>
+              ))}
           </Card>
 
           <OutputsCard outputs={player?.outputs ?? []} />
@@ -325,13 +341,13 @@ function Deck({
         <div className="row between" style={{ flexWrap: "nowrap" }}>
           <div className="row" style={{ flexWrap: "nowrap", minWidth: 0 }}>
             <span className="deck-label">{DECK_NAMES[deck.deck]}</span>
-            {deck.on_air ? (
-              <span className="on-air-pill">{t("app.onAirBadge")}</span>
-            ) : track ? (
-              <span className="badge accent">{t("dashboard.next")}</span>
-            ) : (
-              <span className="badge">{t("dashboard.empty")}</span>
-            )}
+            {deck.on_air && <span className="on-air-pill">{t("app.onAirBadge")}</span>}
+            {!deck.on_air &&
+              (track ? (
+                <span className="badge accent">{t("dashboard.next")}</span>
+              ) : (
+                <span className="badge">{t("dashboard.empty")}</span>
+              ))}
           </div>
           <div className="row" style={{ flexWrap: "nowrap" }}>
             {shaping && (
@@ -513,9 +529,10 @@ function OutputsCard({ outputs }: Readonly<{ outputs: OutputStatus[] }>) {
                 <div className="muted small">
                   {output.state === "connected" && output.connected_since_unix_ms
                     ? t("dashboard.outputSince", { time: clockTime(output.connected_since_unix_ms), sent: bytes(output.bytes_sent) })
-                    : output.error
-                      ? <span className="bad">{output.error}</span>
-                      : null}
+                    : null}
+                  {!(output.state === "connected" && output.connected_since_unix_ms) && output.error && (
+                    <span className="bad">{output.error}</span>
+                  )}
                   {listenersOf(output.id) !== undefined && listenersOf(output.id) !== null && (
                     <span> · {t("dashboard.listeners", { count: listenersOf(output.id) ?? 0 })}</span>
                   )}
@@ -546,15 +563,7 @@ function EngineCard() {
         <dt>{t("dashboard.runningSince")}</dt>
         <dd>{player ? ago(player.engine_started_at_unix_ms) : "–"}</dd>
         <dt>{t("dashboard.configuration")}</dt>
-        <dd className={sync === "failed" ? "bad" : sync === "synced" ? "good" : "muted"}>
-          {sync === "synced"
-            ? t("dashboard.inSync")
-            : sync === "pending"
-              ? t("dashboard.waitingEngine")
-              : sync === "failed"
-                ? t("dashboard.refused")
-                : t("dashboard.unknown")}
-        </dd>
+        <dd className={syncClass(sync)}>{syncLabel(sync)}</dd>
         <dt>{t("dashboard.underruns")}</dt>
         <dd className={player && player.underruns > 0 ? "warn num" : "num"}>
           {player ? number(player.underruns) : "–"}

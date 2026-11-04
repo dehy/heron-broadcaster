@@ -37,6 +37,7 @@ export function TrackSearch({
 }>) {
   const [text, setText] = useState("");
   const q = useDebounced(text.trim());
+  const defaultSort = categoryId ? ("title" as const) : ("last_played" as const);
   const results = useQuery({
     queryKey: ["tracks", "search", q, playableOnly, categoryId, limit],
     queryFn: ({ signal }) =>
@@ -47,7 +48,7 @@ export function TrackSearch({
               q,
               category_id: categoryId,
               filter: playableOnly ? ("playable" as const) : undefined,
-              sort: q ? undefined : categoryId ? ("title" as const) : ("last_played" as const),
+              sort: q ? undefined : defaultSort,
               limit,
             }),
           },

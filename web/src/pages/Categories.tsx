@@ -50,9 +50,10 @@ export function Categories() {
   const [sort, setSort] = useState<{ by: SortKey; descending: boolean }>({ by: "name", descending: false });
   const types = useCategoryTypes();
   const shown = sortCategories(
-    (categories.data ?? []).filter((category) =>
-      type === "all" ? true : type === "none" ? category.type_id == null : category.type_id === type,
-    ),
+    (categories.data ?? []).filter((category) => {
+      if (type === "all") return true;
+      return type === "none" ? category.type_id == null : category.type_id === type;
+    }),
     sort.by,
     sort.descending,
   );
@@ -60,7 +61,7 @@ export function Categories() {
     <th
       className={className}
       title={title}
-      aria-sort={sort.by === by ? (sort.descending ? "descending" : "ascending") : undefined}
+      aria-sort={sort.by === by ? ariaSort(sort.descending) : undefined}
     >
       <button
         type="button"
@@ -211,6 +212,8 @@ export function Categories() {
     </>
   );
 }
+
+const ariaSort = (descending: boolean) => (descending ? "descending" : "ascending");
 
 function CategoryDialog({ category, onClose }: Readonly<{ category: Category | null; onClose: () => void }>) {
   const [name, setName] = useState(category?.name ?? "");

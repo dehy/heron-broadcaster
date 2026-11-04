@@ -67,11 +67,9 @@ export function SeparationEditor({
               />
             ) : (
               <span className="muted small">
-                {fallback === undefined
-                  ? t("separation.inherited")
-                  : fallback === 0
-                    ? t("separation.offInherited")
-                    : t("separation.minutesInherited", { minutes: number(fallback) })}
+                {fallback === undefined && t("separation.inherited")}
+                {fallback === 0 && t("separation.offInherited")}
+                {fallback !== undefined && fallback !== 0 && t("separation.minutesInherited", { minutes: number(fallback) })}
               </span>
             )}
           </div>

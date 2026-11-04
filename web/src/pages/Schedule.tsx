@@ -52,7 +52,8 @@ function fromGrid(grid: Grid): ScheduledHour[] {
 
 /** The name shown for a schedule: the default one has none of its own. */
 function scheduleName(schedule: Pick<ScheduleSummary, "name" | "is_default"> | undefined): string {
-  return !schedule ? "?" : schedule.is_default ? t("schedules.default") : schedule.name;
+  if (!schedule) return "?";
+  return schedule.is_default ? t("schedules.default") : schedule.name;
 }
 
 function samePeriods(a: Period[], b: Period[]): boolean {

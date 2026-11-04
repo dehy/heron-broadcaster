@@ -172,17 +172,7 @@ export function Backups() {
                       )}
                     </td>
                     <td className="hide-narrow">
-                      {backup.database_size !== null && backup.database_size !== undefined ? (
-                        <a href={`/api/v1/backups/${encodeURIComponent(backup.name)}/database`} download>
-                          {bytes(backup.database_size)}
-                        </a>
-                      ) : backup.database_error ? (
-                        <span className="badge bad" title={backup.database_error}>
-                          {t("backups.databaseFailed")}
-                        </span>
-                      ) : (
-                        <span className="muted">–</span>
-                      )}
+                      <DatabaseCell backup={backup} />
                     </td>
                     <td className="hide-narrow">
                       <EncryptionBadge backup={backup} />
@@ -227,6 +217,24 @@ export function Backups() {
       {report && <ReportDialog report={report} />}
     </>
   );
+}
+
+function DatabaseCell({ backup }: Readonly<{ backup: BackupView }>) {
+  if (backup.database_size !== null && backup.database_size !== undefined) {
+    return (
+      <a href={`/api/v1/backups/${encodeURIComponent(backup.name)}/database`} download>
+        {bytes(backup.database_size)}
+      </a>
+    );
+  }
+  if (backup.database_error) {
+    return (
+      <span className="badge bad" title={backup.database_error}>
+        {t("backups.databaseFailed")}
+      </span>
+    );
+  }
+  return <span className="muted">–</span>;
 }
 
 function EncryptionBadge({ backup }: Readonly<{ backup: BackupView }>) {

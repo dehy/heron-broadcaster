@@ -220,12 +220,12 @@ export function CategoryDialog({ open, onClose, selection, files, tracks }: Targ
       );
     },
     {
-      success: (result) =>
-        "files" in result
-          ? t("buffer.prepared", { count: result.files })
-          : mode === "add"
-            ? t("selection.inCategory", { count: result.tracks })
-            : t("selection.outOfCategory", { count: result.tracks }),
+      success: (result) => {
+        if ("files" in result) return t("buffer.prepared", { count: result.files });
+        return mode === "add"
+          ? t("selection.inCategory", { count: result.tracks })
+          : t("selection.outOfCategory", { count: result.tracks });
+      },
       invalidate: files ? BUFFER : TRACKS,
       onSuccess: onClose,
     },
