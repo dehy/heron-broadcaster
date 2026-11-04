@@ -37,7 +37,7 @@ const es = {
   "app.configRefused": "El motor rechazó la configuración de la emisora: {error}. {link}",
   "app.checkOutputs": "Revisar las salidas",
   "app.versionMismatch":
-    "La interfaz web ({web}) y la API ({api}) no son de la misma versión: algunas páginas pueden fallar. Descargue ambas imágenes y vuelva a iniciarlas (docker compose pull y después docker compose up -d).",
+    "La interfaz web ({web}) y la API ({api}) no son de la misma versión: algunas páginas pueden fallar. Si la aplicación acaba de actualizarse, recargue la página (Ctrl+Mayús+R) para obtener la nueva interfaz web. En caso contrario, descargue ambas imágenes y vuelva a iniciarlas (docker compose pull y después docker compose up -d).",
   "app.backupFolder": "No se pueden escribir las copias de seguridad ({error}): la carpeta de copias de seguridad no pertenece al usuario de la API. En el servidor, asígnesela con {command} sobre HERON_BACKUP_FOLDER (./data/backups por defecto). {link}",
   "app.backupFolderError": "No se pueden escribir las copias de seguridad en la carpeta de copias de seguridad: {error}. {link}",
   "app.backupsNotEncrypted": "Las copias de seguridad no están cifradas: sus copias contienen todas las contraseñas de la emisora. {link}",

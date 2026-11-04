@@ -38,7 +38,7 @@ const fr = {
   "app.configRefused": "Le moteur a refusé la configuration de la station : {error}. {link}",
   "app.checkOutputs": "Vérifier les sorties",
   "app.versionMismatch":
-    "L'interface web ({web}) et l'API ({api}) ne sont pas de la même version : certaines pages peuvent échouer. Récupérez les deux images et redémarrez-les (docker compose pull, puis docker compose up -d).",
+    "L'interface web ({web}) et l'API ({api}) ne sont pas de la même version : certaines pages peuvent échouer. Si l'application vient d'être mise à jour, rechargez la page (Ctrl+Maj+R) pour obtenir la nouvelle interface web. Sinon, récupérez les deux images et redémarrez-les (docker compose pull, puis docker compose up -d).",
   "app.backupFolder": "Les sauvegardes ne peuvent pas être écrites ({error}) : le dossier des sauvegardes n'appartient pas à l'utilisateur de l'API. Sur la machine, donnez-le-lui avec {command} sur HERON_BACKUP_FOLDER (./data/backups par défaut). {link}",
   "app.backupFolderError": "Les sauvegardes ne peuvent pas être écrites dans le dossier des sauvegardes : {error}. {link}",
   "app.backupsNotEncrypted": "Les sauvegardes ne sont pas chiffrées : leurs copies contiennent tous les mots de passe de la station. {link}",
