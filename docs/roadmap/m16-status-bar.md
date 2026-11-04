@@ -9,7 +9,7 @@ While preparing the next hour in the Library or the Schedules, an operator canno
 ## Scope
 
 - **One line at the bottom of every page**, one character high, in the monospace font, whatever the page. It stays in view while the page scrolls.
-- **Both decks:** for each of A and B, the state (on air, cued, paused, empty) and the track with its elapsed time while it plays. An unreachable engine shows as such.
+- **Both decks:** for each of A and B, the state (playing, paused, empty), whether it is the one on air, and the track with its elapsed time. An unreachable engine shows as such.
 - **Listeners:** the total of the current station, from the same reading as the [Statistics](../statistics.md) page. A server that could not be read shows a gap, never zero.
 - **System load** (operators and admins only): the CPU and memory in use (%) and the load average over 1, 5 and 15 minutes, of the machine the API runs on. Pushed on the live WebSocket every few seconds, as a new `system` message sent to operators and admins only.
 - **Offline:** while the live connection is down, the bar says so and greys out.

@@ -30,6 +30,7 @@ export type EqSettings = Schemas["EqSettings"];
 export type DeckEq = Schemas["DeckEq"];
 export type EqPreset = Schemas["EqPreset"];
 export type AgcSettings = Schemas["AgcSettings"];
+export type SystemLoad = Schemas["SystemLoad"];
 export type AgcPresetSettings = Schemas["AgcPresetSettings"];
 export type AgcPreset = Schemas["AgcPreset"];
 export type AgcLevels = Schemas["AgcLevels"];

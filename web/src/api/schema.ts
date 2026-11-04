@@ -6003,7 +6003,10 @@ export interface components {
             settings: components["schemas"]["AgcSettings"];
             /** @enum {string} */
             type: "agc";
-        };
+        } | (components["schemas"]["SystemLoad"] & {
+            /** @enum {string} */
+            type: "system";
+        });
         LoginRequest: {
             password: string;
             username: string;
@@ -7773,6 +7776,26 @@ export interface components {
             checked_at_unix_ms?: number | null;
             error?: string | null;
             state: components["schemas"]["SyncState"];
+        };
+        /** @description What the status bar shows of the machine. */
+        SystemLoad: {
+            /**
+             * Format: int32
+             * @description Logical cores, to read the load average against.
+             */
+            cores: number;
+            /**
+             * Format: float
+             * @description CPU in use, 0 to 100, over all cores.
+             */
+            cpu_percent: number;
+            /** @description The load average over 1, 5 and 15 minutes. */
+            load_avg: number[];
+            /**
+             * Format: float
+             * @description Memory in use (not counting what the system can give back), 0 to 100.
+             */
+            mem_percent: number;
         };
         TagEdit: {
             /**

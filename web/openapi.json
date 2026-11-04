@@ -16827,6 +16827,29 @@
                 ]
               }
             }
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SystemLoad",
+                "description": "The machine's load. Only operators and admins receive it."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "system"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "The machine's load. Only operators and admins receive it."
           }
         ],
         "description": "A message on the live WebSocket."
@@ -20990,6 +21013,42 @@
           },
           "state": {
             "$ref": "#/components/schemas/SyncState"
+          }
+        }
+      },
+      "SystemLoad": {
+        "type": "object",
+        "description": "What the status bar shows of the machine.",
+        "required": [
+          "cpu_percent",
+          "mem_percent",
+          "load_avg",
+          "cores"
+        ],
+        "properties": {
+          "cores": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Logical cores, to read the load average against.",
+            "minimum": 0
+          },
+          "cpu_percent": {
+            "type": "number",
+            "format": "float",
+            "description": "CPU in use, 0 to 100, over all cores."
+          },
+          "load_avg": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "The load average over 1, 5 and 15 minutes."
+          },
+          "mem_percent": {
+            "type": "number",
+            "format": "float",
+            "description": "Memory in use (not counting what the system can give back), 0 to 100."
           }
         }
       },

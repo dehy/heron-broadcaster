@@ -40,6 +40,7 @@ mod settings;
 mod staging;
 mod stations;
 mod sync;
+mod system;
 mod tracks;
 mod users;
 mod webhooks;
@@ -255,6 +256,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     tasks.push(tokio::spawn(
         Arc::clone(&backups).run_daily(pool.clone(), Arc::clone(&stations)),
     ));
+    let (load, system) = tokio::sync::watch::channel(None);
+    tasks.push(tokio::spawn(system::run(load)));
 
     let health = DatabaseHealth(pool.clone());
     let state = AppState {
@@ -267,6 +270,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         webhooks,
         listeners,
         backups,
+        system,
     };
     let router = app::router(state).merge(heron_service::ops_router(SERVICE, metrics, health));
 

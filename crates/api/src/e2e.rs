@@ -154,6 +154,14 @@ impl Station {
         .unwrap();
         tasks.push(tokio::spawn(Arc::clone(&webhooks).send_loop()));
 
+        // A fixed reading, so a test can tell who receives it.
+        let (_, system) = tokio::sync::watch::channel(Some(crate::system::reading(
+            12.0,
+            1,
+            4,
+            [0.5, 0.4, 0.3],
+            2,
+        )));
         let state = AppState {
             pool: pool.clone(),
             health: DatabaseHealth(pool.clone()),
@@ -165,6 +173,7 @@ impl Station {
             // Driven by the tests, minute by minute.
             listeners: crate::listeners::Collector::new(pool.clone()).unwrap(),
             backups: crate::backups::Backups::new(backups.path().to_path_buf(), db.url()),
+            system,
         };
         let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = http.local_addr().unwrap();
@@ -521,6 +530,35 @@ async fn queue_manager_feeds_the_engine_and_records_history() {
     let first = next().await;
     assert_eq!(first["type"], "state");
     assert!(first["player"]["decks"].is_array());
+    // Operators and admins get the machine's load right after the state.
+    let system = next().await;
+    assert_eq!(system["type"], "system", "{system}");
+    assert_eq!(system["cpu_percent"], 12.0);
+    assert_eq!(system["mem_percent"], 25.0);
+    assert_eq!(system["cores"], 2);
+    assert_eq!(system["load_avg"].as_array().unwrap().len(), 3);
+
+    // Viewers never do.
+    let viewer = station.signed_in("viewer").await;
+    let url = format!("ws://{}/api/v1/live?levels=false", station.api);
+    let mut request = tungstenite::client::IntoClientRequest::into_client_request(url).unwrap();
+    request
+        .headers_mut()
+        .insert("cookie", viewer.cookie.as_deref().unwrap().parse().unwrap());
+    let (mut viewer_socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    // Positions keep coming, so listen for a fixed time.
+    let mut types = Vec::new();
+    let until = tokio::time::Instant::now() + Duration::from_millis(1500);
+    while let Ok(Some(Ok(message))) = tokio::time::timeout_at(until, viewer_socket.next()).await {
+        let message: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+        types.push(message["type"].as_str().unwrap().to_owned());
+    }
+    assert_eq!(
+        types.first().map(String::as_str),
+        Some("state"),
+        "{types:?}"
+    );
+    assert!(!types.iter().any(|kind| kind == "system"), "{types:?}");
 
     // Skip: the play ends as skipped in the history, the next one starts.
     let (status, _) = admin.request(Method::POST, "/player/skip", None).await;
