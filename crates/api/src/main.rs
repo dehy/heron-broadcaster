@@ -509,25 +509,33 @@ mod tests {
             assert!(tables.iter().any(|t| t == expected), "missing {expected}");
         }
 
-        // The default encoder profile (docs/outputs.md#default-profiles).
-        let (name, encoder, bitrate, rate, channels, mode): (String, String, u16, u32, u8, String) =
-            sqlx::query_as(
-                "SELECT name, CAST(encoder AS CHAR), bitrate_kbps, sample_rate, channels, \
-                 JSON_UNQUOTE(JSON_EXTRACT(options, '$.mode')) FROM encoder_profiles",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        // The default encoder profiles (docs/outputs.md#default-profiles).
+        let profiles: Vec<(String, String, u16, u32, u8, Option<String>)> = sqlx::query_as(
+            "SELECT name, CAST(encoder AS CHAR), bitrate_kbps, sample_rate, channels, \
+             JSON_UNQUOTE(JSON_EXTRACT(options, '$.mode')) FROM encoder_profiles ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let profiles: Vec<_> = profiles
+            .iter()
+            .map(|(name, encoder, bitrate, rate, channels, mode)| {
+                (
+                    name.as_str(),
+                    encoder.as_str(),
+                    *bitrate,
+                    *rate,
+                    *channels,
+                    mode.as_deref(),
+                )
+            })
+            .collect();
         assert_eq!(
-            (
-                name.as_str(),
-                encoder.as_str(),
-                bitrate,
-                rate,
-                channels,
-                mode.as_str()
-            ),
-            ("MP3 128k", "mp3", 128, 44_100, 2, "cbr")
+            profiles,
+            [
+                ("MP3 128k", "mp3", 128, 44_100, 2, Some("cbr")),
+                ("AAC 96k", "aac", 96, 48_000, 2, None),
+            ]
         );
 
         // Long paths stay unique through the generated hash column.

@@ -27,6 +27,8 @@ pub struct StreamInfo {
 pub enum EncodeError {
     #[error("MP3 encoding failed: {0}")]
     Mp3(String),
+    #[error("AAC encoding failed: {0}")]
+    Aac(String),
     #[error(transparent)]
     Resample(#[from] heron_dsp::resample::Error),
     /// The external FFmpeg encoder failed; it starts again after a delay.
@@ -50,13 +52,21 @@ pub trait Encoder: Send {
 pub fn build(profile: &EncoderProfile) -> Result<Box<dyn Encoder>, ConfigError> {
     match profile.encoder {
         EncoderKind::Mp3 => Ok(Box::new(Mp3Encoder::new(profile)?)),
+        #[cfg(feature = "aac")]
+        EncoderKind::Aac => Ok(Box::new(crate::aac::AacEncoder::new(profile)?)),
+        #[cfg(not(feature = "aac"))]
+        EncoderKind::Aac => Err(ConfigError::Profile {
+            profile: profile.name.clone(),
+            reason: "this Heron was built without AAC-LC (the `aac` feature of heron-outputs)"
+                .to_owned(),
+        }),
         EncoderKind::ExternalFfmpeg => {
             Ok(Box::new(crate::external::ExternalEncoder::new(profile)?))
         }
         kind => Err(ConfigError::Profile {
             profile: profile.name.clone(),
             reason: format!(
-                "the {kind:?} encoder arrives in M11; MP3 and the external FFmpeg encoder are available"
+                "the {kind:?} encoder arrives in M11; MP3, AAC-LC and the external FFmpeg encoder are available"
             ),
         }),
     }

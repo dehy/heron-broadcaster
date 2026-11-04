@@ -33,6 +33,8 @@ bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 cpal = "0.18.2"
 ebur128 = "0.1.10"
+# FFmpeg 7.1 (Debian trixie); only the `aac` feature of heron-outputs uses it.
+ffmpeg-next = { version = "7.1", default-features = false, features = ["codec", "format"] }
 flate2 = "1.1.10"
 getrandom = "0.4.3"
 hmac = "0.13.0"
