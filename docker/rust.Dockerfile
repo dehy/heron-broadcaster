@@ -6,17 +6,22 @@
 
 FROM rust:1.99.1-slim-trixie AS builder
 # LAME (MP3 encoding) is compiled from source by its build script (configure, make).
+# FFmpeg's development libraries and libclang (bindgen) for the engine's AAC-LC
+# encoder (the `aac` feature), which links libavcodec dynamically.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends g++ make \
+    && apt-get install -y --no-install-recommends g++ make pkg-config clang libclang-dev \
+        libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY migrations ./migrations
+# Two builds: cargo unifies features inside one, and only the engine links
+# libavcodec (the other images have none).
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked \
-        --bin heron-engine --bin heron-api --bin heron-analyzer --bin heron-librarian \
+    cargo build --release --locked -p heron-engine --features aac \
+    && cargo build --release --locked -p heron-api -p heron-analyzer -p heron-librarian \
     && mkdir -p /out \
     && cp target/release/heron-engine target/release/heron-api target/release/heron-analyzer \
         target/release/heron-librarian /out/
@@ -34,6 +39,11 @@ USER heron
 
 FROM runtime AS heron-engine
 USER root
+# libavcodec: FFmpeg's native `aac` encoder, for AAC-LC (docs/outputs.md#built-in-aac).
+# Debian's build has no fdk-aac.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libavcodec61 libavformat61 libswresample5 \
+    && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /var/lib/heron/engine /var/lib/heron/fallback /run/heron/relay \
     && chown -R heron:heron /var/lib/heron /run/heron
 USER heron
