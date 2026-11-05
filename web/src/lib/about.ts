@@ -40,7 +40,7 @@ export function configText(item: ConfigItem): string {
 
 /** A service and its instance: `heron-engine (main)`. */
 export function serviceName(service: string, instance?: string | null): string {
-  return instance ? `${service} (${instance})` : service;
+  return instance && instance !== service ? `${service} (${instance})` : service;
 }
 
 /**

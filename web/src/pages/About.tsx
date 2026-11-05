@@ -166,18 +166,20 @@ function RuntimeCard({ about }: Readonly<{ about: AboutData }>) {
           </tbody>
         </table>
       </div>
-      <dl className="facts">
-        <Fact label={t("about.timezone")}>{runtime.timezone ?? "–"}</Fact>
-        <Fact label={t("about.clock")}>
-          {clock === null || clock === undefined
-            ? t("about.clockUnknown")
-            : clock
-              ? t("about.clockSynced")
-              : (runtime.clock.warning ?? t("about.clockNotSynced"))}
-        </Fact>
-        <Fact label={t("about.cores")}>{runtime.cpu_cores}</Fact>
-        <Fact label={t("about.memory")}>{runtime.memory_mib} MiB</Fact>
-      </dl>
+      <div className="card-body">
+        <dl className="facts">
+          <Fact label={t("about.timezone")}>{runtime.timezone ?? "–"}</Fact>
+          <Fact label={t("about.clock")}>
+            {clock === null || clock === undefined
+              ? t("about.clockUnknown")
+              : clock
+                ? t("about.clockSynced")
+                : (runtime.clock.warning ?? t("about.clockNotSynced"))}
+          </Fact>
+          <Fact label={t("about.cores")}>{runtime.cpu_cores}</Fact>
+          <Fact label={t("about.memory")}>{runtime.memory_mib} MiB</Fact>
+        </dl>
+      </div>
     </Card>
   );
 }

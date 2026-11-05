@@ -36,13 +36,13 @@ To report a problem, or to check an upgrade went through, one needs to know whic
 
 ## Acceptance criteria
 
-- [ ] The page is linked at the bottom of the navigation and works from a phone up, in light and dark themes.
+- [x] The page is linked at the bottom of the navigation and works from a phone up, in light and dark themes.
 - [x] A viewer or operator receives and sees the build part and the links only; an admin sees every part.
 - [x] A secret (database URL, error-reporting DSN, metrics credentials, and any added later) never appears in the answer, whatever the configuration: a test sets them and searches the answer.
 - [x] With a service stopped, the page says so for that service and still shows the others.
 - [x] The web UI and the API from different builds show as different, as the banner does.
 - [x] *Copy diagnostics* copies what the user sees, and nothing more.
-- [ ] Unit tests for the route and its roles, the configuration list and the page; docs, translations (all catalogs) and screenshots are up to date.
+- [x] Unit tests for the route and its roles, the configuration list and the page; docs, translations (all catalogs) and screenshots are up to date.
 
 ## References
 
