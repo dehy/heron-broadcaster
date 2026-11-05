@@ -125,6 +125,7 @@ describe("About", () => {
     expect(text).toContain("HERON_LIBRARY_WATCH=" + t("about.on"));
     expect(text).toContain("HERON_DATABASE_URL=" + t("about.secretSet"));
     expect(text).toContain("12.3.1-MariaDB");
+    expect(text).toContain(t("about.clock") + ": " + t("about.clockSynced"));
     expect(await screen.findByText(t("about.copied"))).toBeTruthy();
   });
 

@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { type About as AboutData, type ApiStatus, api, fetchStatus, unwrap } from "../api";
 import { Banner, Card, ErrorView, Loading, PageHead, useToast } from "../components/ui";
 import { t } from "../i18n";
-import { configText, diagnostics, serviceName, uptime } from "../lib/about";
+import { clockText, configText, diagnostics, serviceName, uptime } from "../lib/about";
 import { buildLabel, differentBuilds, webBuild } from "../lib/version";
 
 const REPOSITORY = "https://github.com/dehy/heron-broadcaster";
@@ -140,7 +140,6 @@ function RuntimeCard({ about }: Readonly<{ about: AboutData }>) {
   if (!runtime) {
     return null;
   }
-  const clock = runtime.clock.synchronized;
   return (
     <Card title={t("about.runtime")} flush>
       <div className="table-wrap">
@@ -169,13 +168,7 @@ function RuntimeCard({ about }: Readonly<{ about: AboutData }>) {
       <div className="card-body">
         <dl className="facts">
           <Fact label={t("about.timezone")}>{runtime.timezone ?? "–"}</Fact>
-          <Fact label={t("about.clock")}>
-            {clock === null || clock === undefined
-              ? t("about.clockUnknown")
-              : clock
-                ? t("about.clockSynced")
-                : (runtime.clock.warning ?? t("about.clockNotSynced"))}
-          </Fact>
+          <Fact label={t("about.clock")}>{clockText(runtime.clock)}</Fact>
           <Fact label={t("about.cores")}>{runtime.cpu_cores}</Fact>
           <Fact label={t("about.memory")}>{runtime.memory_mib} MiB</Fact>
         </dl>
