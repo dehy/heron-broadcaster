@@ -16,7 +16,7 @@ To report a problem, or to check an upgrade went through, one needs to know whic
 - **Links:** documentation, changelog, repository, license.
 - **Copy diagnostics:** one button puts everything the user may see on the clipboard as plain text, to paste into a bug report.
 - **One route**, `GET /api/v1/about`, answers with the build part to every role and the other parts to admins only.
-- **How the services report:** the engine answers a `GetAbout` call over gRPC; the analyzer and the librarian, which have no address the API knows, write a heartbeat to the database every 30 seconds (`service_heartbeats`: version, start time, machine, configuration). A heartbeat older than 90 seconds means the worker is not running. The table is not part of backups.
+- **How the services report:** the engine answers a `GetAbout` call over gRPC; the analyzer and the librarian, which have no address the API knows, write a heartbeat to the database every 30 seconds (`service_heartbeats`: version, start time, machine, configuration). A heartbeat older than 90 seconds means the worker is not running. The table is not in the configuration file of a backup (the database dump holds it like any table, and a restored one is overwritten by the next heartbeat).
 
 ## Out of scope
 

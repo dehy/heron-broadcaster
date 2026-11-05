@@ -239,6 +239,7 @@ The engines, the API and the web interface are upgraded as usual. A few things t
 - **Backups** have a folder: `HERON_BACKUP_FOLDER` in `.env` (`./data/backups` by default), mounted in the API's container. A banner in the web interface says if it cannot be written.
 - **The engine image contains libavcodec** (for the AAC-LC encoder) and is larger. A migration adds the `AAC 96k` encoder profile, which no output uses until you pick it.
 - **Processing, track levels and the backup key checks** come with migrations, applied when the API starts. A track shows its levels once it is analyzed again.
+- **The About page** needs the services to run the same build: an engine of the previous version does not answer its new `GetAbout` call, so the page shows it as running, with no version and no details, until it is replaced (`scripts/upgrade.sh` does it). A migration adds the `service_heartbeats` table, where the analyzer and the librarian report every 30 seconds; a worker that has not for 90 seconds shows as stopped. Images you build yourself take `HERON_REVISION` and `HERON_BUILD_DATE` as build arguments to show the commit and the date.
 - **Page addresses changed** with the page names (`/import-music`, `/migrate`, `/to-organize`, `/rotation-log`, `/processing`): update bookmarks.
 
 ### 0.1.0 to 0.2.0
