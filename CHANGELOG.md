@@ -37,6 +37,10 @@ What `main` has since the last release: it is published as the `edge` images. Re
 - Undoing a tag edit and restoring from the trash work with MariaDB 12.3.
 - A restore no longer fails while webhook deliveries are retried.
 
+### Fixed
+
+- **A standby prepared twice in a row** (a handover retried after a late `Ready`) no longer loses its cued track, nor answers `Ready` for a decoder that is not open yet: each cue carries its own generation ([#45](https://github.com/dehy/heron-broadcaster/issues/45)).
+
 ## 0.2.0 – 2026-11-01
 
 Milestones M9 (deck EQ), M13 (several stations, see [Not yet](#not-yet)) and M14 (several schedules), medleys, category types, imports from another software and the external FFmpeg encoder. Upgrading from 0.1.0 keeps the station on air: see [0.1.0 to 0.2.0](docs/upgrading.md#010-to-020).
