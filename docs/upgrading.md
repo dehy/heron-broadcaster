@@ -231,9 +231,15 @@ A new engine can only take over from an engine that speaks the same handover pro
 
 What each release asks of an upgrade, on top of the steps above. What it brings is in the [changelog](../CHANGELOG.md).
 
-### Edge
+### 0.2.0 to 0.3.0
 
-The engines, the API and the web interface are upgraded as usual. A few things to know:
+The upgrade is done on air with `scripts/upgrade.sh 0.3.0` (or `--swarm <stack> 0.3.0`): the handover protocol has not changed, so the 0.3.0 engine of each station takes over from the 0.2.0 one without a gap.
+
+1. **Back up the database** (see above): `heron-api` runs 5 more migrations when it starts, and going back to 0.2.0 needs the backup.
+2. **Update the deployment files.** `docker-compose.yml` now mounts the backup folder in the API's container (`HERON_BACKUP_FOLDER`, `./data/backups` by default), passes `HERON_REVISION` and `HERON_BUILD_DATE` as build arguments, and names newer images of MariaDB, Icecast and ffmpeg (below). Take the 0.3.0 `docker-compose.yml` (`git checkout v0.3.0`); for Swarm, add the same volume to the API service of the stack file. Create the backup folder before the first start.
+3. **Upgrade:** `scripts/upgrade.sh 0.3.0`.
+
+A few things to know:
 
 - **MariaDB 12.3, Icecast 2.5.0 and ffmpeg 9.0.2** are the images of the Compose files now (MariaDB 11.8, Icecast 2.4.4 and ffmpeg 7.1.1 before). A deployment that keeps its own versions of these is not touched; to follow, back up first ([Backups](backups.md)) and read MariaDB's notes on upgrading from 11.8.
 - **Backups** have a folder: `HERON_BACKUP_FOLDER` in `.env` (`./data/backups` by default), mounted in the API's container. A banner in the web interface says if it cannot be written.
