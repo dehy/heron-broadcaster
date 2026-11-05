@@ -4,6 +4,10 @@ What changed in each release of Heron. Before upgrading, read the release's note
 
 ## Unreleased
 
+### Added
+
+- **AAC-LC encoder** (first part of M11): FFmpeg's native `aac` encoder, as an ADTS stream for Icecast, with the default `AAC 96k` profile and an *AAC-LC* choice in the Outputs page. It is built with the optional `aac` Cargo feature, which links the system's libavcodec; Heron's engine image has it. See [Encoders and outputs](docs/outputs.md#built-in-aac).
+
 ### Changed
 
 - **Clearer page names**, in all four languages: *Buffer* is now **Import music**, *Import* is **Migrate**, *Review & organize* is **To organize**, *Selection log* is **Rotation log** and *AGC* is **Processing**. Their addresses changed with them (`/import-music`, `/migrate`, `/to-organize`, `/rotation-log`, `/processing`) and the old ones are not redirected: update any bookmark. The API is unchanged.

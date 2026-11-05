@@ -231,6 +231,10 @@ A new engine can only take over from an engine that speaks the same handover pro
 
 What each release asks of an upgrade, on top of the steps above. What it brings is in the [changelog](../CHANGELOG.md).
 
+### Unreleased
+
+Nothing to set. The engine image now contains libavcodec (for the AAC-LC encoder) and is larger; a migration adds the `AAC 96k` encoder profile, which no output uses until you pick it.
+
 ### 0.1.0 to 0.2.0
 
 The upgrade is done on air with `scripts/upgrade.sh 0.2.0` (or `--swarm <stack> 0.2.0`): the handover protocol has not changed, so the 0.2.0 engine takes over from the 0.1.0 one without a gap, and there is nothing to set.
