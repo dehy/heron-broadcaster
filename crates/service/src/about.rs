@@ -255,6 +255,17 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_value_shows_what_stands_for_it() {
+        let shown = |value: Option<&str>| ConfigItem::optional_text("HERON_X", value, "none").value;
+        assert_eq!(
+            shown(Some("/music")),
+            ConfigValue::Text("/music".to_owned())
+        );
+        assert_eq!(shown(Some("  ")), ConfigValue::Text("none".to_owned()));
+        assert_eq!(shown(None), ConfigValue::Text("none".to_owned()));
+    }
+
+    #[test]
     fn items_serialize_with_their_kind() {
         let json = serde_json::to_value(ConfigItem::flag("HERON_LIBRARY_WATCH", true)).unwrap();
         assert_eq!(

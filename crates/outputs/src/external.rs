@@ -573,4 +573,29 @@ mod tests {
             "no bitrate"
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_version_is_the_first_line_the_program_prints() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("fake-ffmpeg");
+        std::fs::write(
+            &program,
+            "#!/bin/sh\necho '  ffmpeg version 9.0 test  '\necho second\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            version(&program).as_deref(),
+            Some("ffmpeg version 9.0 test")
+        );
+
+        let silent = dir.path().join("silent");
+        std::fs::write(&silent, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&silent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(version(&silent), None, "no output");
+        assert_eq!(version(&dir.path().join("absent")), None, "not found");
+    }
 }
