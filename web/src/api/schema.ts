@@ -3,6 +3,26 @@
 // Generated from openapi.json by `npm run generate-api`. Do not edit.
 
 export interface paths {
+    "/api/v1/about": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The build, and for admins the machine, the dependencies and the
+         *     configuration.
+         */
+        get: operations["about"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agc-presets": {
         parameters: {
             query?: never;
@@ -3823,6 +3843,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        About: {
+            /** @description Admins only. */
+            configuration?: components["schemas"]["ServiceConfig"][] | null;
+            dependencies?: components["schemas"]["Dependencies"] | null;
+            runtime?: components["schemas"]["Runtime"] | null;
+            services: components["schemas"]["ServiceInfo"][];
+        };
         /** @description What a station keeps apart from the other stations' plays and queues. */
         AcrossStations: {
             /**
@@ -4723,6 +4750,27 @@ export interface components {
             scheduled_hours: number;
             slots: components["schemas"]["ClockSlot"][];
         };
+        /** @description A configuration value worth showing. */
+        ConfigItem: components["schemas"]["ConfigValue"] & {
+            /** @description The setting, as its environment variable. */
+            name: string;
+        };
+        ConfigValue: {
+            /** @enum {string} */
+            kind: "text";
+            /** @description A value that is not secret. */
+            value: string;
+        } | {
+            /** @enum {string} */
+            kind: "flag";
+            /** @description A feature that is on or off. */
+            value: boolean;
+        } | {
+            /** @enum {string} */
+            kind: "secret";
+            /** @description A secret: only whether it is set. */
+            value: boolean;
+        };
         Confirmed: {
             /** @description The backup taken with the new key. */
             backup?: string | null;
@@ -4822,6 +4870,15 @@ export interface components {
              */
             skip_fade_ms: number;
         };
+        Database: {
+            /**
+             * Format: int64
+             * @description Database migrations applied.
+             */
+            migrations?: number | null;
+            /** @description `SELECT VERSION()`, e.g. `12.3.1-MariaDB`. */
+            version?: string | null;
+        };
         /** @description One deck EQ. Flat and bypassed by default. */
         DeckEq: {
             /** @default false */
@@ -4905,6 +4962,14 @@ export interface components {
             status: components["schemas"]["DeliveryStatus"];
             /** Format: int64 */
             webhook_id: number;
+        };
+        Dependencies: {
+            database: components["schemas"]["Database"];
+            /**
+             * @description The first line of `ffmpeg -version` of an engine with the external
+             *     encoder; missing when the built-in encoders are used.
+             */
+            ffmpeg?: string | null;
         };
         /** @description What a MusicBrainz details lookup did. */
         DetailsReport: {
@@ -7235,6 +7300,22 @@ export interface components {
             /** @enum {string} */
             kind: "not_after";
         };
+        Runtime: {
+            clock: components["schemas"]["ClockStatus"];
+            /**
+             * Format: int32
+             * @description Logical cores of the machine the API runs on.
+             */
+            cpu_cores: number;
+            hosts: components["schemas"]["ServiceHost"][];
+            /**
+             * Format: int64
+             * @description Its memory, in MiB.
+             */
+            memory_mib: number;
+            /** @description The `TZ` of the API's environment. */
+            timezone?: string | null;
+        };
         /** @description Outcome of one scan, logged and served by `/api/v1/library/status`. */
         ScanReport: {
             /** Format: int64 */
@@ -7375,6 +7456,38 @@ export interface components {
          * @enum {string}
          */
         SeparationRule: "track" | "title" | "artist" | "album";
+        ServiceConfig: {
+            instance?: string | null;
+            items: components["schemas"]["ConfigItem"][];
+            service: string;
+        };
+        /** @description The machine a service runs on (admins). */
+        ServiceHost: {
+            arch?: string | null;
+            container: boolean;
+            instance?: string | null;
+            kernel?: string | null;
+            os?: string | null;
+            service: string;
+            /**
+             * Format: int64
+             * @description How long it has been running, in seconds.
+             */
+            uptime_seconds?: number | null;
+        };
+        /** @description A Heron service and whether it runs. */
+        ServiceInfo: {
+            build_date?: string | null;
+            /** @description The station's code for an engine, the host name for the others. */
+            instance?: string | null;
+            revision?: string | null;
+            /** @description Answering now: the engine reachable, a worker's heartbeat recent. */
+            running: boolean;
+            /** @description `heron-api`, `heron-engine`, `heron-analyzer` or `heron-librarian`. */
+            service: string;
+            /** @description Missing when the service was never seen or does not say. */
+            version?: string | null;
+        };
         /**
          * @description The engine's silence watchdog: after this long of silence on the master
          *     bus (below −50 dBFS), it skips to the next track, then to the fallback
@@ -8589,6 +8702,33 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    about: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["About"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     list_agc_presets: {
         parameters: {
             query?: never;

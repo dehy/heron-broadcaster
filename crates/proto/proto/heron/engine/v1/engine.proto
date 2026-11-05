@@ -29,6 +29,8 @@ service Engine {
   // State.
   rpc GetState(GetStateRequest) returns (EngineState);
   rpc GetLevels(GetLevelsRequest) returns (Levels);
+  // The engine's build, machine and configuration, for the About page.
+  rpc GetAbout(GetAboutRequest) returns (AboutInfo);
   // Track changes as they happen.
   rpc WatchEvents(WatchEventsRequest) returns (stream EngineEvent);
 
@@ -198,6 +200,14 @@ message EngineState {
   // The jingle waiting to start on the FX player over the intro of the
   // track on air.
   optional QueueEntry pending_jingle = 10;
+}
+
+message GetAboutRequest {}
+
+message AboutInfo {
+  // heron_service::about::AboutReport. Empty from engines before the About
+  // page.
+  string json = 1;
 }
 
 message GetLevelsRequest {}

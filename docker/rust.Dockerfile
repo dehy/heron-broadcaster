@@ -36,6 +36,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --user-group --no-create-home heron
 USER heron
+# The commit and the date the image is built from: the web UI checks the
+# commit is its own, and the About page shows both.
+ARG HERON_REVISION=
+ARG HERON_BUILD_DATE=
+ENV HERON_REVISION=$HERON_REVISION \
+    HERON_BUILD_DATE=$HERON_BUILD_DATE
 
 FROM runtime AS heron-engine
 USER root
@@ -62,9 +68,6 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends mariadb-client \
     && rm -rf /var/lib/apt/lists/*
 USER heron
-# The commit the image is built from: the web UI checks it is its own.
-ARG HERON_REVISION=
-ENV HERON_REVISION=$HERON_REVISION
 COPY --from=builder /out/heron-api /usr/local/bin/heron-api
 ENV HERON_HTTP_ADDR=0.0.0.0:8080
 EXPOSE 8080

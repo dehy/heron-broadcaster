@@ -33,6 +33,7 @@
 | **Users** | Users and roles, passwords, enable or disable; with several stations, a shared role and a role on each station | admin |
 | **Backups** | The backups, newest first (kind, time, the size of its two files, a failed dump), *Back up now*, download either file, restore a backup or an uploaded configuration file (with what it will replace, then its report; the key for an encrypted one), delete; the `backups` settings; encryption: encrypt backups (the key shown once, then typed back, or the admin's own public key), check the key, change it, turn encryption off, which backups need an earlier key, the public key each key typed must match ([Backups – Encryption](backups.md#encryption)); *Test* on a backup, the last test, damaged backups ([Testing backups](backups.md#testing-backups)) | admin |
 | **Account** | Theme, language, width, password, API tokens | |
+| **About** | The build (version, commit, each service's version and whether it answers, web UI and API from the same build or not, links); for admins also the runtime (uptime, operating system, container, time zone and clock, CPU and memory), the dependencies (database, FFmpeg and stream servers versions) and the active configuration, read-only, with secrets only as *set* or *not set*; *Copy diagnostics* puts it all in the clipboard for a bug report. Linked at the bottom of the navigation | admin (all but the build) |
 
 Viewers see every page (except users and webhooks) without the controls. Every page shows a banner when something needs attention: the API, the database or the engine unreachable, live updates disconnected, the engine refusing the configuration, the **backup folder** not writable (admins), **backups not encrypted**, **damaged** or **not tested** (admins), the web UI and the API **not from the same version** (an image pulled without the other: pull and start both again), or the **server clock** not synchronized or off by more than about a second (from `GET /api/v1/status`, see [API](api.md#authentication)). When an admin's [key check](backups.md#checking-the-key) is due, a dialog asks for the backup key, on any page.
 
@@ -131,6 +132,18 @@ A line one character high stays at the bottom of every page, in the monospace fo
 - **System** (operators and admins): `cpu 12% mem 41% load 0.4 0.5 0.6`. The CPU and memory turn to the warning colour from 80 % and to the alert colour from 95 %. Viewers do not get this part.
 
 While the live connection is down the bar greys out and says `offline`. Below 760 px the system part goes first, then the titles shrink to the deck letter and its state. It is a `status` region without live announcements: it changes too often to be read out, and each part carries a full label.
+
+### About
+
+The **About** link at the bottom of the navigation, under the account, opens a page with:
+
+- **Build** (everyone): the web interface and each service (API, one engine per station, analyzer, librarian) with its version, commit, build date and whether it runs. A service that was never seen, or whose last sign of life is older than 90 seconds, shows as not running. The commit and the build date are set in the published images (`HERON_REVISION`, `HERON_BUILD_DATE`) and show `–` in a local build.
+- **Runtime** (admins): how long each service has been up and the operating system, kernel and architecture it runs on, whether in a container, the time zone, the server clock's synchronization, the CPU cores and memory.
+- **Dependencies** (admins): the database server's version and the migrations applied, and the FFmpeg version when the external encoder is set up.
+- **Active configuration** (admins): per service, the settings that matter as read-only values (folders, intervals, addresses) and switches. A secret (database URL, error-reporting DSN, metrics password) only shows whether it is set.
+- **Copy diagnostics:** puts what the page shows as plain text in the clipboard, for a bug report.
+
+The engine reports itself over its gRPC link. The analyzer and the librarian write a heartbeat to the database every 30 seconds, which the API reads; it is not part of [backups](backups.md). See [API](api.md#routes) for `GET /about`.
 
 ### Breadcrumb
 

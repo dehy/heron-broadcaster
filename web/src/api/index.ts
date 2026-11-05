@@ -9,6 +9,8 @@ import type { components, paths } from "./schema";
 
 export type Schemas = components["schemas"];
 export type ApiStatus = Schemas["Status"];
+export type About = Schemas["About"];
+export type ConfigItem = Schemas["ConfigItem"];
 export type LibraryStatus = Schemas["LibraryStatus"];
 export type LiveMessage = Schemas["LiveMessage"];
 export type User = Schemas["User"];
