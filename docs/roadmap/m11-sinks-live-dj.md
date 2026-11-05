@@ -5,8 +5,8 @@
 ## Scope
 
 - Encoders (see [Encoders and outputs](../outputs.md#encoders)):
-  - AAC-LC, built in (FFmpeg's native `aac` encoder, built without `--enable-nonfree`), from the system's libavcodec, linked dynamically behind an off-by-default `aac` Cargo feature (the engine's image enables it);
-  - migration seeding the default `AAC 96k` profile;
+  - AAC-LC, built in (FFmpeg's native `aac` encoder, built without `--enable-nonfree`), from the system's libavcodec, linked dynamically behind an off-by-default `aac` Cargo feature (the engine's image enables it, CI tests it). *Done ([#60](https://github.com/dehy/heron-broadcaster/pull/60)), except the playback check of the acceptance criteria below;*
+  - migration seeding the default `AAC 96k` profile. *Done.*
   - Opus and Vorbis;
   - external FFmpeg encoder using a user-provided binary (for fdk-aac / HE-AAC), with a capability check and restart on failure. *Done ahead of the rest of M11, at a station's request (see [Encoders and outputs](../outputs.md#external-ffmpeg-encoder)).*
 - Sinks:
