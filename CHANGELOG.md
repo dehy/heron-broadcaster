@@ -2,9 +2,9 @@
 
 What changed in each release of Heron. Before upgrading, read the release's notes in [Upgrading](docs/upgrading.md#release-notes).
 
-## Edge
+## 0.3.0 – 2026-11-05
 
-What `main` has since the last release: it is published as the `edge` images. Read the [Edge upgrade notes](docs/upgrading.md#edge) first.
+Milestones M10 (AGC and multiband processing), M12 (backups), M13 (several stations, finished), M15 (encrypted and tested backups), M16 (status bar) and M17 (About page), a first part of M11 (the AAC-LC encoder), Spanish and German, and up-to-date dependencies. Upgrading from 0.2.0 keeps the station on air: see [0.2.0 to 0.3.0](docs/upgrading.md#020-to-030).
 
 ### Added
 
@@ -36,10 +36,11 @@ What `main` has since the last release: it is published as the `edge` images. Re
 - Writing the tags of an MP3 with a Picard `WORK` frame no longer fails.
 - Undoing a tag edit and restoring from the trash work with MariaDB 12.3.
 - A restore no longer fails while webhook deliveries are retried.
-
-### Fixed
-
 - **A standby prepared twice in a row** (a handover retried after a late `Ready`) no longer loses its cued track, nor answers `Ready` for a decoder that is not open yet: each cue carries its own generation ([#45](https://github.com/dehy/heron-broadcaster/issues/45)).
+
+### Not yet
+
+- The rest of M11: Opus and Vorbis, HLS, Shoutcast, file recording, an external process pipe and live DJ input. HE-AAC works through the external FFmpeg encoder only.
 
 ## 0.2.0 – 2026-11-01
 
