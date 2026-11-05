@@ -174,6 +174,10 @@ impl Station {
             listeners: crate::listeners::Collector::new(pool.clone()).unwrap(),
             backups: crate::backups::Backups::new(backups.path().to_path_buf(), db.url()),
             system,
+            about: Arc::new(crate::about::Own::new(vec![
+                heron_service::about::ConfigItem::secret("HERON_DATABASE_URL", Some(&db.url())),
+                heron_service::about::ConfigItem::flag("HERON_LIBRARY_WATCH", true),
+            ])),
         };
         let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = http.local_addr().unwrap();
@@ -361,6 +365,85 @@ fn waiting_tracks(queue: &Value) -> Vec<u64> {
         .iter()
         .map(|entry| entry["track"]["track_id"].as_u64().unwrap())
         .collect()
+}
+
+/// The About page: the build for everyone, the rest for admins, and a secret
+/// never shown.
+#[tokio::test(flavor = "multi_thread")]
+async fn about_page_roles_and_secrets() {
+    let Some(station) = Station::start().await else {
+        return;
+    };
+    let anonymous = station.client();
+    let (status, _) = anonymous.request(Method::GET, "/about", None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let viewer = station.signed_in("viewer").await;
+    let about = viewer.get("/about").await;
+    let api = &about["services"][0];
+    assert_eq!(api["service"], "heron-api");
+    assert_eq!(api["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(api["running"], true);
+    assert!(about["runtime"].is_null());
+    assert!(about["dependencies"].is_null());
+    assert!(about["configuration"].is_null());
+
+    // The workers have not been seen: listed as not running.
+    let worker = |about: &Value, name: &str| {
+        about["services"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|service| service["service"] == name)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(worker(&about, "heron-analyzer")["running"], false);
+    assert!(worker(&about, "heron-analyzer")["version"].is_null());
+
+    // A recent heartbeat is a worker running; an old one, a worker stopped.
+    for (service, seen) in [("heron-analyzer", "0"), ("heron-librarian", "600")] {
+        sqlx::query(
+            "INSERT INTO service_heartbeats
+                 (service, instance, version, started_at, seen_at, config)
+             VALUES (?, 'box', '0.2.0', UTC_TIMESTAMP(6) - INTERVAL 1 HOUR,
+                     UTC_TIMESTAMP(6) - INTERVAL ? SECOND,
+                     '[{\"name\":\"HERON_NICE\",\"kind\":\"text\",\"value\":\"10\"}]')",
+        )
+        .bind(service)
+        .bind(seen)
+        .execute(&station.state.pool)
+        .await
+        .unwrap();
+    }
+    let about = viewer.get("/about").await;
+    let analyzer = worker(&about, "heron-analyzer");
+    assert_eq!(analyzer["running"], true);
+    assert_eq!(analyzer["version"], "0.2.0");
+    assert_eq!(analyzer["instance"], "box");
+    assert_eq!(worker(&about, "heron-librarian")["running"], false);
+    assert_eq!(worker(&about, "heron-librarian")["version"], "0.2.0");
+
+    let admin = station.signed_in("admin").await;
+    let about = admin.get("/about").await;
+    assert!(about["runtime"]["cpu_cores"].as_u64().unwrap() >= 1);
+    assert!(about["dependencies"]["database"]["version"].is_string());
+    assert!(
+        about["dependencies"]["database"]["migrations"]
+            .as_i64()
+            .unwrap()
+            > 0
+    );
+    let api_config = about["configuration"][0]["items"].as_array().unwrap();
+    let url = api_config
+        .iter()
+        .find(|item| item["name"] == "HERON_DATABASE_URL")
+        .unwrap();
+    assert_eq!(url["kind"], "secret");
+    assert_eq!(url["value"], true);
+    // The secret itself is nowhere in the answer.
+    assert!(!about.to_string().contains(&station.db.url()));
+    assert!(!about.to_string().contains("mysql://"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

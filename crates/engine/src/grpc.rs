@@ -20,11 +20,21 @@ use crate::player::{PlayerError, PlayerEvent, QueueEntry, TrackRequest};
 
 pub struct EngineService {
     engine: Arc<Engine>,
+    /// What `GetAbout` answers: `heron_service::about::AboutReport` as JSON.
+    about: Arc<str>,
 }
 
 impl EngineService {
     pub fn server(engine: Arc<Engine>) -> EngineServer<Self> {
-        EngineServer::new(Self { engine })
+        Self::server_with_about(engine, String::new())
+    }
+
+    /// As [`server`](Self::server), answering `GetAbout` with `about`.
+    pub fn server_with_about(engine: Arc<Engine>, about: String) -> EngineServer<Self> {
+        EngineServer::new(Self {
+            engine,
+            about: about.into(),
+        })
     }
 }
 
@@ -181,6 +191,12 @@ impl EngineRpc for EngineService {
             rendered_ms: snapshot.rendered_ms,
             underruns: snapshot.underruns,
             started_unix_ms: unix_ms(self.engine.started_at()),
+        }))
+    }
+
+    async fn get_about(&self, _: Request<pb::GetAboutRequest>) -> Reply<pb::AboutInfo> {
+        Ok(Response::new(pb::AboutInfo {
+            json: self.about.to_string(),
         }))
     }
 

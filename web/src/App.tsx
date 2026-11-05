@@ -15,6 +15,7 @@ import { ME_KEY, StationScope, UserContext, useCan, useMeQuery, useUser } from "
 import { chooseStation, here, initialStation, stationRole, useStation } from "./lib/station";
 import { applyFullWidth, applyTheme, storedFullWidth, storedTheme } from "./lib/theme";
 import { buildLabel, differentBuilds, webBuild } from "./lib/version";
+import { About } from "./pages/About";
 import { Account } from "./pages/Account";
 import { Artists } from "./pages/Artists";
 import { Backups } from "./pages/Backups";
@@ -99,6 +100,8 @@ function route(pathname: string): ReactNode {
     return <ClockEditor id={clock.id === "new" ? null : Number(clock.id)} />;
   }
   switch (pathname) {
+    case "/about":
+      return <About />;
     case "/":
       return <Dashboard />;
     case "/queue":
@@ -293,6 +296,9 @@ function Shell() {
           <nav className="nav">
             <Link to="/account" aria-current={pathname === "/account" ? "page" : undefined}>
               <Icon name="user" /> <span className="ellipsis">{user?.username ?? t("nav.account")}</span>
+            </Link>
+            <Link to="/about" aria-current={pathname === "/about" ? "page" : undefined}>
+              <Icon name="info" /> {t("nav.about")}
             </Link>
             <a
               href="/"

@@ -61,6 +61,7 @@ services:
       target: heron-api
       args:
         HERON_REVISION: ${HERON_REVISION:-}
+        HERON_BUILD_DATE: ${HERON_BUILD_DATE:-}
     image: ${HERON_REGISTRY:-ghcr.io/dehy}/heron-api:${HERON_VERSION:-latest}
     restart: unless-stopped
     user: ${HERON_LIBRARIAN_USER:-10001:10001}
@@ -90,6 +91,9 @@ services:
       context: .
       dockerfile: docker/rust.Dockerfile
       target: heron-analyzer
+      args:
+        HERON_REVISION: ${HERON_REVISION:-}
+        HERON_BUILD_DATE: ${HERON_BUILD_DATE:-}
     image: ${HERON_REGISTRY:-ghcr.io/dehy}/heron-analyzer:${HERON_VERSION:-latest}
     restart: unless-stopped
     # Background work: last for the CPU, first to go when memory runs out.
@@ -120,6 +124,9 @@ services:
       context: .
       dockerfile: docker/rust.Dockerfile
       target: heron-librarian
+      args:
+        HERON_REVISION: ${HERON_REVISION:-}
+        HERON_BUILD_DATE: ${HERON_BUILD_DATE:-}
     image: ${HERON_REGISTRY:-ghcr.io/dehy}/heron-librarian:${HERON_VERSION:-latest}
     restart: unless-stopped
     # Background work, like the analyzer; nice 10 (HERON_NICE).
@@ -152,6 +159,9 @@ services:
       context: .
       dockerfile: docker/rust.Dockerfile
       target: heron-engine
+      args:
+        HERON_REVISION: ${HERON_REVISION:-}
+        HERON_BUILD_DATE: ${HERON_BUILD_DATE:-}
     image: ${HERON_REGISTRY:-ghcr.io/dehy}/heron-engine:${HERON_VERSION:-latest}
     restart: unless-stopped
     # Room for a hot handover to a new engine on upgrade (docs/upgrading.md).

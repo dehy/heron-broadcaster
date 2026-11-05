@@ -1830,6 +1830,7 @@ dependencies = [
  "serde_json",
  "snap",
  "sqlx",
+ "sysinfo",
  "thiserror 2.0.21",
  "tokio",
  "tracing",

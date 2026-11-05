@@ -192,6 +192,20 @@ pub fn configured_program() -> PathBuf {
         .map_or_else(|| PathBuf::from("ffmpeg"), PathBuf::from)
 }
 
+/// The first line of `program -version` (`ffmpeg version 7.1 …`), when it runs.
+pub fn version(program: &PathBuf) -> Option<String> {
+    let output = Command::new(program)
+        .arg("-version")
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .map(|line| line.trim().to_owned())
+        .filter(|line| !line.is_empty())
+}
+
 /// Whether `program` runs and has the encoder `codec`.
 pub fn check(program: &PathBuf, codec: &str) -> Result<(), String> {
     let output = Command::new(program)

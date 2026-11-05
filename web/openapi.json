@@ -10,6 +10,35 @@
     "version": "0.2.0"
   },
   "paths": {
+    "/api/v1/about": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "The build, and for admins the machine, the dependencies and the\nconfiguration.",
+        "operationId": "about",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/About"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agc-presets": {
       "get": {
         "tags": [
@@ -12284,6 +12313,52 @@
   },
   "components": {
     "schemas": {
+      "About": {
+        "type": "object",
+        "required": [
+          "services"
+        ],
+        "properties": {
+          "configuration": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ServiceConfig"
+            },
+            "description": "Admins only."
+          },
+          "dependencies": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Dependencies",
+                "description": "Admins only."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runtime": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Runtime",
+                "description": "Admins only."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceInfo"
+            }
+          }
+        }
+      },
       "AcrossStations": {
         "type": "object",
         "description": "What a station keeps apart from the other stations' plays and queues.",
@@ -13911,6 +13986,90 @@
           }
         }
       },
+      "ConfigItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ConfigValue"
+          },
+          {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The setting, as its environment variable."
+              }
+            }
+          }
+        ],
+        "description": "A configuration value worth showing."
+      },
+      "ConfigValue": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A value that is not secret.",
+            "required": [
+              "value",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "description": "A value that is not secret."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A feature that is on or off.",
+            "required": [
+              "value",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "flag"
+                ]
+              },
+              "value": {
+                "type": "boolean",
+                "description": "A feature that is on or off."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A secret: only whether it is set.",
+            "required": [
+              "value",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "secret"
+                ]
+              },
+              "value": {
+                "type": "boolean",
+                "description": "A secret: only whether it is set."
+              }
+            }
+          }
+        ]
+      },
       "Confirmed": {
         "type": "object",
         "required": [
@@ -14099,6 +14258,26 @@
           }
         },
         "additionalProperties": false
+      },
+      "Database": {
+        "type": "object",
+        "properties": {
+          "migrations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Database migrations applied."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`SELECT VERSION()`, e.g. `12.3.1-MariaDB`."
+          }
+        }
       },
       "DeckEq": {
         "type": "object",
@@ -14319,6 +14498,24 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          }
+        }
+      },
+      "Dependencies": {
+        "type": "object",
+        "required": [
+          "database"
+        ],
+        "properties": {
+          "database": {
+            "$ref": "#/components/schemas/Database"
+          },
+          "ffmpeg": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first line of `ffmpeg -version` of an engine with the external\nencoder; missing when the built-in encoders are used."
           }
         }
       },
@@ -19626,6 +19823,45 @@
           }
         ]
       },
+      "Runtime": {
+        "type": "object",
+        "required": [
+          "hosts",
+          "clock",
+          "cpu_cores",
+          "memory_mib"
+        ],
+        "properties": {
+          "clock": {
+            "$ref": "#/components/schemas/ClockStatus"
+          },
+          "cpu_cores": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Logical cores of the machine the API runs on.",
+            "minimum": 0
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceHost"
+            }
+          },
+          "memory_mib": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Its memory, in MiB.",
+            "minimum": 0
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `TZ` of the API's environment."
+          }
+        }
+      },
       "ScanReport": {
         "type": "object",
         "description": "Outcome of one scan, logged and served by `/api/v1/library/status`.",
@@ -19953,6 +20189,122 @@
           "artist",
           "album"
         ]
+      },
+      "ServiceConfig": {
+        "type": "object",
+        "required": [
+          "service",
+          "items"
+        ],
+        "properties": {
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigItem"
+            }
+          },
+          "service": {
+            "type": "string"
+          }
+        }
+      },
+      "ServiceHost": {
+        "type": "object",
+        "description": "The machine a service runs on (admins).",
+        "required": [
+          "service",
+          "container"
+        ],
+        "properties": {
+          "arch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "container": {
+            "type": "boolean"
+          },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kernel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "os": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "service": {
+            "type": "string"
+          },
+          "uptime_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long it has been running, in seconds."
+          }
+        }
+      },
+      "ServiceInfo": {
+        "type": "object",
+        "description": "A Heron service and whether it runs.",
+        "required": [
+          "service",
+          "running"
+        ],
+        "properties": {
+          "build_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The station's code for an engine, the host name for the others."
+          },
+          "revision": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "running": {
+            "type": "boolean",
+            "description": "Answering now: the engine reachable, a worker's heartbeat recent."
+          },
+          "service": {
+            "type": "string",
+            "description": "`heron-api`, `heron-engine`, `heron-analyzer` or `heron-librarian`."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Missing when the service was never seen or does not say."
+          }
+        }
       },
       "SilenceWatchdogSettings": {
         "type": "object",

@@ -6,6 +6,7 @@
 //! feeds the engine and serves the API and the ops endpoints. See
 //! `docs/api.md`.
 
+mod about;
 mod agc;
 mod app;
 mod artists;
@@ -55,6 +56,7 @@ use anyhow::Context;
 use app::{AppState, SERVICE};
 use auth::{Passwords, Role};
 use clap::{Parser, Subcommand};
+use heron_service::about::ConfigItem;
 use heron_service::db::{self, DatabaseHealth, MIGRATOR};
 use heron_service::{LogArgs, MetricsArgs};
 use library::{Library, ScanOptions};
@@ -222,7 +224,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         );
     }
 
-    let library = Arc::new(Library::new(pool.clone(), cli.library_dir));
+    let staging_dir = cli.staging_dir.clone();
+    let library_dir = cli.library_dir.clone();
+    let library = Arc::new(Library::new(pool.clone(), cli.library_dir.clone()));
     let webhooks = webhooks::Webhooks::new(pool.clone()).context("cannot set up webhooks")?;
     let stations = stations::Stations::start(
         pool.clone(),
@@ -233,9 +237,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     )
     .await
     .context("cannot start the stations")?;
+    let station_count = stations.all().len();
     let listeners =
         listeners::Collector::new(pool.clone()).context("cannot set up listener statistics")?;
-    let backups = backups::Backups::new(cli.backup_dir, database_url.clone());
+    let backup_dir = cli.backup_dir.clone();
+    let backups = backups::Backups::new(cli.backup_dir.clone(), database_url.clone());
 
     let mut tasks = vec![
         tokio::spawn(library.clone().run(ScanOptions {
@@ -259,6 +265,21 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let (load, system) = tokio::sync::watch::channel(None);
     tasks.push(tokio::spawn(system::run(load)));
 
+    let about = about::Own::with_common(
+        &cli.log,
+        &cli.metrics,
+        cli.http_addr,
+        [
+            ConfigItem::text("HERON_LIBRARY_DIR", library_dir.display()),
+            ConfigItem::text("HERON_STAGING_DIR", staging_dir.display()),
+            ConfigItem::text("HERON_BACKUP_DIR", backup_dir.display()),
+            ConfigItem::secret("HERON_DATABASE_URL", Some(&database_url)),
+            ConfigItem::text("HERON_SCAN_INTERVAL", cli.scan_interval),
+            ConfigItem::flag("HERON_LIBRARY_WATCH", cli.library_watch),
+            ConfigItem::text("HERON_IMPORT_SETTLE", cli.import_settle),
+            ConfigItem::text("stations", station_count),
+        ],
+    );
     let health = DatabaseHealth(pool.clone());
     let state = AppState {
         pool: pool.clone(),
@@ -266,11 +287,12 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         library,
         stations,
         passwords: Arc::new(Passwords::default()),
-        staging: Arc::new(cli.staging_dir),
+        staging: Arc::new(staging_dir.clone()),
         webhooks,
         listeners,
         backups,
         system,
+        about: Arc::new(about),
     };
     let router = app::router(state).merge(heron_service::ops_router(SERVICE, metrics, health));
 

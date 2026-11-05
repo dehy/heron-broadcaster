@@ -133,6 +133,18 @@ A line one character high stays at the bottom of every page, in the monospace fo
 
 While the live connection is down the bar greys out and says `offline`. Below 760 px the system part goes first, then the titles shrink to the deck letter and its state. It is a `status` region without live announcements: it changes too often to be read out, and each part carries a full label.
 
+### About
+
+The **About** link at the bottom of the navigation, under the account, opens a page with:
+
+- **Build** (everyone): the web interface and each service (API, one engine per station, analyzer, librarian) with its version, commit, build date and whether it runs. A service that was never seen, or whose last sign of life is older than 90 seconds, shows as not running. The commit and the build date are set in the published images (`HERON_REVISION`, `HERON_BUILD_DATE`) and show `–` in a local build.
+- **Runtime** (admins): how long each service has been up and the operating system, kernel and architecture it runs on, whether in a container, the time zone, the server clock's synchronization, the CPU cores and memory.
+- **Dependencies** (admins): the database server's version and the migrations applied, and the FFmpeg version when the external encoder is set up.
+- **Active configuration** (admins): per service, the settings that matter as read-only values (folders, intervals, addresses) and switches. A secret (database URL, error-reporting DSN, metrics password) only shows whether it is set.
+- **Copy diagnostics:** puts what the page shows as plain text in the clipboard, for a bug report.
+
+The engine reports itself over its gRPC link. The analyzer and the librarian write a heartbeat to the database every 30 seconds, which the API reads; it is not part of [backups](backups.md). See [API](api.md#routes) for `GET /about`.
+
 ### Breadcrumb
 
 Above the title of every page that belongs to a section of the navigation, a breadcrumb says where it sits: the section (plain text, it has no page of its own), then the page, for instance `Library › Tracks` or `Station › Settings`. Pages outside a section (On air, Queue, History, Statistics, Account) have none.

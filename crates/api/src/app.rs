@@ -28,9 +28,9 @@ use crate::listeners::Collector;
 use crate::stations::Stations;
 use crate::webhooks::Webhooks;
 use crate::{
-    agc, artists, categories, category_types, clocks, eq, history, import, labels, librarian,
-    listeners, live, medleys, outputs, player, public, restrictions, rotation, schedules,
-    selection, settings, staging, stations, tracks, users, webhooks,
+    about, agc, artists, categories, category_types, clocks, eq, history, import, labels,
+    librarian, listeners, live, medleys, outputs, player, public, restrictions, rotation,
+    schedules, selection, settings, staging, stations, tracks, users, webhooks,
 };
 
 pub const SERVICE: &str = "heron-api";
@@ -52,6 +52,8 @@ pub struct AppState {
     pub backups: Arc<Backups>,
     /// The machine's load, for operators' status bar.
     pub system: crate::system::SystemWatch,
+    /// The API's start and configuration, for the About page.
+    pub about: Arc<crate::about::Own>,
 }
 
 #[derive(OpenApi)]
@@ -111,6 +113,7 @@ fn api() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(status))
         .routes(routes!(library_status))
+        .merge(about::router())
         .merge(users::router())
         .merge(crate::backups::router())
         .merge(stations::router())

@@ -389,6 +389,17 @@ impl EngineLink {
         }
     }
 
+    /// What the engine says of itself for the About page; `None` when it is
+    /// unreachable or too old to say.
+    pub async fn fetch_about(&self) -> Option<heron_service::about::AboutReport> {
+        let mut client = self.client.clone();
+        let about = self
+            .call(client.get_about(pb::GetAboutRequest {}))
+            .await
+            .ok()?;
+        serde_json::from_str(&about.json).ok()
+    }
+
     pub async fn fetch_state(&self) -> ApiResult<PlayerState> {
         let mut client = self.client.clone();
         let state = self.call(client.get_state(pb::GetStateRequest {})).await?;
