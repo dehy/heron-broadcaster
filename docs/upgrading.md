@@ -231,7 +231,7 @@ A new engine can only take over from an engine that speaks the same handover pro
 
 What each release asks of an upgrade, on top of the steps above. What it brings is in the [changelog](../CHANGELOG.md).
 
-### Unreleased
+### Edge
 
 Nothing to set. The engine image now contains libavcodec (for the AAC-LC encoder) and is larger; a migration adds the `AAC 96k` encoder profile, which no output uses until you pick it.
 

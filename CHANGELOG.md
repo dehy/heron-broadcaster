@@ -2,7 +2,9 @@
 
 What changed in each release of Heron. Before upgrading, read the release's notes in [Upgrading](docs/upgrading.md#release-notes).
 
-## Unreleased
+## Edge
+
+What `main` has since the last release: it is published as the `edge` images.
 
 ### Added
 
