@@ -2,6 +2,12 @@
 
 What changed in each release of Heron. Before upgrading, read the release's notes in [Upgrading](docs/upgrading.md#release-notes).
 
+## Unreleased
+
+### Changed
+
+- **Code quality:** the issues reported by SonarQube Cloud on `main` are fixed in the code (React props, nested ternaries, cognitive complexity, blocking file calls in async code, the web image's user), without suppressing any rule, and new tests bring the new-code coverage above the quality gate's 80%.
+
 ## 0.3.0 – 2026-11-05
 
 Milestones M10 (AGC and multiband processing), M12 (backups), M13 (several stations, finished), M15 (encrypted and tested backups), M16 (status bar) and M17 (About page), a first part of M11 (the AAC-LC encoder), Spanish and German, and up-to-date dependencies. Upgrading from 0.2.0 keeps the station on air: see [0.2.0 to 0.3.0](docs/upgrading.md#020-to-030).
