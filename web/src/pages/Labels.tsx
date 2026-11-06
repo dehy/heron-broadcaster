@@ -115,7 +115,7 @@ export function Labels() {
   );
 }
 
-function LabelDialog({ label, onClose }: { label: Label | null; onClose: () => void }) {
+function LabelDialog({ label, onClose }: Readonly<{ label: Label | null; onClose: () => void }>) {
   const [name, setName] = useState(label?.name ?? "");
   const [color, setColor] = useState(label?.color ?? COLORS[0] ?? "#2f6fd6");
   const save = useAction(
@@ -177,7 +177,7 @@ function LabelDialog({ label, onClose }: { label: Label | null; onClose: () => v
   );
 }
 
-function MergeDialog({ label, labels, onClose }: { label: Label; labels: Label[]; onClose: () => void }) {
+function MergeDialog({ label, labels, onClose }: Readonly<{ label: Label; labels: Label[]; onClose: () => void }>) {
   const others = labels.filter((other) => other.id !== label.id);
   const [into, setInto] = useState(String(others[0]?.id ?? ""));
   const merge = useAction(

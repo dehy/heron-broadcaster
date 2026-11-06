@@ -328,7 +328,7 @@ function describeProfile(profile: EncoderProfileView): string {
   return `${encoder}${mode}${bitrate}, ${rate} ${channels}`;
 }
 
-function SaveFooter({ form, onClose, busy }: { form: string; onClose: () => void; busy: boolean }) {
+function SaveFooter({ form, onClose, busy }: Readonly<{ form: string; onClose: () => void; busy: boolean }>) {
   return (
     <>
       <button type="button" className="btn" onClick={onClose}>
@@ -348,11 +348,11 @@ function OutputDialog({
   output,
   profiles,
   onClose,
-}: {
+}: Readonly<{
   output: OutputView | null;
   profiles: EncoderProfileView[];
   onClose: () => void;
-}) {
+}>) {
   const initial = (output?.config ?? {}) as Record<string, unknown>;
   const [name, setName] = useState(output?.name ?? "");
   const [kind, setKind] = useState<Kind>(output?.kind ?? "icecast");
@@ -569,7 +569,7 @@ function OutputDialog({
   );
 }
 
-function ProfileDialog({ profile, onClose }: { profile: EncoderProfileView | null; onClose: () => void }) {
+function ProfileDialog({ profile, onClose }: Readonly<{ profile: EncoderProfileView | null; onClose: () => void }>) {
   const options = (profile?.options ?? {}) as Record<string, unknown>;
   const [name, setName] = useState(profile?.name ?? "");
   const [encoder, setEncoder] = useState<Encoder>(profile?.encoder ?? "mp3");

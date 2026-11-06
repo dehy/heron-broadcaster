@@ -631,7 +631,7 @@ export function Library() {
   );
 }
 
-function ColumnsMenu({ columns, onToggle }: { columns: Column[]; onToggle: (column: Column, shown: boolean) => void }) {
+function ColumnsMenu({ columns, onToggle }: Readonly<{ columns: Column[]; onToggle: (column: Column, shown: boolean) => void }>) {
   return (
     <details className="menu">
       <summary className="btn ghost small">{t("library.columns")}</summary>
@@ -658,11 +658,11 @@ function MoreFilters({
   search,
   labels,
   programming,
-}: {
+}: Readonly<{
   search: URLSearchParams;
   labels: Schemas["Label"][];
   programming: Schemas["ProgrammingSettings"] | undefined;
-}) {
+}>) {
   const value = (name: string) => search.get(name) ?? "";
   const set = (name: string, next: string | undefined) => setSearch({ [name]: next || undefined, page: undefined });
   const labelSelect = (name: string, title: string) => (
@@ -768,7 +768,7 @@ function MoreFilters({
   );
 }
 
-function LibrarySummary({ status }: { status: Awaited<ReturnType<typeof fetchLibraryStatus>> | undefined }) {
+function LibrarySummary({ status }: Readonly<{ status: Awaited<ReturnType<typeof fetchLibraryStatus>> | undefined }>) {
   if (!status) {
     return null;
   }
@@ -804,7 +804,7 @@ function LibrarySummary({ status }: { status: Awaited<ReturnType<typeof fetchLib
   );
 }
 
-function TrackState({ track }: { track: TrackSummary }) {
+function TrackState({ track }: Readonly<{ track: TrackSummary }>) {
   if (track.missing) {
     return <span className="badge bad">{t("library.state.missing")}</span>;
   }
@@ -839,7 +839,7 @@ function Row({
   onQueue,
   onArtist,
   preview,
-}: {
+}: Readonly<{
   track: TrackSummary;
   columns: Column[];
   canQueue: boolean;
@@ -848,7 +848,7 @@ function Row({
   onQueue: (next: boolean) => void;
   onArtist: (artist: string) => void;
   preview: Preview;
-}) {
+}>) {
   const previewing = preview.playing === track.id;
   const unplayable = preview.failed.has(track.id);
   const playable = !track.missing && !track.silent;
@@ -962,7 +962,7 @@ function Row({
 }
 
 /** What a deletion takes, before it is confirmed. */
-export function DeleteQuestion({ tracks }: { tracks: TrackSummary[] }) {
+export function DeleteQuestion({ tracks }: Readonly<{ tracks: TrackSummary[] }>) {
   const shown = tracks.slice(0, 15);
   return (
     <>

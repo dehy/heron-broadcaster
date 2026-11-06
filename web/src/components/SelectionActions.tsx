@@ -59,7 +59,7 @@ function prepare(files: number[], body: Preparation) {
 }
 
 /** A label, as a colored chip. */
-export function LabelChip({ label }: { label: { name: string; color?: string | null | undefined } }) {
+export function LabelChip({ label }: Readonly<{ label: { name: string; color?: string | null | undefined } }>) {
   return (
     <span className="chip" style={label.color ? { borderColor: label.color } : undefined}>
       <span className="swatch" style={{ background: label.color ?? "var(--muted)" }} />
@@ -299,13 +299,13 @@ export function ChangeField({
   onChange,
   input,
   clearLabel,
-}: {
+}: Readonly<{
   label: string;
   change: Change<string>;
   onChange: (change: Change<string>) => void;
   input: (value: string, set: (value: string) => void) => ReactNode;
   clearLabel?: string;
-}) {
+}>) {
   return (
     <div className="field">
       <span>{label}</span>

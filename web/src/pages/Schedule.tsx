@@ -453,7 +453,7 @@ function SchedulesCard({
   canEdit,
   onSelect,
   onPeriods,
-}: {
+}: Readonly<{
   list: ScheduleSummary[];
   activeId: number;
   nextChange: { at: string; schedule_id: number } | null;
@@ -462,7 +462,7 @@ function SchedulesCard({
   canEdit: boolean;
   onSelect: (id: number) => void;
   onPeriods: (periods: Period[]) => void;
-}) {
+}>) {
   const byId = new Map(list.map((schedule) => [schedule.id, schedule]));
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState(false);

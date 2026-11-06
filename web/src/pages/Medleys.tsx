@@ -126,7 +126,7 @@ export function Medleys() {
 }
 
 /** One medley: its recipe, its current version, and building a new one. */
-export function MedleyEditor({ id }: { id: number | null }) {
+export function MedleyEditor({ id }: Readonly<{ id: number | null }>) {
   const canEdit = useCan("operator");
   const medleys = useMedleys();
   const settings = useMedleySettings();
@@ -155,11 +155,11 @@ function RecipeCard({
   medley,
   settings,
   canEdit,
-}: {
+}: Readonly<{
   medley: Medley | null;
   settings: MedleySettings;
   canEdit: boolean;
-}) {
+}>) {
   const categories = useCategories();
   const labels = useLabels();
   const station = useStation();
@@ -557,11 +557,11 @@ export function FadeCurveSelect({
   value,
   disabled,
   onChange,
-}: {
+}: Readonly<{
   value: Recipe["fade_out_curve"];
   disabled: boolean;
   onChange: (curve: Recipe["fade_out_curve"]) => void;
-}) {
+}>) {
   return (
     <select
       className="input"
@@ -583,12 +583,12 @@ export function DuckPlaceSelect({
   value,
   disabled,
   onChange,
-}: {
+}: Readonly<{
   ramp: "attack" | "release";
   value: Recipe["duck_attack_at"];
   disabled: boolean;
   onChange: (place: Recipe["duck_attack_at"]) => void;
-}) {
+}>) {
   const options: [Recipe["duck_attack_at"], PlainKey][] =
     ramp === "attack"
       ? [
@@ -617,7 +617,7 @@ export function DuckPlaceSelect({
   );
 }
 
-function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: MedleySettings; canEdit: boolean }) {
+function BuildCard({ medley, settings, canEdit }: Readonly<{ medley: Medley; settings: MedleySettings; canEdit: boolean }>) {
   const player = useMedleyPlayer();
   // A new version being built; the current one otherwise.
   const [plan, setPlan] = useState<PartView[] | null>(null);
@@ -1172,7 +1172,7 @@ function BuildCard({ medley, settings, canEdit }: { medley: Medley; settings: Me
 }
 
 /** Moves a point by 0.1 s. */
-function Nudge({ label, text, onClick }: { label: string; text: string; onClick: () => void }) {
+function Nudge({ label, text, onClick }: Readonly<{ label: string; text: string; onClick: () => void }>) {
   return (
     <button type="button" className="btn small nudge" aria-label={label} title={label} onClick={onClick}>
       {text}
@@ -1195,12 +1195,12 @@ function ChoiceSelect({
   placeholder,
   choices,
   onChoose,
-}: {
+}: Readonly<{
   label: string;
   placeholder: string;
   choices: PartView[];
   onChoose: (chosen: PartView) => void;
-}) {
+}>) {
   return (
     <select
       className="input"

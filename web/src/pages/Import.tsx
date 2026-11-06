@@ -587,13 +587,13 @@ function ImportRowView({
   onInclude,
   resolution,
   onResolve,
-}: {
+}: Readonly<{
   row: Row;
   included: boolean;
   onInclude: (include: boolean) => void;
   resolution: Resolution | undefined;
   onResolve: (resolution: Resolution) => void;
-}) {
+}>) {
   const matched = row.status === "matched";
   const changed = (Object.keys(VALUE_KEY) as Field[]).filter(
     (field) => row.values[VALUE_KEY[field]] !== null && row.values[VALUE_KEY[field]] !== undefined,

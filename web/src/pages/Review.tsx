@@ -93,7 +93,7 @@ function Identifications() {
   );
 }
 
-function ReviewItem({ item }: { item: Schemas["ReviewItem"] }) {
+function ReviewItem({ item }: Readonly<{ item: Schemas["ReviewItem"] }>) {
   const canEdit = useCan("operator");
   const client = useQueryClient();
   const toast = useToast();
@@ -375,7 +375,7 @@ function Organize() {
   );
 }
 
-function BatchReport({ report }: { report: Schemas["BatchReport"] }) {
+function BatchReport({ report }: Readonly<{ report: Schemas["BatchReport"] }>) {
   return (
     <div className="stack">
       <span>

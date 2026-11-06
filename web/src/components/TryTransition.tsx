@@ -24,11 +24,11 @@ export function TryTransition({
   trackId,
   trackName: name,
   overrides,
-}: {
+}: Readonly<{
   trackId: number;
   trackName: string;
   overrides: TrackOverrides;
-}) {
+}>) {
   const [side, setSide] = useState<Side>("after");
   const [other, setOther] = useState<Other | null>(null);
   const [picking, setPicking] = useState(false);

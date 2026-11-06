@@ -81,7 +81,7 @@ function normalize(overrides: TrackOverrides): TrackOverrides {
   };
 }
 
-export function Track({ id }: { id: number }) {
+export function Track({ id }: Readonly<{ id: number }>) {
   const track = useQuery({
     queryKey: ["track", id],
     queryFn: () => unwrap(api.GET("/api/v1/tracks/{id}", { params: { path: { id } } })),
@@ -113,7 +113,7 @@ export function effectiveCues(track: TrackDetail, overrides: TrackOverrides) {
   return { length, cueIn: Math.min(cueIn, cueOut), cueOut };
 }
 
-function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutSettings | undefined }) {
+function TrackView({ track, settings }: Readonly<{ track: TrackDetail; settings: PlayoutSettings | undefined }>) {
   const canEdit = useCan("operator");
   const waveform = useWaveform(track.id);
   const saved = normalize(track.overrides);
@@ -712,7 +712,7 @@ function currentTags(track: TrackDetail): TagValues {
   };
 }
 
-function ProgrammingCard({ track, canEdit }: { track: TrackDetail; canEdit: boolean }) {
+function ProgrammingCard({ track, canEdit }: Readonly<{ track: TrackDetail; canEdit: boolean }>) {
   const [dialog, setDialog] = useState<"labels" | "programming" | null>(null);
   const measured = track.analysis?.bpm;
   const mb = track.musicbrainz;
@@ -835,13 +835,13 @@ function CueInput({
   placeholder,
   onChange,
   disabled,
-}: {
+}: Readonly<{
   value: number | null;
   /** Shown when empty; nothing when missing. */
   placeholder?: number;
   onChange: (ms: number | null) => void;
   disabled: boolean;
-}) {
+}>) {
   const [text, setText] = useState(value === null ? "" : duration(value, true));
   useEffect(() => {
     setText(value === null ? "" : duration(value, true));
@@ -897,7 +897,7 @@ function OverridesCard({
   onRevert,
   onClear,
   saving,
-}: {
+}: Readonly<{
   track: TrackDetail;
   settings: PlayoutSettings | undefined;
   draft: TrackOverrides;
@@ -923,7 +923,7 @@ function OverridesCard({
   onRevert: () => void;
   onClear: () => void;
   saving: boolean;
-}) {
+}>) {
   const disabled = !canEdit;
   const analysis = track.analysis;
   const station = settings?.crossfade;
@@ -1163,14 +1163,14 @@ function OverrideFade({
   station,
   disabled,
   onChange,
-}: {
+}: Readonly<{
   label: string;
   kind: "in" | "out";
   value: Fade | null;
   station: Fade | undefined;
   disabled: boolean;
   onChange: (fade: Fade | null) => void;
-}) {
+}>) {
   return (
     <div className="stack">
       <label className="check">
@@ -1187,7 +1187,7 @@ function OverrideFade({
   );
 }
 
-function CategoriesCard({ track, canEdit }: { track: TrackDetail; canEdit: boolean }) {
+function CategoriesCard({ track, canEdit }: Readonly<{ track: TrackDetail; canEdit: boolean }>) {
   const categories = useQuery({
     queryKey: ["categories"],
     queryFn: () => unwrap(api.GET("/api/v1/categories")),
@@ -1280,7 +1280,7 @@ function CategoriesCard({ track, canEdit }: { track: TrackDetail; canEdit: boole
   );
 }
 
-function DetailsCard({ track }: { track: TrackDetail }) {
+function DetailsCard({ track }: Readonly<{ track: TrackDetail }>) {
   const analysis = track.analysis;
   return (
     <Card title={t("track.details")}>
@@ -1347,7 +1347,7 @@ function DetailsCard({ track }: { track: TrackDetail }) {
   );
 }
 
-function PlaysCard({ track }: { track: TrackDetail }) {
+function PlaysCard({ track }: Readonly<{ track: TrackDetail }>) {
   const trackId = track.id;
   const plays = useQuery({
     queryKey: ["history", "track", trackId],

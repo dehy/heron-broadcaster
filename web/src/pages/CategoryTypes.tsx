@@ -80,7 +80,7 @@ export function TypesCard() {
   );
 }
 
-function TypeRow({ categoryType, canEdit }: { categoryType: CategoryType; canEdit: boolean }) {
+function TypeRow({ categoryType, canEdit }: Readonly<{ categoryType: CategoryType; canEdit: boolean }>) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const rename = useAction(
     () =>
