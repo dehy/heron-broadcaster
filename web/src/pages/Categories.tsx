@@ -51,7 +51,7 @@ export function Categories() {
   const types = useCategoryTypes();
   const shown = sortCategories(
     (categories.data ?? []).filter((category) =>
-      type === "all" ? true : type === "none" ? category.type_id == null : category.type_id === type,
+      matchesType(category, type),
     ),
     sort.by,
     sort.descending,
@@ -60,7 +60,7 @@ export function Categories() {
     <th
       className={className}
       title={title}
-      aria-sort={sort.by === by ? (sort.descending ? "descending" : "ascending") : undefined}
+      aria-sort={sortDirection(sort, by)}
     >
       <button
         type="button"
@@ -382,4 +382,17 @@ function FillDialog({ category, onClose }: Readonly<{ category: Category; onClos
       </div>
     </Modal>
   );
+}
+
+function matchesType(category: Category, type: number | "all" | "none"): boolean {
+  if (type === "all") return true;
+  return type === "none" ? category.type_id == null : category.type_id === type;
+}
+
+function sortDirection(
+  sort: { by: SortKey; descending: boolean },
+  by: SortKey,
+): "ascending" | "descending" | undefined {
+  if (sort.by !== by) return undefined;
+  return sort.descending ? "descending" : "ascending";
 }

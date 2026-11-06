@@ -948,12 +948,12 @@ function Row({
           <button
             type="button"
             className={unplayable ? "btn ghost small icon warn" : "btn ghost small icon"}
-            title={unplayable ? t("library.previewFailed") : previewing ? t("library.stopPreview") : t("library.preview")}
+            title={unplayable ? t("library.previewFailed") : t(previewing ? "library.stopPreview" : "library.preview")}
             aria-label={t(previewing ? "library.stopPreviewNamed" : "library.previewNamed", { name: track.title ?? file })}
             aria-pressed={previewing}
             onClick={() => preview.toggle(track)}
           >
-            <Icon name={unplayable ? "warn" : previewing ? "stop" : "play"} />
+            <Icon name={unplayable ? "warn" : previewIcon(previewing)} />
           </button>
         )}
       </td>
@@ -985,4 +985,8 @@ export function DeleteQuestion({ tracks }: Readonly<{ tracks: TrackSummary[] }>)
       </ul>
     </>
   );
+}
+
+function previewIcon(previewing: boolean): "stop" | "play" {
+  return previewing ? "stop" : "play";
 }

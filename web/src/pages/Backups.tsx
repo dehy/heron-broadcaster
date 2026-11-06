@@ -176,12 +176,8 @@ export function Backups() {
                         <a href={`/api/v1/backups/${encodeURIComponent(backup.name)}/database`} download>
                           {bytes(backup.database_size)}
                         </a>
-                      ) : backup.database_error ? (
-                        <span className="badge bad" title={backup.database_error}>
-                          {t("backups.databaseFailed")}
-                        </span>
                       ) : (
-                        <span className="muted">–</span>
+                        <DatabaseMissing error={backup.database_error} />
                       )}
                     </td>
                     <td className="hide-narrow">
@@ -822,5 +818,14 @@ function ReportDialog({ report }: Readonly<{ report: RestoreReport }>) {
         ))}
       </dl>
     </Modal>
+  );
+}
+
+function DatabaseMissing({ error }: Readonly<{ error: string | null | undefined }>) {
+  if (!error) return <span className="muted">–</span>;
+  return (
+    <span className="badge bad" title={error}>
+      {t("backups.databaseFailed")}
+    </span>
   );
 }

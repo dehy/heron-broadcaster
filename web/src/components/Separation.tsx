@@ -67,11 +67,7 @@ export function SeparationEditor({
               />
             ) : (
               <span className="muted small">
-                {fallback === undefined
-                  ? t("separation.inherited")
-                  : fallback === 0
-                    ? t("separation.offInherited")
-                    : t("separation.minutesInherited", { minutes: number(fallback) })}
+                {inheritedLabel(fallback)}
               </span>
             )}
           </div>
@@ -92,4 +88,10 @@ export function applyOverrides(base: Windows, overrides: SeparationOverrides | u
     title_min: overrides?.title_min ?? base.title_min,
     track_min: overrides?.track_min ?? base.track_min,
   };
+}
+
+function inheritedLabel(fallback: number | undefined): string {
+  if (fallback === undefined) return t("separation.inherited");
+  if (fallback === 0) return t("separation.offInherited");
+  return t("separation.minutesInherited", { minutes: number(fallback) });
 }

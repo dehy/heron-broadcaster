@@ -167,7 +167,7 @@ function StationDialog({
         </Field>
         <Field
           label={t("stations.code")}
-          hint={codeLocked ? t("stations.codeLocked") : first ? t("stations.codeFirstHint") : t("stations.codeHint")}
+          hint={codeLocked ? t("stations.codeLocked") : t(first ? "stations.codeFirstHint" : "stations.codeHint")}
         >
           <input
             className="input"
@@ -211,15 +211,17 @@ function EngineVariable({ station }: Readonly<{ station: StationInfo }>) {
   return (
     <span>
       <code className="mono">{station.engine_variable}</code>{" "}
-      {station.engine_taken_by ? (
+      {station.engine_taken_by && (
         <span className="badge warn" title={t("stations.engineTakenHint")}>
           {t("stations.engineTaken", { code: station.engine_taken_by })}
         </span>
-      ) : station.engine_configured ? (
-        <span className="badge good">{t("stations.engineConfigured")}</span>
-      ) : (
-        <span className="badge warn">{t("stations.engineMissing")}</span>
       )}
+      {!station.engine_taken_by &&
+        (station.engine_configured ? (
+          <span className="badge good">{t("stations.engineConfigured")}</span>
+        ) : (
+          <span className="badge warn">{t("stations.engineMissing")}</span>
+        ))}
     </span>
   );
 }

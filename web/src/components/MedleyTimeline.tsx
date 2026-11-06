@@ -157,7 +157,9 @@ export function MedleyTimeline({
     if (!onShift) {
       return;
     }
-    const by = event.key === "ArrowRight" ? SHIFT_STEP_MS : event.key === "ArrowLeft" ? -SHIFT_STEP_MS : 0;
+    let by = 0;
+    if (event.key === "ArrowRight") by = SHIFT_STEP_MS;
+    else if (event.key === "ArrowLeft") by = -SHIFT_STEP_MS;
     if (by !== 0) {
       event.preventDefault();
       onShift(index, shiftOf(index) + by);

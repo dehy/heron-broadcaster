@@ -126,11 +126,7 @@ export function TryTransition({
             }}
           >
             <Icon name={active ? "stop" : "play"} size={14} />{" "}
-            {listening.loading
-              ? t("playout.loadingTransition")
-              : active
-                ? t("playout.stopTransition")
-                : t("playout.listen")}
+            {listenLabel(listening.loading, active)}
           </button>
           {preview.data && (
             <span className="muted small">
@@ -139,18 +135,18 @@ export function TryTransition({
           )}
         </div>
         {preview.isError && <ErrorView error={preview.error} />}
-        {other === null ? (
-          <Empty>{t("tryTransition.none")}</Empty>
-        ) : preview.data ? (
-          <TransitionGraph
-            preview={preview.data}
-            outgoingWave={outgoingWave.data ?? null}
-            incomingWave={incomingWave.data ?? null}
-            playhead={listening.position}
-          />
-        ) : (
-          <Loading />
-        )}
+        {other === null && <Empty>{t("tryTransition.none")}</Empty>}
+        {other !== null &&
+          (preview.data ? (
+            <TransitionGraph
+              preview={preview.data}
+              outgoingWave={outgoingWave.data ?? null}
+              incomingWave={incomingWave.data ?? null}
+              playhead={listening.position}
+            />
+          ) : (
+            <Loading />
+          ))}
       </div>
       <Modal
         title={side === "after" ? t("tryTransition.pickAfter") : t("tryTransition.pickBefore")}
@@ -172,4 +168,9 @@ export function TryTransition({
       </Modal>
     </Card>
   );
+}
+
+function listenLabel(loading: boolean, active: boolean): string {
+  if (loading) return t("playout.loadingTransition");
+  return active ? t("playout.stopTransition") : t("playout.listen");
 }

@@ -360,11 +360,7 @@ function Preview({ settings }: Readonly<{ settings: PlayoutSettings }>) {
             }}
           >
             <Icon name={active ? "stop" : "play"} size={14} />{" "}
-            {listening.loading
-              ? t("playout.loadingTransition")
-              : active
-                ? t("playout.stopTransition")
-                : t("playout.listen")}
+            {listenLabel(listening.loading, active)}
           </button>
           {preview.data && (
             <span className="muted small">
@@ -373,18 +369,19 @@ function Preview({ settings }: Readonly<{ settings: PlayoutSettings }>) {
           )}
         </div>
         {preview.isError && <ErrorView error={preview.error} />}
-        {!outgoing || !incoming ? (
-          <Empty>{t("playout.pickTwo")}</Empty>
-        ) : preview.data ? (
-          <TransitionGraph
-            preview={preview.data}
-            outgoingWave={outgoingWave.data ?? null}
-            incomingWave={incomingWave.data ?? null}
-            playhead={listening.position}
-          />
-        ) : (
-          <Loading />
-        )}
+        {(!outgoing || !incoming) && <Empty>{t("playout.pickTwo")}</Empty>}
+        {outgoing &&
+          incoming &&
+          (preview.data ? (
+            <TransitionGraph
+              preview={preview.data}
+              outgoingWave={outgoingWave.data ?? null}
+              incomingWave={incomingWave.data ?? null}
+              playhead={listening.position}
+            />
+          ) : (
+            <Loading />
+          ))}
       </div>
       <Modal
         title={picking === "outgoing" ? t("playout.outgoingTrack") : t("playout.incomingTrack")}
@@ -401,4 +398,9 @@ function Preview({ settings }: Readonly<{ settings: PlayoutSettings }>) {
       </Modal>
     </Card>
   );
+}
+
+function listenLabel(loading: boolean, active: boolean): string {
+  if (loading) return t("playout.loadingTransition");
+  return active ? t("playout.stopTransition") : t("playout.listen");
 }

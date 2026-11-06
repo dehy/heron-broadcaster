@@ -259,15 +259,14 @@ function Uploads({ state }: Readonly<{ state: ReturnType<typeof useUploads> }>) 
                   {upload.name}
                 </td>
                 <td className="num small" style={{ width: "9rem" }}>
-                  {upload.state === "sending" || upload.state === "waiting" ? (
+                  {(upload.state === "sending" || upload.state === "waiting") && (
                     <div className="progress" title={t("buffer.sentOf", { sent: bytes(upload.sent), size: bytes(upload.size) })}>
                       <div style={{ width: `${upload.size ? (100 * upload.sent) / upload.size : 0}%` }} />
                     </div>
-                  ) : upload.state === "done" ? (
-                    <span className="good">{t("buffer.sent")}</span>
-                  ) : upload.state === "cancelled" ? (
-                    <span className="muted">{t("buffer.cancelled")}</span>
-                  ) : (
+                  )}
+                  {upload.state === "done" && <span className="good">{t("buffer.sent")}</span>}
+                  {upload.state === "cancelled" && <span className="muted">{t("buffer.cancelled")}</span>}
+                  {upload.state === "failed" && (
                     <span className="bad" title={upload.error}>
                       {t("buffer.uploadFailed")}
                     </span>

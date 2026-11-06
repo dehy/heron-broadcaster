@@ -47,7 +47,7 @@ export function TrackSearch({
               q,
               category_id: categoryId,
               filter: playableOnly ? ("playable" as const) : undefined,
-              sort: q ? undefined : categoryId ? ("title" as const) : ("last_played" as const),
+              sort: q ? undefined : (categoryId ? "title" : "last_played") as "title" | "last_played",
               limit,
             }),
           },
