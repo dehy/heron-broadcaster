@@ -297,13 +297,13 @@ export function ChangeField({
   label,
   change,
   onChange,
-  input,
+  renderInput,
   clearLabel,
 }: Readonly<{
   label: string;
   change: Change<string>;
   onChange: (change: Change<string>) => void;
-  input: (value: string, set: (value: string) => void) => ReactNode;
+  renderInput: (value: string, set: (value: string) => void) => ReactNode;
   clearLabel?: string;
 }>) {
   return (
@@ -322,7 +322,7 @@ export function ChangeField({
             { value: "clear", label: clearLabel ?? t("selection.clear") },
           ]}
         />
-        {change.kind === "set" && input(change.value, (value) => onChange({ kind: "set", value }))}
+        {change.kind === "set" && renderInput(change.value, (value) => onChange({ kind: "set", value }))}
       </div>
     </div>
   );
@@ -388,16 +388,6 @@ export function ProgrammingDialog({ open, onClose, selection, files, tracks }: T
       onSuccess: onClose,
     },
   );
-  const scale = (values: string[] | undefined) => (value: string, set: (value: string) => void) => (
-    <select className="input" value={value} onChange={(event) => set(event.target.value)}>
-      <option value="">{t("selection.choose")}</option>
-      {values?.map((v) => (
-        <option key={v} value={v}>
-          {v}
-        </option>
-      ))}
-    </select>
-  );
   const bpmNumber = bpm.kind === "set" ? Number(bpm.value) : 0;
   const invalid =
     (mood.kind === "set" && !mood.value) ||
@@ -432,13 +422,13 @@ export function ProgrammingDialog({ open, onClose, selection, files, tracks }: T
           label={t("library.column.mood")}
           change={mood}
           onChange={setMood}
-          input={scale(settings.data?.moods)}
+          renderInput={(value, set) => <ScaleSelect values={settings.data?.moods} value={value} set={set} />}
         />
         <ChangeField
           label={t("library.column.soundCode")}
           change={soundCode}
           onChange={setSoundCode}
-          input={scale(settings.data?.sound_codes)}
+          renderInput={(value, set) => <ScaleSelect values={settings.data?.sound_codes} value={value} set={set} />}
         />
         {!files && (
           <ChangeField
@@ -446,7 +436,7 @@ export function ProgrammingDialog({ open, onClose, selection, files, tracks }: T
             change={bpm}
             onChange={setBpm}
             clearLabel={t("selection.measured")}
-            input={(value, set) => (
+            renderInput={(value, set) => (
               <input
                 className="input num"
                 type="number"
@@ -626,7 +616,7 @@ export function TagsDialog({
                   }
                   change={changes[field] ?? { kind: "keep" }}
                   onChange={(change) => setChanges((all) => ({ ...all, [field]: change }))}
-                  input={(text, set) => (
+                  renderInput={(text, set) => (
                     <input
                       className="input"
                       type={numeric ? "number" : "text"}
@@ -698,5 +688,22 @@ export function TagsDialog({
         </div>
       )}
     </Modal>
+  );
+}
+
+function ScaleSelect({
+  values,
+  value,
+  set,
+}: Readonly<{ values: string[] | undefined; value: string; set: (value: string) => void }>) {
+  return (
+    <select className="input" value={value} onChange={(event) => set(event.target.value)}>
+      <option value="">{t("selection.choose")}</option>
+      {values?.map((v) => (
+        <option key={v} value={v}>
+          {v}
+        </option>
+      ))}
+    </select>
   );
 }

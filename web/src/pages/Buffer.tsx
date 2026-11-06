@@ -944,7 +944,7 @@ function TagsDialog({
                 }
                 change={changes[field] ?? { kind: "keep" }}
                 onChange={(change) => setChanges((all) => ({ ...all, [field]: change }))}
-                input={(text, set) => (
+                renderInput={(text, set) => (
                   <input
                     className="input"
                     type={numeric ? "number" : "text"}

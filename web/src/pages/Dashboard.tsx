@@ -275,7 +275,7 @@ function FxPicker({ play, playing }: Readonly<{ play: (trackId: number) => void;
         categoryId={current?.id}
         limit={current ? 50 : 8}
         placeholder={current ? t("dashboard.fxSearchIn", { name: current.name }) : t("dashboard.fxSearch")}
-        actions={(track) => (
+        renderActions={(track) => (
           <button type="button" className="btn small primary" disabled={playing} onClick={() => play(track.id)}>
             <Icon name="play" size={14} /> {t("dashboard.play")}
           </button>

@@ -21,14 +21,14 @@ export function useDebounced<T>(value: T, ms = 250): T {
 }
 
 export function TrackSearch({
-  actions,
+  renderActions,
   placeholder = t("trackSearch.placeholder"),
   playableOnly = true,
   categoryId,
   limit = 8,
 }: Readonly<{
   /** Buttons for each result. */
-  actions: (track: TrackSummary) => ReactNode;
+  renderActions: (track: TrackSummary) => ReactNode;
   placeholder?: string;
   playableOnly?: boolean;
   /** Only the tracks of this category, by title until a search. */
@@ -82,7 +82,7 @@ export function TrackSearch({
                 </div>
               </div>
               <div className="row" style={{ flexWrap: "nowrap" }}>
-                {actions(track)}
+                {renderActions(track)}
               </div>
             </li>
           ))}

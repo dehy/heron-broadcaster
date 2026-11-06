@@ -154,7 +154,7 @@ export function TryTransition({
         onClose={() => setPicking(false)}
       >
         <TrackSearch
-          actions={(track) => (
+          renderActions={(track) => (
             <button
               type="button"
               className="btn small primary"

@@ -389,7 +389,7 @@ function Preview({ settings }: Readonly<{ settings: PlayoutSettings }>) {
         onClose={() => setPicking(null)}
       >
         <TrackSearch
-          actions={(track) => (
+          renderActions={(track) => (
             <button type="button" className="btn small primary" onClick={() => choose(track)}>
               {t("restrictions.pick")}
             </button>

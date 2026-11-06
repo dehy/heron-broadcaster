@@ -315,7 +315,7 @@ export function RestrictionDialog({
               )}
               {kind === "artist" && !target && (
                 <ArtistPicker
-                  actions={(artist) => (
+                  renderActions={(artist) => (
                     <button
                       type="button"
                       className="btn small"
@@ -329,7 +329,7 @@ export function RestrictionDialog({
               {kind === "track" && !target && (
                 <TrackSearch
                   playableOnly={false}
-                  actions={(track) => (
+                  renderActions={(track) => (
                     <button
                       type="button"
                       className="btn small"

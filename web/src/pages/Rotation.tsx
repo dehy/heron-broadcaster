@@ -354,10 +354,10 @@ function SimulationSummary({ report }: Readonly<{ report: SimulationReport }>) {
             </tr>
           </thead>
           <tbody>
-            {simulation.picks.slice(0, shown).map((pick, index) => {
+            {simulation.picks.slice(0, shown).map((pick) => {
               const track = names.get(pick.track_id);
               return (
-                <tr key={index}>
+                <tr key={pick.start_unix_ms}>
                   <td className="num small">{dateTime(pick.start_unix_ms)}</td>
                   <td className="title-cell">
                     <Link to={`/library/${pick.track_id}`}>

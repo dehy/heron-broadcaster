@@ -93,7 +93,7 @@ export function QueuePage() {
         {canEdit && (
           <Card title={t("queuePage.add")}>
             <TrackSearch
-              actions={(track) => (
+              renderActions={(track) => (
                 <>
                   <button
                     type="button"
