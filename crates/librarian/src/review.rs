@@ -180,10 +180,13 @@ async fn file(
 ) -> Result<LibraryPath, OpError> {
     let mut planned = HashSet::new();
     let to = loop {
-        let candidate =
-            organize::free_path(desired, Some(current.as_str()), &mut planned, |path| {
-                std::fs::symlink_metadata(roots.library.join(path)).is_ok()
-            });
+        let candidate = organize::free_path_on_disk(
+            &roots.library,
+            desired,
+            Some(current.as_str()),
+            &mut planned,
+        )
+        .await?;
         let Some(candidate) = candidate.map(LibraryPath::from_stored) else {
             // Already where the layout puts it.
             break current.clone();

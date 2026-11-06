@@ -768,7 +768,11 @@ impl Backups {
                     whole = false;
                     tracing::error!(backup = %name, %error, "the database dump failed");
                     let failed = self.dir.join(failed_file(&name));
-                    let _ = write_atomically(&failed, |file| file.write_all(error.as_bytes()));
+                    let reason = error.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        write_atomically(&failed, |file| file.write_all(reason.as_bytes()))
+                    })
+                    .await;
                 }
             }
         }
