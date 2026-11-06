@@ -803,7 +803,7 @@ function BuildCard({ medley, settings, canEdit }: Readonly<{ medley: Medley; set
   const placed = shown.parts;
   // The file playing does not last as long as the timeline says.
   const fileLength =
-    !plan && player.source?.kind === "medley" && renderedSource && player.source.url === renderedSource.url
+    !plan && player.source?.kind === "medley" && player.source.url === renderedSource?.url
       ? player.length_ms
       : null;
   const outOfStep =

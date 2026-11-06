@@ -167,7 +167,7 @@ export function Outputs() {
                       </td>
                       <td className="hide-narrow mono small">
                         {typeof config.host === "string"
-                          ? `${config.host}:${String(config.port ?? 8000)}${String(config.mount ?? "")}`
+                          ? `${config.host}:${configText(config.port, "8000")}${configText(config.mount, "")}`
                           : "–"}
                       </td>
                       <td className="hide-narrow">{profileName(output.encoder_profile_id)}</td>
@@ -787,4 +787,9 @@ function ProfileDialog({ profile, onClose }: Readonly<{ profile: EncoderProfileV
       </form>
     </Modal>
   );
+}
+
+/** A configuration value shown as text, or what to show when it is not a string or a number. */
+function configText(value: unknown, fallback: string): string {
+  return typeof value === "string" || typeof value === "number" ? String(value) : fallback;
 }

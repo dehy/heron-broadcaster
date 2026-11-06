@@ -129,7 +129,7 @@ export function Backups() {
       <Card flush>
         {backups.isPending && <Loading />}
         {backups.isError && <ErrorView error={backups.error} />}
-        {backups.data && backups.data.length === 0 && <div className="empty">{t("backups.none")}</div>}
+        {backups.data?.length === 0 && <div className="empty">{t("backups.none")}</div>}
         {backups.data && backups.data.length > 0 && (
           <div className="table-wrap">
             <table className="table">

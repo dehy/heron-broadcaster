@@ -30,14 +30,13 @@ if (!root) {
 }
 
 // The language this browser remembers is loaded before the first paint.
-void startLanguage().then(() =>
-  createRoot(root).render(
-    <StrictMode>
-      <QueryClientProvider client={queries}>
-        <ToastProvider>
-          <App />
-        </ToastProvider>
-      </QueryClientProvider>
-    </StrictMode>,
-  ),
+await startLanguage();
+createRoot(root).render(
+  <StrictMode>
+    <QueryClientProvider client={queries}>
+      <ToastProvider>
+        <App />
+      </ToastProvider>
+    </QueryClientProvider>
+  </StrictMode>,
 );

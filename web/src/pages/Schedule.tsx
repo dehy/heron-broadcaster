@@ -83,7 +83,7 @@ export function Schedule() {
   });
   const [grid, setGrid] = useState<Grid>(new Map());
   // The clock painted; null paints "no clock", undefined until one is picked.
-  const [picked, setBrush] = useState<number | null | undefined>(undefined);
+  const [picked, setPicked] = useState<number | null | undefined>(undefined);
   const brush = picked === undefined ? (clocks.data?.[0]?.id ?? null) : picked;
   const [onlyEmpty, setOnlyEmpty] = useState(false);
   // The weeks before each stroke, to undo them.
@@ -239,7 +239,7 @@ export function Schedule() {
                     role="radio"
                     aria-checked={brush === clock.id}
                     className={brush === clock.id ? "btn small brush active" : "btn small brush"}
-                    onClick={() => setBrush(clock.id)}
+                    onClick={() => setPicked(clock.id)}
                   >
                     <span className="swatch" style={{ background: colors.get(clock.id) }} />
                     {clock.name}
@@ -251,7 +251,7 @@ export function Schedule() {
                   role="radio"
                   aria-checked={brush === null}
                   className={brush === null ? "btn small brush active" : "btn small brush"}
-                  onClick={() => setBrush(null)}
+                  onClick={() => setPicked(null)}
                 >
                   <span className="swatch empty-swatch" /> {t("schedule.noClockBrush")}
                 </button>

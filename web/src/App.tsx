@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useReducer, useState } from "react";
 import { api, can, done, errorMessage, fetchStatus, unwrap } from "./api";
 import { BackupWarnings } from "./components/BackupKey";
 import { StatusBar } from "./components/StatusBar";
@@ -372,12 +372,12 @@ function Warnings() {
     setDisconnectedSince(connected ? null : Date.now());
   }, [connected]);
   // Brief reconnections are not worth a banner.
-  const [, tick] = useState(0);
+  const [, tick] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
     if (connected) {
       return;
     }
-    const timer = setTimeout(() => tick((n) => n + 1), 3_000);
+    const timer = setTimeout(() => tick(), 3_000);
     return () => clearTimeout(timer);
   }, [connected]);
 

@@ -158,7 +158,7 @@ function Details({ explanation }: Readonly<{ explanation: Explanation }>) {
 function PicksCard() {
   const [before, setBefore] = useState<number[]>([]);
   const [open, setOpen] = useState<number | null>(null);
-  const cursor = before[before.length - 1];
+  const cursor = before.at(-1);
   const picks = useQuery({
     queryKey: ["rotation-picks", cursor],
     queryFn: () =>
@@ -167,7 +167,7 @@ function PicksCard() {
     refetchInterval: cursor === undefined ? 15_000 : false,
   });
   const rows: RotationPick[] = picks.data ?? [];
-  const last = rows[rows.length - 1];
+  const last = rows.at(-1);
   return (
     <Card title={t("rotationPage.picks")} flush>
       {picks.isPending && <Loading />}

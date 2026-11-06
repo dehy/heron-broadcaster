@@ -35,7 +35,7 @@ export function junctions(
   const found: { liner: number; at_ms: number; share: number }[] = [];
   parts.forEach((_, index) => {
     const previous = parts[index - 1];
-    if (!placed[index]?.over || previous === undefined || previous.kind !== "hook") {
+    if (!placed[index]?.over || previous?.kind !== "hook") {
       return;
     }
     // The first liner of its group, between two hooks.
