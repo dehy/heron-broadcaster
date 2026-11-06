@@ -435,7 +435,7 @@ export function Buffer() {
         {canEdit && <DropZone onFiles={onFiles} buffer={buffer.data} />}
         <Uploads state={uploads} />
         {imported && !importing && (
-          <div className="card card-head" role="status">
+          <output className="card card-head">
             <span>
               {rich("buffer.importedLink", {
                 count: imported.count,
@@ -454,7 +454,7 @@ export function Buffer() {
             >
               <Icon name="close" size={14} />
             </button>
-          </div>
+          </output>
         )}
         {importing && (
           <Banner kind="warn">

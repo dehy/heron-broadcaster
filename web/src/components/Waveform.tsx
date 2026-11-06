@@ -206,7 +206,6 @@ export function WaveformView({
         onPointerMove={(event) => setHover(msAt(event.clientX))}
         onPointerLeave={() => setHover(null)}
         style={{ cursor: onSeek ? "pointer" : "default" }}
-        aria-hidden="true"
       />
       {!data && (
         <div className="empty" style={{ position: "absolute", inset: 0, padding: "4rem 1rem" }}>

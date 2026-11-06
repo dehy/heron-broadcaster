@@ -273,7 +273,7 @@ export function Schedule() {
                   {t("schedule.onlyEmpty")}
                 </label>
                 <span className="spacer" />
-                <span className="row" role="group" aria-label={t("schedule.copyDay")}>
+                <fieldset className="row" aria-label={t("schedule.copyDay")}>
                   <span>{t("schedule.copy")}</span>
                   <select
                     className="input"
@@ -320,7 +320,7 @@ export function Schedule() {
                   >
                     {t("schedule.copyButton")}
                   </button>
-                </span>
+                </fieldset>
               </div>
             )}
             <div className="table-wrap">

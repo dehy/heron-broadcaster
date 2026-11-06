@@ -113,9 +113,9 @@ export function Dashboard() {
       />
 
       {player?.paused && (
-        <div className="banner warn" role="status">
+        <output className="banner warn">
           <Icon name="pause" /> {t("dashboard.paused")}
-        </div>
+        </output>
       )}
 
       <div className="grid sidebar-right">

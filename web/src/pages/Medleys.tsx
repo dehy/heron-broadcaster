@@ -257,7 +257,7 @@ function RecipeCard({
         <fieldset>
           <legend>{t("medleys.songs")}</legend>
           <div className="stack">
-            <div className="chips" role="group" aria-label={t("medleys.songCategories")}>
+            <fieldset className="chips" aria-label={t("medleys.songCategories")}>
               {offered?.map((category) => (
                 <label key={category.id} className="row small" style={{ gap: "0.3rem" }}>
                   <input
@@ -275,7 +275,7 @@ function RecipeCard({
                   {category.name}
                 </label>
               ))}
-            </div>
+            </fieldset>
             <div className="form-grid">
               <Field label={t("medleys.label")}>
                 <select
@@ -929,7 +929,7 @@ function BuildCard({ medley, settings, canEdit }: Readonly<{ medley: Medley; set
         {/* While it mixes, the player says so on its own line; a failure shows here. */}
         {plan && previewTask.data?.status === "failed" && <TaskState task={previewTask.data} />}
         {parts.length > 0 && !rendering && (plan || medley.track_id != null) && (
-          <div className="medley-player small" role="group" aria-label={t("medleys.player")}>
+          <fieldset className="medley-player small" aria-label={t("medleys.player")}>
             <button
               type="button"
               className="btn small"
@@ -963,7 +963,7 @@ function BuildCard({ medley, settings, canEdit }: Readonly<{ medley: Medley; set
             )}
             {pendingSeek !== null && <span className="muted">{t("medleys.mixing")}</span>}
             {!plan && medley.track_id != null && <Link to={`/library/${medley.track_id}`}>{t("medleys.openTrack")}</Link>}
-          </div>
+          </fieldset>
         )}
         {outOfStep && <span className="small warn">{t("medleys.timelineOutOfStep")}</span>}
         {!plan && medley.path && medley.track_id == null && status === "done" && (

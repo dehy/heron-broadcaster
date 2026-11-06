@@ -80,10 +80,9 @@ export function Icon({ name, size = 18, label }: Readonly<{ name: IconName; size
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      role={label ? "img" : undefined}
-      aria-label={label}
       aria-hidden={label ? undefined : true}
     >
+      {label && <title>{label}</title>}
       <path d={ICONS[name]} />
     </svg>
   );
@@ -164,12 +163,20 @@ export function PageHead({
 }
 
 export function Banner({ kind, children }: Readonly<{ kind: "warn" | "bad"; children: ReactNode }>) {
-  return (
-    <div className={`banner ${kind}`} role={kind === "bad" ? "alert" : "status"}>
+  const content = (
+    <>
       <Icon name="warn" />
       <div>{children}</div>
-    </div>
+    </>
   );
+  if (kind === "bad") {
+    return (
+      <div className="banner bad" role="alert">
+        {content}
+      </div>
+    );
+  }
+  return <output className="banner warn">{content}</output>;
 }
 
 export function Loading({ label = t("ui.loading") }: Readonly<{ label?: string }>) {
@@ -290,7 +297,7 @@ export function Segmented<T extends string>({
   disabled?: boolean;
 }>) {
   return (
-    <div className="segmented" role="group" aria-label={label}>
+    <fieldset className="segmented" aria-label={label}>
       {options.map((option) => (
         <button
           key={option.value}
@@ -302,7 +309,7 @@ export function Segmented<T extends string>({
           {option.label}
         </button>
       ))}
-    </div>
+    </fieldset>
   );
 }
 
@@ -469,9 +476,9 @@ export function ToastProvider({ children }: Readonly<{ children: ReactNode }>) {
       {children}
       <div className="toasts" aria-live="polite">
         {toasts.map((toast) => (
-          <div key={toast.id} className={toast.bad ? "toast bad" : "toast"} role="status">
+          <output key={toast.id} className={toast.bad ? "toast bad" : "toast"}>
             {toast.text}
-          </div>
+          </output>
         ))}
       </div>
     </ToastContext.Provider>

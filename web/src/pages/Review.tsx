@@ -45,7 +45,7 @@ export function Review() {
           <button
             key={value}
             type="button"
-            aria-selected={tab === value}
+            aria-current={tab === value ? "page" : undefined}
             onClick={() => setSearch({ tab: value === "review" ? undefined : value })}
           >
             {t(label)}

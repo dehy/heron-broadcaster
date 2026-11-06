@@ -84,7 +84,7 @@ export function Menu({ items, label = t("ui.moreActions") }: Readonly<{ items: M
         …
       </button>
       {open && (
-        <div ref={list} id={id} className="menu-list" role="menu" aria-label={label} onKeyDown={keys}>
+        <div ref={list} id={id} className="menu-list" role="menu" tabIndex={-1} aria-label={label} onKeyDown={keys}>
           {items.map((item, index) => (
             <button
               // Items are fixed for a given menu.

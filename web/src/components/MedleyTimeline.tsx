@@ -82,7 +82,7 @@ export function MedleyTimeline({
   /** Plays from `at_ms` on the timeline. */
   onSeek?: ((at_ms: number) => void) | undefined;
 }>) {
-  const box = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLFieldSetElement>(null);
   const drag = useRef<{ index: number; x: number; shift: number } | null>(null);
   // A press on the lanes: a click (seek) or, once it moves, a drag of a part.
   const press = useRef<{ index: number | null; x: number; at: number; dragging: boolean } | null>(null);
@@ -170,7 +170,7 @@ export function MedleyTimeline({
   };
 
   return (
-    <div className="medley-timeline" ref={box} role="group" aria-label={t("medleys.timeline")}>
+    <fieldset className="medley-timeline" ref={box} aria-label={t("medleys.timeline")}>
       <div
         className={`lanes${onMove ? " movable" : ""}${onSeek ? " seekable" : ""}`}
         onPointerDown={pressDown}
@@ -235,7 +235,7 @@ export function MedleyTimeline({
         <span>0:00</span>
         <span>{duration(length_ms, true)}</span>
       </div>
-    </div>
+    </fieldset>
   );
 }
 
