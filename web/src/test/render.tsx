@@ -6,7 +6,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, vi } from "vitest";
+import { afterEach, beforeAll, vi } from "vitest";
 import { type Role, type User, api } from "../api";
 import { ToastProvider } from "../components/ui";
 import { UserContext } from "../lib/session";
@@ -107,4 +107,36 @@ export function renderApp(ui: ReactNode, as: User = user()) {
       </ToastProvider>
     </QueryClientProvider>,
   );
+}
+
+/**
+ * Answers for pages that read much more than a test looks at: what is not
+ * listed is an empty list, which is also an empty page of items.
+ */
+export function lenient(known: Record<string, Answer>): Record<string, Answer> {
+  return new Proxy(known, {
+    has: () => true,
+    get: (target, route: string) => (route in target ? target[route] : Object.assign([], { items: [], total: 0 })),
+  });
+}
+
+/** What jsdom lacks and the waveform, the meters and the theme use. */
+export function browserStubs(): void {
+  beforeAll(() => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    HTMLCanvasElement.prototype.getContext = (() => null) as never;
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+  });
 }
