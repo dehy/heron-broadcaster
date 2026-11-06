@@ -696,7 +696,7 @@ legend {
   white-space: nowrap;
 }
 
-.tabs [aria-current="page"],
+.tabs [aria-selected="true"],
 .tabs [aria-current="page"] {
   color: var(--fg);
   border-bottom-color: var(--accent);
