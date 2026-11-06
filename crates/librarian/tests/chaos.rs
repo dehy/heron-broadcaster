@@ -269,6 +269,68 @@ async fn ready_files(pool: &MySqlPool) -> Vec<u64> {
     .await
 }
 
+/// Imports from the buffer zone: crash at every step of the first operations,
+/// then at random, asking again for what is left.
+async fn import_with_crashes(
+    setup: &Setup,
+    pool: &MySqlPool,
+    roots: &Roots,
+    originals: &BTreeMap<String, usize>,
+    pre_existing: &[u8],
+) {
+    for step in ["recorded", "transferred", "finished", "removed"] {
+        for n in [1, 3] {
+            let ready = ready_files(pool).await;
+            if ready.is_empty() {
+                break;
+            }
+            let crash_at = format!("{step}:{n}");
+            let task = ask(pool, &TaskRequest::StagingImport { file_ids: ready }).await;
+            run_task(setup, pool, task, Some(&crash_at)).await;
+            assert_nothing_lost(
+                roots,
+                originals,
+                pre_existing,
+                &format!("import, crash at {crash_at}"),
+            );
+            assert_prepared(pool, &format!("import, crash at {crash_at}")).await;
+        }
+    }
+    let mut round = 0;
+    loop {
+        // A run recovers interrupted imports first.
+        let ready = ready_files(pool).await;
+        if ready.is_empty() {
+            let importing = ids(
+                pool,
+                "SELECT id FROM staged_files WHERE status = 'importing'",
+            )
+            .await;
+            if importing.is_empty() {
+                break;
+            }
+        }
+        round += 1;
+        assert!(round < 20, "the import never finished");
+        let task = ask(pool, &TaskRequest::StagingImport { file_ids: ready }).await;
+        if round <= 3 {
+            let mut child = setup.spawn(&[], None);
+            tokio::time::sleep(Duration::from_millis(300 + 400 * round)).await;
+            child.kill().unwrap();
+            child.wait().unwrap();
+            assert_nothing_lost(
+                roots,
+                originals,
+                pre_existing,
+                &format!("import, killed in round {round}"),
+            );
+            assert_prepared(pool, &format!("import, killed in round {round}")).await;
+        } else {
+            run_task(setup, pool, task, None).await;
+        }
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn interrupted_operations_lose_and_overwrite_nothing() {
     let Some(db) = ScratchDatabase::create().await else {
@@ -402,59 +464,7 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
         .await
         .unwrap();
 
-    // Import from the buffer zone: crash at every step of the first
-    // operations, then at random, asking again for what is left.
-    for step in ["recorded", "transferred", "finished", "removed"] {
-        for n in [1, 3] {
-            let ready = ready_files(pool).await;
-            if ready.is_empty() {
-                break;
-            }
-            let crash_at = format!("{step}:{n}");
-            let task = ask(pool, &TaskRequest::StagingImport { file_ids: ready }).await;
-            run_task(&setup, pool, task, Some(&crash_at)).await;
-            assert_nothing_lost(
-                &roots,
-                &originals,
-                &pre_existing,
-                &format!("import, crash at {crash_at}"),
-            );
-            assert_prepared(pool, &format!("import, crash at {crash_at}")).await;
-        }
-    }
-    let mut round = 0;
-    loop {
-        // A run recovers interrupted imports first.
-        let ready = ready_files(pool).await;
-        if ready.is_empty() {
-            let importing = ids(
-                pool,
-                "SELECT id FROM staged_files WHERE status = 'importing'",
-            )
-            .await;
-            if importing.is_empty() {
-                break;
-            }
-        }
-        round += 1;
-        assert!(round < 20, "the import never finished");
-        let task = ask(pool, &TaskRequest::StagingImport { file_ids: ready }).await;
-        if round <= 3 {
-            let mut child = setup.spawn(&[], None);
-            tokio::time::sleep(Duration::from_millis(300 + 400 * round)).await;
-            child.kill().unwrap();
-            child.wait().unwrap();
-            assert_nothing_lost(
-                &roots,
-                &originals,
-                &pre_existing,
-                &format!("import, killed in round {round}"),
-            );
-            assert_prepared(pool, &format!("import, killed in round {round}")).await;
-        } else {
-            run_task(&setup, pool, task, None).await;
-        }
-    }
+    import_with_crashes(&setup, pool, &roots, &originals, &pre_existing).await;
     setup.run(&["batches"], None);
     assert_settled(pool, &roots, &originals, "after the import").await;
     assert_eq!(

@@ -59,9 +59,7 @@ export function useAction<V, R>(
   return useMutation({
     mutationFn: action,
     onSuccess: async (result, variables) => {
-      for (const key of options.invalidate ?? []) {
-        await client.invalidateQueries({ queryKey: key });
-      }
+      await Promise.all((options.invalidate ?? []).map((key) => client.invalidateQueries({ queryKey: key })));
       if (options.success) {
         toast(typeof options.success === "string" ? options.success : options.success(result));
       }

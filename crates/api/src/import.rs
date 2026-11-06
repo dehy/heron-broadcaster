@@ -707,187 +707,20 @@ async fn apply(
         .execute(&mut *tx)
         .await?
         .last_insert_id();
-    let mut summary = ImportSummary::default();
-    let mut category_ids: HashMap<String, u64> = HashMap::new();
-    let mut label_ids: HashMap<String, u64> = HashMap::new();
-
+    let mut run = ApplyRun {
+        user_id: user.id,
+        import_id,
+        playout: &playout,
+        categories: &categories,
+        problems: &problems,
+        category_ids: HashMap::new(),
+        label_ids: HashMap::new(),
+        summary: ImportSummary::default(),
+    };
     for row in &request.rows {
-        let exists: Option<bool> =
-            sqlx::query_scalar("SELECT enabled FROM tracks WHERE id = ? AND deleted_at IS NULL")
-                .bind(row.track_id)
-                .fetch_optional(&mut *tx)
-                .await?;
-        if exists.is_none() {
-            return Err(ApiError::Invalid(format!(
-                "track {} does not exist",
-                row.track_id
-            )));
-        }
-        let values = &row.values;
-        let mut previous = snapshot(&mut tx, row.track_id, values).await?;
-        let mut disable = false;
-
-        // Tags, kept in Heron's database.
-        for (field, value) in [
-            (TagField::Title, &values.title),
-            (TagField::Artist, &values.artist),
-            (TagField::Year, &values.year),
-        ] {
-            if let Some(value) = value {
-                set_tag(&mut tx, row.track_id, field, value, user.id).await?;
-            }
-        }
-
-        // Fades: the station's, with the export's length.
-        if values.fade_in_ms.is_some() || values.fade_out_ms.is_some() {
-            let mut crossfade = crossfade(&mut tx, row.track_id).await?;
-            if let Some(time_ms) = values.fade_in_ms {
-                crossfade.fade_in = Some(Fade {
-                    enabled: true,
-                    time_ms,
-                    ..playout.crossfade.fade_in
-                });
-            }
-            if let Some(time_ms) = values.fade_out_ms {
-                crossfade.fade_out = Some(Fade {
-                    enabled: true,
-                    time_ms,
-                    ..playout.crossfade.fade_out
-                });
-            }
-            let json = serde_json::to_string(&crossfade)
-                .map_err(|error| ApiError::Internal(error.to_string()))?;
-            sqlx::query(
-                "INSERT INTO track_overrides (track_id, crossfade) VALUES (?, ?)
-                 ON DUPLICATE KEY UPDATE crossfade = VALUES(crossfade)",
-            )
-            .bind(row.track_id)
-            .bind(json)
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        // Markers.
-        let marks = [
-            values.intro_ms,
-            values.intro2_ms,
-            values.hook_in_ms,
-            values.hook_out_ms,
-            values.next_soft_ms,
-            values.next_hard_ms,
-        ];
-        if marks.iter().any(Option::is_some) {
-            let mut query = sqlx::query(
-                "INSERT INTO track_markers
-                     (track_id, intro_ms, intro2_ms, hook_in_ms, hook_out_ms, next_soft_ms, next_hard_ms)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                 ON DUPLICATE KEY UPDATE
-                     intro_ms = COALESCE(VALUES(intro_ms), intro_ms),
-                     intro2_ms = COALESCE(VALUES(intro2_ms), intro2_ms),
-                     hook_in_ms = COALESCE(VALUES(hook_in_ms), hook_in_ms),
-                     hook_out_ms = COALESCE(VALUES(hook_out_ms), hook_out_ms),
-                     next_soft_ms = COALESCE(VALUES(next_soft_ms), next_soft_ms),
-                     next_hard_ms = COALESCE(VALUES(next_hard_ms), next_hard_ms)",
-            )
-            .bind(row.track_id);
-            for mark in marks {
-                query = query.bind(mark);
-            }
-            query.execute(&mut *tx).await?;
-        }
-
-        // Category.
-        if let Some(choice) = values.category.and_then(|id| categories.get(&id)) {
-            if let Some(name) = choice
-                .name
-                .as_deref()
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-            {
-                let category = match category_ids.get(name) {
-                    Some(id) => *id,
-                    None => {
-                        let id = category(&mut tx, name, choice, &mut summary).await?;
-                        category_ids.insert(name.to_owned(), id);
-                        id
-                    }
-                };
-                let added = sqlx::query(
-                    "INSERT IGNORE INTO track_categories (track_id, category_id) VALUES (?, ?)",
-                )
-                .bind(row.track_id)
-                .bind(category)
-                .execute(&mut *tx)
-                .await?
-                .rows_affected();
-                if added > 0 {
-                    previous.categories_added.push(category);
-                }
-            }
-            disable |= choice.disable_tracks;
-        }
-
-        // Problem.
-        if let Some(choice) = values.problem.and_then(|id| problems.get(&id))
-            && choice.action != ImportProblemAction::Ignore
-        {
-            if let Some(name) = choice
-                .label
-                .as_deref()
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-            {
-                let label = match label_ids.get(name) {
-                    Some(id) => *id,
-                    None => {
-                        let id = label(&mut tx, name, &mut summary).await?;
-                        label_ids.insert(name.to_owned(), id);
-                        id
-                    }
-                };
-                let added = sqlx::query(
-                    "INSERT IGNORE INTO track_labels (track_id, label_id) VALUES (?, ?)",
-                )
-                .bind(row.track_id)
-                .bind(label)
-                .execute(&mut *tx)
-                .await?
-                .rows_affected();
-                if added > 0 {
-                    previous.labels_added.push(label);
-                }
-            }
-            disable |= choice.action == ImportProblemAction::LabelAndDisable;
-        }
-
-        if disable {
-            let changed = sqlx::query("UPDATE tracks SET enabled = FALSE WHERE id = ? AND enabled")
-                .bind(row.track_id)
-                .execute(&mut *tx)
-                .await?
-                .rows_affected();
-            summary.disabled += changed;
-        }
-        if let Some(added_at) = &values.added_at {
-            sqlx::query("UPDATE tracks SET created_at = ? WHERE id = ?")
-                .bind(added_at)
-                .bind(row.track_id)
-                .execute(&mut *tx)
-                .await?;
-        }
-
-        let previous = serde_json::to_string(&previous)
-            .map_err(|error| ApiError::Internal(error.to_string()))?;
-        sqlx::query(
-            "INSERT INTO track_import_changes (import_id, track_id, previous) VALUES (?, ?, ?)",
-        )
-        .bind(import_id)
-        .bind(row.track_id)
-        .bind(previous)
-        .execute(&mut *tx)
-        .await?;
-        summary.tracks += 1;
+        run.apply_row(&mut tx, row).await?;
     }
+    let summary = run.summary;
 
     let json =
         serde_json::to_string(&summary).map_err(|error| ApiError::Internal(error.to_string()))?;
@@ -900,6 +733,256 @@ async fn apply(
     state.stations.wake_all();
     tracing::info!(user = %user.username, import_id, tracks = summary.tracks, "tracks imported");
     Ok(Json(find_import(&state, import_id).await?))
+}
+
+/// What an import shares between its rows.
+struct ApplyRun<'a> {
+    user_id: u64,
+    import_id: u64,
+    playout: &'a PlayoutSettings,
+    categories: &'a HashMap<u64, ImportCategoryChoice>,
+    problems: &'a HashMap<u64, ImportProblemChoice>,
+    category_ids: HashMap<String, u64>,
+    label_ids: HashMap<String, u64>,
+    summary: ImportSummary,
+}
+
+impl ApplyRun<'_> {
+    /// Sets one track's values and records what it had before.
+    async fn apply_row(
+        &mut self,
+        tx: &mut Transaction<'_, MySql>,
+        row: &ImportApplyRow,
+    ) -> ApiResult<()> {
+        let exists: Option<bool> =
+            sqlx::query_scalar("SELECT enabled FROM tracks WHERE id = ? AND deleted_at IS NULL")
+                .bind(row.track_id)
+                .fetch_optional(&mut **tx)
+                .await?;
+        if exists.is_none() {
+            return Err(ApiError::Invalid(format!(
+                "track {} does not exist",
+                row.track_id
+            )));
+        }
+        let values = &row.values;
+        let mut previous = snapshot(tx, row.track_id, values).await?;
+        self.set_tags(tx, row.track_id, values).await?;
+        self.set_fades(tx, row.track_id, values).await?;
+        set_markers(tx, row.track_id, values).await?;
+        let mut disable = self
+            .put_in_category(tx, row.track_id, values, &mut previous)
+            .await?;
+        disable |= self
+            .label_problem(tx, row.track_id, values, &mut previous)
+            .await?;
+        if disable {
+            let changed = sqlx::query("UPDATE tracks SET enabled = FALSE WHERE id = ? AND enabled")
+                .bind(row.track_id)
+                .execute(&mut **tx)
+                .await?
+                .rows_affected();
+            self.summary.disabled += changed;
+        }
+        if let Some(added_at) = &values.added_at {
+            sqlx::query("UPDATE tracks SET created_at = ? WHERE id = ?")
+                .bind(added_at)
+                .bind(row.track_id)
+                .execute(&mut **tx)
+                .await?;
+        }
+        let previous = serde_json::to_string(&previous)
+            .map_err(|error| ApiError::Internal(error.to_string()))?;
+        sqlx::query(
+            "INSERT INTO track_import_changes (import_id, track_id, previous) VALUES (?, ?, ?)",
+        )
+        .bind(self.import_id)
+        .bind(row.track_id)
+        .bind(previous)
+        .execute(&mut **tx)
+        .await?;
+        self.summary.tracks += 1;
+        Ok(())
+    }
+
+    /// Tags, kept in Heron's database.
+    async fn set_tags(
+        &self,
+        tx: &mut Transaction<'_, MySql>,
+        track_id: u64,
+        values: &ImportValues,
+    ) -> ApiResult<()> {
+        for (field, value) in [
+            (TagField::Title, &values.title),
+            (TagField::Artist, &values.artist),
+            (TagField::Year, &values.year),
+        ] {
+            if let Some(value) = value {
+                set_tag(tx, track_id, field, value, self.user_id).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Fades: the station's, with the export's length.
+    async fn set_fades(
+        &self,
+        tx: &mut Transaction<'_, MySql>,
+        track_id: u64,
+        values: &ImportValues,
+    ) -> ApiResult<()> {
+        if values.fade_in_ms.is_none() && values.fade_out_ms.is_none() {
+            return Ok(());
+        }
+        let playout = self.playout;
+        let mut crossfade = crossfade(tx, track_id).await?;
+        if let Some(time_ms) = values.fade_in_ms {
+            crossfade.fade_in = Some(Fade {
+                enabled: true,
+                time_ms,
+                ..playout.crossfade.fade_in
+            });
+        }
+        if let Some(time_ms) = values.fade_out_ms {
+            crossfade.fade_out = Some(Fade {
+                enabled: true,
+                time_ms,
+                ..playout.crossfade.fade_out
+            });
+        }
+        let json = serde_json::to_string(&crossfade)
+            .map_err(|error| ApiError::Internal(error.to_string()))?;
+        sqlx::query(
+            "INSERT INTO track_overrides (track_id, crossfade) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE crossfade = VALUES(crossfade)",
+        )
+        .bind(track_id)
+        .bind(json)
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
+    }
+
+    /// Puts the track in its category, creating it when new. Whether the
+    /// category asks for the track to be disabled.
+    async fn put_in_category(
+        &mut self,
+        tx: &mut Transaction<'_, MySql>,
+        track_id: u64,
+        values: &ImportValues,
+        previous: &mut Previous,
+    ) -> ApiResult<bool> {
+        let Some(choice) = values.category.and_then(|id| self.categories.get(&id)) else {
+            return Ok(false);
+        };
+        let name = choice
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
+        if let Some(name) = name {
+            let category = match self.category_ids.get(name) {
+                Some(id) => *id,
+                None => {
+                    let id = category(tx, name, choice, &mut self.summary).await?;
+                    self.category_ids.insert(name.to_owned(), id);
+                    id
+                }
+            };
+            let added = sqlx::query(
+                "INSERT IGNORE INTO track_categories (track_id, category_id) VALUES (?, ?)",
+            )
+            .bind(track_id)
+            .bind(category)
+            .execute(&mut **tx)
+            .await?
+            .rows_affected();
+            if added > 0 {
+                previous.categories_added.push(category);
+            }
+        }
+        Ok(choice.disable_tracks)
+    }
+
+    /// Labels the track with its problem, creating the label when new.
+    /// Whether the problem asks for the track to be disabled.
+    async fn label_problem(
+        &mut self,
+        tx: &mut Transaction<'_, MySql>,
+        track_id: u64,
+        values: &ImportValues,
+        previous: &mut Previous,
+    ) -> ApiResult<bool> {
+        let Some(choice) = values
+            .problem
+            .and_then(|id| self.problems.get(&id))
+            .filter(|choice| choice.action != ImportProblemAction::Ignore)
+        else {
+            return Ok(false);
+        };
+        let name = choice
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
+        if let Some(name) = name {
+            let label = match self.label_ids.get(name) {
+                Some(id) => *id,
+                None => {
+                    let id = label(tx, name, &mut self.summary).await?;
+                    self.label_ids.insert(name.to_owned(), id);
+                    id
+                }
+            };
+            let added =
+                sqlx::query("INSERT IGNORE INTO track_labels (track_id, label_id) VALUES (?, ?)")
+                    .bind(track_id)
+                    .bind(label)
+                    .execute(&mut **tx)
+                    .await?
+                    .rows_affected();
+            if added > 0 {
+                previous.labels_added.push(label);
+            }
+        }
+        Ok(choice.action == ImportProblemAction::LabelAndDisable)
+    }
+}
+
+/// Markers, imported from another software and shown, not played by Heron.
+async fn set_markers(
+    tx: &mut Transaction<'_, MySql>,
+    track_id: u64,
+    values: &ImportValues,
+) -> ApiResult<()> {
+    let marks = [
+        values.intro_ms,
+        values.intro2_ms,
+        values.hook_in_ms,
+        values.hook_out_ms,
+        values.next_soft_ms,
+        values.next_hard_ms,
+    ];
+    if marks.iter().any(Option::is_some) {
+        let mut query = sqlx::query(
+                "INSERT INTO track_markers
+                     (track_id, intro_ms, intro2_ms, hook_in_ms, hook_out_ms, next_soft_ms, next_hard_ms)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                     intro_ms = COALESCE(VALUES(intro_ms), intro_ms),
+                     intro2_ms = COALESCE(VALUES(intro2_ms), intro2_ms),
+                     hook_in_ms = COALESCE(VALUES(hook_in_ms), hook_in_ms),
+                     hook_out_ms = COALESCE(VALUES(hook_out_ms), hook_out_ms),
+                     next_soft_ms = COALESCE(VALUES(next_soft_ms), next_soft_ms),
+                     next_hard_ms = COALESCE(VALUES(next_hard_ms), next_hard_ms)",
+            )
+            .bind(track_id);
+        for mark in marks {
+            query = query.bind(mark);
+        }
+        query.execute(&mut **tx).await?;
+    }
+    Ok(())
 }
 
 /// Refuses values the database cannot hold.
