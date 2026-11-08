@@ -930,8 +930,8 @@ impl ImportRun<'_> {
             .filter(|_| settings.embed_cover && !file.has_cover);
         let retag = (file.applied != file.own || cover.is_some()).then(|| Retag {
             change: TagChange::Tags {
-                previous: file.own.clone(),
-                applied: file.applied.clone(),
+                previous: Box::new(file.own.clone()),
+                applied: Box::new(file.applied.clone()),
             },
             restore: None,
             cover: cover.map_or(RetagCover::Keep, |jpeg| RetagCover::Embed(jpeg.clone())),

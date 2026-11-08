@@ -421,7 +421,6 @@ impl Stations {
 
     /// The first station: the one the single-station routes serve.
     // It always runs: `start` fails without it, and it cannot be deleted.
-    #[allow(clippy::expect_used)]
     pub fn first(&self) -> Arc<StationRuntime> {
         self.running
             .read()
@@ -429,7 +428,7 @@ impl Stations {
             .values()
             .next()
             .cloned()
-            .expect("there is always a station")
+            .unwrap_or_else(|| unreachable!("there is always a station"))
     }
 
     /// Every station, by ID.

@@ -110,8 +110,8 @@ pub async fn apply(
         .filter(|_| settings.embed_cover && !read.has_cover);
     let retag = (applied != own || embed.is_some()).then(|| Retag {
         change: TagChange::Tags {
-            previous: own.clone(),
-            applied: applied.clone(),
+            previous: Box::new(own.clone()),
+            applied: Box::new(applied.clone()),
         },
         restore: None,
         cover: embed.map_or(RetagCover::Keep, |jpeg| RetagCover::Embed(jpeg.clone())),

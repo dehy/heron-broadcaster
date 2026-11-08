@@ -89,7 +89,6 @@ impl ScratchDatabase {
     /// Uses `HERON_TEST_DATABASE_URL`, e.g. `mysql://root:root@127.0.0.1:3306`.
     /// Returns `None` (and the test should return early) when it is not set,
     /// and panics when it is set but unusable, so CI cannot skip silently.
-    #[allow(clippy::expect_used)]
     pub async fn create() -> Option<Self> {
         let Ok(admin_url) = std::env::var("HERON_TEST_DATABASE_URL") else {
             eprintln!("HERON_TEST_DATABASE_URL not set, skipping");
@@ -103,19 +102,19 @@ impl ScratchDatabase {
         );
         let admin = MySqlPool::connect(&admin_url)
             .await
-            .expect("cannot connect to HERON_TEST_DATABASE_URL");
+            .unwrap_or_else(|error| panic!("cannot connect to HERON_TEST_DATABASE_URL: {error}"));
         sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE `{name}`")))
             .execute(&admin)
             .await
-            .expect("cannot create the scratch database");
+            .unwrap_or_else(|error| panic!("cannot create the scratch database: {error}"));
         admin.close().await;
         let pool = MySqlPool::connect(&format!("{admin_url}/{name}"))
             .await
-            .expect("cannot connect to the scratch database");
+            .unwrap_or_else(|error| panic!("cannot connect to the scratch database: {error}"));
         MIGRATOR
             .run(&pool)
             .await
-            .expect("cannot migrate the scratch database");
+            .unwrap_or_else(|error| panic!("cannot migrate the scratch database: {error}"));
         Some(Self {
             pool,
             admin_url,

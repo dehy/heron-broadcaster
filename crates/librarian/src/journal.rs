@@ -155,12 +155,13 @@ pub struct Retag {
     pub restore: Option<Box<Delta>>,
 }
 
-// One per file operation: not worth boxing.
-#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TagChange {
     /// The tags identification writes ([`Tags`]).
-    Tags { previous: Tags, applied: Tags },
+    Tags {
+        previous: Box<Tags>,
+        applied: Box<Tags>,
+    },
     /// Fields edited from the browser: only these are written.
     Fields {
         previous: FieldValues,
@@ -331,10 +332,15 @@ pub async fn execute(pool: &MySqlPool, roots: &Roots, op: Operation) -> Result<u
     let temp = temp_path(&op.to, move_id);
     crash_point("recorded");
 
-    let transferred = transfer(
-        pool, roots, &op, move_id, &from, &to, &temp, source, in_place,
-    )
-    .await;
+    let step = Step {
+        move_id,
+        from: &from,
+        to: &to,
+        temp: &temp,
+        source,
+        in_place,
+    };
+    let transferred = transfer(pool, roots, &op, &step).await;
     if transferred.is_ok() {
         crash_point("transferred");
     }
@@ -505,19 +511,31 @@ enum Transfer {
     Copied,
 }
 
+/// Where one operation's file comes from and goes to.
+struct Step<'a> {
+    move_id: u64,
+    from: &'a Path,
+    to: &'a Path,
+    temp: &'a LibraryPath,
+    source: FileStamp,
+    in_place: bool,
+}
+
 /// Step 2: put the file at its new path (or its new tags into it).
-#[allow(clippy::too_many_arguments)]
 async fn transfer(
     pool: &MySqlPool,
     roots: &Roots,
     op: &Operation,
-    move_id: u64,
-    from: &Path,
-    to: &Path,
-    temp: &LibraryPath,
-    source: FileStamp,
-    in_place: bool,
+    step: &Step<'_>,
 ) -> Result<Transfer, OpError> {
+    let Step {
+        move_id,
+        from,
+        to,
+        temp,
+        source,
+        in_place,
+    } = *step;
     if let Some(parent) = to.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }

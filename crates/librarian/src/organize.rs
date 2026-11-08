@@ -424,8 +424,8 @@ impl RecordedChange {
             let previous: Tags = serde_json::from_str(&self.previous).unwrap_or_default();
             let now = tags::read(path).map(|read| read.tags).unwrap_or_default();
             TagChange::Tags {
-                previous: now,
-                applied: previous,
+                previous: Box::new(now),
+                applied: Box::new(previous),
             }
         };
         if let Some(delta) = delta
