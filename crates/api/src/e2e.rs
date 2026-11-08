@@ -106,7 +106,9 @@ impl Station {
         let mut tracks = Vec::new();
         for n in 1..=5 {
             let path = format!("Artist {n}/Track {n}.wav");
-            std::fs::create_dir_all(library.path().join(format!("Artist {n}"))).unwrap();
+            tokio::fs::create_dir_all(library.path().join(format!("Artist {n}")))
+                .await
+                .unwrap();
             write_wav(
                 &library.path().join(&path),
                 TRACK_SECONDS,

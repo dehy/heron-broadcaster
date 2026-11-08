@@ -824,7 +824,7 @@ function timelineOf(
   renderedSource: MedleySource | null,
 ) {
   const saved = medley.rendered_layout;
-  const rendered = !editing && saved && saved.parts.length === parts.length ? saved : null;
+  const rendered = !editing && saved?.parts.length === parts.length ? saved : null;
   const shown = rendered ?? layout(parts, medley.recipe);
   // The file playing does not last as long as the timeline says.
   const playingRendered = player.source?.kind === "medley" && player.source.url === renderedSource?.url;

@@ -142,12 +142,34 @@ describe("MedleyEditor", () => {
     expect(screen.getAllByRole("listitem").length).toBeGreaterThan(0);
   });
 
+  it("moves, shifts and nudges every end of the parts", async () => {
+    editor([medley({ rendered_at_unix_ms: 1_700_000_000_000, track_id: 9, path: "m.mp3" })]);
+    fireEvent.click(await screen.findByText(t("medleys.edit")));
+    const controls = /0\.1 s (earlier|later)$|^More of |^Put .* back where/;
+    for (const label of screen.getAllByRole("button", { name: controls }).map((b) => b.getAttribute("aria-label"))) {
+      const button = screen.getAllByRole("button").find((b) => b.getAttribute("aria-label") === label);
+      if (button) fireEvent.click(button);
+    }
+    expect(screen.getAllByRole("listitem").length).toBeGreaterThan(0);
+  });
+
+  it("replaces a part with another pick", async () => {
+    editor([medley({ rendered_at_unix_ms: 1_700_000_000_000, track_id: 9, path: "m.mp3" })], "operator", {
+      "POST /api/v1/medleys/{id}/pick": part(9, "hook"),
+    });
+    fireEvent.click(await screen.findByText(t("medleys.edit")));
+    const replace = await screen.findAllByRole("button", { name: /^Replace .* with another pick/ });
+    fireEvent.click(replace[0] as HTMLElement);
+    await waitFor(() => expect(sent("POST /api/v1/medleys/{id}/pick")).toHaveLength(1));
+    expect((await screen.findAllByText("hook 9", { exact: false }))[0]).toBeTruthy();
+  });
+
   it("builds the parts to pick when none exist", async () => {
     editor([medley({ parts: [] })], "operator", {
       "POST /api/v1/medleys/{id}/plan": { parts: PARTS, qualified: 1 },
     });
     fireEvent.click(await screen.findByText(t("medleys.build")));
-    await waitFor(() => expect(sent("POST /api/v1/medleys/{id}/plan").length).toBe(1));
+    await waitFor(() => expect(sent("POST /api/v1/medleys/{id}/plan")).toHaveLength(1));
     expect((await screen.findAllByText("hook 1", { exact: false }))[0]).toBeTruthy();
     expect(screen.getByText(t("medleys.fewSongs", { qualified: "1", wanted: "3" }), { exact: false })).toBeTruthy();
   });
@@ -158,7 +180,7 @@ describe("MedleyEditor", () => {
     });
     fireEvent.click(await screen.findByText(t("medleys.edit")));
     fireEvent.click(await screen.findByText(t("medleys.render")));
-    await waitFor(() => expect(sent("POST /api/v1/medleys/{id}/render").length).toBe(1));
+    await waitFor(() => expect(sent("POST /api/v1/medleys/{id}/render")).toHaveLength(1));
   });
 
   it("offers a viewer nothing to change", async () => {

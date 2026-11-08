@@ -108,7 +108,78 @@ describe("Track", () => {
   it("queues the track next", async () => {
     page();
     fireEvent.click(await screen.findByText(t("queue.playNext")));
-    await waitFor(() => expect(sent("POST /api/v1/stations/{station_id}/queue").length).toBe(1));
+    await waitFor(() => expect(sent("POST /api/v1/stations/{station_id}/queue")).toHaveLength(1));
+  });
+
+  it("disables the track", async () => {
+    answer(lenient({ "GET /api/v1/tracks/{id}": TRACK, "PATCH /api/v1/tracks/{id}": TRACK }));
+    chooseStation(1);
+    renderApp(<Track id={7} />, user("operator"));
+    fireEvent.click(await screen.findByText(t("track.disable")));
+    await waitFor(() => expect(sent("PATCH /api/v1/tracks/{id}")).toHaveLength(1));
+    expect(sent("PATCH /api/v1/tracks/{id}")[0]?.options).toMatchObject({ body: { enabled: false } });
+  });
+
+  it("writes the tags the file lacks", async () => {
+    answer(
+      lenient({
+        "GET /api/v1/tracks/{id}": { ...TRACK, tag_overrides: ["title"] },
+        "POST /api/v1/tracks/tag-overrides/clear": undefined,
+      }),
+    );
+    chooseStation(1);
+    renderApp(<Track id={7} />, user("operator"));
+    fireEvent.click(await screen.findByText(t("track.fileTags")));
+    await waitFor(() => expect(sent("POST /api/v1/tracks/tag-overrides/clear")).toHaveLength(1));
+  });
+
+  it.each([
+    ["done", { skipped: [] }, undefined, t("track.deleted")],
+    ["done", { skipped: [{ reason: "in use" }] }, undefined, t("track.notDeleted", { reason: "in use" })],
+    ["failed", null, "disk full", "disk full"],
+  ])("tells how deleting the track ended (%s)", async (status, report, error, message) => {
+    answer(
+      lenient({
+        "GET /api/v1/tracks/{id}": TRACK,
+        "POST /api/v1/tracks/delete": { id: 9 },
+        "GET /api/v1/library/tasks/{id}": { id: 9, status, report, error },
+      }),
+    );
+    chooseStation(1);
+    renderApp(<Track id={7} />, user("operator"));
+    fireEvent.click(await screen.findByText(t("library.delete")));
+    fireEvent.click((await screen.findAllByText(t("library.delete"))).at(-1) as HTMLElement);
+    await waitFor(() => expect(sent("POST /api/v1/tracks/delete")).toHaveLength(1));
+    expect(await screen.findByText(message)).toBeTruthy();
+  });
+
+  it("loops the hook", async () => {
+    page();
+    fireEvent.click(await screen.findByText(t("track.loopHook")));
+    expect(await screen.findByText(t("track.stopHook"))).toBeTruthy();
+    // jsdom plays no audio: the button stays until the element says it paused.
+    fireEvent.click(screen.getByText(t("track.stopHook")));
+  });
+
+  it("follows the audio while it plays, looping the hook", async () => {
+    page();
+    fireEvent.click(await screen.findByText(t("track.loopHook")));
+    const audio = document.querySelector("audio") as HTMLAudioElement;
+    // The hook runs 60 s to 80 s: past its end, the audio goes back to its start.
+    audio.currentTime = 81;
+    fireEvent.play(audio);
+    await waitFor(() => expect(audio.currentTime).toBeLessThan(81));
+    fireEvent.pause(audio);
+    expect(await screen.findByText(t("track.listen"))).toBeTruthy();
+  });
+
+  it("pauses the audio from the play button", async () => {
+    page();
+    const audio = (await screen.findByText(t("track.listen")).then(() => document.querySelector("audio"))) as HTMLAudioElement;
+    fireEvent.play(audio);
+    fireEvent.click(await screen.findByText(t("dashboard.pause")));
+    fireEvent.ended(audio);
+    expect(await screen.findByText(t("track.listen"))).toBeTruthy();
   });
 
   it("zooms on the intro", async () => {
