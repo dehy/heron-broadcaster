@@ -207,7 +207,7 @@ function StationDialog({
 }
 
 /** A station's engine variable, and whether heron-api has it. */
-function EngineVariable({ station }: Readonly<{ station: StationInfo }>) {
+export function EngineVariable({ station }: Readonly<{ station: StationInfo }>) {
   return (
     <span>
       <code className="mono">{station.engine_variable}</code>{" "}

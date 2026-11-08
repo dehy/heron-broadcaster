@@ -55,7 +55,7 @@ function fieldLabel(field: Field): string {
 }
 
 /** A value as shown: text, or a time in seconds. */
-function show(field: Field, values: Values): string {
+export function show(field: Field, values: Values): string {
   const value = values[VALUE_KEY[field]];
   if (value === null || value === undefined) {
     return "–";

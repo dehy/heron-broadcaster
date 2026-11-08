@@ -731,7 +731,7 @@ function SimulateCard({ clockId, dirty }: Readonly<{ clockId: number; dirty: boo
   );
 }
 
-function separationLabel(overrides: string, canEdit: boolean): string {
+export function separationLabel(overrides: string, canEdit: boolean): string {
   if (overrides) return t("clocks.separationValue", { windows: overrides });
   return canEdit ? t("clocks.overrideSeparation") : t("categories.separation");
 }

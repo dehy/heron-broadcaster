@@ -987,6 +987,6 @@ export function DeleteQuestion({ tracks }: Readonly<{ tracks: TrackSummary[] }>)
   );
 }
 
-function previewIcon(previewing: boolean): "stop" | "play" {
+export function previewIcon(previewing: boolean): "stop" | "play" {
   return previewing ? "stop" : "play";
 }

@@ -384,12 +384,12 @@ function FillDialog({ category, onClose }: Readonly<{ category: Category; onClos
   );
 }
 
-function matchesType(category: Category, type: number | "all" | "none"): boolean {
+export function matchesType(category: Category, type: number | "all" | "none"): boolean {
   if (type === "all") return true;
   return type === "none" ? category.type_id == null : category.type_id === type;
 }
 
-function sortDirection(
+export function sortDirection(
   sort: { by: SortKey; descending: boolean },
   by: SortKey,
 ): "ascending" | "descending" | undefined {
