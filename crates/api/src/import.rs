@@ -457,7 +457,7 @@ async fn preview(
     }
 
     let mut connection = state.pool.acquire().await?;
-    let mut rows = Vec::with_capacity(request.rows.len());
+    let mut rows = Vec::new();
     let mut categories: BTreeMap<u64, ImportCategory> = BTreeMap::new();
     let mut problems: BTreeMap<u64, ImportProblem> = BTreeMap::new();
     for (index, row) in request.rows.iter().enumerate() {
