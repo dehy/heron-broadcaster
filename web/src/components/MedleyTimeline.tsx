@@ -35,7 +35,7 @@ export function junctions(
   const found: { liner: number; at_ms: number; share: number }[] = [];
   parts.forEach((_, index) => {
     const previous = parts[index - 1];
-    if (!placed[index]?.over || previous === undefined || previous.kind !== "hook") {
+    if (!placed[index]?.over || previous?.kind !== "hook") {
       return;
     }
     // The first liner of its group, between two hooks.
@@ -68,7 +68,7 @@ export function MedleyTimeline({
   onShift,
   onMove,
   onSeek,
-}: {
+}: Readonly<{
   parts: readonly TimelinePart[];
   recipe: Parameters<typeof layout>[1];
   /** The layout the medley's file was rendered with: drawn instead of laying the parts out again. */
@@ -81,8 +81,8 @@ export function MedleyTimeline({
   onMove?: ((index: number, move_ms: number) => void) | undefined;
   /** Plays from `at_ms` on the timeline. */
   onSeek?: ((at_ms: number) => void) | undefined;
-}) {
-  const box = useRef<HTMLDivElement>(null);
+}>) {
+  const box = useRef<HTMLFieldSetElement>(null);
   const drag = useRef<{ index: number; x: number; shift: number } | null>(null);
   // A press on the lanes: a click (seek) or, once it moves, a drag of a part.
   const press = useRef<{ index: number | null; x: number; at: number; dragging: boolean } | null>(null);
@@ -157,7 +157,9 @@ export function MedleyTimeline({
     if (!onShift) {
       return;
     }
-    const by = event.key === "ArrowRight" ? SHIFT_STEP_MS : event.key === "ArrowLeft" ? -SHIFT_STEP_MS : 0;
+    let by = 0;
+    if (event.key === "ArrowRight") by = SHIFT_STEP_MS;
+    else if (event.key === "ArrowLeft") by = -SHIFT_STEP_MS;
     if (by !== 0) {
       event.preventDefault();
       onShift(index, shiftOf(index) + by);
@@ -168,7 +170,7 @@ export function MedleyTimeline({
   };
 
   return (
-    <div className="medley-timeline" ref={box} role="group" aria-label={t("medleys.timeline")}>
+    <fieldset className="medley-timeline" ref={box} aria-label={t("medleys.timeline")}>
       <div
         className={`lanes${onMove ? " movable" : ""}${onSeek ? " seekable" : ""}`}
         onPointerDown={pressDown}
@@ -233,7 +235,7 @@ export function MedleyTimeline({
         <span>0:00</span>
         <span>{duration(length_ms, true)}</span>
       </div>
-    </div>
+    </fieldset>
   );
 }
 
@@ -245,7 +247,7 @@ const LEVEL_POINTS = 160;
  * and for the music the ducking under liners and the medley's fade-in and
  * fade-out.
  */
-function Level({ medley, index }: { medley: Layout; index: number }) {
+function Level({ medley, index }: Readonly<{ medley: Layout; index: number }>) {
   const part = medley.parts[index];
   if (!part) {
     return null;

@@ -136,6 +136,31 @@ pub fn free_path(
     None
 }
 
+/// [`free_path`] against the files in `library`, looked up on a blocking thread.
+pub(crate) async fn free_path_on_disk(
+    library: &Path,
+    desired: &str,
+    own: Option<&str>,
+    taken: &mut HashSet<String>,
+) -> std::io::Result<Option<String>> {
+    let (library, desired, own) = (
+        library.to_path_buf(),
+        desired.to_owned(),
+        own.map(str::to_owned),
+    );
+    let mut owned = std::mem::take(taken);
+    let (found, owned) = tokio::task::spawn_blocking(move || {
+        let found = free_path(&desired, own.as_deref(), &mut owned, |path| {
+            std::fs::symlink_metadata(library.join(path)).is_ok()
+        });
+        (found, owned)
+    })
+    .await
+    .map_err(std::io::Error::other)?;
+    *taken = owned;
+    Ok(found)
+}
+
 pub fn stem_and_extension(path: &Path) -> (String, String) {
     let stem = path
         .file_stem()
@@ -274,63 +299,7 @@ pub async fn undo(pool: &MySqlPool, roots: &Roots, batch: u64) -> Result<Report,
     for chunk in rows.chunks(LOCK_CHUNK) {
         let lock = LibraryLock::acquire(pool, "librarian").await?;
         for row in chunk {
-            let move_id: u64 = row.try_get("id")?;
-            let track_id: u64 = row.try_get("track_id")?;
-            let current = LibraryPath::from_stored(row.try_get("track_path")?);
-            let relocated = row.try_get::<String, _>("from_root")? == "library"
-                && row.try_get::<String, _>("from_path")? != row.try_get::<String, _>("to_path")?;
-            let change_id: Option<u64> = row.try_get("change_id")?;
-            if !relocated && change_id.is_none() {
-                continue;
-            }
-            let to = if relocated {
-                LibraryPath::from_stored(row.try_get("from_path")?)
-            } else {
-                current.clone()
-            };
-            let retag = match change_id {
-                None => None,
-                Some(_) => {
-                    let change = RecordedChange {
-                        kind: row.try_get("kind")?,
-                        previous: row.try_get("previous")?,
-                        cover_embedded: row.try_get("cover_embedded")?,
-                        restore: row.try_get("restore")?,
-                        written: row.try_get("content_hash")?,
-                    };
-                    let path = current.resolve(&roots.library);
-                    tokio::task::spawn_blocking(move || change.undo(&path)).await?
-                }
-            };
-            let outcome = if to == current && retag.is_none() {
-                Ok(track_id)
-            } else {
-                let operation = Operation {
-                    batch_id: undo_batch,
-                    subject: Subject::Existing(track_id),
-                    from: Origin::Library(current.clone()),
-                    to,
-                    retag,
-                    expected_stamp: None,
-                };
-                journal::execute(pool, roots, operation).await
-            };
-            let succeeded = outcome.is_ok();
-            record_outcome(&mut report, current.as_str(), outcome)?;
-            if succeeded {
-                if relocated {
-                    sqlx::query("UPDATE library_moves SET status = 'undone' WHERE id = ?")
-                        .bind(move_id)
-                        .execute(pool)
-                        .await?;
-                }
-                if let Some(change_id) = change_id {
-                    sqlx::query("UPDATE track_tag_changes SET undone_at = NOW(6) WHERE id = ?")
-                        .bind(change_id)
-                        .execute(pool)
-                        .await?;
-                }
-            }
+            undo_move(pool, roots, undo_batch, row, &mut report).await?;
         }
         lock.release().await?;
     }
@@ -354,6 +323,75 @@ pub async fn undo(pool: &MySqlPool, roots: &Roots, batch: u64) -> Result<Report,
         "batch undone"
     );
     Ok(report)
+}
+
+/// Undoes one recorded move: the file goes back to its previous path and gets
+/// its previous tags back.
+async fn undo_move(
+    pool: &MySqlPool,
+    roots: &Roots,
+    undo_batch: u64,
+    row: &sqlx::mysql::MySqlRow,
+    report: &mut Report,
+) -> Result<(), Error> {
+    let move_id: u64 = row.try_get("id")?;
+    let track_id: u64 = row.try_get("track_id")?;
+    let current = LibraryPath::from_stored(row.try_get("track_path")?);
+    let relocated = row.try_get::<String, _>("from_root")? == "library"
+        && row.try_get::<String, _>("from_path")? != row.try_get::<String, _>("to_path")?;
+    let change_id: Option<u64> = row.try_get("change_id")?;
+    if !relocated && change_id.is_none() {
+        return Ok(());
+    }
+    let to = if relocated {
+        LibraryPath::from_stored(row.try_get("from_path")?)
+    } else {
+        current.clone()
+    };
+    let retag = match change_id {
+        None => None,
+        Some(_) => {
+            let change = RecordedChange {
+                kind: row.try_get("kind")?,
+                previous: row.try_get("previous")?,
+                cover_embedded: row.try_get("cover_embedded")?,
+                restore: row.try_get("restore")?,
+                written: row.try_get("content_hash")?,
+            };
+            let path = current.resolve(&roots.library);
+            tokio::task::spawn_blocking(move || change.undo(&path)).await?
+        }
+    };
+    let outcome = if to == current && retag.is_none() {
+        Ok(track_id)
+    } else {
+        let operation = Operation {
+            batch_id: undo_batch,
+            subject: Subject::Existing(track_id),
+            from: Origin::Library(current.clone()),
+            to,
+            retag,
+            expected_stamp: None,
+        };
+        journal::execute(pool, roots, operation).await
+    };
+    let succeeded = outcome.is_ok();
+    record_outcome(report, current.as_str(), outcome)?;
+    if succeeded {
+        if relocated {
+            sqlx::query("UPDATE library_moves SET status = 'undone' WHERE id = ?")
+                .bind(move_id)
+                .execute(pool)
+                .await?;
+        }
+        if let Some(change_id) = change_id {
+            sqlx::query("UPDATE track_tag_changes SET undone_at = NOW(6) WHERE id = ?")
+                .bind(change_id)
+                .execute(pool)
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 /// A tag change as recorded, to undo it.
@@ -386,8 +424,8 @@ impl RecordedChange {
             let previous: Tags = serde_json::from_str(&self.previous).unwrap_or_default();
             let now = tags::read(path).map(|read| read.tags).unwrap_or_default();
             TagChange::Tags {
-                previous: now,
-                applied: previous,
+                previous: Box::new(now),
+                applied: Box::new(previous),
             }
         };
         if let Some(delta) = delta

@@ -85,18 +85,24 @@ export async function uploadFile(
         throw error;
       }
       await sleep(backoff(failures), options.signal);
-      // Where the server got to, before carrying on.
-      try {
-        offset = await transport.received(id);
-        options.onProgress?.(offset);
-      } catch (lookup) {
-        if (!isTransient(lookup)) {
-          throw lookup;
-        }
-      }
+      offset = await resync(transport, id, offset, options);
     }
   }
   return id;
+}
+
+/** Where the server got to, before carrying on; where we were if it cannot say. */
+async function resync(transport: Transport, id: number, offset: number, options: UploadOptions): Promise<number> {
+  try {
+    const received = await transport.received(id);
+    options.onProgress?.(received);
+    return received;
+  } catch (error) {
+    if (!isTransient(error)) {
+      throw error;
+    }
+    return offset;
+  }
 }
 
 /** The API, as the uploader uses it. */

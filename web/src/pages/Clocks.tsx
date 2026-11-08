@@ -160,7 +160,7 @@ interface Draft extends ClockSlot {
   key: number;
 }
 
-export function ClockEditor({ id }: { id: number | null }) {
+export function ClockEditor({ id }: Readonly<{ id: number | null }>) {
   const clock = useQuery({
     queryKey: ["clocks", id],
     queryFn: () => unwrap(api.GET("/api/v1/stations/{station_id}/clocks/{id}", { params: { path: here({ id: id ?? 0 }) } })),
@@ -175,7 +175,7 @@ export function ClockEditor({ id }: { id: number | null }) {
   return <Editor key={id ?? "new"} clock={clock.data ?? null} />;
 }
 
-function Editor({ clock }: { clock: ClockView | null }) {
+function Editor({ clock }: Readonly<{ clock: ClockView | null }>) {
   const canEdit = useCan("operator");
   const categories = useStationCategories();
   const rotation = useQuery({
@@ -417,7 +417,7 @@ function SlotRow({
   onChange,
   onSeparation,
   onRemove,
-}: {
+}: Readonly<{
   slot: Draft;
   index: number;
   categories: Category[];
@@ -426,7 +426,7 @@ function SlotRow({
   onChange: (changes: Partial<ClockSlot>) => void;
   onSeparation: () => void;
   onRemove: () => void;
-}) {
+}>) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: slot.key,
     disabled: !canEdit,
@@ -514,7 +514,7 @@ function SlotRow({
             </>
           )}
           <button type="button" className="link-button" onClick={onSeparation}>
-            {overrides ? t("clocks.separationValue", { windows: overrides }) : canEdit ? t("clocks.overrideSeparation") : t("categories.separation")}
+            {separationLabel(overrides, canEdit)}
           </button>
         </div>
       </div>
@@ -551,14 +551,14 @@ function HourCard({
   slots,
   looping,
   onRulesOff,
-}: {
+}: Readonly<{
   preview: ClockPreview | undefined;
   categories: Map<number, Category>;
   slots: ClockSlot[];
   looping: boolean;
   /** Turns enforce rules off on the slots running short; unset for viewers. */
   onRulesOff: (() => void) | undefined;
-}) {
+}>) {
   const short = preview?.slots.filter((slot) => slot.short) ?? [];
   // Two slots in a row calling a type that never plays twice in a row: the
   // second is passed over (the last slot is followed by the first).
@@ -569,17 +569,15 @@ function HourCard({
   };
   const inARow = slots.filter((slot, index) => {
     const type = unrepeatable(slot);
-    const before = index > 0 ? slots[index - 1] : slots.length > 1 ? slots[slots.length - 1] : undefined;
+    const before = slots[index - 1] ?? (slots.length > 1 ? slots.at(-1) : undefined);
     return type !== null && unrepeatable(before) === type;
   });
   const span = looping && preview ? Math.max(HOUR_MS, preview.duration_ms) : HOUR_MS;
   return (
     <Card title={looping ? t("clocks.theLoop") : t("clocks.theHour")}>
-      {!preview ? (
-        <Loading />
-      ) : slots.length === 0 ? (
-        <Empty>{t("clocks.addSlotsToSee")}</Empty>
-      ) : (
+      {!preview && <Loading />}
+      {preview && slots.length === 0 && <Empty>{t("clocks.addSlotsToSee")}</Empty>}
+      {preview && slots.length > 0 && (
         <div className="stack">
           <div className="hour-bar" role="img" aria-label={looping ? t("clocks.barLoop") : t("clocks.barHour")}>
             {preview.slots.map((slot, index) => {
@@ -667,7 +665,7 @@ function HourCard({
   );
 }
 
-function SimulateCard({ clockId, dirty }: { clockId: number; dirty: boolean }) {
+function SimulateCard({ clockId, dirty }: Readonly<{ clockId: number; dirty: boolean }>) {
   const canSimulate = useCan("operator");
   const [report, setReport] = useState<SimulationReport | null>(null);
   const simulate = useAction(
@@ -705,10 +703,10 @@ function SimulateCard({ clockId, dirty }: { clockId: number; dirty: boolean }) {
             <Banner kind="bad">{t("clocks.rulesBroken", { count: report.simulation.violations.length })}</Banner>
           )}
           <ol className="list compact">
-            {report.simulation.picks.map((pick, index) => {
+            {report.simulation.picks.map((pick) => {
               const track = names.get(pick.track_id);
               return (
-                <li key={index} className="row" style={{ flexWrap: "nowrap" }}>
+                <li key={pick.start_unix_ms} className="row" style={{ flexWrap: "nowrap" }}>
                   <span className="num muted small">+{duration(pick.start_unix_ms - start)}</span>
                   <span className="ellipsis" style={{ flex: 1 }}>
                     <Link to={`/library/${pick.track_id}`}>
@@ -731,4 +729,9 @@ function SimulateCard({ clockId, dirty }: { clockId: number; dirty: boolean }) {
       )}
     </Card>
   );
+}
+
+export function separationLabel(overrides: string, canEdit: boolean): string {
+  if (overrides) return t("clocks.separationValue", { windows: overrides });
+  return canEdit ? t("clocks.overrideSeparation") : t("categories.separation");
 }

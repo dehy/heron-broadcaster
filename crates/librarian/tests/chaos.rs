@@ -17,7 +17,7 @@ mod common;
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use common::{
@@ -29,6 +29,7 @@ use heron_librarian::journal::Roots;
 use heron_library::{Tags, is_audio, is_hidden};
 use heron_service::db::ScratchDatabase;
 use sqlx::MySqlPool;
+use tokio::process::{Child, Command};
 
 /// The collision target that must never be overwritten.
 const PRE_EXISTING: &str = "Band 1/Album 1/01 Song 1 of 1.wav";
@@ -70,9 +71,9 @@ impl Setup {
     }
 
     /// Runs a command to completion (or to its crash).
-    fn run(&self, args: &[&str], crash_at: Option<&str>) -> bool {
+    async fn run(&self, args: &[&str], crash_at: Option<&str>) -> bool {
         let mut command = self.command(args, crash_at);
-        let output = command.stderr(Stdio::piped()).output().unwrap();
+        let output = command.stderr(Stdio::piped()).output().await.unwrap();
         eprintln!("chaos: {args:?} crash_at={crash_at:?} -> {}", output.status);
         if crash_at.is_none() && !output.status.success() {
             eprintln!("{}", String::from_utf8_lossy(&output.stderr));
@@ -81,18 +82,12 @@ impl Setup {
     }
 }
 
-fn wait(child: &mut Child, timeout: Duration) -> std::process::ExitStatus {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Some(status) = child.try_wait().unwrap() {
-            return status;
-        }
-        if Instant::now() > deadline {
-            child.kill().unwrap();
-            panic!("the librarian did not finish in time");
-        }
-        std::thread::sleep(Duration::from_millis(20));
+async fn wait(child: &mut Child, timeout: Duration) -> std::process::ExitStatus {
+    if let Ok(status) = tokio::time::timeout(timeout, child.wait()).await {
+        return status.unwrap();
     }
+    child.kill().await.unwrap();
+    panic!("the librarian did not finish in time");
 }
 
 /// Fingerprints of the audio files found in `dirs` (several copies of a
@@ -232,10 +227,11 @@ async fn run_task(setup: &Setup, pool: &MySqlPool, task: u64, crash_at: Option<&
     }
     Command::new("kill")
         .arg("-TERM")
-        .arg(child.id().to_string())
+        .arg(child.id().unwrap().to_string())
         .status()
+        .await
         .unwrap();
-    wait(&mut child, Duration::from_secs(60));
+    wait(&mut child, Duration::from_secs(60)).await;
 }
 
 async fn ids(pool: &MySqlPool, query: &str) -> Vec<u64> {
@@ -267,6 +263,67 @@ async fn ready_files(pool: &MySqlPool) -> Vec<u64> {
         "SELECT id FROM staged_files WHERE status = 'ready' ORDER BY id",
     )
     .await
+}
+
+/// Imports from the buffer zone: crash at every step of the first operations,
+/// then at random, asking again for what is left.
+async fn import_with_crashes(
+    setup: &Setup,
+    pool: &MySqlPool,
+    roots: &Roots,
+    originals: &BTreeMap<String, usize>,
+    pre_existing: &[u8],
+) {
+    for step in ["recorded", "transferred", "finished", "removed"] {
+        for n in [1, 3] {
+            let ready = ready_files(pool).await;
+            if ready.is_empty() {
+                break;
+            }
+            let crash_at = format!("{step}:{n}");
+            let task = ask(pool, &TaskRequest::StagingImport { file_ids: ready }).await;
+            run_task(setup, pool, task, Some(&crash_at)).await;
+            assert_nothing_lost(
+                roots,
+                originals,
+                pre_existing,
+                &format!("import, crash at {crash_at}"),
+            );
+            assert_prepared(pool, &format!("import, crash at {crash_at}")).await;
+        }
+    }
+    let mut round = 0;
+    loop {
+        // A run recovers interrupted imports first.
+        let ready = ready_files(pool).await;
+        if ready.is_empty() {
+            let importing = ids(
+                pool,
+                "SELECT id FROM staged_files WHERE status = 'importing'",
+            )
+            .await;
+            if importing.is_empty() {
+                break;
+            }
+        }
+        round += 1;
+        assert!(round < 20, "the import never finished");
+        let task = ask(pool, &TaskRequest::StagingImport { file_ids: ready }).await;
+        if round <= 3 {
+            let mut child = setup.spawn(&[], None);
+            tokio::time::sleep(Duration::from_millis(300 + 400 * round)).await;
+            child.kill().await.unwrap();
+            assert_nothing_lost(
+                roots,
+                originals,
+                pre_existing,
+                &format!("import, killed in round {round}"),
+            );
+            assert_prepared(pool, &format!("import, killed in round {round}")).await;
+        } else {
+            run_task(setup, pool, task, None).await;
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -333,7 +390,7 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
 
     // Into the buffer zone: crash at every step, then at random.
     for crash_at in ["staging-recorded:1", "staging-recorded:7"] {
-        setup.run(&[], Some(crash_at));
+        setup.run(&[], Some(crash_at)).await;
         assert_nothing_lost(
             &roots,
             &originals,
@@ -345,9 +402,8 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
     while !incoming_is_empty(&roots) && round < 3 {
         round += 1;
         let mut child = setup.spawn(&[], None);
-        std::thread::sleep(Duration::from_millis(200 * round));
-        child.kill().unwrap();
-        child.wait().unwrap();
+        tokio::time::sleep(Duration::from_millis(200 * round)).await;
+        child.kill().await.unwrap();
         assert_nothing_lost(
             &roots,
             &originals,
@@ -360,10 +416,9 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
     let deadline = Instant::now() + Duration::from_secs(120);
     while !incoming_is_empty(&roots) || ready_files(pool).await.len() < 20 {
         assert!(Instant::now() < deadline, "the files never got ready");
-        std::thread::sleep(Duration::from_millis(200));
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    child.kill().unwrap();
-    child.wait().unwrap();
+    child.kill().await.unwrap();
     let tracks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tracks")
         .fetch_one(pool)
         .await
@@ -402,60 +457,8 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
         .await
         .unwrap();
 
-    // Import from the buffer zone: crash at every step of the first
-    // operations, then at random, asking again for what is left.
-    for step in ["recorded", "transferred", "finished", "removed"] {
-        for n in [1, 3] {
-            let ready = ready_files(pool).await;
-            if ready.is_empty() {
-                break;
-            }
-            let crash_at = format!("{step}:{n}");
-            let task = ask(pool, &TaskRequest::StagingImport { file_ids: ready }).await;
-            run_task(&setup, pool, task, Some(&crash_at)).await;
-            assert_nothing_lost(
-                &roots,
-                &originals,
-                &pre_existing,
-                &format!("import, crash at {crash_at}"),
-            );
-            assert_prepared(pool, &format!("import, crash at {crash_at}")).await;
-        }
-    }
-    let mut round = 0;
-    loop {
-        // A run recovers interrupted imports first.
-        let ready = ready_files(pool).await;
-        if ready.is_empty() {
-            let importing = ids(
-                pool,
-                "SELECT id FROM staged_files WHERE status = 'importing'",
-            )
-            .await;
-            if importing.is_empty() {
-                break;
-            }
-        }
-        round += 1;
-        assert!(round < 20, "the import never finished");
-        let task = ask(pool, &TaskRequest::StagingImport { file_ids: ready }).await;
-        if round <= 3 {
-            let mut child = setup.spawn(&[], None);
-            tokio::time::sleep(Duration::from_millis(300 + 400 * round)).await;
-            child.kill().unwrap();
-            child.wait().unwrap();
-            assert_nothing_lost(
-                &roots,
-                &originals,
-                &pre_existing,
-                &format!("import, killed in round {round}"),
-            );
-            assert_prepared(pool, &format!("import, killed in round {round}")).await;
-        } else {
-            run_task(&setup, pool, task, None).await;
-        }
-    }
-    setup.run(&["batches"], None);
+    import_with_crashes(&setup, pool, &roots, &originals, &pre_existing).await;
+    setup.run(&["batches"], None).await;
     assert_settled(pool, &roots, &originals, "after the import").await;
     assert_eq!(
         std::fs::read(roots.library.join(PRE_EXISTING)).unwrap(),
@@ -478,7 +481,7 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
     .unwrap();
     let before_organize = common::snapshot(&roots.library);
     for crash_at in ["recorded:1", "transferred:2", "recorded:5", "transferred:7"] {
-        setup.run(&["organize", "--apply"], Some(crash_at));
+        setup.run(&["organize", "--apply"], Some(crash_at)).await;
         assert_nothing_lost(
             &roots,
             &originals,
@@ -488,12 +491,11 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
     }
     for _ in 0..3 {
         let mut child = setup.spawn(&["organize", "--apply"], None);
-        std::thread::sleep(Duration::from_millis(150));
-        let _ = child.kill();
-        child.wait().unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let _ = child.kill().await;
         assert_nothing_lost(&roots, &originals, &pre_existing, "organize, killed");
     }
-    assert!(setup.run(&["organize", "--apply"], None));
+    assert!(setup.run(&["organize", "--apply"], None).await);
     assert_settled(pool, &roots, &originals, "after organizing").await;
     let organized = common::snapshot(&roots.library);
     assert_ne!(organized, before_organize, "files moved");
@@ -516,11 +518,11 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
     for (batch, moves) in &batches {
         let batch = batch.to_string();
         if !crashed && *moves >= 2 {
-            setup.run(&["undo", &batch], Some("transferred:2"));
+            setup.run(&["undo", &batch], Some("transferred:2")).await;
             assert_nothing_lost(&roots, &originals, &pre_existing, "undo, crashed");
             crashed = true;
         }
-        assert!(setup.run(&["undo", &batch], None), "undo {batch}");
+        assert!(setup.run(&["undo", &batch], None).await, "undo {batch}");
     }
     assert!(crashed, "no organize batch with two moves: {batches:?}");
     assert_settled(pool, &roots, &originals, "after undoing").await;
@@ -575,10 +577,10 @@ async fn interrupted_operations_lose_and_overwrite_nothing() {
     for (index, batch) in batches.iter().enumerate() {
         let batch = batch.to_string();
         if index == 0 {
-            setup.run(&["undo", &batch], Some("transferred:1"));
+            setup.run(&["undo", &batch], Some("transferred:1")).await;
             assert_nothing_lost(&roots, &originals, &pre_existing, "restore, crashed");
         }
-        assert!(setup.run(&["undo", &batch], None), "restore {batch}");
+        assert!(setup.run(&["undo", &batch], None).await, "restore {batch}");
     }
     assert_settled(pool, &roots, &originals, "after restoring").await;
     assert_eq!(

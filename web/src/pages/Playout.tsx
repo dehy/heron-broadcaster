@@ -48,7 +48,7 @@ interface Pick {
   name: string;
 }
 
-function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
+function PlayoutForm({ saved }: Readonly<{ saved: PlayoutSettings }>) {
   const isAdmin = useCan("admin");
   const [draft, setDraft] = useState(saved);
   useEffect(() => setDraft(saved), [saved]);
@@ -230,7 +230,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
                 checked={watchdog.enabled}
                 disabled={disabled}
                 onChange={(event) => setWatchdog({ enabled: event.target.checked })}
-              />
+              />{" "}
               Skip tracks that stay silent
             </label>
             <div className="form-grid">
@@ -259,7 +259,7 @@ function PlayoutForm({ saved }: { saved: PlayoutSettings }) {
 }
 
 /** The transition between two tracks with the settings being edited. */
-function Preview({ settings }: { settings: PlayoutSettings }) {
+function Preview({ settings }: Readonly<{ settings: PlayoutSettings }>) {
   const player = useLive((live) => live.player);
   const [outgoing, setOutgoing] = useState<Pick | null>(null);
   const [incoming, setIncoming] = useState<Pick | null>(null);
@@ -360,11 +360,7 @@ function Preview({ settings }: { settings: PlayoutSettings }) {
             }}
           >
             <Icon name={active ? "stop" : "play"} size={14} />{" "}
-            {listening.loading
-              ? t("playout.loadingTransition")
-              : active
-                ? t("playout.stopTransition")
-                : t("playout.listen")}
+            {listenLabel(listening.loading, active)}
           </button>
           {preview.data && (
             <span className="muted small">
@@ -373,18 +369,19 @@ function Preview({ settings }: { settings: PlayoutSettings }) {
           )}
         </div>
         {preview.isError && <ErrorView error={preview.error} />}
-        {!outgoing || !incoming ? (
-          <Empty>{t("playout.pickTwo")}</Empty>
-        ) : preview.data ? (
-          <TransitionGraph
-            preview={preview.data}
-            outgoingWave={outgoingWave.data ?? null}
-            incomingWave={incomingWave.data ?? null}
-            playhead={listening.position}
-          />
-        ) : (
-          <Loading />
-        )}
+        {(!outgoing || !incoming) && <Empty>{t("playout.pickTwo")}</Empty>}
+        {outgoing &&
+          incoming &&
+          (preview.data ? (
+            <TransitionGraph
+              preview={preview.data}
+              outgoingWave={outgoingWave.data ?? null}
+              incomingWave={incomingWave.data ?? null}
+              playhead={listening.position}
+            />
+          ) : (
+            <Loading />
+          ))}
       </div>
       <Modal
         title={picking === "outgoing" ? t("playout.outgoingTrack") : t("playout.incomingTrack")}
@@ -392,7 +389,7 @@ function Preview({ settings }: { settings: PlayoutSettings }) {
         onClose={() => setPicking(null)}
       >
         <TrackSearch
-          actions={(track) => (
+          renderActions={(track) => (
             <button type="button" className="btn small primary" onClick={() => choose(track)}>
               {t("restrictions.pick")}
             </button>
@@ -401,4 +398,9 @@ function Preview({ settings }: { settings: PlayoutSettings }) {
       </Modal>
     </Card>
   );
+}
+
+function listenLabel(loading: boolean, active: boolean): string {
+  if (loading) return t("playout.loadingTransition");
+  return active ? t("playout.stopTransition") : t("playout.listen");
 }

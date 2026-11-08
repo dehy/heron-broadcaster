@@ -296,26 +296,11 @@ impl Library {
                 _ if file.stamp.mtime_us > settle_before => report.deferred += 1,
                 existing => {
                     let existing = existing.map(|track| track.id);
-                    let Some(info) = self.read(&file.path).await? else {
-                        report.failed += 1;
+                    if !self
+                        .import_changed(file, existing, &mut vanished, &mut moved_ids, &mut report)
+                        .await?
+                    {
                         continue;
-                    };
-                    match existing {
-                        Some(id) => {
-                            self.update(id, file, &info, true).await?;
-                            report.updated += 1;
-                        }
-                        None => {
-                            let moved_from = vanished.get_mut(&info.hash[..]).and_then(Vec::pop);
-                            if let Some(id) = moved_from {
-                                self.update_path(id, file, &info).await?;
-                                moved_ids.insert(id);
-                                report.moved += 1;
-                            } else {
-                                self.insert(file, &info).await?;
-                                report.added += 1;
-                            }
-                        }
                     }
                     // Feed the analyzers during long imports instead of at the end.
                     imported_since_enqueue += 1;
@@ -328,22 +313,10 @@ impl Library {
             }
         }
 
-        // Files that vanished are marked missing, unless the whole library
-        // looks unmounted: an empty directory must not "lose" every track.
         known.retain(|path, track| {
             !on_disk.contains(path.as_str()) && !track.missing && !moved_ids.contains(&track.id)
         });
-        if files.is_empty() && !known.is_empty() {
-            tracing::error!(
-                root = %self.root.display(),
-                "the library directory is empty, not marking tracks missing (unmounted volume?)"
-            );
-        } else {
-            for track in known.values() {
-                self.set_missing(track.id, true).await?;
-                report.missing += 1;
-            }
-        }
+        report.missing = self.mark_missing(&known, files.is_empty()).await?;
 
         report.enqueued += heron_analysis::jobs::enqueue_stale(&self.pool, &settings).await?;
 
@@ -351,27 +324,62 @@ impl Library {
         report.finished_at_unix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |since| since.as_secs());
-        tracing::info!(
-            files = report.files,
-            added = report.added,
-            updated = report.updated,
-            moved = report.moved,
-            restored = report.restored,
-            missing = report.missing,
-            deferred = report.deferred,
-            refreshed = report.refreshed,
-            failed = report.failed,
-            enqueued = report.enqueued,
-            duration_ms = report.duration_ms,
-            "library scan finished"
-        );
-        metrics::counter!("heron_library_scans_total", "result" => "ok").increment(1);
-        metrics::gauge!("heron_library_scan_duration_seconds").set(started.elapsed().as_secs_f64());
-        metrics::gauge!("heron_library_files").set(report.files as f64);
+        log_scan(&report, started);
         if let Ok(mut last) = self.last_scan.lock() {
             *last = Some(report.clone());
         }
         Ok(report)
+    }
+
+    /// Reads a new or changed file and records it: an update, a move or a
+    /// new track. `false` when it cannot be read.
+    async fn import_changed(
+        &self,
+        file: &DiskFile,
+        existing: Option<u64>,
+        vanished: &mut HashMap<Vec<u8>, Vec<u64>>,
+        moved_ids: &mut HashSet<u64>,
+        report: &mut ScanReport,
+    ) -> Result<bool, ScanError> {
+        let Some(info) = self.read(&file.path).await? else {
+            report.failed += 1;
+            return Ok(false);
+        };
+        if let Some(id) = existing {
+            self.update(id, file, &info, true).await?;
+            report.updated += 1;
+        } else if let Some(id) = vanished.get_mut(&info.hash[..]).and_then(Vec::pop) {
+            self.update_path(id, file, &info).await?;
+            moved_ids.insert(id);
+            report.moved += 1;
+        } else {
+            self.insert(file, &info).await?;
+            report.added += 1;
+        }
+        Ok(true)
+    }
+
+    /// Marks the `known` tracks, whose files vanished, as missing; how many.
+    /// Not when the whole library looks unmounted: an empty directory must
+    /// not "lose" every track.
+    async fn mark_missing(
+        &self,
+        known: &HashMap<String, KnownTrack>,
+        library_empty: bool,
+    ) -> Result<u64, ScanError> {
+        if library_empty && !known.is_empty() {
+            tracing::error!(
+                root = %self.root.display(),
+                "the library directory is empty, not marking tracks missing (unmounted volume?)"
+            );
+            return Ok(0);
+        }
+        let mut marked = 0;
+        for track in known.values() {
+            self.set_missing(track.id, true).await?;
+            marked += 1;
+        }
+        Ok(marked)
     }
 
     async fn known_tracks(&self) -> Result<HashMap<String, KnownTrack>, sqlx::Error> {
@@ -524,6 +532,26 @@ impl Library {
         sqlx::query(query).bind(id).execute(&self.pool).await?;
         Ok(())
     }
+}
+
+fn log_scan(report: &ScanReport, started: Instant) {
+    tracing::info!(
+        files = report.files,
+        added = report.added,
+        updated = report.updated,
+        moved = report.moved,
+        restored = report.restored,
+        missing = report.missing,
+        deferred = report.deferred,
+        refreshed = report.refreshed,
+        failed = report.failed,
+        enqueued = report.enqueued,
+        duration_ms = report.duration_ms,
+        "library scan finished"
+    );
+    metrics::counter!("heron_library_scans_total", "result" => "ok").increment(1);
+    metrics::gauge!("heron_library_scan_duration_seconds").set(started.elapsed().as_secs_f64());
+    metrics::gauge!("heron_library_files").set(report.files as f64);
 }
 
 /// Lists the audio files under `root`. Hidden files and directories

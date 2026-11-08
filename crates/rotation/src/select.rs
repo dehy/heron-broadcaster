@@ -391,6 +391,53 @@ struct SlotCall<'l> {
     enforce_rules: bool,
 }
 
+/// Counts the allowed tracks the separation rules block, and finds the one
+/// held back by another station (never played first, then the oldest).
+fn survey_blocked(
+    library: &Library,
+    history: &History,
+    recent: &Recent<'_>,
+    allowed: &[(&Track, f64)],
+    windows: Windows,
+    across: AcrossWindows,
+    at_ms: i64,
+) -> (Blocked, Option<(Option<i64>, HeldElsewhere)>) {
+    let mut blocked = Blocked::default();
+    let mut held: Option<(Option<i64>, HeldElsewhere)> = None;
+    for (track, _) in allowed {
+        match recent.blocking(library, track, windows, at_ms) {
+            Some(SeparationRule::Track) => blocked.track += 1,
+            Some(SeparationRule::Title) => blocked.title += 1,
+            Some(SeparationRule::Artist) => blocked.artist += 1,
+            Some(SeparationRule::Album) => blocked.album += 1,
+            None => {
+                let Some((rule, other)) = held_elsewhere(library, history, track, across, at_ms)
+                else {
+                    continue;
+                };
+                blocked.across += 1;
+                let last = history.last_played(track.id);
+                let wanted = held
+                    .as_ref()
+                    .is_none_or(|(held_last, held)| (last, track.id) < (*held_last, held.track_id));
+                if wanted {
+                    held = Some((
+                        last,
+                        HeldElsewhere {
+                            track_id: track.id,
+                            rule,
+                            station_id: other.station_id,
+                            at_unix_ms: other.play.start_ms,
+                            planned: other.planned,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    (blocked, held)
+}
+
 /// Tries the relaxation steps in order and picks with the slot's method
 /// among the first step's candidates.
 fn fill(
@@ -411,42 +458,19 @@ fn fill(
     } else {
         AcrossWindows::OFF
     };
-    let mut blocked = Blocked::default();
-    let mut held: Option<(Option<i64>, HeldElsewhere)> = None;
-    if slot.enforce_rules {
-        for (track, _) in &allowed {
-            match recent.blocking(library, track, slot.call.windows, at_ms) {
-                Some(SeparationRule::Track) => blocked.track += 1,
-                Some(SeparationRule::Title) => blocked.title += 1,
-                Some(SeparationRule::Artist) => blocked.artist += 1,
-                Some(SeparationRule::Album) => blocked.album += 1,
-                None => {
-                    if let Some((rule, other)) =
-                        held_elsewhere(library, history, track, across, at_ms)
-                    {
-                        blocked.across += 1;
-                        let last = history.last_played(track.id);
-                        // Never played first, then the oldest; then by ID.
-                        let wanted = held.as_ref().is_none_or(|(held_last, held)| {
-                            (last, track.id) < (*held_last, held.track_id)
-                        });
-                        if wanted {
-                            held = Some((
-                                last,
-                                HeldElsewhere {
-                                    track_id: track.id,
-                                    rule,
-                                    station_id: other.station_id,
-                                    at_unix_ms: other.play.start_ms,
-                                    planned: other.planned,
-                                },
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let (blocked, held) = if slot.enforce_rules {
+        survey_blocked(
+            library,
+            history,
+            &recent,
+            &allowed,
+            slot.call.windows,
+            across,
+            at_ms,
+        )
+    } else {
+        (Blocked::default(), None)
+    };
     let mut fallback: Option<(Call<'_>, Vec<(&Track, f64)>)> = None;
     for step in steps(slot.enforce_rules) {
         let across = if step < FALLBACK_STEP {

@@ -82,9 +82,9 @@ export function QueuePage() {
         }
       />
       {settings.data && !settings.data.autofill && (
-        <div className="banner warn" role="status">
+        <output className="banner warn">
           <Icon name="warn" /> {t("queuePage.autofillOff")}
-        </div>
+        </output>
       )}
       <div className="grid sidebar-right">
         <Card flush>
@@ -93,7 +93,7 @@ export function QueuePage() {
         {canEdit && (
           <Card title={t("queuePage.add")}>
             <TrackSearch
-              actions={(track) => (
+              renderActions={(track) => (
                 <>
                   <button
                     type="button"

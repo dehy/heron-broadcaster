@@ -9,8 +9,8 @@ FROM rust:1.99.1-slim-trixie AS builder
 # FFmpeg's development libraries and libclang (bindgen) for the engine's AAC-LC
 # encoder (the `aac` feature), which links libavcodec dynamically.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends g++ make pkg-config clang libclang-dev \
-        libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
+    && apt-get install -y --no-install-recommends clang g++ libavcodec-dev libavformat-dev libavutil-dev \
+        libclang-dev libswresample-dev make pkg-config \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY rust-toolchain.toml Cargo.toml Cargo.lock ./

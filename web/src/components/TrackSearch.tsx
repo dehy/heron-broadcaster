@@ -21,20 +21,20 @@ export function useDebounced<T>(value: T, ms = 250): T {
 }
 
 export function TrackSearch({
-  actions,
+  renderActions,
   placeholder = t("trackSearch.placeholder"),
   playableOnly = true,
   categoryId,
   limit = 8,
-}: {
+}: Readonly<{
   /** Buttons for each result. */
-  actions: (track: TrackSummary) => ReactNode;
+  renderActions: (track: TrackSummary) => ReactNode;
   placeholder?: string;
   playableOnly?: boolean;
   /** Only the tracks of this category, by title until a search. */
   categoryId?: number | undefined;
   limit?: number;
-}) {
+}>) {
   const [text, setText] = useState("");
   const q = useDebounced(text.trim());
   const results = useQuery({
@@ -47,7 +47,7 @@ export function TrackSearch({
               q,
               category_id: categoryId,
               filter: playableOnly ? ("playable" as const) : undefined,
-              sort: q ? undefined : categoryId ? ("title" as const) : ("last_played" as const),
+              sort: q ? undefined : (categoryId ? "title" : "last_played") as "title" | "last_played",
               limit,
             }),
           },
@@ -82,7 +82,7 @@ export function TrackSearch({
                 </div>
               </div>
               <div className="row" style={{ flexWrap: "nowrap" }}>
-                {actions(track)}
+                {renderActions(track)}
               </div>
             </li>
           ))}

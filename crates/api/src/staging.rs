@@ -542,7 +542,8 @@ async fn create_upload(
         )));
     }
     let group_dir = state.staging.join(upload.group_id.to_string());
-    std::fs::create_dir_all(&group_dir)
+    tokio::fs::create_dir_all(&group_dir)
+        .await
         .map_err(|error| ApiError::Internal(format!("cannot write to the buffer zone: {error}")))?;
     // Bytes still to come for the uploads in progress count as used.
     let pending: Option<i64> = sqlx::query_scalar(
@@ -1265,7 +1266,7 @@ async fn discard_files(
                 .join(group_id.to_string())
                 .join(upload_part_name(id)),
         ] {
-            match std::fs::remove_file(&path) {
+            match tokio::fs::remove_file(&path).await {
                 Ok(()) => {
                     if let Some(parent) = path.parent() {
                         remove_empty_dirs(parent, &state.staging);

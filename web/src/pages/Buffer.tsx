@@ -153,7 +153,7 @@ function useUploads(onComplete: () => void) {
   return { uploads, start, cancel, retry, clear };
 }
 
-function DropZone({ onFiles, buffer }: { onFiles: (picked: Picked[]) => void; buffer: Schemas["Buffer"] | undefined }) {
+function DropZone({ onFiles, buffer }: Readonly<{ onFiles: (picked: Picked[]) => void; buffer: Schemas["Buffer"] | undefined }>) {
   const [over, setOver] = useState(false);
   const files = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
@@ -225,7 +225,7 @@ function DropZone({ onFiles, buffer }: { onFiles: (picked: Picked[]) => void; bu
   );
 }
 
-function Uploads({ state }: { state: ReturnType<typeof useUploads> }) {
+function Uploads({ state }: Readonly<{ state: ReturnType<typeof useUploads> }>) {
   const { uploads, cancel, retry, clear } = state;
   if (uploads.length === 0) {
     return null;
@@ -259,15 +259,14 @@ function Uploads({ state }: { state: ReturnType<typeof useUploads> }) {
                   {upload.name}
                 </td>
                 <td className="num small" style={{ width: "9rem" }}>
-                  {upload.state === "sending" || upload.state === "waiting" ? (
+                  {(upload.state === "sending" || upload.state === "waiting") && (
                     <div className="progress" title={t("buffer.sentOf", { sent: bytes(upload.sent), size: bytes(upload.size) })}>
                       <div style={{ width: `${upload.size ? (100 * upload.sent) / upload.size : 0}%` }} />
                     </div>
-                  ) : upload.state === "done" ? (
-                    <span className="good">{t("buffer.sent")}</span>
-                  ) : upload.state === "cancelled" ? (
-                    <span className="muted">{t("buffer.cancelled")}</span>
-                  ) : (
+                  )}
+                  {upload.state === "done" && <span className="good">{t("buffer.sent")}</span>}
+                  {upload.state === "cancelled" && <span className="muted">{t("buffer.cancelled")}</span>}
+                  {upload.state === "failed" && (
                     <span className="bad" title={upload.error}>
                       {t("buffer.uploadFailed")}
                     </span>
@@ -436,7 +435,7 @@ export function Buffer() {
         {canEdit && <DropZone onFiles={onFiles} buffer={buffer.data} />}
         <Uploads state={uploads} />
         {imported && !importing && (
-          <div className="card card-head" role="status">
+          <output className="card card-head">
             <span>
               {rich("buffer.importedLink", {
                 count: imported.count,
@@ -455,7 +454,7 @@ export function Buffer() {
             >
               <Icon name="close" size={14} />
             </button>
-          </div>
+          </output>
         )}
         {importing && (
           <Banner kind="warn">
@@ -562,13 +561,13 @@ function Group({
   onToggle,
   range,
   canEdit,
-}: {
+}: Readonly<{
   group: StagedGroup;
   selected: Set<number>;
   onToggle: (ids: number[], on: boolean) => void;
   range: RangeSelection<number>;
   canEdit: boolean;
-}) {
+}>) {
   const [open, setOpen] = useState<number | null>(null);
   const selectable = group.files.filter((f) => f.status !== "importing").map((f) => f.id);
   const all = selectable.length > 0 && selectable.every((id) => selected.has(id));
@@ -636,7 +635,7 @@ function Group({
 
 /** The categories and labels the files of a group were given, with how
  * many of them have each when not all do. */
-function GroupPreparation({ files }: { files: StagedFile[] }) {
+function GroupPreparation({ files }: Readonly<{ files: StagedFile[] }>) {
   const counts = new Map<string, { chip: { name: string; color?: string | null }; count: number }>();
   for (const file of files) {
     for (const category of file.categories) {
@@ -671,7 +670,7 @@ function GroupPreparation({ files }: { files: StagedFile[] }) {
 }
 
 /** What a file was prepared with. */
-function Preparation({ file }: { file: StagedFile }) {
+function Preparation({ file }: Readonly<{ file: StagedFile }>) {
   const programming = [
     file.mood && t("buffer.moodValue", { value: file.mood }),
     file.sound_code && t("buffer.soundCodeValue", { value: file.sound_code }),
@@ -708,7 +707,7 @@ function tagLine(tags: Schemas["StagedTags"] | null | undefined): string {
   return [name, tags.album].filter(Boolean).join(" · ");
 }
 
-function State({ file }: { file: StagedFile }) {
+function State({ file }: Readonly<{ file: StagedFile }>) {
   const badges: ReactNode[] = [];
   switch (file.status) {
     case "receiving":
@@ -779,14 +778,14 @@ function FileRows({
   range,
   open,
   onOpen,
-}: {
+}: Readonly<{
   file: StagedFile;
   canEdit: boolean;
   selected: boolean;
   range: RangeSelection<number>;
   open: boolean;
   onOpen: () => void;
-}) {
+}>) {
   const shown = file.tags ?? file.own_tags;
   return (
     <>
@@ -870,13 +869,13 @@ function TagsDialog({
   onClose,
   files,
   current,
-}: {
+}: Readonly<{
   open: boolean;
   onClose: () => void;
   files: number[];
   /** The tags of a single file, to start from. */
   current?: Schemas["StagedTags"] | null | undefined;
-}) {
+}>) {
   const [changes, setChanges] = useState<Partial<Record<TagField, Change<string>>>>({});
   useEffect(() => {
     if (open) {
@@ -903,7 +902,7 @@ function TagsDialog({
   const edited = Object.values(changes).some((change) => change && change.kind !== "keep");
   const invalid = EDITABLE.some(({ field, number }) => {
     const change = changes[field];
-    return change?.kind === "set" && (!change.value.trim() || (number && !(Number(change.value) >= 1)));
+    return change?.kind === "set" && (!change.value.trim() || (number && (Number.isNaN(Number(change.value)) || Number(change.value) < 1)));
   });
   return (
     <Modal
@@ -945,7 +944,7 @@ function TagsDialog({
                 }
                 change={changes[field] ?? { kind: "keep" }}
                 onChange={(change) => setChanges((all) => ({ ...all, [field]: change }))}
-                input={(text, set) => (
+                renderInput={(text, set) => (
                   <input
                     className="input"
                     type={numeric ? "number" : "text"}
@@ -964,7 +963,7 @@ function TagsDialog({
   );
 }
 
-function Details({ file, canEdit }: { file: StagedFile; canEdit: boolean }) {
+function Details({ file, canEdit }: Readonly<{ file: StagedFile; canEdit: boolean }>) {
   const [cover, setCover] = useState(true);
   const [editing, setEditing] = useState(false);
   const reset = useAction(

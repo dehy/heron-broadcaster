@@ -43,7 +43,7 @@ walkdir.workspace = true
 heron-service = { workspace = true, features = ["test-util"] }
 hound.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["test-util", "process"] }
 
 [lints]
 workspace = true

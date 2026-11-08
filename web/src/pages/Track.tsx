@@ -6,7 +6,7 @@
 
 import { PlaysByStation } from "../components/Stations";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { type ComponentProps, type Dispatch, type RefObject, type SetStateAction, useEffect, useRef, useState } from "react";
 import {
   type Fade,
   type PlayoutSettings,
@@ -81,7 +81,7 @@ function normalize(overrides: TrackOverrides): TrackOverrides {
   };
 }
 
-export function Track({ id }: { id: number }) {
+export function Track({ id }: Readonly<{ id: number }>) {
   const track = useQuery({
     queryKey: ["track", id],
     queryFn: () => unwrap(api.GET("/api/v1/tracks/{id}", { params: { path: { id } } })),
@@ -113,7 +113,7 @@ export function effectiveCues(track: TrackDetail, overrides: TrackOverrides) {
   return { length, cueIn: Math.min(cueIn, cueOut), cueOut };
 }
 
-function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutSettings | undefined }) {
+function TrackView({ track, settings }: Readonly<{ track: TrackDetail; settings: PlayoutSettings | undefined }>) {
   const canEdit = useCan("operator");
   const waveform = useWaveform(track.id);
   const saved = normalize(track.overrides);
@@ -128,7 +128,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   const [looping, setLooping] = useState(false);
   const loop = useRef<Hook | null>(null);
   loop.current = looping ? hook : null;
-  const [zoom, setZoom] = useState<"whole" | "intro" | "outro">("whole");
+  const [zoom, setZoom] = useState<Zoom>("whole");
   const audio = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [playhead, setPlayhead] = useState<number | null>(null);
@@ -151,27 +151,7 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
     setHook({ in: savedHook.in, out: savedHook.out });
   }, [savedHook.in, savedHook.out]);
 
-  // Follow the audio while it plays.
-  useEffect(() => {
-    if (!playing) {
-      return;
-    }
-    let frame = 0;
-    const step = () => {
-      const element = audio.current;
-      if (element) {
-        // Looping the hook: back to its start at its end.
-        const range = loop.current;
-        if (range?.in != null && range.out != null && element.currentTime * 1000 >= range.out) {
-          element.currentTime = range.in / 1000;
-        }
-        setPlayhead(element.currentTime * 1000);
-      }
-      frame = requestAnimationFrame(step);
-    };
-    frame = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(frame);
-  }, [playing]);
+  useFollowPlayhead(audio, loop, playing, setPlayhead);
 
   // The overrides and the intro point, each when it changed.
   const saveOverrides = useAction(
@@ -220,54 +200,10 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
       ),
     { success: t("queuePage.queued") },
   );
-  const client = useQueryClient();
-  const toast = useToast();
-  const [deleteTask, setDeleteTask] = useState<number | null>(null);
-  const deleting = useTask(deleteTask);
-  const remove = useAction(
-    () => unwrap(api.POST("/api/v1/tracks/delete", { body: { track_ids: [track.id] } })),
-    { onSuccess: (task) => setDeleteTask(task.id) },
-  );
-  useEffect(() => {
-    const task = deleting.data;
-    if (task?.status === "done") {
-      const skipped = task.report?.skipped[0];
-      toast(skipped ? t("track.notDeleted", { reason: skipped.reason }) : t("track.deleted"), Boolean(skipped));
-      void client.invalidateQueries({ queryKey: ["track", track.id] });
-      void client.invalidateQueries({ queryKey: ["tracks"] });
-      void client.invalidateQueries({ queryKey: ["trash"] });
-    } else if (task?.status === "failed") {
-      toast(task.error ?? t("track.deleteFailed"), true);
-    }
-  }, [deleting.data, client, toast, track.id]);
-  const deleted = track.deleted_at_unix_ms !== null && track.deleted_at_unix_ms !== undefined;
+  const { deleting, remove, deleted, removing, deleteBusy } = useDeleteTrack(track);
 
   const { length, cueIn, cueOut } = effectiveCues(track, draft);
-  const crossfade = settings?.crossfade;
-  const overrides = draft.crossfade;
-  const mode = overrides.mode ?? crossfade?.mode ?? "auto";
-  const fixedMs = overrides.fixed_ms ?? crossfade?.fixed_ms ?? 2000;
-  const shortTrack = crossfade ? cueOut - cueIn <= crossfade.min_track_ms : false;
-  const crossfades = overrides.crossfade !== false && !shortTrack;
-  const autoPoint = track.analysis?.fade_out_start_ms ?? null;
-  // A short track keeps a point it sets itself, without fades.
-  const ownPoint =
-    overrides.crossfade !== false && overrides.mode === "fixed" && overrides.fixed_ms != null
-      ? cueOut - overrides.fixed_ms
-      : null;
-  const mixPoint = shortTrack
-    ? ownPoint !== null && ownPoint >= cueIn && ownPoint < cueOut
-      ? ownPoint
-      : null
-    : !crossfades
-      ? null
-      : mode === "fixed"
-        ? Math.max(cueIn, cueOut - fixedMs)
-        : autoPoint !== null && autoPoint >= cueIn && autoPoint < cueOut
-          ? autoPoint
-          : null;
-  const fadeOut: Fade | undefined = overrides.fade_out ?? crossfade?.fade_out;
-  const fadeIn: Fade | undefined = overrides.fade_in ?? crossfade?.fade_in;
+  const { shortTrack, crossfades, mixPoint, fadeOut, fadeIn } = mixOf(track, draft, settings, cueIn, cueOut);
 
   const overridesDirty = JSON.stringify(draft) !== JSON.stringify(saved);
   const introDirty = intro !== savedIntro;
@@ -278,112 +214,29 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   const dirty = overridesDirty || introDirty || hookDirty;
   const hasOverrides = !isDefault(track.overrides);
 
-  const markers: Marker[] = [
-    {
-      id: "cue_in",
-      label: t("track.cueIn"),
-      ms: cueIn,
-      color: "var(--good)",
-      ...(canEdit && {
-        onDrag: (ms: number) => setDraft((d) => ({ ...d, cue_in_ms: Math.min(ms, cueOut - 100) })),
-      }),
-    },
-    {
-      id: "cue_out",
-      label: t("track.cueOut"),
-      ms: cueOut,
-      color: "var(--bad)",
-      end: true,
-      ...(canEdit && {
-        onDrag: (ms: number) => setDraft((d) => ({ ...d, cue_out_ms: Math.max(ms, cueIn + 100) })),
-      }),
-    },
-  ];
-  // Always shown: on the cue-out when the next track follows back to back.
-  {
-    markers.push({
-      id: "mix",
-      label: mixPoint !== null ? t("transition.nextStarts") : t("transition.nextStartsBackToBack"),
-      ms: mixPoint ?? cueOut,
-      color: "var(--accent)",
-      end: true,
-      row: 1,
-      // Dragging it sets a fixed crossfade for this track.
-      ...(canEdit && {
-        onDrag: (ms: number) => setDraft((d) => withNextStart(d, ms, cueOut)),
-      }),
-    });
-  }
-  const regions: Region[] = [];
-  if (mixPoint !== null && fadeOut?.enabled && !shortTrack) {
-    regions.push({
-      startMs: mixPoint,
-      endMs: Math.min(cueOut, mixPoint + fadeOut.time_ms),
-      color: getVar("--bad"),
-      label: t("track.fadeOut"),
-    });
-  }
-  if (fadeIn?.enabled && crossfades) {
-    regions.push({
-      startMs: cueIn,
-      endMs: Math.min(cueOut, cueIn + fadeIn.time_ms),
-      color: getVar("--good"),
-      label: t("track.fadeIn"),
-    });
-  }
-
-  // Points imported from another software (the intro, above, can be set
-  // here too): shown, not played by Heron.
   const imported = track.markers;
-  if (intro !== null) {
-    markers.push({
-      id: "intro",
-      label: t("track.introEnds"),
-      ms: intro,
-      color: "var(--fx)",
-      row: 2,
-      ...(canEdit && { onDrag: (ms: number) => setIntro(Math.max(1, Math.min(ms, length))) }),
-    });
-  }
-  if (imported?.intro2_ms != null) {
-    markers.push({ id: "intro2", label: t("track.intro2Ends"), ms: imported.intro2_ms, color: "var(--fx)", row: 2 });
-  }
-  if (hookSet) {
-    regions.push({ startMs: hook.in ?? 0, endMs: hook.out ?? 0, color: getVar("--deck-b"), label: t("track.hook") });
-  }
-  if (hook.in !== null) {
-    markers.push({
-      id: "hook_in",
-      label: t("track.hookIn"),
-      ms: hook.in,
-      color: "var(--deck-b)",
-      row: 3,
-      ...(canEdit && {
-        onDrag: (ms: number) => setHook((h) => ({ ...h, in: Math.max(0, Math.min(ms, (h.out ?? length) - 100)) })),
-      }),
-    });
-  }
-  if (hook.out !== null) {
-    markers.push({
-      id: "hook_out",
-      label: t("track.hookOut"),
-      ms: hook.out,
-      color: "var(--deck-b)",
-      end: true,
-      // A row of its own: a short hook would put both flags on each other.
-      row: 4,
-      ...(canEdit && {
-        onDrag: (ms: number) => setHook((h) => ({ ...h, out: Math.min(length, Math.max(ms, (h.in ?? 0) + 100)) })),
-      }),
-    });
-  }
+  const { markers, regions } = annotations({
+    canEdit,
+    cueIn,
+    cueOut,
+    length,
+    mixPoint,
+    shortTrack,
+    crossfades,
+    fadeOut,
+    fadeIn,
+    intro,
+    imported,
+    hook,
+    hookSet,
+    setDraft,
+    setIntro,
+    setHook,
+  });
 
-  const view: [number, number] | undefined =
-    zoom === "intro"
-      ? [Math.max(0, cueIn - 5_000), Math.min(length, cueIn + 20_000)]
-      : zoom === "outro"
-        ? [Math.max(0, (mixPoint ?? cueOut) - 15_000), Math.min(length, cueOut + 5_000)]
-        : undefined;
+  let view: [number, number] | undefined;
+  if (zoom === "intro") view = [Math.max(0, cueIn - 5_000), Math.min(length, cueIn + 20_000)];
+  else if (zoom === "outro") view = [Math.max(0, (mixPoint ?? cueOut) - 15_000), Math.min(length, cueOut + 5_000)];
 
   const playFrom = (ms: number) => {
     const element = audio.current;
@@ -408,162 +261,48 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
         actions={
           canEdit &&
           !deleted && (
-            <>
-              {!track.missing && !track.silent && (
-                <>
-                  <button type="button" className="btn" onClick={() => enqueue.mutate(true)}>
-                    <Icon name="next" /> {t("queue.playNext")}
-                  </button>
-                  <button type="button" className="btn" onClick={() => enqueue.mutate(false)}>
-                    <Icon name="plus" /> {t("track.queue")}
-                  </button>
-                </>
-              )}
-              {!track.missing && (
-                <button type="button" className="btn" onClick={() => setEditingTags(true)}>
-                  <Icon name="edit" /> {t("track.editTags")}
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setEnabled.mutate(!track.enabled)}
-                title={track.enabled ? t("track.disableHelp") : undefined}
-              >
-                {track.enabled ? t("track.disable") : t("track.enable")}
-              </button>
-              <ConfirmButton
-                className="btn danger"
-                confirm={t("library.delete")}
-                disabled={deleteTask !== null && deleting.data?.status !== "failed"}
-                question={<DeleteQuestion tracks={[track]} />}
-                onConfirm={() => remove.mutate(undefined)}
-              >
-                <Icon name="trash" /> {t("library.delete")}
-              </ConfirmButton>
-            </>
+            <TrackActions
+              track={track}
+              deleting={deleteBusy}
+              onQueue={(next) => enqueue.mutate(next)}
+              onEditTags={() => setEditingTags(true)}
+              onEnable={() => setEnabled.mutate(!track.enabled)}
+              onDelete={() => remove.mutate(undefined)}
+            />
           )
         }
       />
-      {deleteTask !== null && deleting.data?.status !== "done" && deleting.data?.status !== "failed" && (
-        <Banner kind="warn">
-          {t("library.deleting")} <TaskState task={deleting.data} />
-        </Banner>
-      )}
-      {deleted && (
-        <Banner kind="warn">
-          {rich("track.inTrash", {
-            date: dateTime(track.deleted_at_unix_ms),
-            link: <Link to="/trash">{t("track.restoreFromTrash")}</Link>,
-          })}
-        </Banner>
-      )}
-      {track.missing && !deleted && (
-        <Banner kind="bad">
-          {t("track.missingSince", { date: dateTime(track.file.missing_since_unix_ms) })}
-        </Banner>
-      )}
-      {track.silent && <Banner kind="bad">{t("track.silent")}</Banner>}
-      {!track.enabled && <Banner kind="warn">{t("track.disabled")}</Banner>}
-      {track.tag_overrides.length > 0 && (
-        <Banner kind="warn">
-          {t("track.tagOverrides", {
-            fields: track.tag_overrides
-              .map((field) => {
-                const known = TAG_FIELDS.find((tag) => tag.field === field);
-                return known ? t(known.label) : field;
-              })
-              .join(", "),
-          })}{" "}
-          {canEdit && (
-            <button
-              type="button"
-              className="btn small"
-              disabled={fileTags.isPending}
-              onClick={() => fileTags.mutate(undefined)}
-            >
-              {t("track.fileTags")}
-            </button>
-          )}
-        </Banner>
-      )}
-      {track.identification?.status === "needs_review" && (
-        <Banner kind="warn">
-          {rich("track.needsReview", {
-            reason: track.identification.reason,
-            link: <Link to="/to-organize">{t("track.reviewIt")}</Link>,
-          })}
-        </Banner>
-      )}
+      <TrackBanners
+        track={track}
+        canEdit={canEdit}
+        deleted={deleted}
+        removing={removing}
+        task={deleting.data}
+        fileTagsPending={fileTags.isPending}
+        onFileTags={() => fileTags.mutate(undefined)}
+      />
 
       <Card
         title={t("track.waveform")}
         actions={
-          <>
-            <Segmented
-              label={t("track.zoom")}
-              value={zoom}
-              onChange={setZoom}
-              options={[
-                { value: "whole", label: t("track.whole") },
-                { value: "intro", label: t("track.intro") },
-                { value: "outro", label: t("track.outro") },
-              ]}
-            />
-            {!track.missing && (
-              <>
-                <button
-                  type="button"
-                  className="btn small"
-                  onClick={() => (playing ? audio.current?.pause() : playFrom(playhead ?? cueIn))}
-                >
-                  <Icon name={playing ? "pause" : "play"} size={14} /> {playing ? t("dashboard.pause") : t("track.listen")}
-                </button>
-                <span
-                  className="num small playhead-time"
-                  title={t("track.playheadHelp", { fromCueIn: duration((playhead ?? cueIn) - cueIn, true) })}
-                >
-                  <span className="visually-hidden">{t("track.playhead")} </span>
-                  {duration(playhead ?? 0, true)} / {duration(length)}
-                  {waveform.data && (
-                    <>
-                      {" · "}
-                      <span title={t("track.levelHelp")}>
-                        {levelText(levelAt(waveform.data.peaks, waveform.data.intervalMs, playhead ?? 0))}
-                      </span>
-                    </>
-                  )}
-                </span>
-                <button type="button" className="btn small" onClick={() => playFrom(cueIn)}>
-                  {t("track.fromCueIn")}
-                </button>
-                {(hookSet || looping) && (
-                  <button
-                    type="button"
-                    className={looping ? "btn small primary" : "btn small"}
-                    aria-pressed={looping}
-                    onClick={() => {
-                      if (looping) {
-                        audio.current?.pause();
-                      } else {
-                        playFrom(hook.in ?? 0);
-                        setLooping(true);
-                      }
-                    }}
-                  >
-                    <Icon name={looping ? "stop" : "play"} size={14} /> {looping ? t("track.stopHook") : t("track.loopHook")}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="btn small"
-                  onClick={() => playFrom(Math.max(0, (mixPoint ?? cueOut) - 5_000))}
-                >
-                  {t("track.ending")}
-                </button>
-              </>
-            )}
-          </>
+          <WaveformControls
+            track={track}
+            zoom={zoom}
+            setZoom={setZoom}
+            playing={playing}
+            pause={() => audio.current?.pause()}
+            playFrom={playFrom}
+            playhead={playhead}
+            cueIn={cueIn}
+            cueOut={cueOut}
+            length={length}
+            mixPoint={mixPoint}
+            peaks={waveform.data}
+            hook={hook}
+            hookSet={hookSet}
+            looping={looping}
+            setLooping={setLooping}
+          />
         }
       >
         <div className="stack">
@@ -698,6 +437,469 @@ function TrackView({ track, settings }: { track: TrackDetail; settings: PlayoutS
   );
 }
 
+/** What can be done to a track from the top of its page. */
+function TrackActions({
+  track,
+  deleting,
+  onQueue,
+  onEditTags,
+  onEnable,
+  onDelete,
+}: Readonly<{
+  track: TrackDetail;
+  deleting: boolean;
+  onQueue: (next: boolean) => void;
+  onEditTags: () => void;
+  onEnable: () => void;
+  onDelete: () => void;
+}>) {
+  return (
+    <>
+      {!track.missing && !track.silent && (
+        <>
+          <button type="button" className="btn" onClick={() => onQueue(true)}>
+            <Icon name="next" /> {t("queue.playNext")}
+          </button>
+          <button type="button" className="btn" onClick={() => onQueue(false)}>
+            <Icon name="plus" /> {t("track.queue")}
+          </button>
+        </>
+      )}
+      {!track.missing && (
+        <button type="button" className="btn" onClick={() => onEditTags()}>
+          <Icon name="edit" /> {t("track.editTags")}
+        </button>
+      )}
+      <button
+        type="button"
+        className="btn"
+        onClick={() => onEnable()}
+        title={track.enabled ? t("track.disableHelp") : undefined}
+      >
+        {track.enabled ? t("track.disable") : t("track.enable")}
+      </button>
+      <ConfirmButton
+        className="btn danger"
+        confirm={t("library.delete")}
+        disabled={deleting}
+        question={<DeleteQuestion tracks={[track]} />}
+        onConfirm={() => onDelete()}
+      >
+        <Icon name="trash" /> {t("library.delete")}
+      </ConfirmButton>
+    </>
+  );
+}
+
+/** What to know about a track before anything else: deleted, missing, silent, disabled, tags overridden. */
+function TrackBanners({
+  track,
+  canEdit,
+  deleted,
+  removing,
+  task,
+  fileTagsPending,
+  onFileTags,
+}: Readonly<{
+  track: TrackDetail;
+  canEdit: boolean;
+  deleted: boolean;
+  removing: boolean;
+  task: ComponentProps<typeof TaskState>["task"];
+  fileTagsPending: boolean;
+  onFileTags: () => void;
+}>) {
+  return (
+    <>
+      {removing && (
+        <Banner kind="warn">
+          {t("library.deleting")} <TaskState task={task} />
+        </Banner>
+      )}
+      {deleted && (
+        <Banner kind="warn">
+          {rich("track.inTrash", {
+            date: dateTime(track.deleted_at_unix_ms),
+            link: <Link to="/trash">{t("track.restoreFromTrash")}</Link>,
+          })}
+        </Banner>
+      )}
+      {track.missing && !deleted && (
+        <Banner kind="bad">
+          {t("track.missingSince", { date: dateTime(track.file.missing_since_unix_ms) })}
+        </Banner>
+      )}
+      {track.silent && <Banner kind="bad">{t("track.silent")}</Banner>}
+      {!track.enabled && <Banner kind="warn">{t("track.disabled")}</Banner>}
+      {track.tag_overrides.length > 0 && (
+        <Banner kind="warn">
+          {t("track.tagOverrides", {
+            fields: track.tag_overrides
+              .map((field) => {
+                const known = TAG_FIELDS.find((tag) => tag.field === field);
+                return known ? t(known.label) : field;
+              })
+              .join(", "),
+          })}{" "}
+          {canEdit && (
+            <button
+              type="button"
+              className="btn small"
+              disabled={fileTagsPending}
+              onClick={() => onFileTags()}
+            >
+              {t("track.fileTags")}
+            </button>
+          )}
+        </Banner>
+      )}
+      {track.identification?.status === "needs_review" && (
+        <Banner kind="warn">
+          {rich("track.needsReview", {
+            reason: track.identification.reason,
+            link: <Link to="/to-organize">{t("track.reviewIt")}</Link>,
+          })}
+        </Banner>
+      )}
+    </>
+  );
+}
+
+/** Zoom, listen and jump to a point of a track. */
+function WaveformControls({
+  track,
+  zoom,
+  setZoom,
+  playing,
+  pause,
+  playFrom,
+  playhead,
+  cueIn,
+  cueOut,
+  length,
+  mixPoint,
+  peaks,
+  hook,
+  hookSet,
+  looping,
+  setLooping,
+}: Readonly<{
+  track: TrackDetail;
+  zoom: Zoom;
+  setZoom: Setter<Zoom>;
+  playing: boolean;
+  pause: () => void;
+  playFrom: (ms: number) => void;
+  playhead: number | null;
+  cueIn: number;
+  cueOut: number;
+  length: number;
+  mixPoint: number | null;
+  peaks: ReturnType<typeof useWaveform>["data"];
+  hook: Hook;
+  hookSet: boolean;
+  looping: boolean;
+  setLooping: Setter<boolean>;
+}>) {
+  return (
+    <>
+      <Segmented
+        label={t("track.zoom")}
+        value={zoom}
+        onChange={setZoom}
+        options={[
+          { value: "whole", label: t("track.whole") },
+          { value: "intro", label: t("track.intro") },
+          { value: "outro", label: t("track.outro") },
+        ]}
+      />
+      {!track.missing && (
+        <>
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => (playing ? pause() : playFrom(playhead ?? cueIn))}
+          >
+            <Icon name={playing ? "pause" : "play"} size={14} /> {playing ? t("dashboard.pause") : t("track.listen")}
+          </button>
+          <span
+            className="num small playhead-time"
+            title={t("track.playheadHelp", { fromCueIn: duration((playhead ?? cueIn) - cueIn, true) })}
+          >
+            <span className="visually-hidden">{t("track.playhead")} </span>
+            {duration(playhead ?? 0, true)} / {duration(length)}
+            {peaks && (
+              <>
+                {" · "}
+                <span title={t("track.levelHelp")}>
+                  {levelText(levelAt(peaks.peaks, peaks.intervalMs, playhead ?? 0))}
+                </span>
+              </>
+            )}
+          </span>
+          <button type="button" className="btn small" onClick={() => playFrom(cueIn)}>
+            {t("track.fromCueIn")}
+          </button>
+          {(hookSet || looping) && (
+            <button
+              type="button"
+              className={looping ? "btn small primary" : "btn small"}
+              aria-pressed={looping}
+              onClick={() => {
+                if (looping) {
+                  pause();
+                } else {
+                  playFrom(hook.in ?? 0);
+                  setLooping(true);
+                }
+              }}
+            >
+              <Icon name={looping ? "stop" : "play"} size={14} /> {looping ? t("track.stopHook") : t("track.loopHook")}
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => playFrom(Math.max(0, (mixPoint ?? cueOut) - 5_000))}
+          >
+            {t("track.ending")}
+          </button>
+        </>
+      )}
+    </>
+  );
+}
+
+type Zoom = "whole" | "intro" | "outro";
+
+type Setter<T> = Dispatch<SetStateAction<T>>;
+
+/** Follows the audio while it plays, looping the hook being edited when asked to. */
+function useFollowPlayhead(
+  audio: RefObject<HTMLAudioElement | null>,
+  loop: RefObject<Hook | null>,
+  playing: boolean,
+  setPlayhead: Setter<number | null>,
+) {
+  useEffect(() => {
+    if (!playing) {
+      return;
+    }
+    let frame = 0;
+    const step = () => {
+      const element = audio.current;
+      if (element) {
+        // Looping the hook: back to its start at its end.
+        const range = loop.current;
+        if (range?.in != null && range.out != null && element.currentTime * 1000 >= range.out) {
+          element.currentTime = range.in / 1000;
+        }
+        setPlayhead(element.currentTime * 1000);
+      }
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [playing, audio, loop, setPlayhead]);
+}
+
+/** Deleting the track: the task that does it, and what to tell when it ends. */
+function useDeleteTrack(track: TrackDetail) {
+  const client = useQueryClient();
+  const toast = useToast();
+  const [deleteTask, setDeleteTask] = useState<number | null>(null);
+  const deleting = useTask(deleteTask);
+  const remove = useAction(
+    () => unwrap(api.POST("/api/v1/tracks/delete", { body: { track_ids: [track.id] } })),
+    { onSuccess: (task) => setDeleteTask(task.id) },
+  );
+  useEffect(() => {
+    const task = deleting.data;
+    if (task?.status === "done") {
+      const skipped = task.report?.skipped[0];
+      toast(skipped ? t("track.notDeleted", { reason: skipped.reason }) : t("track.deleted"), Boolean(skipped));
+      void client.invalidateQueries({ queryKey: ["track", track.id] });
+      void client.invalidateQueries({ queryKey: ["tracks"] });
+      void client.invalidateQueries({ queryKey: ["trash"] });
+    } else if (task?.status === "failed") {
+      toast(task.error ?? t("track.deleteFailed"), true);
+    }
+  }, [deleting.data, client, toast, track.id]);
+  const deleted = track.deleted_at_unix_ms !== null && track.deleted_at_unix_ms !== undefined;
+  const status = deleting.data?.status;
+  // Running, or not started: the track is not gone yet and can not be deleted twice.
+  const removing = deleteTask !== null && status !== "done" && status !== "failed";
+  const deleteBusy = deleteTask !== null && status !== "failed";
+  return { deleting, remove, deleted, removing, deleteBusy };
+}
+
+/** Where the next track starts over this one, and the fades around it, with `draft` applied. */
+export function mixOf(
+  track: TrackDetail,
+  draft: TrackOverrides,
+  settings: PlayoutSettings | undefined,
+  cueIn: number,
+  cueOut: number,
+) {
+  const crossfade = settings?.crossfade;
+  const overrides = draft.crossfade;
+  const mode = overrides.mode ?? crossfade?.mode ?? "auto";
+  const fixedMs = overrides.fixed_ms ?? crossfade?.fixed_ms ?? 2000;
+  const shortTrack = crossfade ? cueOut - cueIn <= crossfade.min_track_ms : false;
+  const crossfades = overrides.crossfade !== false && !shortTrack;
+  const autoPoint = track.analysis?.fade_out_start_ms ?? null;
+  // A short track keeps a point it sets itself, without fades.
+  const ownPoint =
+    overrides.crossfade !== false && overrides.mode === "fixed" && overrides.fixed_ms != null
+      ? cueOut - overrides.fixed_ms
+      : null;
+  const withinCues = (point: number | null) => (point !== null && point >= cueIn && point < cueOut ? point : null);
+  let mixPoint: number | null;
+  if (shortTrack) mixPoint = withinCues(ownPoint);
+  else if (!crossfades) mixPoint = null;
+  else if (mode === "fixed") mixPoint = Math.max(cueIn, cueOut - fixedMs);
+  else mixPoint = withinCues(autoPoint);
+  const fadeOut: Fade | undefined = overrides.fade_out ?? crossfade?.fade_out;
+  const fadeIn: Fade | undefined = overrides.fade_in ?? crossfade?.fade_in;
+  return { shortTrack, crossfades, mixPoint, fadeOut, fadeIn };
+}
+
+interface AnnotationInput {
+  canEdit: boolean;
+  cueIn: number;
+  cueOut: number;
+  length: number;
+  mixPoint: number | null;
+  shortTrack: boolean;
+  crossfades: boolean;
+  fadeOut: Fade | undefined;
+  fadeIn: Fade | undefined;
+  intro: number | null;
+  imported: TrackDetail["markers"];
+  hook: Hook;
+  hookSet: boolean;
+  setDraft: Setter<TrackOverrides>;
+  setIntro: Setter<number | null>;
+  setHook: Setter<Hook>;
+}
+
+/** The flags and the colored stretches drawn on the waveform. */
+export function annotations(input: AnnotationInput): { markers: Marker[]; regions: Region[] } {
+  return {
+    markers: [...cueMarkers(input), ...pointMarkers(input)],
+    regions: fadeRegions(input, input.hookSet ? input.hook : null),
+  };
+}
+
+function cueMarkers({ canEdit, cueIn, cueOut, mixPoint, setDraft }: AnnotationInput): Marker[] {
+  return [
+    {
+      id: "cue_in",
+      label: t("track.cueIn"),
+      ms: cueIn,
+      color: "var(--good)",
+      ...(canEdit && {
+        onDrag: (ms: number) => setDraft((d) => ({ ...d, cue_in_ms: Math.min(ms, cueOut - 100) })),
+      }),
+    },
+    {
+      id: "cue_out",
+      label: t("track.cueOut"),
+      ms: cueOut,
+      color: "var(--bad)",
+      end: true,
+      ...(canEdit && {
+        onDrag: (ms: number) => setDraft((d) => ({ ...d, cue_out_ms: Math.max(ms, cueIn + 100) })),
+      }),
+    },
+    // Always shown: on the cue-out when the next track follows back to back.
+    {
+      id: "mix",
+      label: mixPoint !== null ? t("transition.nextStarts") : t("transition.nextStartsBackToBack"),
+      ms: mixPoint ?? cueOut,
+      color: "var(--accent)",
+      end: true,
+      row: 1,
+      // Dragging it sets a fixed crossfade for this track.
+      ...(canEdit && {
+        onDrag: (ms: number) => setDraft((d) => withNextStart(d, ms, cueOut)),
+      }),
+    },
+  ];
+}
+
+/** The intro, the points imported from another software (shown, not played by Heron) and the hook. */
+function pointMarkers({ canEdit, length, intro, imported, hook, setIntro, setHook }: AnnotationInput): Marker[] {
+  const markers: Marker[] = [];
+  if (intro !== null) {
+    markers.push({
+      id: "intro",
+      label: t("track.introEnds"),
+      ms: intro,
+      color: "var(--fx)",
+      row: 2,
+      ...(canEdit && { onDrag: (ms: number) => setIntro(Math.max(1, Math.min(ms, length))) }),
+    });
+  }
+  if (imported?.intro2_ms != null) {
+    markers.push({ id: "intro2", label: t("track.intro2Ends"), ms: imported.intro2_ms, color: "var(--fx)", row: 2 });
+  }
+  if (hook.in !== null) {
+    markers.push({
+      id: "hook_in",
+      label: t("track.hookIn"),
+      ms: hook.in,
+      color: "var(--deck-b)",
+      row: 3,
+      ...(canEdit && {
+        onDrag: (ms: number) => setHook((h) => ({ ...h, in: Math.max(0, Math.min(ms, (h.out ?? length) - 100)) })),
+      }),
+    });
+  }
+  if (hook.out !== null) {
+    markers.push({
+      id: "hook_out",
+      label: t("track.hookOut"),
+      ms: hook.out,
+      color: "var(--deck-b)",
+      end: true,
+      // A row of its own: a short hook would put both flags on each other.
+      row: 4,
+      ...(canEdit && {
+        onDrag: (ms: number) => setHook((h) => ({ ...h, out: Math.min(length, Math.max(ms, (h.in ?? 0) + 100)) })),
+      }),
+    });
+  }
+  return markers;
+}
+
+function fadeRegions(
+  { cueIn, cueOut, mixPoint, shortTrack, crossfades, fadeOut, fadeIn }: AnnotationInput,
+  hook: Hook | null,
+): Region[] {
+  const regions: Region[] = [];
+  if (mixPoint !== null && fadeOut?.enabled && !shortTrack) {
+    regions.push({
+      startMs: mixPoint,
+      endMs: Math.min(cueOut, mixPoint + fadeOut.time_ms),
+      color: getVar("--bad"),
+      label: t("track.fadeOut"),
+    });
+  }
+  if (fadeIn?.enabled && crossfades) {
+    regions.push({
+      startMs: cueIn,
+      endMs: Math.min(cueOut, cueIn + fadeIn.time_ms),
+      color: getVar("--good"),
+      label: t("track.fadeIn"),
+    });
+  }
+  if (hook) {
+    regions.push({ startMs: hook.in ?? 0, endMs: hook.out ?? 0, color: getVar("--deck-b"), label: t("track.hook") });
+  }
+  return regions;
+}
+
 /** What the scanner read from the file, to start a tag edit from. */
 function currentTags(track: TrackDetail): TagValues {
   return {
@@ -712,7 +914,7 @@ function currentTags(track: TrackDetail): TagValues {
   };
 }
 
-function ProgrammingCard({ track, canEdit }: { track: TrackDetail; canEdit: boolean }) {
+function ProgrammingCard({ track, canEdit }: Readonly<{ track: TrackDetail; canEdit: boolean }>) {
   const [dialog, setDialog] = useState<"labels" | "programming" | null>(null);
   const measured = track.analysis?.bpm;
   const mb = track.musicbrainz;
@@ -835,13 +1037,13 @@ function CueInput({
   placeholder,
   onChange,
   disabled,
-}: {
+}: Readonly<{
   value: number | null;
   /** Shown when empty; nothing when missing. */
   placeholder?: number;
   onChange: (ms: number | null) => void;
   disabled: boolean;
-}) {
+}>) {
   const [text, setText] = useState(value === null ? "" : duration(value, true));
   useEffect(() => {
     setText(value === null ? "" : duration(value, true));
@@ -873,7 +1075,10 @@ function CueInput({
 type Hook = { in: number | null; out: number | null };
 
 type Tri = "default" | "on" | "off";
-const tri = (value: boolean | null): Tri => (value === null ? "default" : value ? "on" : "off");
+const tri = (value: boolean | null): Tri => {
+  if (value === null) return "default";
+  return value ? "on" : "off";
+};
 const fromTri = (value: Tri): boolean | null => (value === "default" ? null : value === "on");
 
 function OverridesCard({
@@ -897,7 +1102,7 @@ function OverridesCard({
   onRevert,
   onClear,
   saving,
-}: {
+}: Readonly<{
   track: TrackDetail;
   settings: PlayoutSettings | undefined;
   draft: TrackOverrides;
@@ -923,7 +1128,7 @@ function OverridesCard({
   onRevert: () => void;
   onClear: () => void;
   saving: boolean;
-}) {
+}>) {
   const disabled = !canEdit;
   const analysis = track.analysis;
   const station = settings?.crossfade;
@@ -982,9 +1187,9 @@ function OverridesCard({
             hint={
               shortTrack && mixPoint === null
                 ? t("track.nextStartsShort")
-                : mixPoint === null
-                  ? t("track.nextStartsNow", { value: t("track.backToBackAt", { at: duration(cueOut, true) }) })
-                  : t("track.nextStartsNow", { value: duration(mixPoint, true) })
+                : t("track.nextStartsNow", {
+                    value: mixPoint === null ? t("track.backToBackAt", { at: duration(cueOut, true) }) : duration(mixPoint, true),
+                  })
             }
           >
             <CueInput
@@ -1163,14 +1368,14 @@ function OverrideFade({
   station,
   disabled,
   onChange,
-}: {
+}: Readonly<{
   label: string;
   kind: "in" | "out";
   value: Fade | null;
   station: Fade | undefined;
   disabled: boolean;
   onChange: (fade: Fade | null) => void;
-}) {
+}>) {
   return (
     <div className="stack">
       <label className="check">
@@ -1187,7 +1392,7 @@ function OverrideFade({
   );
 }
 
-function CategoriesCard({ track, canEdit }: { track: TrackDetail; canEdit: boolean }) {
+function CategoriesCard({ track, canEdit }: Readonly<{ track: TrackDetail; canEdit: boolean }>) {
   const categories = useQuery({
     queryKey: ["categories"],
     queryFn: () => unwrap(api.GET("/api/v1/categories")),
@@ -1280,7 +1485,7 @@ function CategoriesCard({ track, canEdit }: { track: TrackDetail; canEdit: boole
   );
 }
 
-function DetailsCard({ track }: { track: TrackDetail }) {
+function DetailsCard({ track }: Readonly<{ track: TrackDetail }>) {
   const analysis = track.analysis;
   return (
     <Card title={t("track.details")}>
@@ -1312,13 +1517,7 @@ function DetailsCard({ track }: { track: TrackDetail }) {
           {bitrate(track)}
           {track.file.sample_rate && ` · ${t("track.kilohertz", { rate: track.file.sample_rate / 1000 })}`}
           {track.file.channels &&
-            ` · ${
-              track.file.channels === 1
-                ? t("track.mono")
-                : track.file.channels === 2
-                  ? t("track.stereo")
-                  : t("track.channels", { count: track.file.channels })
-            }`}
+            ` · ${channelsLabel(track.file.channels)}`}
         </dd>
         <dt>{t("track.size")}</dt>
         <dd>{bytes(track.file.size)}</dd>
@@ -1326,28 +1525,14 @@ function DetailsCard({ track }: { track: TrackDetail }) {
         <dd>{dateTime(track.added_at_unix_ms)}</dd>
         <dt>{t("track.identification")}</dt>
         <dd>
-          {track.identification?.status === "identified" && track.identification.release_mbid ? (
-            <a
-              href={`https://musicbrainz.org/release/${track.identification.release_mbid}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {t("track.musicbrainzRelease")}
-            </a>
-          ) : track.identification?.status === "needs_review" ? (
-            <span className="warn">{t("library.filter.needsReview")}</span>
-          ) : track.identification?.status === "kept" ? (
-            t("track.reviewedOwnTags")
-          ) : (
-            t("track.ownTags")
-          )}
+          <Identification identification={track.identification} />
         </dd>
       </dl>
     </Card>
   );
 }
 
-function PlaysCard({ track }: { track: TrackDetail }) {
+function PlaysCard({ track }: Readonly<{ track: TrackDetail }>) {
   const trackId = track.id;
   const plays = useQuery({
     queryKey: ["history", "track", trackId],
@@ -1384,4 +1569,21 @@ function PlaysCard({ track }: { track: TrackDetail }) {
       </ul>
     </Card>
   );
+}
+
+function channelsLabel(channels: number): string {
+  if (channels === 1) return t("track.mono");
+  return channels === 2 ? t("track.stereo") : t("track.channels", { count: channels });
+}
+
+function Identification({ identification }: Readonly<{ identification: TrackDetail["identification"] }>) {
+  if (identification?.status === "identified" && identification.release_mbid) {
+    return (
+      <a href={`https://musicbrainz.org/release/${identification.release_mbid}`} target="_blank" rel="noreferrer">
+        {t("track.musicbrainzRelease")}
+      </a>
+    );
+  }
+  if (identification?.status === "needs_review") return <span className="warn">{t("library.filter.needsReview")}</span>;
+  return <>{identification?.status === "kept" ? t("track.reviewedOwnTags") : t("track.ownTags")}</>;
 }

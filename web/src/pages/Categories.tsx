@@ -51,7 +51,7 @@ export function Categories() {
   const types = useCategoryTypes();
   const shown = sortCategories(
     (categories.data ?? []).filter((category) =>
-      type === "all" ? true : type === "none" ? category.type_id == null : category.type_id === type,
+      matchesType(category, type),
     ),
     sort.by,
     sort.descending,
@@ -60,7 +60,7 @@ export function Categories() {
     <th
       className={className}
       title={title}
-      aria-sort={sort.by === by ? (sort.descending ? "descending" : "ascending") : undefined}
+      aria-sort={sortDirection(sort, by)}
     >
       <button
         type="button"
@@ -212,7 +212,7 @@ export function Categories() {
   );
 }
 
-function CategoryDialog({ category, onClose }: { category: Category | null; onClose: () => void }) {
+function CategoryDialog({ category, onClose }: Readonly<{ category: Category | null; onClose: () => void }>) {
   const [name, setName] = useState(category?.name ?? "");
   const [color, setColor] = useState(category?.color ?? COLORS[0] ?? "#2f6fd6");
   const [fxPlayer, setFxPlayer] = useState(category?.fx_player ?? false);
@@ -321,7 +321,7 @@ function CategoryDialog({ category, onClose }: { category: Category | null; onCl
 }
 
 /** Puts every track with a label in the category. */
-function FillDialog({ category, onClose }: { category: Category; onClose: () => void }) {
+function FillDialog({ category, onClose }: Readonly<{ category: Category; onClose: () => void }>) {
   const labels = useLabels();
   const [label, setLabel] = useState("");
   const fill = useAction(
@@ -382,4 +382,17 @@ function FillDialog({ category, onClose }: { category: Category; onClose: () => 
       </div>
     </Modal>
   );
+}
+
+export function matchesType(category: Category, type: number | "all" | "none"): boolean {
+  if (type === "all") return true;
+  return type === "none" ? category.type_id == null : category.type_id === type;
+}
+
+export function sortDirection(
+  sort: { by: SortKey; descending: boolean },
+  by: SortKey,
+): "ascending" | "descending" | undefined {
+  if (sort.by !== by) return undefined;
+  return sort.descending ? "descending" : "ascending";
 }

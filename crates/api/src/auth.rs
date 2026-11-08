@@ -351,8 +351,13 @@ const MAX_FAILURES: u32 = 5;
 const LOCKOUT: Duration = Duration::from_secs(60);
 
 /// Verified when the username does not exist, so the answer takes as long.
-static DUMMY_HASH: LazyLock<String> =
-    LazyLock::new(|| hash_blocking("not a real password").unwrap_or_default());
+static DUMMY_HASH: LazyLock<String> = LazyLock::new(|| {
+    let mut bytes = [0_u8; 16];
+    // Without randomness the hash stays empty: the verification still runs.
+    let _ = getrandom::fill(&mut bytes);
+    let password: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    hash_blocking(&password).unwrap_or_default()
+});
 
 fn hash_blocking(password: &str) -> Result<String, String> {
     Argon2::default()
@@ -491,6 +496,11 @@ mod tests {
             HeaderValue::from_static("Bearer heron_xyz"),
         );
         assert_eq!(bearer_token(&headers), Some("heron_xyz"));
+    }
+
+    #[test]
+    fn the_dummy_hash_is_a_real_hash() {
+        assert!(DUMMY_HASH.starts_with("$argon2id$"));
     }
 
     #[test]

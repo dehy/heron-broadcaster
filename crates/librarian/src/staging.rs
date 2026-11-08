@@ -678,9 +678,8 @@ async fn plan_path(
         extension: &extension,
     });
     loop {
-        let candidate = organize::free_path(&desired, None, planned, |path| {
-            std::fs::symlink_metadata(roots.library.join(path)).is_ok()
-        });
+        let candidate =
+            organize::free_path_on_disk(&roots.library, &desired, None, planned).await?;
         let Some(candidate) = candidate.map(LibraryPath::from_stored) else {
             continue;
         };
@@ -782,51 +781,18 @@ pub async fn import(
         batch_id,
         ..BatchReport::default()
     };
-    let mut files = Vec::new();
-    for &id in file_ids {
-        let claimed = sqlx::query(
-            "UPDATE staged_files SET status = 'importing' WHERE id = ? AND status = 'ready'",
-        )
-        .bind(id)
-        .execute(pool)
-        .await?
-        .rows_affected();
-        if claimed == 0 {
-            let name: Option<(String, String)> = sqlx::query_as(
-                "SELECT original_name, CAST(status AS CHAR) FROM staged_files WHERE id = ?",
-            )
-            .bind(id)
-            .fetch_optional(pool)
-            .await?;
-            report.skipped.push(match name {
-                Some((name, status)) => SkippedFile {
-                    path: name,
-                    reason: format!("not ready to import ({status})"),
-                },
-                None => SkippedFile {
-                    path: format!("file {id}"),
-                    reason: "not in the buffer zone".into(),
-                },
-            });
-            continue;
-        }
-        files.push(load_claimed(pool, id).await?);
-    }
+    let files = claim_files(pool, file_ids, &mut report).await?;
 
-    let releases: HashSet<&String> = files.iter().filter_map(ToImport::release).collect();
-    let covers = if (settings.save_cover || settings.embed_cover) && !releases.is_empty() {
-        match Identifier::new(endpoints.clone(), String::new(), settings.min_score) {
-            Ok(identifier) => import::fetch_covers(&identifier, releases).await,
-            Err(error) => {
-                tracing::warn!(%error, "cannot fetch covers");
-                HashMap::new()
-            }
-        }
-    } else {
-        HashMap::new()
+    let covers = fetch_release_covers(endpoints, settings, &files).await;
+
+    let run = ImportRun {
+        pool,
+        roots,
+        settings,
+        layout: Layout::from_settings(settings),
+        batch_id,
+        covers: &covers,
     };
-
-    let layout = Layout::from_settings(settings);
     let mut planned = HashSet::new();
     let mut album_dirs: HashMap<String, std::path::PathBuf> = HashMap::new();
     let mut group_dirs = HashSet::new();
@@ -834,79 +800,8 @@ pub async fn import(
         let lock = LibraryLock::acquire(pool, "librarian").await?;
         for file in chunk {
             group_dirs.insert(file.group_id);
-            let release = file.release().cloned();
-            let cover = release
-                .as_ref()
-                .and_then(|release| covers.get(release))
-                .filter(|_| settings.embed_cover && !file.has_cover);
-            let retag = (file.applied != file.own || cover.is_some()).then(|| Retag {
-                change: TagChange::Tags {
-                    previous: file.own.clone(),
-                    applied: file.applied.clone(),
-                },
-                restore: None,
-                cover: cover.map_or(RetagCover::Keep, |jpeg| RetagCover::Embed(jpeg.clone())),
-            });
-            let to = plan_path(
-                pool,
-                roots,
-                &layout,
-                &file.applied,
-                &file.staged_path,
-                &mut planned,
-            )
-            .await?;
-            let operation = Operation {
-                batch_id,
-                subject: Subject::New(Box::new(NewTrack {
-                    tags: file.applied.clone(),
-                    duration_ms: file.duration_ms,
-                    chromaprint: file.chromaprint.clone().map(Chromaprint::from_compressed),
-                    identification: file.track_identification(),
-                    prepared_from: Some(file.id),
-                })),
-                from: Origin::Staging(file.staged_path.clone()),
-                to: to.clone(),
-                retag,
-                expected_stamp: None,
-            };
-            let outcome = journal::execute(pool, roots, operation).await;
-            let (status, track_id, error) = match &outcome {
-                Ok(track_id) => ("imported", Some(*track_id), None),
-                Err(OpError::Database(_)) => ("importing", None, None),
-                Err(OpError::SourceMissing) => {
-                    ("failed", None, Some("the file is gone".to_owned()))
-                }
-                Err(error) => ("ready", None, Some(error.to_string())),
-            };
-            if let Err(OpError::Database(error)) = outcome {
-                // Recovery settles the file on restart.
-                return Err(error.into());
-            }
-            sqlx::query("UPDATE staged_files SET status = ?, track_id = ?, error = ? WHERE id = ?")
-                .bind(status)
-                .bind(track_id)
-                .bind(&error)
-                .bind(file.id)
-                .execute(pool)
+            run.import_one(file, &mut planned, &mut album_dirs, &mut report)
                 .await?;
-            match error {
-                None => {
-                    report.done += 1;
-                    tracing::info!(from = %file.staged_path, %to, "imported from the buffer zone");
-                    if let (Some(release), Some(parent)) =
-                        (release, to.resolve(&roots.library).parent())
-                    {
-                        album_dirs
-                            .entry(release)
-                            .or_insert_with(|| parent.to_path_buf());
-                    }
-                }
-                Some(reason) => report.skipped.push(SkippedFile {
-                    path: file.staged_path.to_string(),
-                    reason,
-                }),
-            }
         }
         lock.release().await?;
     }
@@ -938,6 +833,169 @@ pub async fn import(
         "files imported from the buffer zone"
     );
     Ok(report)
+}
+
+/// Claims the ready files among `file_ids` for the import; the others are
+/// skipped, with why.
+async fn claim_files(
+    pool: &MySqlPool,
+    file_ids: &[u64],
+    report: &mut BatchReport,
+) -> Result<Vec<ToImport>, Error> {
+    let mut files = Vec::new();
+    for &id in file_ids {
+        let claimed = sqlx::query(
+            "UPDATE staged_files SET status = 'importing' WHERE id = ? AND status = 'ready'",
+        )
+        .bind(id)
+        .execute(pool)
+        .await?
+        .rows_affected();
+        if claimed == 0 {
+            let name: Option<(String, String)> = sqlx::query_as(
+                "SELECT original_name, CAST(status AS CHAR) FROM staged_files WHERE id = ?",
+            )
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+            report.skipped.push(match name {
+                Some((name, status)) => SkippedFile {
+                    path: name,
+                    reason: format!("not ready to import ({status})"),
+                },
+                None => SkippedFile {
+                    path: format!("file {id}"),
+                    reason: "not in the buffer zone".into(),
+                },
+            });
+            continue;
+        }
+        files.push(load_claimed(pool, id).await?);
+    }
+    Ok(files)
+}
+
+/// The covers of the releases of `files`, when covers are saved or embedded.
+async fn fetch_release_covers(
+    endpoints: &Endpoints,
+    settings: &LibrarySettings,
+    files: &[ToImport],
+) -> HashMap<String, Vec<u8>> {
+    let releases: HashSet<&String> = files.iter().filter_map(ToImport::release).collect();
+    if (settings.save_cover || settings.embed_cover) && !releases.is_empty() {
+        match Identifier::new(endpoints.clone(), String::new(), settings.min_score) {
+            Ok(identifier) => import::fetch_covers(&identifier, releases).await,
+            Err(error) => {
+                tracing::warn!(%error, "cannot fetch covers");
+                HashMap::new()
+            }
+        }
+    } else {
+        HashMap::new()
+    }
+}
+
+/// What importing the files of a batch shares.
+struct ImportRun<'a> {
+    pool: &'a MySqlPool,
+    roots: &'a Roots,
+    settings: &'a LibrarySettings,
+    layout: Layout,
+    batch_id: u64,
+    covers: &'a HashMap<String, Vec<u8>>,
+}
+
+impl ImportRun<'_> {
+    /// Imports one claimed file into the library and records how it went.
+    async fn import_one(
+        &self,
+        file: &ToImport,
+        planned: &mut HashSet<String>,
+        album_dirs: &mut HashMap<String, std::path::PathBuf>,
+        report: &mut BatchReport,
+    ) -> Result<(), Error> {
+        let Self {
+            pool,
+            roots,
+            settings,
+            layout,
+            batch_id,
+            covers,
+        } = self;
+        let (pool, roots, batch_id) = (*pool, *roots, *batch_id);
+        let release = file.release().cloned();
+        let cover = release
+            .as_ref()
+            .and_then(|release| covers.get(release))
+            .filter(|_| settings.embed_cover && !file.has_cover);
+        let retag = (file.applied != file.own || cover.is_some()).then(|| Retag {
+            change: TagChange::Tags {
+                previous: Box::new(file.own.clone()),
+                applied: Box::new(file.applied.clone()),
+            },
+            restore: None,
+            cover: cover.map_or(RetagCover::Keep, |jpeg| RetagCover::Embed(jpeg.clone())),
+        });
+        let to = plan_path(
+            pool,
+            roots,
+            layout,
+            &file.applied,
+            &file.staged_path,
+            planned,
+        )
+        .await?;
+        let operation = Operation {
+            batch_id,
+            subject: Subject::New(Box::new(NewTrack {
+                tags: file.applied.clone(),
+                duration_ms: file.duration_ms,
+                chromaprint: file.chromaprint.clone().map(Chromaprint::from_compressed),
+                identification: file.track_identification(),
+                prepared_from: Some(file.id),
+            })),
+            from: Origin::Staging(file.staged_path.clone()),
+            to: to.clone(),
+            retag,
+            expected_stamp: None,
+        };
+        let outcome = journal::execute(pool, roots, operation).await;
+        let (status, track_id, error) = match &outcome {
+            Ok(track_id) => ("imported", Some(*track_id), None),
+            Err(OpError::Database(_)) => ("importing", None, None),
+            Err(OpError::SourceMissing) => ("failed", None, Some("the file is gone".to_owned())),
+            Err(error) => ("ready", None, Some(error.to_string())),
+        };
+        if let Err(OpError::Database(error)) = outcome {
+            // Recovery settles the file on restart.
+            return Err(error.into());
+        }
+        sqlx::query("UPDATE staged_files SET status = ?, track_id = ?, error = ? WHERE id = ?")
+            .bind(status)
+            .bind(track_id)
+            .bind(&error)
+            .bind(file.id)
+            .execute(pool)
+            .await?;
+        match error {
+            None => {
+                report.done += 1;
+                tracing::info!(from = %file.staged_path, %to, "imported from the buffer zone");
+                if let (Some(release), Some(parent)) =
+                    (release, to.resolve(&roots.library).parent())
+                {
+                    album_dirs
+                        .entry(release)
+                        .or_insert_with(|| parent.to_path_buf());
+                }
+            }
+            Some(reason) => report.skipped.push(SkippedFile {
+                path: file.staged_path.to_string(),
+                reason,
+            }),
+        }
+        Ok(())
+    }
 }
 
 async fn load_claimed(pool: &MySqlPool, id: u64) -> Result<ToImport, sqlx::Error> {
@@ -997,9 +1055,10 @@ pub async fn recover(pool: &MySqlPool, roots: &Roots) -> Result<StagingRecovery,
     for (id, group, staged, original) in moves {
         let to = LibraryPath::from_stored(staged).resolve(&roots.staging);
         let from = LibraryPath::from_stored(original).resolve(&roots.incoming);
-        let _ = std::fs::remove_file(
+        let _ = tokio::fs::remove_file(
             LibraryPath::from_stored(format!("{group}/.heron-{id}")).resolve(&roots.staging),
-        );
+        )
+        .await;
         if to.is_file() {
             // A copy is renamed into place only once verified: the original
             // can go, unless it changed meanwhile (then both stay).
@@ -1010,7 +1069,7 @@ pub async fn recover(pool: &MySqlPool, roots: &Roots) -> Result<StagingRecovery,
                         (Ok(a), Ok(b)) if a == b
                     ))
             {
-                let _ = std::fs::remove_file(&from);
+                let _ = tokio::fs::remove_file(&from).await;
             }
             sqlx::query("UPDATE staged_files SET status = 'identifying' WHERE id = ?")
                 .bind(id)
@@ -1107,7 +1166,7 @@ pub async fn cleanup(pool: &MySqlPool, roots: &Roots) -> Result<(), sqlx::Error>
             .staging
             .join(group.to_string())
             .join(heron_core::library::upload_part_name(id));
-        let _ = std::fs::remove_file(part);
+        let _ = tokio::fs::remove_file(part).await;
         let given_up = sqlx::query(
             "UPDATE staged_files SET status = 'discarded', error = 'upload abandoned'
              WHERE id = ? AND status = 'receiving'",

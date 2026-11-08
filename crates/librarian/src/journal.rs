@@ -155,12 +155,13 @@ pub struct Retag {
     pub restore: Option<Box<Delta>>,
 }
 
-// One per file operation: not worth boxing.
-#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TagChange {
     /// The tags identification writes ([`Tags`]).
-    Tags { previous: Tags, applied: Tags },
+    Tags {
+        previous: Box<Tags>,
+        applied: Box<Tags>,
+    },
     /// Fields edited from the browser: only these are written.
     Fields {
         previous: FieldValues,
@@ -295,7 +296,10 @@ pub async fn is_free(
     roots: &Roots,
     path: &LibraryPath,
 ) -> Result<bool, sqlx::Error> {
-    if std::fs::symlink_metadata(path.resolve(&roots.library)).is_ok() {
+    if tokio::fs::symlink_metadata(path.resolve(&roots.library))
+        .await
+        .is_ok()
+    {
         return Ok(false);
     }
     let taken: Option<i32> = sqlx::query_scalar("SELECT 1 FROM tracks WHERE path = ? LIMIT 1")
@@ -311,7 +315,7 @@ pub async fn execute(pool: &MySqlPool, roots: &Roots, op: Operation) -> Result<u
     let to = op.to.resolve(&roots.library);
     let in_place = op.from == Origin::Library(op.to.clone());
 
-    let source = match std::fs::metadata(&from) {
+    let source = match tokio::fs::metadata(&from).await {
         Ok(metadata) => FileStamp::from_metadata(&metadata),
         Err(error) if error.kind() == ErrorKind::NotFound => return Err(OpError::SourceMissing),
         Err(error) => return Err(error.into()),
@@ -328,10 +332,15 @@ pub async fn execute(pool: &MySqlPool, roots: &Roots, op: Operation) -> Result<u
     let temp = temp_path(&op.to, move_id);
     crash_point("recorded");
 
-    let transferred = transfer(
-        pool, roots, &op, move_id, &from, &to, &temp, source, in_place,
-    )
-    .await;
+    let step = Step {
+        move_id,
+        from: &from,
+        to: &to,
+        temp: &temp,
+        source,
+        in_place,
+    };
+    let transferred = transfer(pool, roots, &op, &step).await;
     if transferred.is_ok() {
         crash_point("transferred");
     }
@@ -352,7 +361,7 @@ pub async fn execute(pool: &MySqlPool, roots: &Roots, op: Operation) -> Result<u
             }
         }
         Err(error) => {
-            let _ = std::fs::remove_file(temp.resolve(&roots.library));
+            let _ = tokio::fs::remove_file(temp.resolve(&roots.library)).await;
             abandon(pool, move_id, &error.to_string()).await?;
             return Err(error);
         }
@@ -502,21 +511,33 @@ enum Transfer {
     Copied,
 }
 
+/// Where one operation's file comes from and goes to.
+struct Step<'a> {
+    move_id: u64,
+    from: &'a Path,
+    to: &'a Path,
+    temp: &'a LibraryPath,
+    source: FileStamp,
+    in_place: bool,
+}
+
 /// Step 2: put the file at its new path (or its new tags into it).
-#[allow(clippy::too_many_arguments)]
 async fn transfer(
     pool: &MySqlPool,
     roots: &Roots,
     op: &Operation,
-    move_id: u64,
-    from: &Path,
-    to: &Path,
-    temp: &LibraryPath,
-    source: FileStamp,
-    in_place: bool,
+    step: &Step<'_>,
 ) -> Result<Transfer, OpError> {
+    let Step {
+        move_id,
+        from,
+        to,
+        temp,
+        source,
+        in_place,
+    } = *step;
     if let Some(parent) = to.parent() {
-        std::fs::create_dir_all(parent)?;
+        tokio::fs::create_dir_all(parent).await?;
     }
     if op.retag.is_none() {
         let (from_owned, to_owned) = (from.to_path_buf(), to.to_path_buf());
@@ -570,12 +591,12 @@ async fn transfer(
     }
 
     // The original changed while it was copied: the copy is not the file.
-    if FileStamp::from_metadata(&std::fs::metadata(from)?) != source {
+    if FileStamp::from_metadata(&tokio::fs::metadata(from).await?) != source {
         return Err(OpError::SourceChanged);
     }
     if in_place {
         // The one replacement Heron does: the file by its own re-tagged copy.
-        std::fs::rename(&temp_abs, to)?;
+        tokio::fs::rename(&temp_abs, to).await?;
     } else {
         match fsops::rename_no_replace(&temp_abs, to) {
             Ok(()) => {}
@@ -662,7 +683,7 @@ async fn finish(
     read_details: bool,
     status: &str,
 ) -> Result<(), OpError> {
-    let stamp = FileStamp::from_metadata(&std::fs::metadata(to_abs)?);
+    let stamp = FileStamp::from_metadata(&tokio::fs::metadata(to_abs).await?);
     let path = to_abs.to_path_buf();
     let hash = blocking(move || heron_library::content_hash(&path)).await?;
     let details = if read_details {
@@ -835,7 +856,7 @@ pub async fn move_loose_file(
     .await?
     .last_insert_id();
     if let Some(parent) = to_abs.parent() {
-        std::fs::create_dir_all(parent)?;
+        tokio::fs::create_dir_all(parent).await?;
     }
     let renamed = {
         let (from_abs, to_abs) = (from_abs.clone(), to_abs.clone());
@@ -904,78 +925,94 @@ pub async fn recover(pool: &MySqlPool, roots: &Roots) -> Result<Recovery, OpErro
     .await?;
     let mut recovery = Recovery::default();
     for row in rows {
-        let move_id: u64 = row.try_get("id")?;
-        let track_id: Option<u64> = row.try_get("track_id")?;
-        let from_path = LibraryPath::from_stored(row.try_get("from_path")?);
-        let origin = Origin::from_stored(&row.try_get::<String, _>("from_root")?, from_path);
-        let to = LibraryPath::from_stored(row.try_get("to_path")?);
-        let method: String = row.try_get("method")?;
-        let temp: Option<String> = row.try_get("temp_path")?;
-        let content_hash: Option<Vec<u8>> = row.try_get("content_hash")?;
-        let status: String = row.try_get("status")?;
-
-        let from_abs = origin.resolve(roots);
-        let to_abs = to.resolve(&roots.library);
-        let in_place = origin == Origin::Library(to.clone());
-        let read_details = matches!(origin, Origin::Incoming(_)) || retagged(pool, move_id).await?;
-        let matches_copy = |path: &Path| match &content_hash {
-            Some(hash) => fsops::full_hash(path).is_ok_and(|actual| actual[..] == hash[..]),
-            None => false,
-        };
-
-        if status == "moved" {
-            // The track already points at the copy: remove the original.
-            if !in_place && from_abs.exists() && (matches_copy(&to_abs) || same(&from_abs, &to_abs))
-            {
-                remove_original(&from_abs)?;
-            }
-            set_status(pool, move_id, "done", None).await?;
-            recovery.finished += 1;
-            continue;
-        }
-
-        if let Some(temp) = temp {
-            let _ = std::fs::remove_file(LibraryPath::from_stored(temp).resolve(&roots.library));
-        }
-        let (from_exists, to_exists) = (from_abs.exists(), to_abs.exists());
-        let landed = if in_place {
-            matches_copy(&to_abs)
-        } else if !to_exists {
-            false
-        } else if from_exists {
-            same(&from_abs, &to_abs) || matches_copy(&to_abs)
-        } else {
-            method == "rename" || matches_copy(&to_abs)
-        };
-        match (landed, track_id) {
-            (true, Some(track_id)) => {
-                let leftover = !in_place && from_exists;
-                let status = if leftover { "moved" } else { "done" };
-                finish(pool, move_id, track_id, &to, &to_abs, read_details, status).await?;
-                if leftover {
-                    remove_original(&from_abs)?;
-                    set_status(pool, move_id, "done", None).await?;
-                }
-                recovery.finished += 1;
-            }
-            // A file that is not a track (a cover moved to the trash).
-            (true, None) => {
-                set_status(pool, move_id, "done", None).await?;
-                recovery.finished += 1;
-            }
-            _ => {
-                if !from_exists && !in_place {
-                    tracing::error!(from = %from_abs.display(), to = %to, "an interrupted move left no file at either path");
-                }
-                abandon(pool, move_id, "interrupted before the file moved").await?;
-                recovery.abandoned += 1;
-            }
+        match recover_move(pool, roots, &row).await? {
+            Recovered::Finished => recovery.finished += 1,
+            Recovered::Abandoned => recovery.abandoned += 1,
         }
     }
     if recovery != Recovery::default() {
         tracing::info!(?recovery, "recovered interrupted library operations");
     }
     Ok(recovery)
+}
+
+enum Recovered {
+    Finished,
+    Abandoned,
+}
+
+/// Finishes or rolls back one interrupted operation.
+async fn recover_move(
+    pool: &MySqlPool,
+    roots: &Roots,
+    row: &sqlx::mysql::MySqlRow,
+) -> Result<Recovered, OpError> {
+    let move_id: u64 = row.try_get("id")?;
+    let track_id: Option<u64> = row.try_get("track_id")?;
+    let from_path = LibraryPath::from_stored(row.try_get("from_path")?);
+    let origin = Origin::from_stored(&row.try_get::<String, _>("from_root")?, from_path);
+    let to = LibraryPath::from_stored(row.try_get("to_path")?);
+    let method: String = row.try_get("method")?;
+    let temp: Option<String> = row.try_get("temp_path")?;
+    let content_hash: Option<Vec<u8>> = row.try_get("content_hash")?;
+    let status: String = row.try_get("status")?;
+
+    let from_abs = origin.resolve(roots);
+    let to_abs = to.resolve(&roots.library);
+    let in_place = origin == Origin::Library(to.clone());
+    let read_details = matches!(origin, Origin::Incoming(_)) || retagged(pool, move_id).await?;
+    let matches_copy = |path: &Path| match &content_hash {
+        Some(hash) => fsops::full_hash(path).is_ok_and(|actual| actual[..] == hash[..]),
+        None => false,
+    };
+
+    if status == "moved" {
+        // The track already points at the copy: remove the original.
+        if !in_place && from_abs.exists() && (matches_copy(&to_abs) || same(&from_abs, &to_abs)) {
+            remove_original(&from_abs)?;
+        }
+        set_status(pool, move_id, "done", None).await?;
+        return Ok(Recovered::Finished);
+    }
+
+    if let Some(temp) = temp {
+        let _ =
+            tokio::fs::remove_file(LibraryPath::from_stored(temp).resolve(&roots.library)).await;
+    }
+    let (from_exists, to_exists) = (from_abs.exists(), to_abs.exists());
+    let landed = if in_place {
+        matches_copy(&to_abs)
+    } else if !to_exists {
+        false
+    } else if from_exists {
+        same(&from_abs, &to_abs) || matches_copy(&to_abs)
+    } else {
+        method == "rename" || matches_copy(&to_abs)
+    };
+    match (landed, track_id) {
+        (true, Some(track_id)) => {
+            let leftover = !in_place && from_exists;
+            let status = if leftover { "moved" } else { "done" };
+            finish(pool, move_id, track_id, &to, &to_abs, read_details, status).await?;
+            if leftover {
+                remove_original(&from_abs)?;
+                set_status(pool, move_id, "done", None).await?;
+            }
+            Ok(Recovered::Finished)
+        }
+        // A file that is not a track (a cover moved to the trash).
+        (true, None) => {
+            set_status(pool, move_id, "done", None).await?;
+            Ok(Recovered::Finished)
+        }
+        _ => {
+            if !from_exists && !in_place {
+                tracing::error!(from = %from_abs.display(), to = %to, "an interrupted move left no file at either path");
+            }
+            abandon(pool, move_id, "interrupted before the file moved").await?;
+            Ok(Recovered::Abandoned)
+        }
+    }
 }
 
 fn same(a: &Path, b: &Path) -> bool {

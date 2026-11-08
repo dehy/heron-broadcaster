@@ -45,7 +45,7 @@ export function Review() {
           <button
             key={value}
             type="button"
-            aria-selected={tab === value}
+            aria-current={tab === value ? "page" : undefined}
             onClick={() => setSearch({ tab: value === "review" ? undefined : value })}
           >
             {t(label)}
@@ -93,7 +93,7 @@ function Identifications() {
   );
 }
 
-function ReviewItem({ item }: { item: Schemas["ReviewItem"] }) {
+function ReviewItem({ item }: Readonly<{ item: Schemas["ReviewItem"] }>) {
   const canEdit = useCan("operator");
   const client = useQueryClient();
   const toast = useToast();
@@ -375,7 +375,7 @@ function Organize() {
   );
 }
 
-function BatchReport({ report }: { report: Schemas["BatchReport"] }) {
+function BatchReport({ report }: Readonly<{ report: Schemas["BatchReport"] }>) {
   return (
     <div className="stack">
       <span>
@@ -431,13 +431,13 @@ function Batches() {
     const status = undoing.data?.status;
     if (status === "done") {
       const report = undoing.data?.report;
-      toast(
-        report
-          ? report.skipped.length
-            ? t("review.undoneSkipped", { count: report.done, skipped: report.skipped.length })
-            : t("review.undoneCount", { count: report.done })
-          : t("review.undone"),
-      );
+      let message = t("review.undone");
+      if (report) {
+        message = report.skipped.length
+          ? t("review.undoneSkipped", { count: report.done, skipped: report.skipped.length })
+          : t("review.undoneCount", { count: report.done });
+      }
+      toast(message);
       void client.invalidateQueries({ queryKey: ["library-batches"] });
       void client.invalidateQueries({ queryKey: ["review"] });
     } else if (status === "failed") {
@@ -485,13 +485,15 @@ function Batches() {
                   <td>{dateTime(batch.created_at_unix_ms)}</td>
                   <td className="num">{number(batch.files)}</td>
                   <td>
-                    {batch.undone_by ? (
+                    {!!batch.undone_by && (
                       <span className="badge">{t("review.undoneBy", { batch: String(batch.undone_by) })}</span>
-                    ) : batch.finished_at_unix_ms ? (
-                      <span className="badge good">{t("review.done")}</span>
-                    ) : (
-                      <span className="badge warn">{t("review.unfinished")}</span>
                     )}
+                    {!batch.undone_by &&
+                      (batch.finished_at_unix_ms ? (
+                        <span className="badge good">{t("review.done")}</span>
+                      ) : (
+                        <span className="badge warn">{t("review.unfinished")}</span>
+                      ))}
                   </td>
                   <td className="actions">
                     {isAdmin && batch.kind !== "undo" && batch.kind !== "purge" && !batch.undone_by && batch.files > 0 && (
