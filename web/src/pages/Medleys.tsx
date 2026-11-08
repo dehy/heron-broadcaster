@@ -816,7 +816,7 @@ function useRendering(status: string | undefined, editing: boolean): boolean {
 }
 
 /** The layout to show: outside editing, the one the file was rendered with, when saved for these parts. */
-function timelineOf(
+export function timelineOf(
   medley: Medley,
   parts: PartView[],
   editing: boolean,
@@ -852,12 +852,12 @@ async function pickReplacement(medleyId: number, parts: PartView[], index: numbe
 }
 
 /** The parts with the one at `index` changed. */
-function replaceAt(parts: PartView[], index: number, change: (part: PartView) => PartView): PartView[] {
+export function replaceAt(parts: PartView[], index: number, change: (part: PartView) => PartView): PartView[] {
   return parts.map((part, i) => (i === index ? change(part) : part));
 }
 
 /** The parts with the one at `index` moved by `by` places. */
-function movedPart(parts: PartView[], index: number, by: number): PartView[] {
+export function movedPart(parts: PartView[], index: number, by: number): PartView[] {
   const next = [...parts];
   const [part] = next.splice(index, 1);
   if (part) {
@@ -867,7 +867,7 @@ function movedPart(parts: PartView[], index: number, by: number): PartView[] {
 }
 
 /** The name the next render gives: the day and the songs' titles or artists. */
-function nextMedleyName(parts: PartView[], nameFrom: string): string {
+export function nextMedleyName(parts: PartView[], nameFrom: string): string {
   return medleyName(
     renderDay(new Date()),
     parts.filter((part) => part.kind === "hook").map((part) => (nameFrom === "titles" ? part.title : part.artist)),
@@ -911,7 +911,7 @@ function BuildSummary({
 }
 
 /** What the API takes of a medley's parts. */
-function asPartsBody(parts: PartView[]) {
+export function asPartsBody(parts: PartView[]) {
   return {
     parts: parts.map(({ kind, track_id, from_ms, to_ms, shift_ms, move_ms }) => ({
       kind,
@@ -925,7 +925,7 @@ function asPartsBody(parts: PartView[]) {
 }
 
 /** A part with its start or end moved by `by` ms, within its file, at least 0.5 s long. */
-function nudged(part: PartView, end: "from_ms" | "to_ms", by: number): PartView {
+export function nudged(part: PartView, end: "from_ms" | "to_ms", by: number): PartView {
   if (end === "from_ms") {
     return { ...part, from_ms: Math.max(0, Math.min(part.from_ms + by, part.to_ms - 500)) };
   }
@@ -934,7 +934,7 @@ function nudged(part: PartView, end: "from_ms" | "to_ms", by: number): PartView 
 }
 
 /** Where the timeline's playhead is, for what plays. */
-function playheadOf(
+export function playheadOf(
   source: PlayerSource | null | undefined,
   positionMs: number,
   placed: readonly { at_ms: number; from_ms: number }[],

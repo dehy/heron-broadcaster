@@ -9,7 +9,7 @@ type Medley = Schemas["Medley"];
 import { t } from "../i18n";
 import { chooseStation } from "../lib/station";
 import { answer, browserStubs, lenient, renderApp, sent, user } from "../test/render";
-import { MedleyEditor, Medleys } from "./Medleys";
+import { MedleyEditor, Medleys, asPartsBody, movedPart, nextMedleyName, nudged, playheadOf, replaceAt, timelineOf } from "./Medleys";
 
 browserStubs();
 
@@ -98,6 +98,23 @@ describe("Medleys", () => {
     chooseStation(1);
     renderApp(<Medleys />);
     expect(await screen.findByText("Morning mix")).toBeTruthy();
+  });
+});
+
+describe("Medleys list states", () => {
+  it("says when a render failed or has not happened", async () => {
+    answer(
+      lenient({
+        "GET /api/v1/medleys": [
+          medley({ id: 1, name: "Failed one", task_status: "failed" }),
+          medley({ id: 2, name: "Draft one" }),
+        ],
+      }),
+    );
+    chooseStation(1);
+    renderApp(<Medleys />);
+    expect(await screen.findByText(t("medleys.renderFailed"))).toBeTruthy();
+    expect(screen.getByText(t("medleys.notRendered"))).toBeTruthy();
   });
 });
 
@@ -199,5 +216,75 @@ describe("MedleyEditor", () => {
       "GET /api/v1/tasks/{id}": { id: 3, status: "running" },
     });
     expect((await screen.findAllByText("hook 1", { exact: false }))[0]).toBeTruthy();
+  });
+});
+
+describe("medley helpers", () => {
+  it("changes one part", () => {
+    expect(replaceAt(PARTS, 1, (p) => ({ ...p, shift_ms: 5 })).map((p) => p.shift_ms)).toEqual([0, 5, 0]);
+  });
+
+  it("moves a part by places, and leaves the others in order", () => {
+    expect(movedPart(PARTS, 0, 1).map((p) => p.track_id)).toEqual([102, 101, 103]);
+    expect(movedPart(PARTS, 2, -1).map((p) => p.track_id)).toEqual([101, 103, 102]);
+    expect(movedPart(PARTS, 5, 1)).toHaveLength(3);
+  });
+
+  it("names the medley after its songs' titles or artists", () => {
+    expect(nextMedleyName(PARTS, "titles")).toContain("hook 1");
+    expect(nextMedleyName(PARTS, "artists")).toContain("Artist 1");
+    expect(nextMedleyName([], "titles")).toBeTruthy();
+  });
+
+  it("sends only what the API takes of the parts", () => {
+    expect(Object.keys(asPartsBody(PARTS).parts[0] ?? {}).sort()).toEqual(
+      ["from_ms", "kind", "move_ms", "shift_ms", "to_ms", "track_id"],
+    );
+  });
+
+  it("nudges a start and an end within the file, at least half a second apart", () => {
+    const p = part(1, "hook");
+    expect(nudged(p, "from_ms", -999_999).from_ms).toBe(0);
+    expect(nudged(p, "from_ms", 999_999).from_ms).toBe(p.to_ms - 500);
+    expect(nudged(p, "from_ms", 100).from_ms).toBe(p.from_ms + 100);
+    expect(nudged(p, "to_ms", -999_999).to_ms).toBe(p.from_ms + 500);
+    expect(nudged(p, "to_ms", 999_999).to_ms).toBe(p.from_ms + 120_000);
+    expect(nudged({ ...p, duration_ms: p.to_ms + 50 }, "to_ms", 100).to_ms).toBe(p.to_ms + 50);
+    expect(nudged({ ...p, duration_ms: null }, "to_ms", 100).to_ms).toBe(p.to_ms + 100);
+  });
+
+  it("places the playhead for what plays", () => {
+    const placed = [{ at_ms: 1_000, from_ms: 500 }];
+    expect(playheadOf({ kind: "medley", url: "u" } as never, 700, placed)).toBe(700);
+    expect(playheadOf({ kind: "part", index: 0 } as never, 800, placed)).toBe(1_300);
+    expect(playheadOf({ kind: "part", index: 4 } as never, 800, placed)).toBeNull();
+    expect(playheadOf(null, 800, placed)).toBeNull();
+  });
+
+  describe("timelineOf", () => {
+    const player = (source: unknown, length_ms: number | null) => ({ source, length_ms }) as never;
+    const source = { kind: "medley", url: "m.mp3" } as never;
+
+    it("shows the saved layout when it is for these parts", () => {
+      const saved = { parts: PARTS.map((p, i) => ({ ...p, at_ms: i * 1_000 })), length_ms: 50_000 };
+      const done = medley({ track_id: 9, rendered_layout: saved as never });
+      const timeline = timelineOf(done, PARTS, false, player(null, null), null);
+      expect(timeline.rendered).toBe(saved);
+      expect(timeline.outOfStep).toBe(false);
+    });
+
+    it("is out of step when the file is not as long as the timeline", () => {
+      const saved = { parts: PARTS.map((p, i) => ({ ...p, at_ms: i * 1_000 })), length_ms: 50_000 };
+      const done = medley({ track_id: 9, rendered_layout: saved as never });
+      expect(timelineOf(done, PARTS, false, player(source, 40_000), source).outOfStep).toBe(true);
+      expect(timelineOf(done, PARTS, false, player(source, 50_100), source).outOfStep).toBe(false);
+    });
+
+    it("is out of step without a saved layout, and never while editing", () => {
+      const done = medley({ track_id: 9 });
+      expect(timelineOf(done, PARTS, false, player(null, null), null).outOfStep).toBe(true);
+      expect(timelineOf(done, PARTS, true, player(null, null), null).outOfStep).toBe(false);
+      expect(timelineOf(medley(), PARTS, false, player(null, null), null).outOfStep).toBe(false);
+    });
   });
 });

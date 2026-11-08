@@ -499,6 +499,13 @@ mod tests {
     }
 
     #[test]
+    fn the_dummy_hash_is_a_real_hash_of_nothing_anyone_knows() {
+        assert!(DUMMY_HASH.starts_with("$argon2id$"));
+        assert!(!verify_blocking(&DUMMY_HASH, ""));
+        assert!(!verify_blocking(&DUMMY_HASH, "not a real password"));
+    }
+
+    #[test]
     fn passwords_hash_and_verify() {
         let hash = hash_blocking("correct horse").unwrap();
         assert!(hash.starts_with("$argon2id$"));

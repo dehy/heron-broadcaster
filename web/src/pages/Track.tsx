@@ -734,7 +734,7 @@ function useDeleteTrack(track: TrackDetail) {
 }
 
 /** Where the next track starts over this one, and the fades around it, with `draft` applied. */
-function mixOf(
+export function mixOf(
   track: TrackDetail,
   draft: TrackOverrides,
   settings: PlayoutSettings | undefined,
@@ -784,7 +784,7 @@ interface AnnotationInput {
 }
 
 /** The flags and the colored stretches drawn on the waveform. */
-function annotations(input: AnnotationInput): { markers: Marker[]; regions: Region[] } {
+export function annotations(input: AnnotationInput): { markers: Marker[]; regions: Region[] } {
   return {
     markers: [...cueMarkers(input), ...pointMarkers(input)],
     regions: fadeRegions(input, input.hookSet ? input.hook : null),
