@@ -39,3 +39,9 @@
 - CI publishes the images it has tested to GHCR, under the repository owner's packages (`ghcr.io/dehy/heron-*`; a fork publishes its own, `ghcr.io/<owner>/heron-*`), for amd64 and arm64. Pull requests never publish. `HERON_REGISTRY` in `.env` picks where a station pulls them from.
 - Every push to `main` publishes `edge` and `sha-<commit>`. What goes into `edge` is written in the *Edge* sections of `CHANGELOG.md` and of the release notes in [Upgrading](upgrading.md#release-notes); a release renames them to its version.
 - To release `X.Y.Z`: set the version in `Cargo.toml` (`[workspace.package]`) and `web/package.json`, update `Cargo.lock`, `web/package-lock.json` and `web/openapi.json` (`cargo run -p heron-api -- openapi > web/openapi.json`), add the release to `CHANGELOG.md` and its upgrade notes to [Upgrading](upgrading.md#release-notes), merge, then tag `main` with `vX.Y.Z` and push the tag. CI checks that the tag matches both versions and publishes `X.Y.Z`, `X.Y` and `latest`.
+
+## Dependency analysis
+
+- The *SBOM* workflow (`.github/workflows/sbom.yml`) lists the dependencies of the checkout (`Cargo.lock`, `web/package-lock.json`) as a CycloneDX SBOM and uploads it to a [Dependency-Track](https://dependencytrack.org/) server, which reports known vulnerabilities and licenses. It runs on every push to `main` (project version `main`) and on every published release (the release's tag, marked as the latest version), and can be started by hand.
+- It signs in with the job's GitHub OIDC token (Dependency-Track 5.2 or later, workload identity federation), so no secret is stored. A fork that has no Dependency-Track server can disable the workflow.
+- As in every workflow, actions are pinned to a commit SHA, with their version in a comment.
