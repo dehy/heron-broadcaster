@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Generates a CycloneDX SBOM of the checkout and uploads it to Dependency-Track.
+# Signs in with the job's GitHub OIDC token (workload identity federation,
+# Dependency-Track >= 5.2): no secret to store. See docs/conventions.md.
+name: SBOM
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # lets the job request an OIDC token for Dependency-Track
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Scans the checkout's lockfiles and manifests.
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: bom.json
+          upload-artifact: false
+
+      - uses: DependencyTrack/gh-upload-sbom@331f980a6eba119842052f447c54b09e4888b4c6 # v4.3.0
+        with:
+          server-hostname: dtrack.admds.net
+          workload-identity-provider: github-actions
+          service-account: github-ci
+          oidc-audience: https://dtrack.admds.net
+          project-name: ${{ github.event.repository.name }}
+          # main on pushes, the tag on releases
+          project-version: ${{ github.event_name == 'release' && github.ref_name || 'main' }}
+          is-latest: ${{ github.event_name == 'release' }}
+          project-tags: github,${{ github.repository_owner }}
+          bom-filename: bom.json
+          auto-create: true
