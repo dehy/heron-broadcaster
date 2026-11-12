@@ -43,5 +43,5 @@
 ## Dependency analysis
 
 - The *SBOM* workflow (`.github/workflows/sbom.yml`) lists the dependencies of the checkout (`Cargo.lock`, `web/package-lock.json`) as a CycloneDX SBOM and uploads it to a [Dependency-Track](https://dependencytrack.org/) server, which reports known vulnerabilities and licenses. It runs on every push to `main` (project version `main`) and on every published release (the release's tag, marked as the latest version), and can be started by hand.
-- It signs in with the job's GitHub OIDC token (Dependency-Track 5.2 or later, workload identity federation), so no secret is stored. A fork that has no Dependency-Track server can disable the workflow.
+- It signs in with the job's GitHub OIDC token (Dependency-Track 5.2 or later, workload identity federation), so no secret is stored. It runs only in the upstream repository, never in a fork.
 - As in every workflow, actions are pinned to a commit SHA, with their version in a comment.
