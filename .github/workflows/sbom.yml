@@ -7,7 +7,12 @@
 name: SBOM
 
 on:
-  # After CI has published the images of a push to main or of a vX.Y.Z tag.
+  # The source: on each push to main or of a vX.Y.Z tag.
+  push:
+    branches: [main]
+    tags: ['v*']
+  # The images: once CI has published those of such a push. No checkout here:
+  # a workflow_run job is privileged.
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -26,18 +31,13 @@ env:
 
 jobs:
   source:
-    # Forks have no access to this Dependency-Track server, and only pushes
-    # that passed CI have published images.
+    # Forks have no access to this Dependency-Track server.
     if: >-
       github.repository == 'dehy/heron-broadcaster' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event.workflow_run.event == 'push' &&
-        github.event.workflow_run.conclusion == 'success'))
+      github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.SHA }}
 
       # Scans the checkout's lockfiles and manifests.
       - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
@@ -62,8 +62,18 @@ jobs:
 
   images:
     name: Image ${{ matrix.image }}
-    # The source project is the images' parent: it must exist first.
+    # The source project is the images' parent: it must exist first. After a
+    # push, the source job ran when the push did, long before CI published the
+    # images; when started by hand, this job waits for it.
     needs: [source]
+    # Only pushes that passed CI have published images.
+    if: >-
+      !cancelled() && needs.source.result != 'failure' &&
+      github.repository == 'dehy/heron-broadcaster' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success'))
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

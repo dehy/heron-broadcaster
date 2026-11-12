@@ -43,6 +43,6 @@
 ## Dependency analysis
 
 - The *SBOM* workflow (`.github/workflows/sbom.yml`) lists the dependencies of the source (`Cargo.lock`, `web/package-lock.json`) and of each published image (its system packages and binaries, for amd64) as CycloneDX SBOMs, and uploads them to a [Dependency-Track](https://dependencytrack.org/) server, which reports known vulnerabilities and licenses. The source is one project, and each image a child project of it.
-- It runs once CI has passed and published the images of a push to `main` (project version `main`) or of a `vX.Y.Z` tag (version `vX.Y.Z`, marked as the latest version), and can be started by hand on `main` or a tag.
+- It scans the source on every push to `main` (project version `main`) and of a `vX.Y.Z` tag (version `vX.Y.Z`, marked as the latest version), and the images once CI has passed and published them for that push. It can be started by hand on `main` or a tag. The images job checks nothing out: it runs after CI with the repository's permissions.
 - It signs in with the job's GitHub OIDC token (Dependency-Track 5.2 or later, workload identity federation), so no secret is stored. It runs only in the upstream repository, never in a fork.
 - As in every workflow, actions are pinned to a commit SHA, with their version in a comment.
