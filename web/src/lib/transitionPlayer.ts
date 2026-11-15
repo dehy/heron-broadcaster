@@ -140,10 +140,12 @@ export function useTransitionPlayer(onError: (error: unknown) => void): Transiti
             total,
           );
           const at = (ms: number) => Math.max(0, (start - context.currentTime) * 1000 + ms);
-          timers.push(window.setTimeout(() => void a.element.play().catch(onError), at(0)));
-          timers.push(window.setTimeout(() => void b.element.play().catch(onError), at(preview.next_start_ms - from)));
-          timers.push(window.setTimeout(() => a.element.pause(), at(out.cue_out_ms - from)));
-          timers.push(window.setTimeout(stop, at(to - from)));
+          timers.push(
+            window.setTimeout(() => void a.element.play().catch(onError), at(0)),
+            window.setTimeout(() => void b.element.play().catch(onError), at(preview.next_start_ms - from)),
+            window.setTimeout(() => a.element.pause(), at(out.cue_out_ms - from)),
+            window.setTimeout(stop, at(to - from)),
+          );
           setLoading(false);
           const step = () => {
             const elapsed = context.currentTime - start;

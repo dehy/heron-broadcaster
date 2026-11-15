@@ -318,14 +318,14 @@ export function TrackDaypartsDialog({
           change={separation}
           onChange={setSeparation}
           clearLabel={t("trackDayparts.categoryOption")}
-          input={choose(MAX_SEPARATION, (n) => String(n), t("dayparts.category"))}
+          renderInput={choose(MAX_SEPARATION, (n) => String(n), t("dayparts.category"))}
         />
         <ChangeField
           label={t("dayparts.days")}
           change={days}
           onChange={setDays}
           clearLabel={t("trackDayparts.categoryOption")}
-          input={choose(MAX_DAYS, (n) => t("dayparts.daysOption", { count: n }), t("dayparts.days"))}
+          renderInput={choose(MAX_DAYS, (n) => t("dayparts.daysOption", { count: n }), t("dayparts.days"))}
         />
         <p className="muted small" style={{ margin: 0 }}>
           {t("trackDayparts.maxHint")}

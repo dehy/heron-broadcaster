@@ -27,7 +27,7 @@ pub struct ClockStatus {
 }
 
 impl ClockStatus {
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    #[cfg(any(target_os = "linux", test))]
     fn from_kernel(synchronized: bool, offset_ms: f64, estimated_error_ms: f64) -> Self {
         let warning = if !synchronized {
             Some("the server clock is not synchronized (is NTP running on the host?)".to_owned())

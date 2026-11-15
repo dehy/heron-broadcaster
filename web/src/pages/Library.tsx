@@ -818,7 +818,7 @@ function sameRatio(tracks: TrackSummary[]): number | null {
   return ratios.size === 1 && only !== undefined ? only : null;
 }
 
-function ColumnsMenu({ columns, onToggle }: { columns: Column[]; onToggle: (column: Column, shown: boolean) => void }) {
+function ColumnsMenu({ columns, onToggle }: Readonly<{ columns: Column[]; onToggle: (column: Column, shown: boolean) => void }>) {
   const coverArt = useModule("cover_art");
   const likesOn = useModule("likes");
   const labelsOn = useModule("labels");
@@ -854,12 +854,12 @@ function MoreFilters({
   labels,
   programming,
   coverArt,
-}: {
+}: Readonly<{
   search: URLSearchParams;
   labels: Schemas["Label"][];
   programming: Schemas["ProgrammingSettings"] | undefined;
   coverArt: boolean;
-}) {
+}>) {
   const value = (name: string) => search.get(name) ?? "";
   const set = (name: string, next: string | undefined) => setSearch({ [name]: next || undefined, page: undefined });
   const labelSelect = (name: string, title: string) => (
@@ -985,7 +985,7 @@ function MoreFilters({
   );
 }
 
-function LibrarySummary({ status }: { status: Awaited<ReturnType<typeof fetchLibraryStatus>> | undefined }) {
+function LibrarySummary({ status }: Readonly<{ status: Awaited<ReturnType<typeof fetchLibraryStatus>> | undefined }>) {
   if (!status) {
     return null;
   }
@@ -1021,7 +1021,7 @@ function LibrarySummary({ status }: { status: Awaited<ReturnType<typeof fetchLib
   );
 }
 
-function TrackState({ track }: { track: TrackSummary }) {
+function TrackState({ track }: Readonly<{ track: TrackSummary }>) {
   if (track.missing) {
     return <span className="badge bad">{t("library.state.missing")}</span>;
   }
@@ -1071,7 +1071,7 @@ function Row({
   onQueue,
   onArtist,
   preview,
-}: {
+}: Readonly<{
   track: TrackSummary;
   columns: Column[];
   showCover: boolean;
@@ -1081,7 +1081,7 @@ function Row({
   onQueue: (next: boolean) => void;
   onArtist: (artist: string) => void;
   preview: Preview;
-}) {
+}>) {
   const previewing = preview.playing === track.id;
   const unplayable = preview.failed.has(track.id);
   const playable = !track.missing && !track.silent;
@@ -1186,12 +1186,12 @@ function Row({
           <button
             type="button"
             className={unplayable ? "btn ghost small icon warn" : "btn ghost small icon"}
-            title={unplayable ? t("library.previewFailed") : previewing ? t("library.stopPreview") : t("library.preview")}
+            title={unplayable ? t("library.previewFailed") : t(previewing ? "library.stopPreview" : "library.preview")}
             aria-label={t(previewing ? "library.stopPreviewNamed" : "library.previewNamed", { name: track.title ?? file })}
             aria-pressed={previewing}
             onClick={() => preview.toggle(track)}
           >
-            <Icon name={unplayable ? "warn" : previewing ? "stop" : "play"} />
+            <Icon name={unplayable ? "warn" : previewIcon(previewing)} />
           </button>
         )}
       </td>
@@ -1226,7 +1226,7 @@ function RatioPill({ track }: { track: TrackSummary }) {
 }
 
 /** What a deletion takes, before it is confirmed. */
-export function DeleteQuestion({ tracks }: { tracks: TrackSummary[] }) {
+export function DeleteQuestion({ tracks }: Readonly<{ tracks: TrackSummary[] }>) {
   const trashOn = useModule("trash");
   const shown = tracks.slice(0, 15);
   return (
@@ -1250,4 +1250,8 @@ export function DeleteQuestion({ tracks }: { tracks: TrackSummary[] }) {
       </ul>
     </>
   );
+}
+
+export function previewIcon(previewing: boolean): "stop" | "play" {
+  return previewing ? "stop" : "play";
 }

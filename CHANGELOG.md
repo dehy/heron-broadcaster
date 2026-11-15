@@ -10,6 +10,10 @@ What `main` has since the last release: it is published as the `edge` images. Re
 
 - **Featured artist**, a show (`featured_artist`): on the days and hours it chooses, at `:00`, `:15`, `:30` or `:45` of each hour, a track of the artist of the week, or of the day, from a planning filled in ahead, plays at a soft exact time, after a jingle of its category if any ([Listener interaction – Featured artist](docs/listener-interaction.md#featured-artist)).
 
+### Changed
+
+- **Code quality:** the issues reported by SonarQube Cloud on `main` are fixed in the code (React props, nested ternaries, cognitive complexity, blocking file calls in async code, the web image's user), without suppressing any rule, and new tests bring the new-code coverage above the quality gate's 80%.
+
 ### Fixed
 
 - **A station off the air can be prepared:** a category, a restriction or a medley for a station whose engine is not set yet was refused (*no station 3*): the stations were checked against those on the air instead of those that exist.

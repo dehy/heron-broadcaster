@@ -175,7 +175,7 @@ function PlanningRow({
       {choosing && (
         <ArtistPicker
           exclude={entry.artist_id === null || entry.artist_id === undefined ? [] : [entry.artist_id]}
-          actions={(artist) => (
+          renderActions={(artist) => (
             <button type="button" className="btn small primary" onClick={() => onPick(artist.id)}>
               {t("featured.pick")}
             </button>

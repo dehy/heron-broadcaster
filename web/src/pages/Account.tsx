@@ -42,12 +42,12 @@ function DisplayCard({
   language,
   width,
   wholeQueue,
-}: {
+}: Readonly<{
   theme: Theme;
   language: LanguageSetting;
   width: Width;
   wholeQueue: boolean;
-}) {
+}>) {
   const client = useQueryClient();
   const save = useAction(
     (preferences: { theme?: Theme; language?: LanguageSetting; width?: Width; on_air_whole_queue?: boolean }) =>

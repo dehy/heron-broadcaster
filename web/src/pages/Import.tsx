@@ -48,19 +48,19 @@ const VALUE_KEY: Record<Field, keyof Values> = {
   next_soft: "next_soft_ms",
   next_hard: "next_hard_ms",
 };
-const TEXT_FIELDS: Field[] = ["title", "artist", "year"];
+const TEXT_FIELDS = new Set<Field>(["title", "artist", "year"]);
 
 function fieldLabel(field: Field): string {
   return t(`import.field.${field}`);
 }
 
 /** A value as shown: text, or a time in seconds. */
-function show(field: Field, values: Values): string {
+export function show(field: Field, values: Values): string {
   const value = values[VALUE_KEY[field]];
   if (value === null || value === undefined) {
     return "–";
   }
-  return TEXT_FIELDS.includes(field) ? String(value) : duration(Number(value), true);
+  return TEXT_FIELDS.has(field) ? String(value) : duration(Number(value), true);
 }
 
 /** Reads a JSON Lines export (or a JSON array). */
@@ -95,7 +95,7 @@ function resolved(row: Row, resolution: Resolution | undefined): Values {
       const edited = resolution.values[field]?.trim();
       if (!edited) {
         delete values[key];
-      } else if (TEXT_FIELDS.includes(field)) {
+      } else if (TEXT_FIELDS.has(field)) {
         (values as Record<string, unknown>)[key] = edited;
       } else {
         (values as Record<string, unknown>)[key] = Math.round(Number(edited.replace(",", ".")) * 1000);
@@ -120,8 +120,10 @@ export function Import() {
   const types = useCategoryTypes();
   const typeNamed = (name: string) =>
     types.data?.find((categoryType) => categoryType.name.toLowerCase() === name)?.id ?? null;
-  const typeOf = (choice: CategoryChoice, isJingle: boolean) =>
-    choice.type_id !== undefined ? choice.type_id : typeNamed(isJingle ? "jingle" : "song");
+  const typeOf = (choice: CategoryChoice, isJingle: boolean) => {
+    if (choice.type_id !== undefined) return choice.type_id;
+    return typeNamed(isJingle ? "jingle" : "song");
+  };
 
   const history = useQuery({
     queryKey: ["imports"],
@@ -531,11 +533,9 @@ export function Import() {
       )}
 
       <Card title={t("import.historyTitle")}>
-        {history.isPending ? (
-          <Loading />
-        ) : !history.data?.length ? (
-          <Empty>{t("import.noHistory")}</Empty>
-        ) : (
+        {history.isPending && <Loading />}
+        {!history.isPending && !history.data?.length && <Empty>{t("import.noHistory")}</Empty>}
+        {!!history.data?.length && (
           <div className="table-wrap">
             <table className="table">
               <thead>
@@ -587,13 +587,13 @@ function ImportRowView({
   onInclude,
   resolution,
   onResolve,
-}: {
+}: Readonly<{
   row: Row;
   included: boolean;
   onInclude: (include: boolean) => void;
   resolution: Resolution | undefined;
   onResolve: (resolution: Resolution) => void;
-}) {
+}>) {
   const matched = row.status === "matched";
   const changed = (Object.keys(VALUE_KEY) as Field[]).filter(
     (field) => row.values[VALUE_KEY[field]] !== null && row.values[VALUE_KEY[field]] !== undefined,
@@ -656,7 +656,7 @@ function ImportRowView({
                           values: Object.fromEntries(
                             row.conflicts.map((field) => [
                               field,
-                              TEXT_FIELDS.includes(field)
+                              TEXT_FIELDS.has(field)
                                 ? String(row.values[VALUE_KEY[field]] ?? "")
                                 : String(Number(row.values[VALUE_KEY[field]] ?? 0) / 1000),
                             ]),
@@ -686,9 +686,9 @@ function ImportRowView({
                     className="input"
                     style={{ maxWidth: "16rem" }}
                     value={edit[field] ?? ""}
-                    inputMode={TEXT_FIELDS.includes(field) ? undefined : "decimal"}
+                    inputMode={TEXT_FIELDS.has(field) ? undefined : "decimal"}
                     aria-label={t("import.editField", { field: fieldLabel(field) })}
-                    placeholder={TEXT_FIELDS.includes(field) ? undefined : t("import.seconds")}
+                    placeholder={TEXT_FIELDS.has(field) ? undefined : t("import.seconds")}
                     onChange={(event) =>
                       onResolve({ kind: "edit", values: { ...edit, [field]: event.target.value } })
                     }

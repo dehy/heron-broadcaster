@@ -31,6 +31,11 @@ mod never_off_air;
 const TRACK_SECONDS: f64 = 3.0;
 /// The gateway token the test API accepts.
 const GATEWAY_TOKEN: &str = "test-gateway-token";
+/// The password of the users the tests create, and of a second one for a user who changes it.
+const USER_PASSWORD: &str = "correct horse";
+const HOST_PASSWORD: &str = "morning show";
+/// A value the backups must never carry out.
+const ADMIN_SECRET: &str = "adm1n-pw";
 
 struct Station {
     db: ScratchDatabase,
@@ -107,7 +112,9 @@ impl Station {
         let mut tracks = Vec::new();
         for n in 1..=5 {
             let path = format!("Artist {n}/Track {n}.wav");
-            std::fs::create_dir_all(library.path().join(format!("Artist {n}"))).unwrap();
+            tokio::fs::create_dir_all(library.path().join(format!("Artist {n}")))
+                .await
+                .unwrap();
             write_wav(
                 &library.path().join(&path),
                 TRACK_SECONDS,
@@ -205,7 +212,7 @@ impl Station {
         }));
 
         for (name, role) in [("admin", Role::Admin), ("viewer", Role::Viewer)] {
-            users::add_user(&pool, &state.passwords, name, "correct horse", role)
+            users::add_user(&pool, &state.passwords, name, USER_PASSWORD, role)
                 .await
                 .unwrap();
         }
@@ -238,7 +245,7 @@ impl Station {
         let response = client
             .http
             .post(format!("{}/auth/login", client.base))
-            .json(&json!({"username": username, "password": "correct horse"}))
+            .json(&json!({"username": username, "password": USER_PASSWORD}))
             .send()
             .await
             .unwrap();
@@ -808,13 +815,13 @@ async fn settings_and_outputs_reach_the_engine() {
             Method::POST,
             "/stream-servers",
             json!({"name": "Local", "host": "127.0.0.1", "port": 9, "source_password": "hackme",
-                   "admin_password": "adm1n-pw"}),
+                   "admin_password": ADMIN_SECRET}),
         )
         .await;
     assert_eq!(status, StatusCode::CREATED, "{server}");
     assert_eq!(server["source_password_set"], true);
     assert_eq!(server["admin_password_set"], true);
-    assert!(!server.to_string().contains("hackme") && !server.to_string().contains("adm1n-pw"));
+    assert!(!server.to_string().contains("hackme") && !server.to_string().contains(ADMIN_SECRET));
     let server_id = server["id"].as_u64().unwrap();
 
     // An output: validated, its own settings only, pushed in full.
@@ -931,7 +938,7 @@ async fn settings_and_outputs_reach_the_engine() {
         },
     )
     .await;
-    assert!(!pushed.contains("hackme") && !pushed.contains("adm1n-pw"));
+    assert!(!pushed.contains("hackme") && !pushed.contains(ADMIN_SECRET));
     let outputs = eventually("the output's state", Duration::from_secs(10), || async {
         let outputs = admin.get("/outputs").await;
         outputs[0]["status"].is_object().then_some(outputs)
@@ -1087,12 +1094,12 @@ async fn listener_statistics_through_the_api() {
             Method::POST,
             "/stream-servers",
             json!({"name": "Local", "host": "127.0.0.1", "port": 9, "source_password": "hackme",
-                   "admin_password": "adm1n-pw"}),
+                   "admin_password": ADMIN_SECRET}),
         )
         .await;
     assert_eq!(status, StatusCode::CREATED, "{server}");
     assert_eq!(server["admin_password_set"], true);
-    assert!(!server.to_string().contains("adm1n-pw"));
+    assert!(!server.to_string().contains(ADMIN_SECRET));
     let server_id = server["id"].as_u64().unwrap();
     let (status, output) = admin
         .send(
@@ -1116,7 +1123,7 @@ async fn listener_statistics_through_the_api() {
         },
     )
     .await;
-    assert!(!pushed.contains("adm1n-pw") && !pushed.contains("statistics"));
+    assert!(!pushed.contains(ADMIN_SECRET) && !pushed.contains("statistics"));
 
     // Changing them leaves the engine's configuration as it was.
     let (status, changed) = admin
@@ -4006,6 +4013,67 @@ async fn webhook_receiver() -> (tokio::sync::mpsc::UnboundedReceiver<Received>, 
     (received, addr)
 }
 
+/// The public endpoints: no sign-in, any origin, no IDs.
+async fn check_public_endpoints(api: SocketAddr) {
+    let anyone = reqwest::Client::new();
+    let base = format!("http://{}/api/v1/public", api);
+    let response = anyone
+        .get(format!("{base}/now-playing"))
+        .header("origin", "https://station.example")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["access-control-allow-origin"], "*");
+    assert_eq!(response.headers()["cache-control"], "public, max-age=5");
+    let now: Value = response.json().await.unwrap();
+    assert!(
+        now["now"]["title"].as_str().unwrap().starts_with("Track "),
+        "{now}"
+    );
+    assert!(now["now"].get("track_id").is_none());
+    let response = anyone
+        .get(format!("{base}/history?limit=5"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let history: Value = response.json().await.unwrap();
+    let plays = history.as_array().unwrap();
+    assert!(!plays.is_empty() && plays.len() <= 5);
+    for play in plays {
+        assert!(
+            play.get("id").is_none() && play.get("track_id").is_none(),
+            "{play}"
+        );
+        assert!(play["artist"].is_string());
+    }
+    let response = anyone
+        .get(format!("{base}/history?limit=500"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let older = plays.last().unwrap()["started_at_unix_ms"]
+        .as_i64()
+        .unwrap();
+    let history: Value = anyone
+        .get(format!("{base}/history?before={older}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        history
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|play| play["started_at_unix_ms"].as_i64().unwrap() < older)
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
     let Some(station) = Station::start().await else {
@@ -4192,64 +4260,9 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
         }
     }
 
-    // Public endpoints: no sign-in, any origin, no IDs.
+    check_public_endpoints(station.api).await;
     let anyone = reqwest::Client::new();
     let base = format!("http://{}/api/v1/public", station.api);
-    let response = anyone
-        .get(format!("{base}/now-playing"))
-        .header("origin", "https://station.example")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["access-control-allow-origin"], "*");
-    assert_eq!(response.headers()["cache-control"], "public, max-age=5");
-    let now: Value = response.json().await.unwrap();
-    assert!(
-        now["now"]["title"].as_str().unwrap().starts_with("Track "),
-        "{now}"
-    );
-    assert!(now["now"].get("track_id").is_none());
-    let response = anyone
-        .get(format!("{base}/history?limit=5"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let history: Value = response.json().await.unwrap();
-    let plays = history.as_array().unwrap();
-    assert!(!plays.is_empty() && plays.len() <= 5);
-    for play in plays {
-        assert!(
-            play.get("id").is_none() && play.get("track_id").is_none(),
-            "{play}"
-        );
-        assert!(play["artist"].is_string());
-    }
-    let response = anyone
-        .get(format!("{base}/history?limit=500"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let older = plays.last().unwrap()["started_at_unix_ms"]
-        .as_i64()
-        .unwrap();
-    let history: Value = anyone
-        .get(format!("{base}/history?before={older}"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert!(
-        history
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|play| play["started_at_unix_ms"].as_i64().unwrap() < older)
-    );
 
     // Editing a webhook keeps its secret; a new one replaces it.
     let edited = json!({"name": "Website", "url": format!("http://{receiver}/json"),
@@ -5409,7 +5422,7 @@ async fn play_ratios_per_station() {
         .send(
             Method::POST,
             "/users",
-            json!({"username": "eighties", "password": "correct horse", "role": "viewer",
+            json!({"username": "eighties", "password": USER_PASSWORD, "role": "viewer",
                    "station_roles": [{"station_id": first, "role": "viewer"},
                                      {"station_id": second, "role": "operator"}]}),
         )
@@ -7383,7 +7396,7 @@ async fn roles_per_station() {
         .send(
             Method::POST,
             "/users",
-            json!({"username": "eighties", "password": "correct horse", "role": "viewer",
+            json!({"username": "eighties", "password": USER_PASSWORD, "role": "viewer",
                    "station_roles": [{"station_id": first, "role": "viewer"},
                                      {"station_id": second, "role": "operator"}]}),
         )
@@ -7977,7 +7990,7 @@ async fn a_backup_restores_onto_an_empty_database() {
         .send(
             Method::POST,
             "/users",
-            json!({"username": "host", "password": "morning show", "role": "operator"}),
+            json!({"username": "host", "password": HOST_PASSWORD, "role": "operator"}),
         )
         .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
@@ -8123,7 +8136,7 @@ async fn a_backup_restores_onto_an_empty_database() {
         .send(
             Method::POST,
             "/auth/login",
-            json!({"username": "host", "password": "morning show"}),
+            json!({"username": "host", "password": HOST_PASSWORD}),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
@@ -8420,7 +8433,7 @@ async fn an_encrypted_backup_opens_with_its_key_only() {
         .send(
             Method::POST,
             "/users",
-            json!({"username": "night", "password": "correct horse", "role": "admin"}),
+            json!({"username": "night", "password": USER_PASSWORD, "role": "admin"}),
         )
         .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
@@ -9652,7 +9665,7 @@ impl Station {
         let response = client
             .http
             .post(format!("{}/auth/login", client.base))
-            .json(&json!({"username": username, "password": "correct horse"}))
+            .json(&json!({"username": username, "password": USER_PASSWORD}))
             .send()
             .await
             .unwrap();
@@ -9721,7 +9734,7 @@ async fn two_factor_authentication() {
         .send(
             Method::POST,
             "/auth/two-factor/recovery-codes",
-            json!({"password": "correct horse"}),
+            json!({"password": USER_PASSWORD}),
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -9739,7 +9752,7 @@ async fn two_factor_authentication() {
         .send(
             Method::POST,
             "/auth/two-factor/totp",
-            json!({"password": "correct horse"}),
+            json!({"password": USER_PASSWORD}),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{setup}");
@@ -9855,7 +9868,7 @@ async fn two_factor_authentication() {
         .send(
             Method::POST,
             "/auth/two-factor/recovery-codes",
-            json!({"password": "correct horse"}),
+            json!({"password": USER_PASSWORD}),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{fresh}");
@@ -9881,7 +9894,7 @@ async fn two_factor_authentication() {
         .header("cookie", admin.cookie.as_deref().unwrap())
         .header("x-requested-with", "test")
         .header("origin", "http://localhost:8000")
-        .json(&json!({"password": "correct horse", "name": "Laptop"}))
+        .json(&json!({"password": USER_PASSWORD, "name": "Laptop"}))
         .send()
         .await
         .unwrap();
@@ -9956,7 +9969,7 @@ async fn two_factor_authentication() {
         .send(
             Method::POST,
             "/auth/two-factor/totp",
-            json!({"password": "correct horse"}),
+            json!({"password": USER_PASSWORD}),
         )
         .await;
     let viewer_secret = from_base32(setup["secret"].as_str().unwrap());
@@ -9974,7 +9987,7 @@ async fn two_factor_authentication() {
         .send(
             Method::DELETE,
             "/auth/two-factor/totp",
-            json!({"password": "correct horse"}),
+            json!({"password": USER_PASSWORD}),
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -9996,7 +10009,7 @@ async fn two_factor_authentication() {
         .send(
             Method::DELETE,
             "/auth/two-factor/totp",
-            json!({"password": "correct horse"}),
+            json!({"password": USER_PASSWORD}),
         )
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);

@@ -566,6 +566,51 @@ fn count(blocked: &mut Blocked, rule: SeparationRule) {
     }
 }
 
+/// Counts the allowed tracks the separation rules block, and finds the one
+/// held back by another station (never played first, then the oldest).
+fn survey_blocked(
+    library: &Library,
+    history: &History,
+    recent: &Recent<'_>,
+    allowed: &[(&Track, f64)],
+    windows: Windows,
+    across: AcrossWindows,
+    at_ms: i64,
+) -> (Blocked, Option<(Option<i64>, HeldElsewhere)>) {
+    let mut blocked = Blocked::default();
+    let mut held: Option<(Option<i64>, HeldElsewhere)> = None;
+    for (track, _) in allowed {
+        let windows = library.for_track(windows, track);
+        match recent.blocking(library, track, windows, at_ms) {
+            Some(rule) => count(&mut blocked, rule),
+            None => {
+                let Some((rule, other)) = held_elsewhere(library, history, track, across, at_ms)
+                else {
+                    continue;
+                };
+                blocked.across += 1;
+                let last = history.last_played(track.id);
+                let wanted = held
+                    .as_ref()
+                    .is_none_or(|(held_last, held)| (last, track.id) < (*held_last, held.track_id));
+                if wanted {
+                    held = Some((
+                        last,
+                        HeldElsewhere {
+                            track_id: track.id,
+                            rule,
+                            station_id: other.station_id,
+                            at_unix_ms: other.play.start_ms,
+                            planned: other.planned,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    (blocked, held)
+}
+
 /// Tries the relaxation steps in order and picks with the slot's method
 /// among the first step's candidates, within the slot's draw depth: at step
 /// 0 (and 11, in the fallback category) the draw widens from its start to
@@ -606,43 +651,22 @@ fn fill(
     } else {
         AcrossWindows::OFF
     };
-    let mut blocked = Blocked::default();
-    let mut held: Option<(Option<i64>, HeldElsewhere)> = None;
     // A fill's later picks are never logged: what only the log needs is
     // left out.
     let quick = fit.is_some_and(|fit| fit.quick);
-    if slot.enforce_rules && !quick {
-        for (track, _) in &allowed {
-            let windows = library.for_track(slot.call.windows, track);
-            match recent.blocking(library, track, windows, at_ms) {
-                Some(rule) => count(&mut blocked, rule),
-                None => {
-                    if let Some((rule, other)) =
-                        held_elsewhere(library, history, track, across, at_ms)
-                    {
-                        blocked.across += 1;
-                        let last = history.last_played(track.id);
-                        // Never played first, then the oldest; then by ID.
-                        let wanted = held.as_ref().is_none_or(|(held_last, held)| {
-                            (last, track.id) < (*held_last, held.track_id)
-                        });
-                        if wanted {
-                            held = Some((
-                                last,
-                                HeldElsewhere {
-                                    track_id: track.id,
-                                    rule,
-                                    station_id: other.station_id,
-                                    at_unix_ms: other.play.start_ms,
-                                    planned: other.planned,
-                                },
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let (blocked, held) = if slot.enforce_rules && !quick {
+        survey_blocked(
+            library,
+            history,
+            &recent,
+            &allowed,
+            slot.call.windows,
+            across,
+            at_ms,
+        )
+    } else {
+        (Blocked::default(), None)
+    };
     // Ordered once per pick for the draw, played longest ago first, and
     // reused by every step.
     let ordered = slot.draw.map(|_| draw::order(&allowed, history, rng));

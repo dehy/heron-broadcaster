@@ -519,23 +519,7 @@ fn cut_over(
     let mut attempt = 0;
     let stop = loop {
         attempt += 1;
-        let point = loop {
-            // The stop falls within the handover's time: a later one would
-            // keep the old engine past Docker's grace period.
-            let left_ms = deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis();
-            let lead = u32::try_from(left_ms).unwrap_or(u32::MAX).min(lead_ms);
-            if lead < FIRST_LEAD_MS {
-                return Err(HandoverError::Failed(
-                    "no moment to stop the track on air".to_owned(),
-                ));
-            }
-            match engine.handover_point(lead) {
-                HandoverPoint::Wait => std::thread::sleep(POLL),
-                point => break point,
-            }
-        };
+        let point = wait_for_point(engine, deadline, lead_ms)?;
         let (stop, ready_by) = match point {
             HandoverPoint::At { position } => {
                 let now = engine.on_air_position().unwrap_or(position);
@@ -582,41 +566,97 @@ fn cut_over(
     };
 
     // Stop the track on air exactly where the standby will go on.
-    let mut last_frame = None;
-    if let Some(position) = stop {
-        // The standby may be ready long before the stop (a retry, with the
-        // track quick to open the second time): wait until it is due.
-        let ahead = Duration::from_millis(frames_to_ms(
-            position.saturating_sub(engine.on_air_position().unwrap_or(position)),
-        ));
-        engine
-            .halt_at(position)
-            .map_err(|error| HandoverError::Failed(error.to_string()))?;
-        let halted_by = Instant::now() + ahead + HALT_MARGIN;
-        let halted = loop {
-            if let Some(halted) = engine.take_halted() {
-                break halted;
-            }
-            if Instant::now() > halted_by {
-                let _ = engine.unhold();
-                return Err(HandoverError::Failed(
-                    "the track on air did not stop".to_owned(),
-                ));
-            }
-            std::thread::sleep(POLL);
-        };
-        if halted.position != position {
-            tracing::warn!(halted.position, position, "stopped off the planned frame");
-        }
-        // The AGC chain's limiter delays the audio: the end of the fade-out
-        // comes out of it that much later.
-        last_frame = Some(halted.at_frame + engine.agc_latency_frames());
-        // The audio up to the stop is rendered: give it time to reach the
-        // encoders (the clock renders 50 ms ahead).
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    let last_frame = match stop {
+        Some(position) => Some(halt_on_air(engine, position)?),
+        None => None,
+    };
 
     let released = engine.release_outputs(last_frame);
+    let (outputs, fds) = collect_connections(runtime, released);
+    engine.stop_saving();
+    channel.send_with(
+        &Message::Cut {
+            outputs: outputs.clone(),
+            agc_gain_db: engine.agc_gain_db(),
+        },
+        &fds,
+    )?;
+    // Ours are copies: the standby has its own.
+    drop(fds);
+    match channel.recv(Some(Duration::from_secs(5))) {
+        Ok((Message::Done, _)) => tracing::info!(connections = outputs.len(), "handed over"),
+        Ok((message, _)) => tracing::warn!(received = ?message, "unexpected answer to the cut"),
+        Err(error) => tracing::warn!(%error, "the new engine did not confirm"),
+    }
+    Ok(())
+}
+
+/// Waits for a moment to stop the track on air, within the handover's time: a
+/// later one would keep the old engine past Docker's grace period.
+fn wait_for_point(
+    engine: &Engine,
+    deadline: Instant,
+    lead_ms: u32,
+) -> Result<HandoverPoint, HandoverError> {
+    loop {
+        let left_ms = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis();
+        let lead = u32::try_from(left_ms).unwrap_or(u32::MAX).min(lead_ms);
+        if lead < FIRST_LEAD_MS {
+            return Err(HandoverError::Failed(
+                "no moment to stop the track on air".to_owned(),
+            ));
+        }
+        match engine.handover_point(lead) {
+            HandoverPoint::Wait => std::thread::sleep(POLL),
+            point => return Ok(point),
+        }
+    }
+}
+
+/// Stops the track on air at `position`; the frame where its audio ends.
+fn halt_on_air(engine: &Engine, position: u64) -> Result<u64, HandoverError> {
+    // The standby may be ready long before the stop (a retry, with the
+    // track quick to open the second time): wait until it is due.
+    let ahead = Duration::from_millis(frames_to_ms(
+        position.saturating_sub(engine.on_air_position().unwrap_or(position)),
+    ));
+    engine
+        .halt_at(position)
+        .map_err(|error| HandoverError::Failed(error.to_string()))?;
+    let halted_by = Instant::now() + ahead + HALT_MARGIN;
+    let halted = loop {
+        if let Some(halted) = engine.take_halted() {
+            break halted;
+        }
+        if Instant::now() > halted_by {
+            let _ = engine.unhold();
+            return Err(HandoverError::Failed(
+                "the track on air did not stop".to_owned(),
+            ));
+        }
+        std::thread::sleep(POLL);
+    };
+    if halted.position != position {
+        tracing::warn!(halted.position, position, "stopped off the planned frame");
+    }
+    // The audio up to the stop is rendered: give it time to reach the
+    // encoders (the clock renders 50 ms ahead).
+    std::thread::sleep(Duration::from_millis(100));
+    // The AGC chain's limiter delays the audio: the end of the fade-out
+    // comes out of it that much later.
+    Ok(halted.at_frame + engine.agc_latency_frames())
+}
+
+/// Takes the output connections to hand over, waiting for each to be given up.
+fn collect_connections(
+    runtime: &tokio::runtime::Handle,
+    released: Vec<(
+        u64,
+        tokio::sync::oneshot::Receiver<Option<heron_outputs::HandedConnection>>,
+    )>,
+) -> (Vec<HandedOver>, Vec<OwnedFd>) {
     let mut outputs = Vec::new();
     let mut fds = Vec::new();
     runtime.block_on(async {
@@ -634,22 +674,7 @@ fn cut_over(
             }
         }
     });
-    engine.stop_saving();
-    channel.send_with(
-        &Message::Cut {
-            outputs: outputs.clone(),
-            agc_gain_db: engine.agc_gain_db(),
-        },
-        &fds,
-    )?;
-    // Ours are copies: the standby has its own.
-    drop(fds);
-    match channel.recv(Some(Duration::from_secs(5))) {
-        Ok((Message::Done, _)) => tracing::info!(connections = outputs.len(), "handed over"),
-        Ok((message, _)) => tracing::warn!(received = ?message, "unexpected answer to the cut"),
-        Err(error) => tracing::warn!(%error, "the new engine did not confirm"),
-    }
-    Ok(())
+    (outputs, fds)
 }
 
 /// Waits for `Ready` of `attempt` until `deadline`. `false`: too late.

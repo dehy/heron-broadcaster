@@ -1080,7 +1080,62 @@ pub async fn restore(
     let empty = Vec::new();
     let rows_of = |table: &Table| file.tables.get(table.name).unwrap_or(&empty);
 
-    // Tables replaced whole are emptied first, children before parents.
+    empty_replaced_tables(tx).await?;
+    set_aside_unique(tx, &rows_of).await?;
+    // The file's rows, parents before children.
+    let mut deletes = Vec::new();
+    for table in TABLES {
+        // A file from before the tops has none: the tops stay as they are,
+        // with their charts.
+        if table.name == "tops" && !file.tables.contains_key("tops") {
+            continue;
+        }
+        // Images are files, written before their rows.
+        let cols: Vec<Col> = table
+            .cols
+            .iter()
+            .copied()
+            .filter(|col| !matches!(col, Col::Image(..)))
+            .collect();
+        if cols.len() < table.cols.len() {
+            for row in rows_of(table) {
+                write_images(table, row, files).await?;
+            }
+        }
+        let (resolved, left_out) =
+            resolve_rows(tx, table, &cols, rows_of(table), &mut library).await?;
+        insert_rows(tx, table, &cols, &resolved).await?;
+        if table.mode == Mode::Upsert {
+            let ids: Vec<u64> = rows_of(table)
+                .iter()
+                .filter_map(|row| row.get("id").and_then(Value::as_u64))
+                .collect();
+            deletes.push((table.name, ids));
+        }
+        report
+            .restored
+            .insert(table.name.to_owned(), resolved.len());
+        if left_out > 0 {
+            report.left_out.insert(table.name.to_owned(), left_out);
+        }
+    }
+    delete_rows_not_in_file(tx, deletes).await?;
+    // What migrations since the file's schema changed in the configuration.
+    for (version, sql) in UPGRADES {
+        if file.schema < *version {
+            sqlx::raw_sql(*sql).execute(&mut **tx).await?;
+        }
+    }
+    restore_disabled_tracks(tx, file, &mut library, report).await?;
+    report.missing_tracks_total = library.missing_tracks.len();
+    report.missing_tracks = library.missing_tracks.into_keys().take(100).collect();
+    report.missing_artists_total = library.missing_artists.len();
+    report.missing_artists = library.missing_artists.into_keys().take(100).collect();
+    Ok(())
+}
+
+/// Tables replaced whole are emptied first, children before parents.
+async fn empty_replaced_tables(tx: &mut Transaction<'_, MySql>) -> ApiResult<()> {
     for table in TABLES.iter().rev() {
         if matches!(table.mode, Mode::Replace | Mode::Library | Mode::Merge) {
             let filter = table
@@ -1095,8 +1150,15 @@ pub async fn restore(
             .await?;
         }
     }
-    // Names and codes set aside, so that rows can swap them. Stations the
-    // file does not have keep theirs.
+    Ok(())
+}
+
+/// Names and codes set aside, so that rows can swap them. Stations the file
+/// does not have keep theirs.
+async fn set_aside_unique<'f>(
+    tx: &mut Transaction<'_, MySql>,
+    rows_of: &impl Fn(&Table) -> &'f Vec<Map<String, Value>>,
+) -> ApiResult<()> {
     for table in TABLES {
         for column in table.unique {
             let mut query: QueryBuilder<MySql> =
@@ -1112,119 +1174,114 @@ pub async fn restore(
             query.build().execute(&mut **tx).await?;
         }
     }
-    // The file's rows, parents before children.
-    let mut deletes = Vec::new();
-    for table in TABLES {
-        // A file from before the tops has none: the tops stay as they are,
-        // with their charts.
-        if table.name == "tops" && !file.tables.contains_key("tops") {
+    Ok(())
+}
+
+/// The file's rows of `table` with their references resolved (`None`: a
+/// column the file does not have, written before it was added, which takes
+/// its default), and how many were left out because something they refer
+/// to is gone.
+async fn resolve_rows(
+    tx: &mut Transaction<'_, MySql>,
+    table: &Table,
+    cols: &[Col],
+    rows: &[Map<String, Value>],
+    library: &mut Library,
+) -> ApiResult<(Vec<Vec<Option<Value>>>, usize)> {
+    let mut left_out = 0;
+    let mut resolved: Vec<Vec<Option<Value>>> = Vec::new();
+    for row in rows {
+        let row = &upgrade_row(table.name, row);
+        if table.name == "settings"
+            && row
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| KEPT_SETTINGS.contains(&name))
+        {
             continue;
         }
-        let mut left_out = 0;
-        // Images are files, written before their rows.
-        let cols: Vec<Col> = table
-            .cols
+        let values: Option<Vec<Option<Value>>> = cols
             .iter()
-            .copied()
-            .filter(|col| !matches!(col, Col::Image(..)))
+            .map(|col| match col {
+                Col::Plain(name) if !row.contains_key(*name) => Some(None),
+                _ => resolve(*col, row, library).map(Some),
+            })
             .collect();
-        if cols.len() < table.cols.len() {
-            for row in rows_of(table) {
-                write_images(table, row, files).await?;
-            }
-        }
-        let columns: Vec<&str> = cols.iter().map(|col| col.column()).collect();
-        // `None`: a column the file does not have (written before it was
-        // added), which takes its default.
-        let mut resolved: Vec<Vec<Option<Value>>> = Vec::new();
-        for row in rows_of(table) {
-            let row = &upgrade_row(table.name, row);
-            if table.name == "settings"
-                && row
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .is_some_and(|name| KEPT_SETTINGS.contains(&name))
-            {
-                continue;
-            }
-            let values: Option<Vec<Option<Value>>> = cols
-                .iter()
-                .map(|col| match col {
-                    Col::Plain(name) if !row.contains_key(*name) => Some(None),
-                    _ => resolve(*col, row, &mut library).map(Some),
-                })
-                .collect();
-            match values {
-                Some(values) => resolved.push(values),
-                None => left_out += 1,
-            }
-        }
-        // A restriction left out leaves its stations out too.
-        if table.name == "restriction_stations" {
-            let kept: HashSet<u64> = sqlx::query_scalar("SELECT id FROM restrictions")
-                .fetch_all(&mut **tx)
-                .await?
-                .into_iter()
-                .collect();
-            let before = resolved.len();
-            resolved.retain(|values| {
-                values[0]
-                    .as_ref()
-                    .and_then(Value::as_u64)
-                    .is_some_and(|id| kept.contains(&id))
-            });
-            left_out += before - resolved.len();
-        }
-        for chunk in resolved.chunks(500) {
-            let mut query: QueryBuilder<MySql> = QueryBuilder::new(format!(
-                "INSERT INTO {} ({}) VALUES ",
-                table.name,
-                columns.join(", ")
-            ));
-            for (index, values) in chunk.iter().enumerate() {
-                query.push(if index == 0 { "(" } else { ", (" });
-                for (position, (col, value)) in cols.iter().zip(values).enumerate() {
-                    if position > 0 {
-                        query.push(", ");
-                    }
-                    match value {
-                        Some(value) => push_value(&mut query, *col, value.clone()),
-                        None => {
-                            query.push("DEFAULT");
-                        }
-                    }
-                }
-                query.push(")");
-            }
-            if matches!(table.mode, Mode::Upsert | Mode::Keep | Mode::Merge) {
-                let updates: Vec<String> = columns
-                    .iter()
-                    .filter(|column| **column != "id")
-                    .map(|column| format!("{column} = VALUES({column})"))
-                    .collect();
-                query.push(" ON DUPLICATE KEY UPDATE ");
-                query.push(updates.join(", "));
-            }
-            query.build().execute(&mut **tx).await.map_err(|error| {
-                ApiError::Invalid(format!("{}: cannot restore its rows: {error}", table.name))
-            })?;
-        }
-        if table.mode == Mode::Upsert {
-            let ids: Vec<u64> = rows_of(table)
-                .iter()
-                .filter_map(|row| row.get("id").and_then(Value::as_u64))
-                .collect();
-            deletes.push((table.name, ids));
-        }
-        report
-            .restored
-            .insert(table.name.to_owned(), resolved.len());
-        if left_out > 0 {
-            report.left_out.insert(table.name.to_owned(), left_out);
+        match values {
+            Some(values) => resolved.push(values),
+            None => left_out += 1,
         }
     }
-    // Rows the file does not have, children first: a row kept may have
-    // referred to one that goes until the file's rows were written.
+    // A restriction left out leaves its stations out too.
+    if table.name == "restriction_stations" {
+        let kept: HashSet<u64> = sqlx::query_scalar("SELECT id FROM restrictions")
+            .fetch_all(&mut **tx)
+            .await?
+            .into_iter()
+            .collect();
+        let before = resolved.len();
+        resolved.retain(|values| {
+            values[0]
+                .as_ref()
+                .and_then(Value::as_u64)
+                .is_some_and(|id| kept.contains(&id))
+        });
+        left_out += before - resolved.len();
+    }
+    Ok((resolved, left_out))
+}
+
+/// Writes the resolved rows of `table`, 500 at a time.
+async fn insert_rows(
+    tx: &mut Transaction<'_, MySql>,
+    table: &Table,
+    cols: &[Col],
+    resolved: &[Vec<Option<Value>>],
+) -> ApiResult<()> {
+    let columns: Vec<&str> = cols.iter().map(|col| col.column()).collect();
+    for chunk in resolved.chunks(500) {
+        let mut query: QueryBuilder<MySql> = QueryBuilder::new(format!(
+            "INSERT INTO {} ({}) VALUES ",
+            table.name,
+            columns.join(", ")
+        ));
+        for (index, values) in chunk.iter().enumerate() {
+            query.push(if index == 0 { "(" } else { ", (" });
+            for (position, (col, value)) in cols.iter().zip(values).enumerate() {
+                if position > 0 {
+                    query.push(", ");
+                }
+                match value {
+                    Some(value) => push_value(&mut query, *col, value.clone()),
+                    None => {
+                        query.push("DEFAULT");
+                    }
+                }
+            }
+            query.push(")");
+        }
+        if matches!(table.mode, Mode::Upsert | Mode::Keep | Mode::Merge) {
+            let updates: Vec<String> = columns
+                .iter()
+                .filter(|column| **column != "id")
+                .map(|column| format!("{column} = VALUES({column})"))
+                .collect();
+            query.push(" ON DUPLICATE KEY UPDATE ");
+            query.push(updates.join(", "));
+        }
+        query.build().execute(&mut **tx).await.map_err(|error| {
+            ApiError::Invalid(format!("{}: cannot restore its rows: {error}", table.name))
+        })?;
+    }
+    Ok(())
+}
+
+/// Rows the file does not have, children first: a row kept may have referred
+/// to one that goes until the file's rows were written.
+async fn delete_rows_not_in_file(
+    tx: &mut Transaction<'_, MySql>,
+    deletes: Vec<(&'static str, Vec<u64>)>,
+) -> ApiResult<()> {
     for (name, ids) in deletes.into_iter().rev() {
         let mut query: QueryBuilder<MySql> = QueryBuilder::new(format!("DELETE FROM {name}"));
         if !ids.is_empty() {
@@ -1241,13 +1298,17 @@ pub async fn restore(
             ))
         })?;
     }
-    // What migrations since the file's schema changed in the configuration.
-    for (version, sql) in UPGRADES {
-        if file.schema < *version {
-            sqlx::raw_sql(*sql).execute(&mut **tx).await?;
-        }
-    }
-    // Tracks turned off.
+    Ok(())
+}
+
+/// Tracks turned off in the file are turned off again, by whom and when;
+/// the others are on.
+async fn restore_disabled_tracks(
+    tx: &mut Transaction<'_, MySql>,
+    file: &ConfigFile,
+    library: &mut Library,
+    report: &mut RestoreReport,
+) -> ApiResult<()> {
     sqlx::query(
         "UPDATE tracks SET enabled = TRUE, disabled_by = NULL, disabled_at = NULL WHERE NOT enabled",
     )
@@ -1278,10 +1339,6 @@ pub async fn restore(
     if left > 0 {
         report.left_out.insert("disabled_tracks".to_owned(), left);
     }
-    report.missing_tracks_total = library.missing_tracks.len();
-    report.missing_tracks = library.missing_tracks.into_keys().take(100).collect();
-    report.missing_artists_total = library.missing_artists.len();
-    report.missing_artists = library.missing_artists.into_keys().take(100).collect();
     Ok(())
 }
 
