@@ -2,28 +2,13 @@
 
 What changed in each release of Heron. Before upgrading, read the release's notes in [Upgrading](docs/upgrading.md#release-notes).
 
-## Edge
+## 0.4.0 – 2026-11-15
 
-What `main` has since the last release: it is published as the `edge` images. Read the [Edge upgrade notes](docs/upgrading.md#edge) first.
+Listener interaction (M18: the public gateway `heron-public`, likes, tops, dedications, the match and the featured artist) and audience certification (M19: access logs and deliveries by FTPS) as modules, rotation rules (play ratio, daypart separation, draw depth, linked slots, exact times), cover art, two-factor authentication, stream servers, an audience report on the Statistics page, and a status bar set per user, for several stations. Upgrading from 0.3.0 keeps the station on air: see [0.3.0 to 0.4.0](docs/upgrading.md#030-to-040).
 
 ### Added
 
 - **Featured artist**, a show (`featured_artist`): on the days and hours it chooses, at `:00`, `:15`, `:30` or `:45` of each hour, a track of the artist of the week, or of the day, from a planning filled in ahead, plays at a soft exact time, after a jingle of its category if any ([Listener interaction – Featured artist](docs/listener-interaction.md#featured-artist)).
-
-### Changed
-
-- **Code quality:** the issues reported by SonarQube Cloud on `main` are fixed in the code (React props, nested ternaries, cognitive complexity, blocking file calls in async code, the web image's user), without suppressing any rule, and new tests bring the new-code coverage above the quality gate's 80%.
-
-### Fixed
-
-- **A station off the air can be prepared:** a category, a restriction or a medley for a station whose engine is not set yet was refused (*no station 3*): the stations were checked against those on the air instead of those that exist.
-
-## 0.4.0 – 2026-11-11
-
-Listener interaction (M18: the public gateway `heron-public`, likes, tops, dedications and the match) and audience certification (M19: access logs and deliveries by FTPS) as modules, rotation rules (play ratio, daypart separation, draw depth, linked slots, exact times), cover art, two-factor authentication, stream servers, an audience report on the Statistics page, and a status bar set per user, for several stations. Upgrading from 0.3.0 keeps the station on air: see [0.3.0 to 0.4.0](docs/upgrading.md#030-to-040).
-
-### Added
-
 - **Status bar: several stations.** A station button opens a bar per other station the user sees: the deck on air, its title and the time left, and a station in trouble (engine unreachable, nothing on air, outputs down) in the alert colour, also counted on the button while the bars are closed. *Account › Status bar* chooses the stations. The live WebSocket gains a `stations` message (`?stations=true`) ([Web UI – Status bar](docs/web.md#status-bar)).
 - **Status bar settings, per user** (*Account › Status bar*), with a live preview at computer or phone width: the parts shown (decks A and B or the deck on air only, the last track played of a category type, listeners, the next fixed time, the queue's length, the outputs, the system, the station time), seven formats for the time on the decks, the colours of the intro and of the track on the progress, and the countdowns to the vocals and to the next track (on or off, blinking or not, for how many seconds; On air's *vocals in* follows). A **Status bar** module turns it off for a station or the installation. `GET /history` gains `category_type_id` and `finished` ([Web UI – Status bar](docs/web.md#status-bar)).
 - **Status bar: the intro and the end of the track.** The part of a deck's track before its vocals is filled in the intro colour. On the deck on air, `intro −0:07` counts down to the vocals and blinks in its last 5 seconds (steady in the alert colour with reduced motion), and the last 10 seconds before the next track starts show the time left in the warning colour ([Web UI – Status bar](docs/web.md#status-bar)).
@@ -70,6 +55,7 @@ Listener interaction (M18: the public gateway `heron-public`, likes, tops, dedic
 
 ### Changed
 
+- **Code quality:** the issues reported by SonarQube Cloud on `main` are fixed in the code (React props, nested ternaries, cognitive complexity, blocking file calls in async code, the web image's user), without suppressing any rule, and new tests bring the new-code coverage above the quality gate's 80%.
 - **A show turned off no longer holds its hours:** the hours of a show whose module is off, or that is not enabled (Dedications, Match, a top), are free for the other shows of the station. Turning it back on is refused (`409`, saying which hours and which show) while another show has them. A top not enabled no longer blocks a top of the same rarity either ([Listener interaction – Shows and their hours](docs/listener-interaction.md#shows-and-their-hours)).
 - **Exact times are calculated again when the queue changes**, not only at the next pick: when a dedication, a track added, removed or moved by hand, a skip, a match's loser taken out or a show's items move where the queue ends before the exact time, the queue manager waits 2 seconds, then replaces the picks it queued from the fill kept (never the cued track, tracks queued by hand, requests or a match's tracks) with a new calculation. Before, with the queue already filled up to the exact time, nothing was calculated again and the hour ended out of its window ([Rotation – Exact times](docs/rotation.md#exact-times)).
 - **The calculations on the *Exact times* page read on their own:** *Calculated at 18:55:37*, the result in words (*ends right on time*, *ends 5 s early*, *faded: cuts 12 s*), the picks that followed a calculation counted on its card instead of a card each, the latest card first with the earlier ones behind *N earlier calculations*, and a help text saying what a calculation is and when one happens.
@@ -103,6 +89,7 @@ Listener interaction (M18: the public gateway `heron-public`, likes, tops, dedic
 
 ### Fixed
 
+- **A station off the air can be prepared:** a category, a restriction or a medley for a station whose engine is not set yet was refused (*no station 3*): the stations were checked against those on the air instead of those that exist.
 - **A clock with an exact time no longer loops across hours.** A looping clock carried on whatever the hour, so its top of the hour was reached at any time or skipped, and rotation never looked ahead to it: no fills, songs cut. Saving both is refused, the clock editor turns looping off as soon as a slot has an exact time, and clocks already stored with both start over at each hour.
 - **Exact times: no song is cut before the next hour's top any more.** When every song of the hour's last slots would cross the exact time and no filler fits, rotation played one on and cut it (hard), or faded it at the end of the window (soft). The next hour's exact slot now starts early instead, as an exact slot of the same hour already did.
 - **Rotation log: each skipped slot says its own reason.** The list ended with *restrictions left nothing* whatever the reason, even for slots skipped because the exact time was due.
