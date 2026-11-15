@@ -39,12 +39,12 @@ export function Login() {
       } else {
         client.setQueryData(ME_KEY, answer);
       }
-    } catch (failure) {
+    } catch (error_) {
       // A wrong username or password answers 401, like a missing session.
       setError(
-        failure instanceof ApiError && failure.code === "unauthorized"
+        error_ instanceof ApiError && error_.code === "unauthorized"
           ? t("login.wrong")
-          : errorMessage(failure),
+          : errorMessage(error_),
       );
       setBusy(false);
     }
@@ -87,7 +87,6 @@ export function Login() {
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               required
-              autoFocus
             />
           </Field>
           <Field label={t("login.password")}>

@@ -152,7 +152,7 @@ function ArtistList() {
   );
 }
 
-function ArtistDialog({ id, onClose }: { id: number; onClose: () => void }) {
+function ArtistDialog({ id, onClose }: Readonly<{ id: number; onClose: () => void }>) {
   const restrictionsOn = useModule("restrictions");
   const canEdit = useCan("operator");
   const artist = useQuery({
@@ -302,7 +302,7 @@ function ArtistDialog({ id, onClose }: { id: number; onClose: () => void }) {
               </p>
               <ArtistPicker
                 exclude={[data.id]}
-                actions={(other) => (
+                renderActions={(other) => (
                   <button
                     type="button"
                     className="btn small"
@@ -363,7 +363,7 @@ function ArtistDialog({ id, onClose }: { id: number; onClose: () => void }) {
             <ArtistPicker
               exclude={[data.id, ...data.similar.map((s) => s.id)]}
               placeholder={t("artists.searchSimilar")}
-              actions={(other) => (
+              renderActions={(other) => (
                 <button
                   type="button"
                   className="btn small"
@@ -378,7 +378,7 @@ function ArtistDialog({ id, onClose }: { id: number; onClose: () => void }) {
             <ArtistPicker
               exclude={[data.id]}
               placeholder={t("artists.searchMerge")}
-              actions={(other) => (
+              renderActions={(other) => (
                 <ConfirmButton
                   className="btn small"
                   confirm={t("artists.merge")}

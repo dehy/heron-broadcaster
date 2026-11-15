@@ -10,12 +10,12 @@ import { useDebounced } from "./TrackSearch";
 import { ErrorView, Icon } from "./ui";
 
 export function ArtistPicker({
-  actions,
+  renderActions,
   exclude = [],
   placeholder = t("artistPicker.search"),
 }: Readonly<{
   /** Buttons for each result. */
-  actions: (artist: Artist) => ReactNode;
+  renderActions: (artist: Artist) => ReactNode;
   exclude?: number[];
   placeholder?: string;
 }>) {
@@ -57,7 +57,7 @@ export function ArtistPicker({
                 </div>
               </div>
               <div className="row" style={{ flexWrap: "nowrap" }}>
-                {actions(artist)}
+                {renderActions(artist)}
               </div>
             </li>
           ))}

@@ -13,6 +13,10 @@ concurrency:
   # Never cancel a push: it may be publishing images.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Jobs that publish images ask for more on their own.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 

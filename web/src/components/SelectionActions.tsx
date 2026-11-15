@@ -64,7 +64,7 @@ function prepare(files: number[], body: Preparation) {
 }
 
 /** A label, as a colored chip. */
-export function LabelChip({ label }: { label: { name: string; color?: string | null | undefined } }) {
+export function LabelChip({ label }: Readonly<{ label: { name: string; color?: string | null | undefined } }>) {
   return (
     <span className="chip" style={label.color ? { borderColor: label.color } : undefined}>
       <span className="swatch" style={{ background: label.color ?? "var(--muted)" }} />
@@ -225,12 +225,12 @@ export function CategoryDialog({ open, onClose, selection, files, tracks }: Targ
       );
     },
     {
-      success: (result) =>
-        "files" in result
-          ? t("buffer.prepared", { count: result.files })
-          : mode === "add"
-            ? t("selection.inCategory", { count: result.tracks })
-            : t("selection.outOfCategory", { count: result.tracks }),
+      success: (result) => {
+        if ("files" in result) return t("buffer.prepared", { count: result.files });
+        return mode === "add"
+          ? t("selection.inCategory", { count: result.tracks })
+          : t("selection.outOfCategory", { count: result.tracks });
+      },
       invalidate: files ? BUFFER : TRACKS,
       onSuccess: onClose,
     },
@@ -303,15 +303,15 @@ export function ChangeField({
   label,
   change,
   onChange,
-  input,
+  renderInput,
   clearLabel,
-}: {
+}: Readonly<{
   label: string;
   change: Change<string>;
   onChange: (change: Change<string>) => void;
-  input: (value: string, set: (value: string) => void) => ReactNode;
+  renderInput: (value: string, set: (value: string) => void) => ReactNode;
   clearLabel?: string;
-}) {
+}>) {
   return (
     <div className="field">
       <span>{label}</span>
@@ -328,7 +328,7 @@ export function ChangeField({
             { value: "clear", label: clearLabel ?? t("selection.clear") },
           ]}
         />
-        {change.kind === "set" && input(change.value, (value) => onChange({ kind: "set", value }))}
+        {change.kind === "set" && renderInput(change.value, (value) => onChange({ kind: "set", value }))}
       </div>
     </div>
   );
@@ -394,16 +394,6 @@ export function ProgrammingDialog({ open, onClose, selection, files, tracks }: T
       onSuccess: onClose,
     },
   );
-  const scale = (values: string[] | undefined) => (value: string, set: (value: string) => void) => (
-    <select className="input" value={value} onChange={(event) => set(event.target.value)}>
-      <option value="">{t("selection.choose")}</option>
-      {values?.map((v) => (
-        <option key={v} value={v}>
-          {v}
-        </option>
-      ))}
-    </select>
-  );
   const bpmNumber = bpm.kind === "set" ? Number(bpm.value) : 0;
   const invalid =
     (mood.kind === "set" && !mood.value) ||
@@ -438,13 +428,13 @@ export function ProgrammingDialog({ open, onClose, selection, files, tracks }: T
           label={t("library.column.mood")}
           change={mood}
           onChange={setMood}
-          input={scale(settings.data?.moods)}
+          renderInput={(value, set) => <ScaleSelect values={settings.data?.moods} value={value} set={set} />}
         />
         <ChangeField
           label={t("library.column.soundCode")}
           change={soundCode}
           onChange={setSoundCode}
-          input={scale(settings.data?.sound_codes)}
+          renderInput={(value, set) => <ScaleSelect values={settings.data?.sound_codes} value={value} set={set} />}
         />
         {!files && (
           <ChangeField
@@ -452,7 +442,7 @@ export function ProgrammingDialog({ open, onClose, selection, files, tracks }: T
             change={bpm}
             onChange={setBpm}
             clearLabel={t("selection.measured")}
-            input={(value, set) => (
+            renderInput={(value, set) => (
               <input
                 className="input num"
                 type="number"
@@ -567,7 +557,7 @@ export function TagsDialog({
   const edited = Object.values(changes).filter((change) => change && change.kind !== "keep");
   const invalid = TAG_FIELDS.some(({ field, number }) => {
     const change = changes[field];
-    return change?.kind === "set" && (!change.value.trim() || (number && !(Number(change.value) >= 1)));
+    return change?.kind === "set" && (!change.value.trim() || (number && (Number.isNaN(Number(change.value)) || Number(change.value) < 1)));
   });
   const report = status.data?.report;
   return (
@@ -635,7 +625,7 @@ export function TagsDialog({
                   }
                   change={changes[field] ?? { kind: "keep" }}
                   onChange={(change) => setChanges((all) => ({ ...all, [field]: change }))}
-                  input={(text, set) => (
+                  renderInput={(text, set) => (
                     <input
                       className="input"
                       type={numeric ? "number" : "text"}
@@ -707,5 +697,22 @@ export function TagsDialog({
         </div>
       )}
     </Modal>
+  );
+}
+
+function ScaleSelect({
+  values,
+  value,
+  set,
+}: Readonly<{ values: string[] | undefined; value: string; set: (value: string) => void }>) {
+  return (
+    <select className="input" value={value} onChange={(event) => set(event.target.value)}>
+      <option value="">{t("selection.choose")}</option>
+      {values?.map((v) => (
+        <option key={v} value={v}>
+          {v}
+        </option>
+      ))}
+    </select>
   );
 }

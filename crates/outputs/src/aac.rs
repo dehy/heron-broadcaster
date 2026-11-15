@@ -40,10 +40,11 @@ const RATES: [u32; 13] = [
 ];
 
 /// What a valid AAC-LC profile asks for.
-// Read by the encoder only: unused in a build without the `aac` feature.
-#[cfg_attr(not(feature = "aac"), allow(dead_code))]
 struct Settings {
+    // Read by the encoder only: absent from a build without the `aac` feature.
+    #[cfg(feature = "aac")]
     channels: usize,
+    #[cfg(feature = "aac")]
     rate_index: u8,
     kbps: u16,
 }
@@ -61,16 +62,15 @@ fn settings(profile: &EncoderProfile) -> Result<Settings, ConfigError> {
     if !empty {
         return Err(invalid("the AAC-LC encoder has no options".to_owned()));
     }
-    let channels = match profile.channels {
-        1 => 1,
-        2 => 2,
-        other => return Err(invalid(format!("{other} channels"))),
-    };
-    let rate_index = RATES
-        .iter()
-        .position(|rate| *rate == profile.sample_rate)
-        .and_then(|index| u8::try_from(index).ok())
-        .ok_or_else(|| invalid(format!("AAC does not support {} Hz", profile.sample_rate)))?;
+    if !matches!(profile.channels, 1 | 2) {
+        return Err(invalid(format!("{} channels", profile.channels)));
+    }
+    if !RATES.contains(&profile.sample_rate) {
+        return Err(invalid(format!(
+            "AAC does not support {} Hz",
+            profile.sample_rate
+        )));
+    }
     let kbps = profile
         .bitrate_kbps
         .ok_or_else(|| invalid("a bitrate".to_owned()))?;
@@ -78,8 +78,14 @@ fn settings(profile: &EncoderProfile) -> Result<Settings, ConfigError> {
         return Err(invalid(format!("{kbps} kbps")));
     }
     Ok(Settings {
-        channels,
-        rate_index,
+        #[cfg(feature = "aac")]
+        channels: usize::from(profile.channels),
+        #[cfg(feature = "aac")]
+        rate_index: RATES
+            .iter()
+            .position(|rate| *rate == profile.sample_rate)
+            .and_then(|index| u8::try_from(index).ok())
+            .ok_or_else(|| invalid(format!("AAC does not support {} Hz", profile.sample_rate)))?,
         kbps,
     })
 }

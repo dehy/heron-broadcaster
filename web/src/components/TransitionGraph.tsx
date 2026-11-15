@@ -44,7 +44,7 @@ export function TransitionGraph({
   incomingWave,
   playhead,
   height,
-}: {
+}: Readonly<{
   preview: TransitionPreview;
   outgoingWave?: WaveformData | null;
   incomingWave?: WaveformData | null;
@@ -52,7 +52,7 @@ export function TransitionGraph({
   playhead?: number | null;
   /** A fixed height in pixels, its width the container's: else it scales with its width. */
   height?: number;
-}) {
+}>) {
   const figure = useRef<HTMLElement>(null);
   const [measured, setMeasured] = useState<number | null>(null);
   useEffect(() => {
@@ -170,7 +170,7 @@ export function TransitionGraph({
             key={ms}
             x={x(ms)}
             y={H - 8}
-            textAnchor={index === 0 ? "start" : index === timeTicks.length - 1 ? "end" : "middle"}
+            textAnchor={tickAnchor(index, timeTicks.length)}
             fontSize="11"
             fill="var(--muted)"
           >
@@ -199,4 +199,9 @@ export function TransitionGraph({
       </figcaption>
     </figure>
   );
+}
+
+function tickAnchor(index: number, count: number): "start" | "middle" | "end" {
+  if (index === 0) return "start";
+  return index === count - 1 ? "end" : "middle";
 }

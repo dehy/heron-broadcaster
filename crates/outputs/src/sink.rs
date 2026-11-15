@@ -163,8 +163,10 @@ pub async fn run<S: OutputSink>(
                     &mut metadata,
                     &mut release,
                     &status,
-                    &bytes,
-                    &dropped,
+                    &Counters {
+                        bytes: &bytes,
+                        dropped: &dropped,
+                    },
                 )
                 .await;
                 connected.set(0.0);
@@ -212,7 +214,12 @@ pub async fn run<S: OutputSink>(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The Prometheus counters one connection feeds.
+struct Counters<'a> {
+    bytes: &'a metrics::Counter,
+    dropped: &'a metrics::Counter,
+}
+
 async fn stream<S: OutputSink>(
     sink: &mut S,
     name: &str,
@@ -220,8 +227,7 @@ async fn stream<S: OutputSink>(
     metadata: &mut watch::Receiver<NowPlaying>,
     release: &mut mpsc::Receiver<ReleaseRequest>,
     status: &OutputStatus,
-    bytes: &metrics::Counter,
-    dropped: &metrics::Counter,
+    counters: &Counters<'_>,
 ) -> Streamed {
     // An output without metadata has no sender: stop watching once it is gone.
     let mut watch_metadata = true;
@@ -233,11 +239,11 @@ async fn stream<S: OutputSink>(
                         return Streamed::Failed(error);
                     }
                     status.bytes_sent.fetch_add(chunk.len() as u64, Ordering::Relaxed);
-                    bytes.increment(chunk.len() as u64);
+                    counters.bytes.increment(chunk.len() as u64);
                 }
                 Err(broadcast::error::RecvError::Lagged(missed)) => {
                     status.dropped_chunks.fetch_add(missed, Ordering::Relaxed);
-                    dropped.increment(missed);
+                    counters.dropped.increment(missed);
                 }
                 Err(broadcast::error::RecvError::Closed) => {
                     return Streamed::Failed(SinkError::Io(std::io::Error::other("the encoder stopped")));
