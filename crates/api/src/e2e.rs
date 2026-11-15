@@ -6217,10 +6217,47 @@ async fn two_stations_play_at_once() {
         .request(Method::GET, &format!("/stations/{waiting}/player"), None)
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = admin
-        .request(Method::DELETE, &format!("/stations/{waiting}"), None)
+    // It is prepared all the same: a category and a restriction for it.
+    let (status, category) = admin
+        .send(
+            Method::POST,
+            "/categories",
+            json!({"name": "Nineties", "station_ids": [waiting]}),
+        )
         .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(status, StatusCode::CREATED, "{category}");
+    assert_eq!(category["station_ids"], json!([waiting]));
+    let (status, restriction) = admin
+        .send(
+            Method::POST,
+            "/restrictions",
+            json!({
+                "target": {"kind": "category", "id": category["id"]},
+                "rule": {"kind": "daypart", "mode": "ban", "days": [1],
+                         "start_hour": 0, "end_hour": 6},
+                "station_ids": [waiting],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{restriction}");
+    // A station that does not exist is refused.
+    let (status, refused) = admin
+        .send(
+            Method::POST,
+            "/categories",
+            json!({"name": "Nowhere", "station_ids": [9_999]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["message"], "no station 9999");
+    for path in [
+        format!("/restrictions/{}", restriction["id"]),
+        format!("/categories/{}", category["id"]),
+        format!("/stations/{waiting}"),
+    ] {
+        let (status, _) = admin.request(Method::DELETE, &path, None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{path}");
+    }
 
     // Nor does one whose engine is another station's: the same address,
     // its case and a trailing slash aside.

@@ -243,7 +243,7 @@ async fn create_category(
         .station_ids
         .clone()
         .unwrap_or_else(|| vec![station.id()]);
-    check_stations(&state, &station_ids)?;
+    check_stations(&state, &station_ids).await?;
     let mut tx = state.pool.begin().await?;
     let id = sqlx::query(
         "INSERT INTO categories (name, color, type_id, fx_player, separation) VALUES (?, ?, ?, ?, ?)",
@@ -285,7 +285,7 @@ async fn update_category(
             .fetch_all(&state.pool)
             .await?;
     if let Some(station_ids) = &input.station_ids {
-        check_stations(&state, station_ids)?;
+        check_stations(&state, station_ids).await?;
         for removed in before.iter().filter(|s| !station_ids.contains(s)) {
             let uses = uses(&state.pool, *removed, id).await?;
             if !uses.is_empty() {
@@ -324,16 +324,14 @@ async fn update_category(
     get_category(user, State(state), Path(id)).await
 }
 
-fn check_stations(state: &AppState, station_ids: &[u64]) -> ApiResult<()> {
+/// At least one station, each one a station: on the air or not yet.
+async fn check_stations(state: &AppState, station_ids: &[u64]) -> ApiResult<()> {
     if station_ids.is_empty() {
         return Err(ApiError::Invalid(
             "a category is used on at least one station".to_owned(),
         ));
     }
-    if let Some(id) = station_ids
-        .iter()
-        .find(|id| state.stations.get(**id).is_none())
-    {
+    if let Some(id) = crate::stations::first_missing(&state.pool, station_ids).await? {
         return Err(ApiError::Invalid(format!("no station {id}")));
     }
     Ok(())
