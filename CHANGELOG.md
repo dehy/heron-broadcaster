@@ -14,6 +14,10 @@ What `main` has since the last release: it is published as the `edge` images. Re
 
 - **Code quality:** the issues reported by SonarQube Cloud on `main` are fixed in the code (React props, nested ternaries, cognitive complexity, blocking file calls in async code, the web image's user), without suppressing any rule, and new tests bring the new-code coverage above the quality gate's 80%.
 
+### Fixed
+
+- **A station off the air can be prepared:** a category, a restriction or a medley for a station whose engine is not set yet was refused (*no station 3*): the stations were checked against those on the air instead of those that exist.
+
 ## 0.4.0 – 2026-11-11
 
 Listener interaction (M18: the public gateway `heron-public`, likes, tops, dedications and the match) and audience certification (M19: access logs and deliveries by FTPS) as modules, rotation rules (play ratio, daypart separation, draw depth, linked slots, exact times), cover art, two-factor authentication, stream servers, an audience report on the Statistics page, and a status bar set per user, for several stations. Upgrading from 0.3.0 keeps the station on air: see [0.3.0 to 0.4.0](docs/upgrading.md#030-to-040).
