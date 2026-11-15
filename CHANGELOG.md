@@ -9,6 +9,7 @@ What `main` has since the last release: it is published as the `edge` images. Re
 ### Added
 
 - **Featured artist**, a show (`featured_artist`): on the days and hours it chooses, at `:00`, `:15`, `:30` or `:45` of each hour, a track of the artist of the week, or of the day, from a planning filled in ahead, plays at a soft exact time, after a jingle of its category if any ([Listener interaction – Featured artist](docs/listener-interaction.md#featured-artist)).
+
 ### Fixed
 
 - **A station off the air can be prepared:** a category, a restriction or a medley for a station whose engine is not set yet was refused (*no station 3*): the stations were checked against those on the air instead of those that exist.
