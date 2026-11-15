@@ -93,11 +93,9 @@ impl RestrictionInput {
             .as_deref()
             .map(str::trim)
             .filter(|note| !note.is_empty());
-        if let Some(id) = self
-            .station_ids
-            .iter()
-            .flatten()
-            .find(|id| state.stations.get(**id).is_none())
+        // A station off the air can be prepared too.
+        if let Some(ids) = &self.station_ids
+            && let Some(id) = crate::stations::first_missing(&state.pool, ids).await?
         {
             return Err(ApiError::Invalid(format!("no station {id}")));
         }

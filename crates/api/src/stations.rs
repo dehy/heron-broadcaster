@@ -474,6 +474,15 @@ async fn list_by_id(pool: &MySqlPool) -> ApiResult<Vec<StationInfo>> {
     .await?)
 }
 
+/// The first of `ids` that is no station, if any. A station off the air
+/// (its engine not set) is one: it can be prepared before it plays.
+pub(crate) async fn first_missing(pool: &MySqlPool, ids: &[u64]) -> ApiResult<Option<u64>> {
+    let known: Vec<u64> = sqlx::query_scalar("SELECT id FROM stations")
+        .fetch_all(pool)
+        .await?;
+    Ok(ids.iter().copied().find(|id| !known.contains(id)))
+}
+
 pub(crate) async fn list(pool: &MySqlPool) -> ApiResult<Vec<StationInfo>> {
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {COLUMNS} FROM stations ORDER BY position, id"

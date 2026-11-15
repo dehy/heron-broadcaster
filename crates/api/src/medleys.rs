@@ -751,15 +751,17 @@ async fn check_stations(
     if unique.len() != station_ids.len() {
         return Err(ApiError::Invalid("a station is listed twice".to_owned()));
     }
+    // A station off the air can be prepared too.
+    let stations = crate::stations::list(&state.pool).await?;
     for id in station_ids {
-        let station = state
-            .stations
-            .get(*id)
+        let station = stations
+            .iter()
+            .find(|station| station.id == *id)
             .ok_or_else(|| ApiError::Invalid(format!("no station {id}")))?;
         if added.contains(id) && categories_of(&state.pool, *id).await?.category_id.is_none() {
             return Err(ApiError::Invalid(format!(
                 "{} has no medleys' category: set it in its medley settings first",
-                station.code()
+                station.code
             )));
         }
     }
