@@ -426,6 +426,8 @@ What an operator can do (*Shows › Match*, and *On air*): **close the vote now*
 
 A track the queue manager takes out by itself (its file left the library, or it was disabled) still counts as taken out: the other one wins when the vote closes, and the match is cancelled without either.
 
+**A match never stops the music.** Every track, the queue waits behind the match waiting or open, but only while its vote's track and one of its two tracks are still in the queue or on a deck, and no longer than 2 minutes after its vote should have closed. A match that stops moving (its vote's track played without the vote opening, or ended without the close, both of its tracks gone) holds nothing: rotation fills the queue after its tracks, both may play, and no new match is planned until it is closed or cancelled. A match table that cannot be read leaves the queue and the operators as if no match were in progress.
+
 ### Voting
 
 - **The match open now**: the show's live state names it (`match_id`); a vote names it too. A vote for a match that closed is refused (`409`).
