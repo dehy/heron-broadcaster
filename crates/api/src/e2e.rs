@@ -12958,6 +12958,74 @@ async fn follow_key_of(request: &Value, pool: &sqlx::MySqlPool) -> String {
         .unwrap()
 }
 
+/// The entry on air, if any.
+async fn on_air_entry(admin: &Client) -> Option<u64> {
+    let player = admin.get("/player").await;
+    player["decks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|deck| deck["on_air"] == true)
+        .and_then(|deck| deck["entry"]["entry_id"].as_u64())
+}
+
+async fn skip_track(admin: &Client) {
+    let (status, _) = admin.request(Method::POST, "/player/skip", None).await;
+    assert!(status.is_success(), "{status}");
+}
+
+/// The next match: tracks go by until one is queued.
+async fn next_match_queued(admin: &Client) -> Value {
+    for _ in 0..10 {
+        let found = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let current = admin.get("/match/current").await;
+                if !current.is_null() {
+                    return current;
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        })
+        .await;
+        if let Ok(current) = found {
+            return current;
+        }
+        let before = on_air_entry(admin).await;
+        skip_track(admin).await;
+        eventually("the next track", Duration::from_secs(20), || async {
+            (on_air_entry(admin).await != before).then_some(())
+        })
+        .await;
+    }
+    panic!("no match queued");
+}
+
+/// The first tracks of the library (`Artist {n}/Track {n}.wav`), 100 s
+/// long: long enough to vote during.
+async fn lengthen_first_tracks(station: &Station, tracks: &[u64]) {
+    let pool = &station.db.pool;
+    for (n, track) in (1..).zip(tracks) {
+        write_wav(
+            &station
+                .library
+                .path()
+                .join(format!("Artist {n}/Track {n}.wav")),
+            100.0,
+            220.0 * f64::from(n),
+        );
+        sqlx::query("UPDATE tracks SET duration_ms = 100000 WHERE id = ?")
+            .bind(track)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE track_analysis SET cue_out_ms = 100000 WHERE track_id = ?")
+            .bind(track)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+}
+
 /// The match (docs/listener-interaction.md#match): every N tracks in the
 /// show's hours, two tracks of its category queued after the vote's track
 /// and its announcement; votes only while open, a device changing its mind;
@@ -13007,28 +13075,7 @@ async fn the_match_opens_every_n_tracks_and_queues_its_winner() {
     .await;
     // The music lasts long enough to vote during; the fifth track is the
     // announcement.
-    for n in 1..=4 {
-        write_wav(
-            &station
-                .library
-                .path()
-                .join(format!("Artist {n}/Track {n}.wav")),
-            100.0,
-            220.0 * f64::from(n),
-        );
-    }
-    for track in &t[..4] {
-        sqlx::query("UPDATE tracks SET duration_ms = 100000 WHERE id = ?")
-            .bind(track)
-            .execute(pool)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE track_analysis SET cue_out_ms = 100000 WHERE track_id = ?")
-            .bind(track)
-            .execute(pool)
-            .await
-            .unwrap();
-    }
+    lengthen_first_tracks(&station, &t[..4]).await;
 
     // Off by default: nothing answers.
     let (status, body) = viewer.request(Method::GET, "/match/current", None).await;
@@ -13139,19 +13186,8 @@ async fn the_match_opens_every_n_tracks_and_queues_its_winner() {
         let queue = admin.get("/queue").await;
         queue.as_array().unwrap().clone()
     };
-    let on_air = || async {
-        let player = admin.get("/player").await;
-        player["decks"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|deck| deck["on_air"] == true)
-            .and_then(|deck| deck["entry"]["entry_id"].as_u64())
-    };
-    let skip = || async {
-        let (status, _) = admin.request(Method::POST, "/player/skip", None).await;
-        assert!(status.is_success(), "{status}");
-    };
+    let on_air = || on_air_entry(&admin);
+    let skip = || skip_track(&admin);
     eventually(
         "a track on air, one waiting",
         Duration::from_secs(20),
@@ -13183,31 +13219,7 @@ async fn the_match_opens_every_n_tracks_and_queues_its_winner() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    // The next match: tracks go by until one is queued.
-    let next_match = || async {
-        for _ in 0..10 {
-            let found = tokio::time::timeout(Duration::from_secs(5), async {
-                loop {
-                    let current = admin.get("/match/current").await;
-                    if !current.is_null() {
-                        return current;
-                    }
-                    tokio::time::sleep(Duration::from_millis(200)).await;
-                }
-            })
-            .await;
-            if let Ok(current) = found {
-                return current;
-            }
-            let before = on_air().await;
-            skip().await;
-            eventually("the next track", Duration::from_secs(20), || async {
-                (on_air().await != before).then_some(())
-            })
-            .await;
-        }
-        panic!("no match queued");
-    };
+    let next_match = || next_match_queued(&admin);
     let current = next_match().await;
     assert_eq!(current["status"], "queued");
     assert_eq!(current["category_id"], hits);
@@ -15051,14 +15063,50 @@ impl unftp_core::auth::Authenticator for FtpLogins {
     }
 }
 
+/// A test authority made for this run, and a certificate it signed for
+/// `localhost` and `127.0.0.1`: the authority's, the certificate's and its
+/// key's PEM.
+struct TestAuthority {
+    ca: String,
+    cert: String,
+    key: String,
+}
+
+fn test_authority() -> &'static TestAuthority {
+    static AUTHORITY: std::sync::OnceLock<TestAuthority> = std::sync::OnceLock::new();
+    AUTHORITY.get_or_init(|| {
+        use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
+        let ca_key = KeyPair::generate().unwrap();
+        let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params
+            .distinguished_name
+            .push(DnType::CommonName, "Heron test CA");
+        let ca = ca_params.self_signed(&ca_key).unwrap().pem();
+        let issuer = Issuer::new(ca_params, ca_key);
+        let key = KeyPair::generate().unwrap();
+        let mut params =
+            CertificateParams::new(vec!["localhost".to_owned(), "127.0.0.1".to_owned()]).unwrap();
+        params
+            .distinguished_name
+            .push(DnType::CommonName, "localhost");
+        let cert = params.signed_by(&key, &issuer).unwrap().pem();
+        TestAuthority {
+            ca,
+            cert,
+            key: key.serialize_pem(),
+        }
+    })
+}
+
 /// An FTPS server in this process (explicit TLS, the test authority's
 /// certificate), writing into `root`; its address.
 async fn ftps_server(root: &Path, refuse: Arc<std::sync::atomic::AtomicBool>) -> SocketAddr {
     let certs = tempfile::tempdir().unwrap().keep();
-    let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/ftps");
     let (cert, key) = (certs.join("cert.pem"), certs.join("key.pem"));
-    std::fs::copy(testdata.join("cert.pem"), &cert).unwrap();
-    std::fs::copy(testdata.join("key.pem"), &key).unwrap();
+    let authority = test_authority();
+    tokio::fs::write(&cert, &authority.cert).await.unwrap();
+    tokio::fs::write(&key, &authority.key).await.unwrap();
     let addr = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -15090,7 +15138,7 @@ fn test_sender() -> crate::certification::DeliverySender {
     use rustls::pki_types::CertificateDer;
     use rustls::pki_types::pem::PemObject;
     use suppaftp::tokio_rustls::rustls;
-    let ca = include_bytes!("../testdata/ftps/ca.pem");
+    let ca = test_authority().ca.as_bytes();
     let mut roots = rustls::RootCertStore::empty();
     roots
         .add(CertificateDer::from_pem_slice(ca).unwrap())

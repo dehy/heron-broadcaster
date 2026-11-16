@@ -8,11 +8,15 @@
 //! The engine here has no fallback directory: a queue that runs dry is
 //! silence (on a station, its fallback directory's music).
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use heron_core::PlaySource;
+use reqwest::{Method, StatusCode};
+use serde_json::{Value, json};
 
-use super::*;
+use super::{Client, GATEWAY_TOKEN, Station, eventually, gateway_write, write_wav};
 use crate::engine::PlayerState;
 
 /// How long the queue may stay empty before the station counts as off
@@ -27,7 +31,9 @@ const VOTE_TRACK_SECONDS: f64 = 75.0;
 /// leave it: `name` is its title and its artist.
 async fn add_track(station: &Station, name: &str, seconds: f64, freq: f64) -> u64 {
     let path = format!("{name}/{name}.wav");
-    std::fs::create_dir_all(station.library.path().join(name)).unwrap();
+    tokio::fs::create_dir_all(station.library.path().join(name))
+        .await
+        .unwrap();
     write_wav(&station.library.path().join(&path), seconds, freq);
     let ms = (seconds * 1_000.0) as u32;
     let id = sqlx::query(

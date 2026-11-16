@@ -68,6 +68,8 @@ rubato = "5.0.1"
 rusty-chromaprint = "0.3.0"
 # Checks FTPS certificates with the system's authorities, as reqwest does.
 rustls-platform-verifier = "0.7.1"
+# Test certificates, made while the tests run (an FTPS server's).
+rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "pem"] }
 rustix = { version = "1.1.5", features = ["fs"] }
 # Error reporting, off unless HERON_SENTRY_DSN is set. rustls: no OpenSSL in the images.
 sentry = { version = "0.49.3", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls", "tracing"] }
