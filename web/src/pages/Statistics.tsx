@@ -54,6 +54,7 @@ import {
 } from "../lib/listeners";
 import { Link, setSearch, useLocation } from "../lib/router";
 import { here } from "../lib/station";
+import { HOURS } from "../lib/schedule";
 import { useStations } from "../components/Stations";
 import {
   CompareAudience,
@@ -351,11 +352,7 @@ function AudienceCard({ zone, filter, period, view }: Readonly<{ zone: string | 
   return (
     <Card
       title={t("statistics.audience")}
-      actions={
-        <>
-          <Csv href={all ? stationsCsvUrl("audience", view, { from, to }) : csvUrl("audience", { from, to, ...filterParams(filter) })} />
-        </>
-      }
+      actions={<Csv href={all ? stationsCsvUrl("audience", view, { from, to }) : csvUrl("audience", { from, to, ...filterParams(filter) })} />}
     >
       {figures.isPending && <Loading />}
       {figures.isError && <ErrorView error={figures.error} />}
@@ -413,6 +410,17 @@ function AudienceCard({ zone, filter, period, view }: Readonly<{ zone: string | 
 }
 
 /** The listeners now of a server's part, for one output or all. */
+/** Listening now: on a server, an output, or the whole station. */
+function currentListeners(
+  now: Schemas["ListenersNow"] | undefined,
+  server: number | undefined,
+  output: number | undefined,
+): number | null | undefined {
+  if (server !== undefined) return serverNow(now, server, output);
+  if (output === undefined) return now?.total;
+  return now?.outputs.find((o) => o.output_id === output)?.listeners;
+}
+
 function serverNow(now: Schemas["ListenersNow"] | undefined, server: number, output: number | undefined): number | null | undefined {
   if (output === undefined) {
     return now?.servers.find((s) => s.server_id === server)?.listeners;
@@ -451,12 +459,7 @@ function Today({ zone, filter, view }: Readonly<{ zone: string | undefined; filt
     refetchInterval: 60_000,
   });
   const servers = serversOf(now.data, output);
-  const current =
-    server !== undefined
-      ? serverNow(now.data, server, output)
-      : output === undefined
-        ? now.data?.total
-        : now.data?.outputs.find((o) => o.output_id === output)?.listeners;
+  const current = currentListeners(now.data, server, output);
   const day = totals.data?.[0];
   const unread = now.data?.outputs.filter((o) => o.error && (output === undefined || o.output_id === output)) ?? [];
 
@@ -546,13 +549,23 @@ function RangeSelect({ value, onChange }: Readonly<{ value: number; onChange: (d
 
 /** The totals per hour, day, week or month: one station's, or every one's added up. */
 function days(all: boolean, filter: Filter, from: string, to: string, group: Grouping | "hour") {
-  return all
-    ? unwrap(api.GET("/api/v1/stations/listeners/days", { params: { query: { stations: "all", from, to, group } } })).then((d) => d.total)
-    : unwrap(
-        api.GET("/api/v1/stations/{station_id}/listeners/days", {
-          params: { path: here(), query: { from, to, ...query({ ...filterParams(filter), group }) } },
-        }),
-      );
+  return all ? allStationsDays(from, to, group) : stationDays(filter, from, to, group);
+}
+
+/** Every station's totals added up. */
+function allStationsDays(from: string, to: string, group: Grouping | "hour") {
+  return unwrap(api.GET("/api/v1/stations/listeners/days", { params: { query: { stations: "all", from, to, group } } })).then(
+    (d) => d.total,
+  );
+}
+
+/** The station's totals, for the output or server of `filter`. */
+function stationDays(filter: Filter, from: string, to: string, group: Grouping | "hour") {
+  return unwrap(
+    api.GET("/api/v1/stations/{station_id}/listeners/days", {
+      params: { path: here(), query: { from, to, ...query({ ...filterParams(filter), group }) } },
+    }),
+  );
 }
 
 function OverTime({ filter, period, view }: Readonly<{ filter: Filter; period: Period }> & OneOrAll) {
@@ -668,18 +681,14 @@ function HoursOfDay({ filter, period, view }: Readonly<{ filter: Filter; period:
     return {
       key: String(hour),
       label: hour % 3 === 0 ? hourLabel(hour) : "",
-      value: (measure === "average" ? row?.average : measure === "tune_in" ? row?.tune_in : row?.tune_out) ?? 0,
+      value: row?.[measure] ?? 0,
       tooltip: hourTooltip(hour, row, measure),
     };
   });
   return (
     <Card
       title={t("statistics.hoursOfDay")}
-      actions={
-        <>
-          <Csv href={all ? stationsCsvUrl("hours-of-day", view, { from, to }) : csvUrl("hours-of-day", { from, to, ...filterParams(filter) })} />
-        </>
-      }
+      actions={<Csv href={all ? stationsCsvUrl("hours-of-day", view, { from, to }) : csvUrl("hours-of-day", { from, to, ...filterParams(filter) })} />}
     >
       {byHour.isPending && <Loading />}
       {byHour.isError && <ErrorView error={byHour.error} />}
@@ -727,11 +736,7 @@ function Departures({ filter, period, station }: Readonly<{ filter: Filter; peri
   return (
     <Card
       title={station === undefined ? t("statistics.departures") : `${t("statistics.departures")} · ${station}`}
-      actions={
-        <>
-          <Csv href={csvUrl("tracks", { from, to, limit: 500, ...filterParams(filter) })} />
-        </>
-      }
+      actions={<Csv href={csvUrl("tracks", { from, to, limit: 500, ...filterParams(filter) })} />}
       flush
     >
       <p className="muted small" style={{ margin: "0.75rem 1rem" }}>
@@ -792,14 +797,17 @@ function Heatmap({ cells }: Readonly<{ cells: (number | null)[][] }>) {
       {cells.map((row, day) => (
         <Fragment key={days[day]}>
           <span className="heatmap-day">{days[day]}</span>
-          {row.map((value, hour) => (
+          {HOURS.map((hour) => {
+            const value = row[hour] ?? null;
+            return (
             <span
               key={hour}
               className={value === null ? "heatmap-cell empty" : "heatmap-cell"}
               style={value === null ? undefined : { background: `color-mix(in srgb, var(--accent) ${Math.round(heat(value, top) * 100)}%, var(--surface-2))` }}
               title={t("statistics.heatmapCell", { day: days[day] ?? "", hour: hourLabel(hour), value: value === null ? t("statistics.notMeasured") : decimal(value) })}
             />
-          ))}
+            );
+          })}
         </Fragment>
       ))}
     </div>

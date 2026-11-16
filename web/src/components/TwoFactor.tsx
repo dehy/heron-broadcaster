@@ -11,6 +11,7 @@ import {
   type ReactNode,
   createContext,
   useContext,
+  useEffect,
   useRef,
   useState,
 } from "react";
@@ -39,9 +40,16 @@ export function OtpInput({
   value,
   onChange,
   label,
-  autoFocus,
-}: Readonly<{ value: string; onChange: (code: string) => void; label: string; autoFocus?: boolean }>) {
+  focusFirst,
+}: Readonly<{ value: string; onChange: (code: string) => void; label: string; focusFirst?: boolean }>) {
   const boxes = useRef<(HTMLInputElement | null)[]>([]);
+  // The first box, when the code is what the step asks for; in a dialog,
+  // the dialog focuses it once open (`data-autofocus`).
+  useEffect(() => {
+    if (focusFirst) {
+      boxes.current[0]?.focus();
+    }
+  }, [focusFirst]);
   const focus = (index: number) => boxes.current[Math.max(0, Math.min(5, index))]?.focus();
   const set = (index: number, typed: string) => {
     const digits = digitsOf(typed);
@@ -54,7 +62,7 @@ export function OtpInput({
     }
     const chars = value.padEnd(6, " ").split("");
     chars[index] = digits || " ";
-    onChange(digitsOf(chars.join("").trimEnd().replace(/ /g, "")));
+    onChange(digitsOf(chars.join("").trimEnd().replaceAll(" ", "")));
     if (digits) {
       focus(index + 1);
     }
@@ -77,7 +85,7 @@ export function OtpInput({
     focus(digits.length);
   };
   return (
-    <div className="otp" role="group" aria-label={label}>
+    <fieldset className="otp" aria-label={label}>
       {Array.from({ length: 6 }, (_, index) => (
         <input
           key={index}
@@ -89,14 +97,14 @@ export function OtpInput({
           autoComplete={index === 0 ? "one-time-code" : "off"}
           aria-label={t("twoFactor.digit", { n: String(index + 1) })}
           value={value[index] ?? ""}
-          autoFocus={autoFocus && index === 0}
+          data-autofocus={focusFirst && index === 0 ? "" : undefined}
           onChange={(event) => set(index, event.target.value)}
           onKeyDown={(event) => keyDown(index, event)}
           onPaste={paste}
           onFocus={(event) => event.target.select()}
         />
       ))}
-    </div>
+    </fieldset>
   );
 }
 
@@ -231,8 +239,8 @@ function PasswordDialog({
     setError(null);
     try {
       await action(password);
-    } catch (failure) {
-      setError(passwordError(failure));
+    } catch (error_) {
+      setError(passwordError(error_));
       setBusy(false);
     }
   };
@@ -275,7 +283,7 @@ function PasswordDialog({
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             required
-            autoFocus
+            data-autofocus
           />
         </Field>
       </form>
@@ -321,9 +329,9 @@ export function TotpDialog({ onClose }: Readonly<{ onClose: () => void }>) {
       } else {
         await client.invalidateQueries({ queryKey: ME_KEY });
       }
-    } catch (failure) {
+    } catch (error_) {
       setError(
-        failure instanceof ApiError && failure.code === "invalid" ? t("twoFactor.wrongCode") : errorMessage(failure),
+        error_ instanceof ApiError && error_.code === "invalid" ? t("twoFactor.wrongCode") : errorMessage(error_),
       );
       setCode("");
       setBusy(false);
@@ -382,7 +390,7 @@ export function TotpDialog({ onClose }: Readonly<{ onClose: () => void }>) {
         {error && <Banner kind="bad">{error}</Banner>}
         <div className="field">
           <span>{rich("twoFactor.typeCode", { step: <b>2.</b> })}</span>
-          <OtpInput value={code} onChange={setCode} label={t("twoFactor.appCode")} autoFocus />
+          <OtpInput value={code} onChange={setCode} label={t("twoFactor.appCode")} focusFirst />
           <span className="hint">{t("twoFactor.codeChanges")}</span>
         </div>
       </form>
@@ -426,8 +434,8 @@ export function PasskeyDialog({ onClose }: Readonly<{ onClose: () => void }>) {
       } else {
         await client.invalidateQueries({ queryKey: ME_KEY });
       }
-    } catch (failure) {
-      setError(passwordError(failure));
+    } catch (error_) {
+      setError(passwordError(error_));
       setBusy(false);
     }
   };
@@ -467,7 +475,7 @@ export function PasskeyDialog({ onClose }: Readonly<{ onClose: () => void }>) {
             maxLength={255}
             onChange={(event) => setName(event.target.value)}
             required
-            autoFocus
+            data-autofocus
           />
         </Field>
         <Field label={t("twoFactor.passwordAgain")} hint={t("twoFactor.signsOutElsewhere")}>
@@ -530,7 +538,7 @@ function RenameDialog({
             maxLength={255}
             onChange={(event) => setName(event.target.value)}
             required
-            autoFocus
+            data-autofocus
           />
         </Field>
       </form>
@@ -563,7 +571,7 @@ export function TwoFactorCard() {
   };
   const data = view.data;
   const on = Boolean(data && (data.totp || data.passkeys.length > 0));
-  const factorCount = data ? (data.totp ? 1 : 0) + data.passkeys.length : 0;
+  const factorCount = (data?.totp ? 1 : 0) + (data?.passkeys.length ?? 0);
   // The last factor stays when the role requires one.
   const canRemove = !data?.required_by || factorCount > 1;
   const canPasskey = passkeysAvailable();

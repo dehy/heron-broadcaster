@@ -125,15 +125,23 @@ export function deliveryInputOf(draft: DeliveryDraft): CertificationDeliveryInpu
 
 /** A name for a file, as heron-api writes it: letters, digits, `-` and `_`. */
 export function safeName(name: string): string {
-  return name.replace(/[^A-Za-z0-9_-]/g, "-").replace(/^-+|-+$/g, "");
+  const dashed = name.replace(/[^A-Za-z0-9_-]/g, "-");
+  let start = 0;
+  let end = dashed.length;
+  while (start < end && dashed[start] === "-") start++;
+  while (end > start && dashed[end - 1] === "-") end--;
+  return dashed.slice(start, end);
 }
+
+/** Each export format's file extension. */
+const EXTENSIONS: Record<ExportFormat, string> = { raw: "log", combined: "log", csv: "csv", json: "json" };
 
 /** The file name a pattern gives, as heron-api writes it; `null` for a pattern it refuses. */
 export function previewFileName(
   pattern: string,
   names: { station: string; server: string; mount: string; day: string; format: ExportFormat; compression: DeliveryCompression },
 ): string | null {
-  const ext = (names.format === "csv" ? "csv" : names.format === "json" ? "json" : "log") + (names.compression === "gzip" ? ".gz" : "");
+  const ext = EXTENSIONS[names.format] + (names.compression === "gzip" ? ".gz" : "");
   const [yyyy = "", mm = "", dd = ""] = names.day.split("-");
   const values: Record<string, string> = {
     station: safeName(names.station),

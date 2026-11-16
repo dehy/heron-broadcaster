@@ -47,13 +47,19 @@ type StationRef = Schemas["StationRef"];
 type Compared = Exclude<StationsView, { kind: "one" } | { kind: "all" }>;
 
 /** The station choice of the page: this station, all of them added up, or a comparison. */
+/** The value of the stations' select for a view. */
+function selectValue(view: StationsView): string {
+  if (view.kind === "compare") return view.ids.join(",");
+  return view.kind === "one" ? "" : view.kind;
+}
+
 export function StationsSelect({
   stations,
   view,
   onChange,
 }: Readonly<{ stations: StationInfo[]; view: StationsView; onChange: (view: StationsView) => void }>) {
   const current = here().station_id;
-  const value = view.kind === "compare" ? view.ids.join(",") : view.kind === "one" ? "" : view.kind;
+  const value = selectValue(view);
   const options = stations.filter((s) => s.id !== current).map((s) => ({ value: `${current},${s.id}`, name: s.name }));
   // A comparison bookmarked from another station.
   const other =
@@ -209,7 +215,7 @@ export function CompareToday({ view, zone }: Readonly<{ view: Compared; zone: st
               step={60_000}
               ticks={timeTicks(from, to, 600)}
               tickLabel={shortTime}
-              tooltip={(at, v) => (
+              renderTooltip={(at, v) => (
                 <>
                   {shortTime(at)}
                   {lineValues(v, (value) => number(value))}
@@ -334,7 +340,7 @@ export function CompareOverTime({ view, period }: Readonly<{ view: Compared; per
   const { from, to } = period;
   const totals = useStationsDays(view, from, to, grouping);
   const answer = totals.data?.stations ?? [];
-  const days = [...new Set(answer.flatMap((s) => s.periods.map((p) => p.day)))].sort();
+  const days = [...new Set(answer.flatMap((s) => s.periods.map((p) => p.day)))].sort((a, b) => a.localeCompare(b));
   const every = Math.max(1, Math.ceil(days.length / 8));
   const measureLabel = t(MEASURES.find((m) => m.value === measure)?.label ?? "statistics.listeningHours");
   return (
@@ -365,7 +371,7 @@ export function CompareOverTime({ view, period }: Readonly<{ view: Compared; per
             step={1}
             ticks={days.map((_, i) => i).filter((i) => i % every === 0)}
             tickLabel={(i) => barLabel(days[i] ?? "", grouping)}
-            tooltip={(i, values) => (
+            renderTooltip={(i, values) => (
               <>
                 {periodLabel(days[i] ?? "", grouping)}
                 {lineValues(values, (value) => measureText({ ...EMPTY_PERIOD, [measure]: value }, measure))}
@@ -426,13 +432,13 @@ export function CompareHours({ view, period }: Readonly<{ view: Compared; period
           )}
           <LinesChart
             label={t("statistics.hoursOfDayChart")}
-            series={series(answer, (s) => s.hours.map((h) => ({ at: h.hour, value: (measure === "average" ? h.average : measure === "tune_in" ? h.tune_in : h.tune_out) ?? 0 })))}
+            series={series(answer, (s) => s.hours.map((h) => ({ at: h.hour, value: h[measure] ?? 0 })))}
             from={0}
             to={23}
             step={1}
             ticks={[0, 3, 6, 9, 12, 15, 18, 21]}
             tickLabel={hourLabel}
-            tooltip={(hour, values) => (
+            renderTooltip={(hour, values) => (
               <>
                 {hourLabel(hour)}
                 {lineValues(values, (value) => decimal(value))}

@@ -110,7 +110,8 @@ export function slotDays(slot: TopSlot): number[] {
   if (slot.every === "day") {
     return [1, 2, 3, 4, 5, 6, 7];
   }
-  const days = slot.weekdays?.length ? slot.weekdays : slot.weekday ? [slot.weekday] : [];
+  let days = slot.weekdays ?? [];
+  if (!days.length) days = slot.weekday ? [slot.weekday] : [];
   return [...new Set(days)].sort((a, b) => a - b);
 }
 

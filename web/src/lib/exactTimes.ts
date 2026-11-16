@@ -31,7 +31,8 @@ export interface Status {
 export function signedSeconds(ms: number): string {
   const seconds = Math.round(ms / 1000);
   const value = number(Math.abs(seconds));
-  return seconds > 0 ? `+${value} s` : seconds < 0 ? `−${value} s` : `${value} s`;
+  if (seconds > 0) return `+${value} s`;
+  return seconds < 0 ? `−${value} s` : `${value} s`;
 }
 
 /** How long a faded ending cuts the track before: from the cut to where it would end (ms). */
@@ -388,12 +389,10 @@ export function calculationResult(calculation: CalculationSummary, window: Exact
     return { label: t("exactTimes.resultFaded", { seconds: Math.round(cutMs(ending, window) / 1000) }), tone: "bad" };
   }
   const seconds = Math.round(Math.abs(ending.offset_ms) / 1000);
-  const result =
-    seconds === 0
-      ? t("exactTimes.resultOnTime")
-      : ending.offset_ms < 0
-        ? t("exactTimes.resultEarly", { seconds })
-        : t("exactTimes.resultLate", { seconds });
+  let result = t("exactTimes.resultOnTime");
+  if (seconds !== 0) {
+    result = ending.offset_ms < 0 ? t("exactTimes.resultEarly", { seconds }) : t("exactTimes.resultLate", { seconds });
+  }
   if (!ending.in_window) {
     return { label: t("exactTimes.resultOutside", { result }), tone: "bad" };
   }

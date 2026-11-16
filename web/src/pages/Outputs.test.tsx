@@ -96,7 +96,7 @@ describe("Outputs", () => {
     expect(screen.getByText(t("outputs.relayOf", { name: "Main server" }))).toBeTruthy();
     expect(screen.getByText("https://relay:443")).toBeTruthy();
     // A server in use cannot be deleted.
-    expect(screen.getAllByTitle(t("outputs.serverUsed")).length).toBe(1);
+    expect(screen.getAllByTitle(t("outputs.serverUsed"))).toHaveLength(1);
   });
 
   it("duplicates an output", async () => {

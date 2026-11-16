@@ -360,6 +360,20 @@ export interface OtherStation {
  * hidden ones left out, unless in trouble and `station_trouble`), and how
  * many of those it counts are in trouble.
  */
+/** What another station has on air, `elapsed` ms after it said. */
+function otherOnAir(station: StationSummary, elapsed: number): OtherStation["onAir"] {
+  const deck = station.on_air;
+  if (!deck) return null;
+  const position = Math.min(deck.position_ms + (station.paused ? 0 : elapsed), deck.next_start_ms);
+  return {
+    letter: deck.deck === "b" ? "B" : "A",
+    text: trackName(deck),
+    left: Math.max(0, deck.next_start_ms - position),
+    progress: deck.next_start_ms > 0 ? Math.min(1, position / deck.next_start_ms) : 0,
+    paused: station.paused,
+  };
+}
+
 export function otherStations(
   stations: readonly StationSummary[],
   settings: Pick<StatusBarSettings, "hidden_stations" | "station_trouble">,
@@ -372,19 +386,13 @@ export function otherStations(
     if (hidden && !(trouble && settings.station_trouble)) {
       continue;
     }
-    const deck = station.on_air;
-    let onAir: OtherStation["onAir"] = null;
-    if (deck) {
-      const position = Math.min(deck.position_ms + (station.paused ? 0 : elapsed), deck.next_start_ms);
-      onAir = {
-        letter: deck.deck === "b" ? "B" : "A",
-        text: trackName(deck),
-        left: Math.max(0, deck.next_start_ms - position),
-        progress: deck.next_start_ms > 0 ? Math.min(1, position / deck.next_start_ms) : 0,
-        paused: station.paused,
-      };
-    }
-    shown.push({ id: station.id, code: station.code, trouble, outputsDown: station.outputs_down, onAir });
+    shown.push({
+      id: station.id,
+      code: station.code,
+      trouble,
+      outputsDown: station.outputs_down,
+      onAir: otherOnAir(station, elapsed),
+    });
   }
   return { shown, inTrouble: shown.filter((station) => station.trouble).length };
 }

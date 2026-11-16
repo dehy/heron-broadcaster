@@ -20,7 +20,7 @@ export function linkRoles(entries: readonly Linked[]): LinkRole[] {
     if (next && entry.linked_to != null && entry.linked_to === next.entry_id) {
       return "jingle";
     }
-    if (previous && previous.linked_to != null && previous.linked_to === entry.entry_id) {
+    if (previous?.linked_to != null && previous.linked_to === entry.entry_id) {
       return "track";
     }
     return null;

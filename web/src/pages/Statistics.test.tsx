@@ -238,7 +238,7 @@ describe("Statistics", () => {
     expect(screen.getByTitle(t("statistics.heatmapCell", { day: "Mon", hour: "08h", value: "6" }))).toBeTruthy();
     expect(await screen.findByText("France")).toBeTruthy();
     expect(screen.getByText(t("statistics.unknownCountry"))).toBeTruthy();
-    expect(screen.getAllByText(t("statistics.otherGroup")).length).toBe(2);
+    expect(screen.getAllByText(t("statistics.otherGroup"))).toHaveLength(2);
     expect(screen.getByRole("link", { name: t("statistics.dbipCredit") }).getAttribute("href")).toBe("https://db-ip.com");
     expect(screen.getByText(t("statistics.deviceSmartSpeaker"))).toBeTruthy();
     expect(screen.getByText("VLC")).toBeTruthy();

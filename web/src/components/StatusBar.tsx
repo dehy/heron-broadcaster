@@ -62,19 +62,11 @@ function StationRow({
   onSwitch,
 }: Readonly<{ station: OtherStation; colors: CSSProperties; onSwitch?: ((id: number) => void) | undefined }>) {
   const deck = station.onAir;
-  const trouble =
-    station.trouble === "engine"
-      ? t("statusbar.engine")
-      : station.trouble === "nothing"
-        ? t("statusbar.nothingOnAir")
-        : station.trouble === "outputs"
-          ? t("statusbar.outputsDownShort", { names: station.outputsDown.join(", ") })
-          : null;
+  const trouble = troubleText(station);
   const left = deck ? `−${duration(deck.left)}` : "";
   return (
-    <div
+    <fieldset
       className={`statusbar statusbar-row ${station.trouble ? "statusbar-row-trouble" : "statusbar-row-ok"}`}
-      role="group"
       aria-label={station.code}
     >
       {onSwitch ? (
@@ -110,7 +102,7 @@ function StationRow({
         </span>
       )}
       {trouble && <span className="statusbar-part statusbar-bad">{trouble}</span>}
-    </div>
+    </fieldset>
   );
 }
 
@@ -269,16 +261,84 @@ function NextFixed({ now }: Readonly<{ now: number }>) {
     text = t("statusbar.until", { name: next.name, time });
   } else {
     const when = whenOf(next.at, now);
-    text =
-      when.kind === "in"
-        ? t("statusbar.inMinutes", { name: next.name, count: when.minutes })
-        : when.kind === "at"
-          ? t("statusbar.at", { name: next.name, time })
-          : t("statusbar.onDay", { name: next.name, day: when.day, time });
+    if (when.kind === "in") text = t("statusbar.inMinutes", { name: next.name, count: when.minutes });
+    else if (when.kind === "at") text = t("statusbar.at", { name: next.name, time });
+    else text = t("statusbar.onDay", { name: next.name, day: when.day, time });
   }
   return (
     <Link to={next.link} className="statusbar-part statusbar-link statusbar-next">
       {text}
+    </Link>
+  );
+}
+
+/** What a station in trouble has. */
+function troubleText(station: OtherStation): string | null {
+  switch (station.trouble) {
+    case "engine":
+      return t("statusbar.engine");
+    case "nothing":
+      return t("statusbar.nothingOnAir");
+    case "outputs":
+      return t("statusbar.outputsDownShort", { names: station.outputsDown.join(", ") });
+    default:
+      return null;
+  }
+}
+
+/** The station's code, which opens a bar per other station. */
+function StationsButton({
+  code,
+  open,
+  inTrouble,
+  onClick,
+}: Readonly<{ code: string | undefined; open: boolean; inTrouble: number; onClick: () => void }>) {
+  return (
+    <button
+      type="button"
+      className={`statusbar-station${!open && inTrouble ? " statusbar-station-trouble" : ""}`}
+      aria-expanded={open}
+      aria-label={t(open ? "statusbar.closeStations" : "statusbar.openStations", { count: inTrouble })}
+      onClick={onClick}
+    >
+      <span aria-hidden="true">
+        {code ?? "–"} {open ? "▾" : "▴"}
+      </span>
+      {!open && inTrouble > 0 && (
+        <span className="statusbar-bad" aria-hidden="true">
+          {t("statusbar.down", { count: inTrouble })}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function ListenersLink({
+  total,
+  record,
+}: Readonly<{ total: number | null | undefined; record: ReturnType<typeof recordOf> }>) {
+  return (
+    <Link to="/statistics" className="statusbar-part statusbar-link">
+      <span>
+        {t("statusbar.listeners")} {listenersText(total)}
+      </span>
+      {record && (
+        <span className="statusbar-record" title={t("statusbar.recordOn", { day: record.day })}>
+          {t("statusbar.record")} {record.listeners}
+        </span>
+      )}
+    </Link>
+  );
+}
+
+function OutputsLink({ outputs }: Readonly<{ outputs: NonNullable<ReturnType<typeof outputsOf>> }>) {
+  return (
+    <Link
+      to="/outputs"
+      className={`statusbar-part statusbar-link ${outputs.down.length ? "statusbar-bad" : "statusbar-good"}`}
+      title={outputs.down.length ? t("statusbar.outputsDown", { names: outputs.down.join(", ") }) : undefined}
+    >
+      {t("statusbar.outputs", { connected: outputs.connected, total: outputs.total })}
     </Link>
   );
 }
@@ -366,24 +426,7 @@ export function StatusBar({
       aria-live="off"
       aria-label={t("statusbar.label")}
     >
-      {stations && (
-        <button
-          type="button"
-          className={`statusbar-station${!open && stations.inTrouble ? " statusbar-station-trouble" : ""}`}
-          aria-expanded={open}
-          aria-label={t(open ? "statusbar.closeStations" : "statusbar.openStations", { count: stations.inTrouble })}
-          onClick={toggle}
-        >
-          <span aria-hidden="true">
-            {code ?? "–"} {open ? "▾" : "▴"}
-          </span>
-          {!open && stations.inTrouble > 0 && (
-            <span className="statusbar-bad" aria-hidden="true">
-              {t("statusbar.down", { count: stations.inTrouble })}
-            </span>
-          )}
-        </button>
-      )}
+      {stations && <StationsButton code={code} open={open} inTrouble={stations.inTrouble} onClick={toggle} />}
       {settings.decks &&
         (player === null ? (
           <span className="statusbar-deck">{t("statusbar.engine")}</span>
@@ -391,33 +434,14 @@ export function StatusBar({
           letters.map((letter) => <Deck key={letter} summary={deckSummary(letter)} colors={colors} />)
         ))}
       {settings.history && <History typeId={settings.history_type_id} onAir={onAir?.entry?.entry_id ?? null} />}
-      {settings.listeners && statistics && (
-        <Link to="/statistics" className="statusbar-part statusbar-link">
-          <span>
-            {t("statusbar.listeners")} {listenersText(listeners.data?.total)}
-          </span>
-          {record && (
-            <span className="statusbar-record" title={t("statusbar.recordOn", { day: record.day })}>
-              {t("statusbar.record")} {record.listeners}
-            </span>
-          )}
-        </Link>
-      )}
+      {settings.listeners && statistics && <ListenersLink total={listeners.data?.total} record={record} />}
       {settings.next_fixed && <NextFixed now={now} />}
       {settings.queue && player && (
         <Link to="/queue" className="statusbar-part statusbar-link statusbar-queue">
           {t("statusbar.queue", { time: duration(queueLength(player.queue)) })}
         </Link>
       )}
-      {settings.outputs && outputs && outputs.total > 0 && (
-        <Link
-          to="/outputs"
-          className={`statusbar-part statusbar-link ${outputs.down.length ? "statusbar-bad" : "statusbar-good"}`}
-          title={outputs.down.length ? t("statusbar.outputsDown", { names: outputs.down.join(", ") }) : undefined}
-        >
-          {t("statusbar.outputs", { connected: outputs.connected, total: outputs.total })}
-        </Link>
-      )}
+      {settings.outputs && outputs && outputs.total > 0 && <OutputsLink outputs={outputs} />}
       {settings.system && summary && (
         <span className="statusbar-part statusbar-system">
           <span className={`statusbar-${summary.cpuLevel}`}>cpu {summary.cpu}</span>

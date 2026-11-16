@@ -83,22 +83,27 @@ export function TopsPage() {
           )
         }
       />
-      {tops.isPending ? (
-        <Loading />
-      ) : tops.isError ? (
-        <ErrorView error={tops.error} />
-      ) : tops.data.length === 0 ? (
-        <Card>
-          <Empty>{t("tops.empty")}</Empty>
-        </Card>
-      ) : (
-        <div className="stack">
-          {tops.data.map((top) => (
-            <TopCard key={top.id} top={top} />
-          ))}
-        </div>
-      )}
+      <TopList tops={tops} />
     </>
+  );
+}
+
+function TopList({ tops }: Readonly<{ tops: ReturnType<typeof useTops> }>) {
+  if (tops.isPending) return <Loading />;
+  if (tops.isError) return <ErrorView error={tops.error} />;
+  if (tops.data.length === 0) {
+    return (
+      <Card>
+        <Empty>{t("tops.empty")}</Empty>
+      </Card>
+    );
+  }
+  return (
+    <div className="stack">
+      {tops.data.map((top) => (
+        <TopCard key={top.id} top={top} />
+      ))}
+    </div>
   );
 }
 
@@ -298,11 +303,9 @@ export function ChartCard({ top, chartKey }: Readonly<{ top: TopView; chartKey: 
   }
   const data = chart.data;
   const editable = canEdit && !data.locked;
-  const freezes = data.frozen
-    ? t("tops.frozen", { time: dateTime(data.to_unix_ms) })
-    : top.settings.period === "rolling_7_days"
-      ? t("tops.freezesShow")
-      : t("tops.freezes", { time: dateTime(data.to_unix_ms) });
+  let freezes = t("tops.freezes", { time: dateTime(data.to_unix_ms) });
+  if (data.frozen) freezes = t("tops.frozen", { time: dateTime(data.to_unix_ms) });
+  else if (top.settings.period === "rolling_7_days") freezes = t("tops.freezesShow");
   const row = (entry: ChartEntry, outside: boolean) => (
     <tr key={entry.rank} className={outside ? "top-outside" : ""}>
       <td className="num">
@@ -490,11 +493,8 @@ function ShowTab({ top }: Readonly<{ top: TopView }>) {
                 <tr key={`${index}-${item.track_id}`} className={item.kind === "new_release" ? "top30-release" : ""}>
                   <td className="small">{item.skipped ? "" : shortTime(item.planned_at_unix_ms)}</td>
                   <td className="num">
-                    {item.kind === "track" ? (
-                      <strong>{item.rank}</strong>
-                    ) : item.kind === "new_release" ? (
-                      <span className="badge accent">{t("tops.isNew")}</span>
-                    ) : null}
+                    {item.kind === "track" && <strong>{item.rank}</strong>}
+                    {item.kind === "new_release" && <span className="badge accent">{t("tops.isNew")}</span>}
                   </td>
                   <td className={item.kind === "jingle" ? "muted small" : ""}>
                     {item.skipped ? <s>{label(item)}</s> : label(item)}
@@ -712,7 +712,8 @@ function SettingsForm({ top }: Readonly<{ top: TopView }>) {
     webhooks: top.webhooks,
   };
   const today = new Date().toISOString().slice(0, 10);
-  const when = slot ? (slot.every === "month" ? (slot.nth ?? "first") : "week") : "none";
+  let when = "none";
+  if (slot) when = slot.every === "month" ? (slot.nth ?? "first") : "week";
   // Settings saved before (every day, a single day) in the form of days.
   const days = slot ? slotDays(slot) : [];
   const setWhen = (value: string) => {
@@ -747,13 +748,13 @@ function SettingsForm({ top }: Readonly<{ top: TopView }>) {
         </div>
         <div className="field">
           <span>{t("tops.sizeLabel")}</span>
-          <div className="segmented" role="group" aria-label={t("tops.sizeLabel")}>
+          <fieldset className="segmented" aria-label={t("tops.sizeLabel")}>
             {SIZES.map((size) => (
               <button key={size} type="button" aria-pressed={draft.size === size} disabled={!canEdit} onClick={() => set({ size })}>
                 {t("tops.size", { size })}
               </button>
             ))}
-          </div>
+          </fieldset>
           <span className="hint">{t("tops.sizeHint")}</span>
         </div>
       </Card>
@@ -895,7 +896,7 @@ function SettingsForm({ top }: Readonly<{ top: TopView }>) {
             ))}
           </select>
           {slot && (
-            <div className="segmented" role="group" aria-label={t("tops.days")}>
+            <fieldset className="segmented" aria-label={t("tops.days")}>
               {[1, 2, 3, 4, 5, 6, 7].map((day) => (
                 <button
                   key={day}
@@ -909,7 +910,7 @@ function SettingsForm({ top }: Readonly<{ top: TopView }>) {
                   {weekdayShort(day)}
                 </button>
               ))}
-            </div>
+            </fieldset>
           )}
           {slot?.every === "month" && <span>{t("tops.ofMonth")}</span>}
           {slot && (

@@ -16,7 +16,7 @@ export function maxSeparation(count: number): number {
 
 /** `A`, `B`… */
 export function daypartLetter(index: number): string {
-  return String.fromCharCode(65 + Math.max(0, Math.min(index, 25)));
+  return String.fromCodePoint(65 + Math.max(0, Math.min(index, 25)));
 }
 
 /** `06:00–11:59`. */

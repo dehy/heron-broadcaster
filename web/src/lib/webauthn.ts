@@ -6,12 +6,12 @@
 
 /** base64url (no padding) to bytes. */
 export function fromBase64url(text: string): ArrayBuffer {
-  const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
+  const base64 = text.replaceAll("-", "+").replaceAll("_", "/");
   const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
   const binary = atob(padded);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+    bytes[i] = binary.codePointAt(i) ?? 0;
   }
   return bytes.buffer;
 }
@@ -24,9 +24,16 @@ export function toBase64url(buffer: ArrayBuffer | ArrayBufferView): string {
       : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
   let binary = "";
   for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
+    binary += String.fromCodePoint(byte);
   }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return withoutPadding(btoa(binary).replaceAll("+", "-").replaceAll("/", "_"));
+}
+
+/** Without the `=` that pad base64 at its end. */
+function withoutPadding(base64: string): string {
+  let end = base64.length;
+  while (end > 0 && base64[end - 1] === "=") end--;
+  return base64.slice(0, end);
 }
 
 type Json = Record<string, unknown>;

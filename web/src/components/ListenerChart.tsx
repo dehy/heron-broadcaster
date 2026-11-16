@@ -207,7 +207,7 @@ export function LinesChart({
   ticks,
   label,
   tickLabel,
-  tooltip,
+  renderTooltip,
 }: Readonly<{
   series: Series[];
   from: number;
@@ -217,7 +217,7 @@ export function LinesChart({
   ticks: number[];
   label: string;
   tickLabel: (at: number) => string;
-  tooltip: (at: number, values: { series: Series; value: number | undefined }[]) => ReactNode;
+  renderTooltip: (at: number, values: { series: Series; value: number | undefined }[]) => ReactNode;
 }>) {
   const { ref, width } = useWidth();
   const [hover, setHover] = useState<number | null>(null);
@@ -267,7 +267,7 @@ export function LinesChart({
         </svg>
         {hover !== null && (
           <Tooltip x={x(hover)} width={width}>
-            {tooltip(
+            {renderTooltip(
               hover,
               series.map((s) => ({ series: s, value: s.points.find((p) => p.at === hover)?.value })),
             )}

@@ -14,6 +14,7 @@ import { dateTime, fullDate, shortTime } from "../lib/format";
 import { useModule } from "../lib/modules";
 import { DAY_NUMBERS, dayName, daysLabel } from "../lib/rotation";
 import { Link } from "../lib/router";
+import { useRowKeys } from "../lib/rowKeys";
 import { useAction, useCan } from "../lib/session";
 import {
   COMMON_EVENTS,
@@ -143,6 +144,20 @@ function AlwaysOpen({ draft, set, canEdit }: Readonly<{ draft: ShowSettings; set
   );
 }
 
+/** When a show is open until, or opens next. */
+function statusText(status: ShowView["status"]): string {
+  if (status.open) return t("shows.openUntil", { time: dateTime(status.closes_at_unix_ms) });
+  if (status.next_opening_unix_ms) return t("shows.closedUntil", { time: dateTime(status.next_opening_unix_ms) });
+  return t("shows.neverOpen");
+}
+
+/** An hour of the week grid: this show's, another's, both or none. */
+function cellKind(own: boolean | undefined, other: boolean | undefined): string {
+  if (own && other) return "clash";
+  if (own) return "own";
+  return other ? "other" : "";
+}
+
 function Hours({
   show,
   draft,
@@ -158,6 +173,7 @@ function Hours({
   const theirs = weekGrid(others.flatMap((other) => other.settings.hours));
   const change = (index: number, range: Partial<HourRange>) =>
     set((d) => ({ ...d, hours: d.hours.map((r, i) => (i === index ? { ...r, ...range } : r)) }));
+  const rows = useRowKeys(draft.hours.length);
   const status = show.status;
   return (
     <Card
@@ -175,19 +191,13 @@ function Hours({
       }
     >
       <p className="muted small">{t("shows.hoursHelp")}</p>
-      <p className="small">
-        {status.open
-          ? t("shows.openUntil", { time: dateTime(status.closes_at_unix_ms) })
-          : status.next_opening_unix_ms
-            ? t("shows.closedUntil", { time: dateTime(status.next_opening_unix_ms) })
-            : t("shows.neverOpen")}
-      </p>
+      <p className="small">{statusText(status)}</p>
       <div className="stack">
         {draft.hours.map((range, index) => {
           const clash = found[index];
           return (
-            <div className="row" key={index} style={{ flexWrap: "wrap", gap: 8 }}>
-              <div className="segmented" role="group" aria-label={t("shows.days")}>
+            <div className="row" key={rows.keys[index]} style={{ flexWrap: "wrap", gap: 8 }}>
+              <fieldset className="segmented" aria-label={t("shows.days")}>
                 {DAY_NUMBERS.map((day) => (
                   <button
                     key={day}
@@ -205,7 +215,7 @@ function Hours({
                     {dayName(day)}
                   </button>
                 ))}
-              </div>
+              </fieldset>
               <label className="row small">
                 {t("shows.from")}
                 <select
@@ -241,7 +251,10 @@ function Hours({
                   type="button"
                   className="btn ghost icon"
                   aria-label={t("shows.removeRange")}
-                  onClick={() => set((d) => ({ ...d, hours: d.hours.filter((_, i) => i !== index) }))}
+                  onClick={() => {
+                    rows.remove(index);
+                    set((d) => ({ ...d, hours: d.hours.filter((_, i) => i !== index) }));
+                  }}
                 >
                   <Icon name="close" />
                 </button>
@@ -301,7 +314,7 @@ function Hours({
                 {Array.from({ length: 24 }, (_, hour) => {
                   const own = mine[day - 1]?.[hour];
                   const other = theirs[day - 1]?.[hour];
-                  const kind = own && other ? "clash" : own ? "own" : other ? "other" : "";
+                  const kind = cellKind(own, other);
                   return <td key={hour} className={kind} title={`${dayName(day)} ${hourLabel(hour)}`} />;
                 })}
               </tr>
@@ -505,7 +518,7 @@ export function Website({
   station,
 }: Readonly<{
   /** Its key in the gateway's routes: a module's, or a top's (`top-4`). */
-  module: ShowKey | string;
+  module: string;
   title: string;
   show: ShowView;
   draft: ShowSettings;
@@ -679,79 +692,17 @@ export function WidgetPreview({
   if (!open && closed === "nothing") {
     return <div className="show-widget empty muted small">{t("shows.previewNothing")}</div>;
   }
-  const likes = module === "likes";
-  const dedications = module === "dedications";
-  const duel = module === "match";
   const when = next ? dateTime(next) : "…";
   const values = next ? { day: fullDate(next), hour: shortTime(next) } : { day: "…", hour: "" };
   return (
     <div className="show-widget">
       <div className="show-widget-head" style={{ background: open ? color : "var(--muted)" }}>
         <strong>{title}</strong>
-        <div className="small">
-          {!open
-            ? t("shows.closedTitle")
-            : likes
-              ? t("likes.widgetSub")
-              : duel
-                ? t("match.preview.sub")
-                : t("shows.until", { time: "18:00" })}
-        </div>
+        <div className="small">{previewSub(open, module)}</div>
       </div>
       <div className="show-widget-body">
-        {open && likes ? (
-          <div className="stack" style={{ gap: 8, textAlign: "left" }}>
-            <strong>{t("likes.exampleTrack")}</strong>
-            <div className="row">
-              <span className="btn">
-                <Icon name="like" /> {t("likes.like")}
-              </span>
-              <span className="btn">
-                <Icon name="dislike" /> {t("likes.dislike")}
-              </span>
-            </div>
-          </div>
-        ) : open && duel ? (
-          <div className="stack" style={{ gap: 8, textAlign: "left" }}>
-            {[
-              { title: "Neon Orchard", artist: "Cassia Bloom", percent: 58 },
-              { title: "Running Lights", artist: "Echo Parade", percent: 42 },
-            ].map((choice, index) => (
-              <div key={choice.title} className="stack" style={{ gap: 8 }}>
-                {index === 1 && <span className="match-versus small">{t("match.versus")}</span>}
-                <div
-                  className="match-preview-choice"
-                  style={{ background: `linear-gradient(90deg, ${color}26 ${choice.percent}%, transparent ${choice.percent}%)` }}
-                >
-                  <span>
-                    <strong>{choice.title}</strong>
-                    <span className="muted small"> {choice.artist}</span>
-                  </span>
-                  <strong>{choice.percent} %</strong>
-                </div>
-              </div>
-            ))}
-            <span className="muted small" style={{ textAlign: "center" }}>
-              {t("match.votes", { count: 79 })}
-            </span>
-          </div>
-        ) : open && dedications ? (
-          <div className="stack" style={{ gap: 8, textAlign: "left" }}>
-            {[t("dedications.preview.track"), t("dedications.preview.from"), t("dedications.preview.to"), t("dedications.preview.message")].map(
-              (label) => (
-                <label key={label} className="field">
-                  <span>{label}</span>
-                  <input className="input" disabled aria-label={label} />
-                </label>
-              ),
-            )}
-            <span className="btn primary" style={{ background: color, borderColor: color, justifyContent: "center" }}>
-              {t("dedications.preview.send")}
-            </span>
-            <span className="muted small">{t("dedications.preview.note")}</span>
-          </div>
-        ) : open ? (
-          <p className="muted">{t("shows.previewOpenBody")}</p>
+        {open ? (
+          <OpenPreview module={module} color={color} />
         ) : (
           <>
             <Icon name="clock" size={28} />
@@ -766,4 +717,77 @@ export function WidgetPreview({
       </div>
     </div>
   );
+}
+
+/** The line under a preview's title. */
+function previewSub(open: boolean, module: string | undefined): string {
+  if (!open) return t("shows.closedTitle");
+  if (module === "likes") return t("likes.widgetSub");
+  if (module === "match") return t("match.preview.sub");
+  return t("shows.until", { time: "18:00" });
+}
+
+/** An open show's preview: its module's, else a line. */
+function OpenPreview({ module, color }: Readonly<{ module: string | undefined; color: string }>) {
+  if (module === "likes") {
+    return (
+      <div className="stack" style={{ gap: 8, textAlign: "left" }}>
+        <strong>{t("likes.exampleTrack")}</strong>
+        <div className="row">
+          <span className="btn">
+            <Icon name="like" /> {t("likes.like")}
+          </span>
+          <span className="btn">
+            <Icon name="dislike" /> {t("likes.dislike")}
+          </span>
+        </div>
+      </div>
+    );
+  }
+  if (module === "match") {
+    return (
+      <div className="stack" style={{ gap: 8, textAlign: "left" }}>
+        {[
+          { title: "Neon Orchard", artist: "Cassia Bloom", percent: 58 },
+          { title: "Running Lights", artist: "Echo Parade", percent: 42 },
+        ].map((choice, index) => (
+          <div key={choice.title} className="stack" style={{ gap: 8 }}>
+            {index === 1 && <span className="match-versus small">{t("match.versus")}</span>}
+            <div
+              className="match-preview-choice"
+              style={{ background: `linear-gradient(90deg, ${color}26 ${choice.percent}%, transparent ${choice.percent}%)` }}
+            >
+              <span>
+                <strong>{choice.title}</strong>
+                <span className="muted small"> {choice.artist}</span>
+              </span>
+              <strong>{choice.percent} %</strong>
+            </div>
+          </div>
+        ))}
+        <span className="muted small" style={{ textAlign: "center" }}>
+          {t("match.votes", { count: 79 })}
+        </span>
+      </div>
+    );
+  }
+  if (module === "dedications") {
+    return (
+      <div className="stack" style={{ gap: 8, textAlign: "left" }}>
+        {[t("dedications.preview.track"), t("dedications.preview.from"), t("dedications.preview.to"), t("dedications.preview.message")].map(
+          (label) => (
+            <label key={label} className="field">
+              <span>{label}</span>
+              <input className="input" disabled aria-label={label} />
+            </label>
+          ),
+        )}
+        <span className="btn primary" style={{ background: color, borderColor: color, justifyContent: "center" }}>
+          {t("dedications.preview.send")}
+        </span>
+        <span className="muted small">{t("dedications.preview.note")}</span>
+      </div>
+    );
+  }
+  return <p className="muted">{t("shows.previewOpenBody")}</p>;
 }

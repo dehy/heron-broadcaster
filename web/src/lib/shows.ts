@@ -121,7 +121,7 @@ export function ownExample(key: string): Record<string, string> {
 
 /** 7 days (0 is Monday) of 24 hours: whether each hour is in the ranges. */
 export function weekGrid(ranges: readonly HourRange[]): boolean[][] {
-  const grid = Array.from({ length: 7 }, () => Array<boolean>(24).fill(false));
+  const grid = Array.from({ length: 7 }, () => new Array<boolean>(24).fill(false));
   for (const range of ranges) {
     for (const day of range.days) {
       const row = grid[day - 1];
@@ -183,16 +183,23 @@ export function unknownPlaceholders(template: string, known: readonly string[]):
   return [...new Set(found.filter((name) => !known.includes(name)))];
 }
 
+/** An address without the slashes at its end. */
+function withoutTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") end--;
+  return url.slice(0, end);
+}
+
 /** The script line of a show's page (`page`) or small widget, for the website. */
 export function widgetLine(gatewayUrl: string, code: string, module: string, page: boolean): string {
-  const base = gatewayUrl.replace(/\/+$/, "");
+  const base = withoutTrailingSlashes(gatewayUrl);
   const mode = page ? ' data-mode="page"' : "";
   return `<script src="${base}/api/v1/public/stations/${code}/${module}.js"${mode} async></script>`;
 }
 
 /** The address of a show's page alone, on the gateway. */
 export function pageUrl(gatewayUrl: string, code: string, module: string): string {
-  return `${gatewayUrl.replace(/\/+$/, "")}/api/v1/public/stations/${code}/${module}.html`;
+  return `${withoutTrailingSlashes(gatewayUrl)}/api/v1/public/stations/${code}/${module}.html`;
 }
 
 /** `17:00` for an hour of the day, 0 to 24. */

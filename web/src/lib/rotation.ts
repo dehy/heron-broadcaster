@@ -251,12 +251,9 @@ export function describeExact(exact: Schemas["ExactTime"]): string {
 /** How an exact time was met: `on time`, `early by 12 s, outside its window`, `late by 30 s, the track before faded`. */
 export function describeMet(log: Schemas["ExactLog"]): string {
   const seconds = Math.round(Math.abs(log.offset_ms) / 1000);
-  let met =
-    log.met === "on_time"
-      ? t("exact.onTime")
-      : log.met === "early"
-        ? t("exact.early", { seconds })
-        : t("exact.late", { seconds });
+  let met = t("exact.late", { seconds });
+  if (log.met === "on_time") met = t("exact.onTime");
+  else if (log.met === "early") met = t("exact.early", { seconds });
   if (!log.in_window) {
     met = t("exact.outside", { met });
   }

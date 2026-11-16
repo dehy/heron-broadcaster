@@ -381,6 +381,15 @@ export function Segmented<T extends string>({
 
 // Dialogs -------------------------------------------------------------------
 
+/**
+ * A ref that focuses its element once, when it appears: the field a step
+ * starts with (in a dialog, `data-autofocus` instead, which the dialog
+ * focuses once open).
+ */
+export function focusOnMount(element: HTMLElement | null) {
+  element?.focus();
+}
+
 export function Modal({
   title,
   open,
@@ -404,6 +413,8 @@ export function Modal({
     }
     if (open && !dialog.open) {
       dialog.showModal();
+      // The field to start with, once the dialog has moved the focus in.
+      dialog.querySelector<HTMLElement>("[data-autofocus]")?.focus();
     } else if (!open && dialog.open) {
       dialog.close();
     }

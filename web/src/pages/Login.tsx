@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { ApiError, type Schemas, type User, api, errorMessage, unwrap } from "../api";
 import { OtpInput } from "../components/TwoFactor";
-import { Banner, Field, Logo } from "../components/ui";
+import { Banner, Field, Logo, focusOnMount } from "../components/ui";
 import { t } from "../i18n";
 import { ME_KEY } from "../lib/session";
 import { getPasskey, passkeysAvailable } from "../lib/webauthn";
@@ -150,8 +150,8 @@ function SecondStep({
     try {
       const path = recovery ? "/api/v1/auth/login/recovery" : "/api/v1/auth/login/totp";
       onSignedIn(await unwrap(api.POST(path, { body: { code: typed } })));
-    } catch (failure) {
-      failed(failure, t("twoFactor.wrongCode"));
+    } catch (error_) {
+      failed(error_, t("twoFactor.wrongCode"));
     }
   };
 
@@ -172,8 +172,8 @@ function SecondStep({
         return;
       }
       onSignedIn(await unwrap(api.POST("/api/v1/auth/login/webauthn/finish", { body: { credential } })));
-    } catch (failure) {
-      failed(failure, t("twoFactor.passkeyRefused"));
+    } catch (error_) {
+      failed(error_, t("twoFactor.passkeyRefused"));
     }
   };
 
@@ -211,14 +211,14 @@ function SecondStep({
                 value={code}
                 onChange={(event) => setCode(event.target.value)}
                 required
-                autoFocus
+                ref={focusOnMount}
               />
             </Field>
           ) : (
             hasApp && (
               <div className="field">
                 <span>{t("twoFactor.appCodeLabel")}</span>
-                <OtpInput value={code} onChange={changeCode} label={t("twoFactor.appCode")} autoFocus />
+                <OtpInput value={code} onChange={changeCode} label={t("twoFactor.appCode")} focusFirst />
               </div>
             )
           )}
