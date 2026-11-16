@@ -462,50 +462,32 @@ enum Target {
     Station(u64),
 }
 
-/// Sets play ratios from a CSV file (the body, `text/csv`): a `path` or
-/// `filename` column naming the track, a column per station code, and
-/// `default`. A ratio is 0 to 1 in steps of 0.1 (`0.2` or `0,2`); 0
-/// disables the track (on that station, or everywhere), another ratio sets
-/// it and enables the track; an empty cell changes nothing. Operators of
-/// every station named, and the shared role for `default`.
-#[utoipa::path(post, path = "/tracks/ratios/import", tag = "library",
-    params(ImportParams),
-    request_body(content = String, content_type = "text/csv"),
-    responses((status = 200, body = RatioImport), (status = "4XX", body = ErrorBody)))]
-async fn import_ratios(
-    user: CurrentUser,
-    State(state): State<AppState>,
-    Query(params): Query<ImportParams>,
-    body: String,
-) -> ApiResult<Json<RatioImport>> {
-    let pool = &state.pool;
-    let mut lines = parse_csv(&body, separator(&body)).into_iter();
-    let Some((_, header)) = lines.next() else {
-        return Err(ApiError::Invalid("the file is empty".to_owned()));
-    };
-    let header: Vec<String> = header
-        .iter()
-        .map(|name| name.trim().to_lowercase())
-        .collect();
+/// The column naming the tracks, and what it matches them by: `path`,
+/// else `filename`.
+fn name_column(header: &[String]) -> ApiResult<(usize, &'static str)> {
     let by_path = header.iter().position(|name| name == "path");
     let by_name = header.iter().position(|name| name == "filename");
-    let (name_column, matched_by) = match (by_path, by_name) {
-        (Some(column), _) => (column, "path"),
-        (None, Some(column)) => (column, "filename"),
-        (None, None) => {
-            return Err(ApiError::Invalid(
-                "the file needs a path or a filename column".to_owned(),
-            ));
-        }
-    };
+    match (by_path, by_name) {
+        (Some(column), _) => Ok((column, "path")),
+        (None, Some(column)) => Ok((column, "filename")),
+        (None, None) => Err(ApiError::Invalid(
+            "the file needs a path or a filename column".to_owned(),
+        )),
+    }
+}
+
+/// The columns of ratios: `default` and the codes of the stations the user
+/// operates; the others are listed as unknown.
+async fn column_targets(
+    user: &CurrentUser,
+    pool: &MySqlPool,
+    header: &[String],
+    name_column: usize,
+    report: &mut RatioImport,
+) -> ApiResult<Vec<(usize, Target)>> {
     let stations: Vec<(u64, String)> = sqlx::query_as("SELECT id, code FROM stations")
         .fetch_all(pool)
         .await?;
-    let mut report = RatioImport {
-        dry_run: params.dry_run,
-        matched_by: matched_by.to_owned(),
-        ..RatioImport::default()
-    };
     let mut targets: Vec<(usize, Target)> = Vec::new();
     for (index, name) in header.iter().enumerate() {
         if index == name_column || (name == "filename" || name == "path") {
@@ -538,6 +520,69 @@ async fn import_ratios(
             None => report.unknown_columns.push(name.clone()),
         }
     }
+    Ok(targets)
+}
+
+impl RatioImport {
+    fn unmatched_row(&mut self, line: usize, name: &str, found: usize) {
+        self.unmatched_total += 1;
+        if self.unmatched.len() < MAX_LISTED {
+            self.unmatched.push(UnmatchedRow {
+                line,
+                name: name.to_owned(),
+                reason: match found {
+                    _ if name.is_empty() => Unmatched::Empty,
+                    0 => Unmatched::NotFound,
+                    _ => Unmatched::Several,
+                },
+            });
+        }
+    }
+
+    fn invalid_value(&mut self, line: usize, column: &str, value: &str) {
+        self.invalid_total += 1;
+        if self.invalid.len() < MAX_LISTED {
+            self.invalid.push(InvalidValue {
+                line,
+                column: column.to_owned(),
+                value: value.to_owned(),
+            });
+        }
+    }
+}
+
+/// Sets play ratios from a CSV file (the body, `text/csv`): a `path` or
+/// `filename` column naming the track, a column per station code, and
+/// `default`. A ratio is 0 to 1 in steps of 0.1 (`0.2` or `0,2`); 0
+/// disables the track (on that station, or everywhere), another ratio sets
+/// it and enables the track; an empty cell changes nothing. Operators of
+/// every station named, and the shared role for `default`.
+#[utoipa::path(post, path = "/tracks/ratios/import", tag = "library",
+    params(ImportParams),
+    request_body(content = String, content_type = "text/csv"),
+    responses((status = 200, body = RatioImport), (status = "4XX", body = ErrorBody)))]
+async fn import_ratios(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Query(params): Query<ImportParams>,
+    body: String,
+) -> ApiResult<Json<RatioImport>> {
+    let pool = &state.pool;
+    let mut lines = parse_csv(&body, separator(&body)).into_iter();
+    let Some((_, header)) = lines.next() else {
+        return Err(ApiError::Invalid("the file is empty".to_owned()));
+    };
+    let header: Vec<String> = header
+        .iter()
+        .map(|name| name.trim().to_lowercase())
+        .collect();
+    let (name_column, matched_by) = name_column(&header)?;
+    let mut report = RatioImport {
+        dry_run: params.dry_run,
+        matched_by: matched_by.to_owned(),
+        ..RatioImport::default()
+    };
+    let targets = column_targets(&user, pool, &header, name_column, &mut report).await?;
 
     let tracks: Vec<(String, u64)> =
         sqlx::query_as("SELECT path, id FROM tracks WHERE deleted_at IS NULL")
@@ -563,23 +608,9 @@ async fn import_ratios(
             file_name(name)
         };
         let ids = found.get(&key).map_or(&[][..], Vec::as_slice);
-        let track_id = match ids {
-            [id] => *id,
-            _ => {
-                report.unmatched_total += 1;
-                if report.unmatched.len() < MAX_LISTED {
-                    report.unmatched.push(UnmatchedRow {
-                        line,
-                        name: name.to_owned(),
-                        reason: match ids.len() {
-                            _ if name.is_empty() => Unmatched::Empty,
-                            0 => Unmatched::NotFound,
-                            _ => Unmatched::Several,
-                        },
-                    });
-                }
-                continue;
-            }
+        let &[track_id] = ids else {
+            report.unmatched_row(line, name, ids.len());
+            continue;
         };
         report.matched += 1;
         for (column, target) in &targets {
@@ -592,16 +623,7 @@ async fn import_ratios(
                     report.values += 1;
                     values.entry(*target).or_default().insert(track_id, ratio);
                 }
-                None => {
-                    report.invalid_total += 1;
-                    if report.invalid.len() < MAX_LISTED {
-                        report.invalid.push(InvalidValue {
-                            line,
-                            column: header[*column].clone(),
-                            value: value.to_owned(),
-                        });
-                    }
-                }
+                None => report.invalid_value(line, &header[*column], value),
             }
         }
     }

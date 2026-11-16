@@ -541,6 +541,42 @@ impl Planner {
         }
     }
 
+    /// What the clock puts between the vote's track and the winner, up to
+    /// the next music slot, added to `picks` (their places in `between`):
+    /// they play as the clock says. Returns the music slot's pick, and the
+    /// fill kept as it was before it, for when that pick is not queued.
+    fn up_to_slot(
+        &self,
+        ground: &mut Ground<'_>,
+        picks: &mut Vec<Pick>,
+        between: &mut Vec<usize>,
+    ) -> (Option<Pick>, Option<Option<heron_rotation::Plan>>) {
+        let library = ground.library;
+        let mut kept = None;
+        for _ in 0..MAX_BETWEEN {
+            kept = Some(ground.plan.clone());
+            let Some(next) = ground.next(library, true) else {
+                break;
+            };
+            let mut group = next.into_picks();
+            // A jingle linked to the music slot's track: it plays between,
+            // linked to neither of the two.
+            if group.len() == 2 && !self.between(&group[1]) && self.between(&group[0]) {
+                let mut jingle = group.remove(0);
+                jingle.explanation.linked = false;
+                between.extend(ground.push(jingle, picks));
+            }
+            if group.iter().all(|pick| self.between(pick)) {
+                for pick in group {
+                    between.extend(ground.push(pick, picks));
+                }
+                continue;
+            }
+            return ((group.len() == 1).then(|| group.remove(0)), kept);
+        }
+        (None, kept)
+    }
+
     /// A match whose vote runs during `vote_track` (`picks[vote]`, or queued
     /// already at `vote_entry`), starting at `start_ms`. `Err(true)`: no
     /// match, but the slot's track was added to `picks`, to carry the next
@@ -567,39 +603,8 @@ impl Planner {
             self.since = self.since.saturating_add(1);
             return Err(false);
         }
-        // What the clock puts between the vote's track and the winner, up
-        // to the next music slot: they play as the clock says.
         let mut between = Vec::new();
-        let mut slot = None;
-        // The fill kept as it was before the slot's pick, for when that pick
-        // is not queued.
-        let mut kept = None;
-        for _ in 0..MAX_BETWEEN {
-            kept = Some(ground.plan.clone());
-            let Some(next) = ground.next(library, true) else {
-                break;
-            };
-            let mut group = next.into_picks();
-            // A jingle linked to the music slot's track: it plays between,
-            // linked to neither of the two.
-            if group.len() == 2 && !self.between(&group[1]) && self.between(&group[0]) {
-                let mut jingle = group.remove(0);
-                jingle.explanation.linked = false;
-                if let Some(index) = ground.push(jingle, picks) {
-                    between.push(index);
-                }
-            }
-            if group.iter().all(|pick| self.between(pick)) {
-                for pick in group {
-                    if let Some(index) = ground.push(pick, picks) {
-                        between.push(index);
-                    }
-                }
-                continue;
-            }
-            slot = (group.len() == 1).then(|| group.remove(0));
-            break;
-        }
+        let (slot, mut kept) = self.up_to_slot(ground, picks, &mut between);
         let Some(slot) = slot else {
             return Err(false);
         };

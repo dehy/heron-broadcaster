@@ -53,7 +53,7 @@ pub struct TwoFactorSettings {
 }
 
 impl TwoFactorSettings {
-    pub const SETTINGS_NAME: &'static str = "two_factor";
+    pub const SETTINGS_NAME: &str = "two_factor";
 
     pub fn requires(&self, role: Role) -> bool {
         match role {

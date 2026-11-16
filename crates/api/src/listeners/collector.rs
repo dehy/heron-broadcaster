@@ -134,6 +134,136 @@ fn relay_player(client: &Client) -> bool {
         .is_some_and(|start| start.eq_ignore_ascii_case("icecast"))
 }
 
+/// A server's count for an output, and its listener list when it gives one.
+type Counted = (u32, Option<Vec<Client>>);
+
+/// What a poll read from the servers: each one's mounts and counts, the
+/// listener lists, and the addresses of the relays that count their
+/// master's connection.
+struct Readings {
+    statuses: BTreeMap<u64, Result<HashMap<String, u32>, ReadError>>,
+    clients: BTreeMap<(u64, String), Result<Vec<Client>, ReadError>>,
+    relay_addresses: HashMap<u64, HashSet<IpAddr>>,
+}
+
+impl Readings {
+    /// A server's part of an output on `mount`, and what it read: its
+    /// count (a master's without its relays', `relays`) and listener list.
+    /// Nothing read when the server did not answer.
+    fn part(
+        &mut self,
+        server: &StoredServer,
+        mount: &str,
+        relays: &[(&StoredServer, String)],
+    ) -> (ServerPart, Option<Counted>) {
+        let mut part = ServerPart {
+            server_id: server.id,
+            name: server.name.clone(),
+            relay_of: server.relay_of,
+            listeners: None,
+            sessions: false,
+            error: None,
+        };
+        let status = match self.statuses.get(&server.id) {
+            Some(Ok(mounts)) => mounts,
+            Some(Err(error)) => {
+                tracing::debug!(server = %server.name, %error, "cannot read the stream server");
+                part.error = Some(truncate(&error.to_string(), ERROR_CHARS));
+                return (part, None);
+            }
+            None => return (part, None),
+        };
+        let count = status.get(mount).copied().unwrap_or(0);
+        let list = match self.clients.remove(&(server.id, mount.to_owned())) {
+            Some(Ok(list)) => Some(list),
+            Some(Err(error)) => {
+                part.error = Some(truncate(&format!("listener list: {error}"), ERROR_CHARS));
+                None
+            }
+            None => None,
+        };
+        if server.relay_of.is_some() {
+            return (part, Some((count, list)));
+        }
+        let relays: Vec<(bool, bool, HashSet<IpAddr>)> = relays
+            .iter()
+            .map(|(relay, relay_mount)| {
+                let has_mount = matches!(
+                    self.statuses.get(&relay.id),
+                    Some(Ok(mounts)) if mounts.contains_key(relay_mount)
+                );
+                (
+                    has_mount,
+                    relay.relay_subtract_one,
+                    self.relay_addresses
+                        .get(&relay.id)
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+        (part, Some(without_relays(count, list.as_deref(), &relays)))
+    }
+}
+
+/// The listeners of a list as the sessions see them, and their addresses
+/// (for the country of the sessions opened, only).
+fn seen_of<'l>(
+    list: &'l [Client],
+    day_key: &[u8; 32],
+    now_ms: i64,
+) -> (Vec<Seen>, HashMap<u64, &'l str>) {
+    let seen = list
+        .iter()
+        .map(|client| Seen {
+            client_id: client.id,
+            key: sessions::listener_key(day_key, &client.address, &client.user_agent),
+            user_agent: truncate(&client.user_agent, USER_AGENT_CHARS),
+            connected_ms: now_ms
+                - i64::try_from(client.connected_s)
+                    .unwrap_or(i64::MAX / 2_000)
+                    .saturating_mul(1_000),
+        })
+        .collect();
+    let addresses = list
+        .iter()
+        .map(|client| (client.id, client.address.as_str()))
+        .collect();
+    (seen, addresses)
+}
+
+/// An output's listeners, from its servers' parts.
+fn output_listeners(target: Target, parts: Vec<ServerPart>, minute_ms: i64) -> OutputListeners {
+    let read_parts: Vec<&ServerPart> = parts
+        .iter()
+        .filter(|part| part.listeners.is_some())
+        .collect();
+    let listeners =
+        (!read_parts.is_empty()).then(|| read_parts.iter().filter_map(|part| part.listeners).sum());
+    let error = parts
+        .iter()
+        .filter_map(|part| {
+            let error = part.error.as_ref()?;
+            Some(if part.relay_of.is_some() {
+                format!("{}: {error}", part.name)
+            } else {
+                error.clone()
+            })
+        })
+        .collect::<Vec<_>>();
+    metrics::gauge!("heron_listeners", "output" => target.name.clone())
+        .set(listeners.map_or(f64::NAN, f64::from));
+    OutputListeners {
+        output_id: target.id,
+        name: target.name,
+        listeners,
+        sampled_at_unix_ms: minute_ms,
+        sessions: !read_parts.is_empty() && read_parts.iter().all(|part| part.sessions),
+        error: (!error.is_empty()).then(|| truncate(&error.join("; "), ERROR_CHARS)),
+        servers: parts,
+    }
+}
+
 /// The master's listeners of a mount, without its relays' connections:
 /// the count to keep, and the listeners left for sessions.
 pub(super) fn without_relays(
@@ -353,15 +483,18 @@ impl Collector {
                 relay_addresses.insert(relay.id, addresses(&relay.host, relay.port).await);
             }
         }
-        let mut statuses: BTreeMap<u64, Result<HashMap<String, u32>, ReadError>> = BTreeMap::new();
+        let mut found = Readings {
+            statuses: BTreeMap::new(),
+            clients: BTreeMap::new(),
+            relay_addresses,
+        };
         while let Some(Ok((id, status))) = requests.join_next().await {
             count_poll(status.is_ok());
-            statuses.insert(id, status);
+            found.statuses.insert(id, status);
         }
-        let mut clients: BTreeMap<(u64, String), Result<Vec<Client>, ReadError>> = BTreeMap::new();
         while let Some(Ok((key, list))) = lists.join_next().await {
             count_poll(list.is_ok());
-            clients.insert(key, list);
+            found.clients.insert(key, list);
         }
 
         let minute_ms = now_ms - now_ms.rem_euclid(MINUTE_MS);
@@ -381,80 +514,15 @@ impl Collector {
             let mut readings = vec![(*master, target.mount.clone())];
             readings.extend(relays.iter().map(|(relay, mount)| (*relay, mount.clone())));
             for (server, mount) in readings {
-                let mut part = ServerPart {
-                    server_id: server.id,
-                    name: server.name.clone(),
-                    relay_of: server.relay_of,
-                    listeners: None,
-                    sessions: false,
-                    error: None,
-                };
-                let status = match statuses.get(&server.id) {
-                    Some(Ok(mounts)) => mounts,
-                    Some(Err(error)) => {
-                        tracing::debug!(server = %server.name, %error, "cannot read the stream server");
-                        part.error = Some(truncate(&error.to_string(), ERROR_CHARS));
-                        parts.push(part);
-                        continue;
-                    }
-                    None => {
-                        parts.push(part);
-                        continue;
-                    }
-                };
-                let count = status.get(&mount).copied().unwrap_or(0);
-                let list = match clients.remove(&(server.id, mount.clone())) {
-                    Some(Ok(list)) => Some(list),
-                    Some(Err(error)) => {
-                        part.error =
-                            Some(truncate(&format!("listener list: {error}"), ERROR_CHARS));
-                        None
-                    }
-                    None => None,
-                };
-                let (count, list) = if server.relay_of.is_none() {
-                    let relays: Vec<(bool, bool, HashSet<IpAddr>)> = relays
-                        .iter()
-                        .map(|(relay, relay_mount)| {
-                            let has_mount = matches!(
-                                statuses.get(&relay.id),
-                                Some(Ok(mounts)) if mounts.contains_key(relay_mount)
-                            );
-                            (
-                                has_mount,
-                                relay.relay_subtract_one,
-                                relay_addresses.get(&relay.id).cloned().unwrap_or_default(),
-                            )
-                        })
-                        .collect();
-                    without_relays(count, list.as_deref(), &relays)
-                } else {
-                    (count, list)
+                let (mut part, read) = found.part(server, &mount, &relays);
+                let Some((count, list)) = read else {
+                    parts.push(part);
+                    continue;
                 };
                 part.listeners = Some(count);
                 if let Some(list) = list {
                     part.sessions = true;
-                    let seen = list
-                        .iter()
-                        .map(|client| Seen {
-                            client_id: client.id,
-                            key: sessions::listener_key(
-                                &day_key,
-                                &client.address,
-                                &client.user_agent,
-                            ),
-                            user_agent: truncate(&client.user_agent, USER_AGENT_CHARS),
-                            connected_ms: now_ms
-                                - i64::try_from(client.connected_s)
-                                    .unwrap_or(i64::MAX / 2_000)
-                                    .saturating_mul(1_000),
-                        })
-                        .collect::<Vec<_>>();
-                    // For the country of the sessions opened, only.
-                    let addresses: HashMap<u64, &str> = list
-                        .iter()
-                        .map(|client| (client.id, client.address.as_str()))
-                        .collect();
+                    let (seen, addresses) = seen_of(&list, &day_key, now_ms);
                     let touched = self
                         .track_sessions(
                             (target.id, server.id),
@@ -482,34 +550,7 @@ impl Collector {
                 .await?;
                 parts.push(part);
             }
-            let read_parts: Vec<&ServerPart> = parts
-                .iter()
-                .filter(|part| part.listeners.is_some())
-                .collect();
-            let listeners = (!read_parts.is_empty())
-                .then(|| read_parts.iter().filter_map(|part| part.listeners).sum());
-            let error = parts
-                .iter()
-                .filter_map(|part| {
-                    let error = part.error.as_ref()?;
-                    Some(if part.relay_of.is_some() {
-                        format!("{}: {error}", part.name)
-                    } else {
-                        error.clone()
-                    })
-                })
-                .collect::<Vec<_>>();
-            metrics::gauge!("heron_listeners", "output" => target.name.clone())
-                .set(listeners.map_or(f64::NAN, f64::from));
-            last.push(OutputListeners {
-                output_id: target.id,
-                name: target.name,
-                listeners,
-                sampled_at_unix_ms: minute_ms,
-                sessions: !read_parts.is_empty() && read_parts.iter().all(|part| part.sessions),
-                error: (!error.is_empty()).then(|| truncate(&error.join("; "), ERROR_CHARS)),
-                servers: parts,
-            });
+            last.push(output_listeners(target, parts, minute_ms));
         }
 
         for day in days {

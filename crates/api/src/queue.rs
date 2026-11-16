@@ -293,6 +293,16 @@ impl TrackRow {
     }
 }
 
+/// What a fill needs ([`QueueManager::need`]).
+struct Need {
+    missing: usize,
+    /// The match just closed, its winner's entry and track.
+    chained: Option<(u64, u64, u64)>,
+    /// A match's two tracks: one plays.
+    alternatives: Option<(u64, u64)>,
+    now: i64,
+}
+
 /// The queue entries of rotation's picks: an exact slot's track with its
 /// start time, a shortened medley as two spans of its file, the first
 /// linked to the second. Returns the tracks, the indices of those linked to
@@ -501,68 +511,15 @@ impl QueueManager {
 
     /// [`Self::fill`], `self.busy` held, with at least `at_least` picks.
     async fn fill_locked(&self, state: &PlayerState, at_least: usize) -> ApiResult<()> {
-        let settings: QueueSettings =
-            settings::load_for(&self.pool, self.station_id, QueueSettings::SETTINGS_NAME).await?;
-        // A cued fallback track gives way to anything queued.
-        let waiting = state
-            .waiting()
-            .filter(|entry| entry.track.source != PlaySource::Fallback)
-            .count();
-        let missing = (settings.min_queued as usize)
-            .saturating_sub(waiting)
-            .max(at_least);
-        if !settings.autofill {
+        let Some(Need {
+            missing,
+            chained,
+            alternatives,
+            now,
+        }) = self.need(state, at_least).await?
+        else {
             return Ok(());
-        }
-        // Every track: the winner of the match just closed carries the next
-        // vote, whatever the queue's depth.
-        let tried = self.chain_tried.lock().ok().and_then(|tried| *tried);
-        // A match that fails never stops the music: the queue fills as
-        // without one.
-        let chained = crate::matches::chained(&self.pool, self.station_id, state)
-            .await
-            .unwrap_or_else(|error| {
-                tracing::warn!(%error, "cannot read the last match: the queue fills without it");
-                None
-            })
-            .filter(|(id, _, _)| tried != Some(*id));
-        if missing == 0 && chained.is_none() {
-            return Ok(());
-        }
-        // Every track: nothing goes behind the match waiting or open.
-        let holds = crate::matches::holds_queue(&self.pool, self.station_id, state)
-            .await
-            .unwrap_or_else(|error| {
-                tracing::warn!(%error, "cannot read the match waiting: the queue fills without it");
-                false
-            });
-        if chained.is_none() && holds {
-            return Ok(());
-        }
-        let now = rotation::now_ms();
-        // A match's two tracks: one plays.
-        let alternatives = crate::matches::alternatives(&self.pool, self.station_id, state)
-            .await
-            .unwrap_or_else(|error| {
-                tracing::warn!(%error, "cannot read the match's tracks: the queue fills without it");
-                None
-            });
-        // A show on air (a top) queues its programme in its hours. A show
-        // that fails never stops the music: the queue fills as without it.
-        let (_, planned_end) = rotation::planned_starts(state, now, alternatives);
-        let shown = self
-            .fill_show(planned_end, missing)
-            .await
-            .unwrap_or_else(|error| {
-                tracing::warn!(%error, "cannot queue the top's show: the queue fills without it");
-                false
-            });
-        if shown {
-            return Ok(());
-        }
-        if self.idle() {
-            return Ok(());
-        }
+        };
         let mut library = rotation::load_library(&self.pool, self.station_id).await?;
         let history = rotation::load_history(&self.pool, self.station_id, &library, now).await?;
         let history = match self.stations.upgrade() {
@@ -688,20 +645,7 @@ impl QueueManager {
             }
             ahead.clear();
         }
-        // The choice by hand holds until its exact time, its fill followed
-        // to the end, unless rotation built fills of its own for it.
-        if kept.choice.as_ref().is_some_and(|choice| {
-            choice.exact_at_unix_ms <= now
-                || plan.as_ref().is_some_and(|plan| {
-                    plan.exact_at_unix_ms() == choice.exact_at_unix_ms && !plan.chosen_by_hand()
-                })
-        }) {
-            kept.choice = None;
-        }
-        kept.plan = plan;
-        if let Ok(mut slot) = self.kept.lock() {
-            *slot = kept;
-        }
+        self.keep(kept, plan, now);
         if picks.is_empty() && chained.is_some() {
             // Every track: the winner carries no match, and the queue is
             // deep enough.
@@ -722,10 +666,140 @@ impl QueueManager {
             self.rest();
             return Ok(());
         }
-        // Every track: the announcement of the match behind the winner goes
-        // over the winner's intro, right before it.
+        let jingle_entry = self
+            .queue_announcement(state, planned_match.as_ref())
+            .await?;
+        let ids: Vec<u64> = picks.iter().map(|pick| pick.track).collect();
+        let tracks = self.tracks(&ids, PlaySource::Rotation).await?;
+        let (tracks, linked, firsts) = entries(&picks, tracks)?;
+        let entry_ids = self.engine.enqueue(tracks, None, linked).await?;
+        self.awaiting(entry_ids.iter().copied().chain(jingle_entry));
+        self.queued_from(&ahead, &picks, &firsts, &entry_ids);
+        self.record_queued(
+            state,
+            &picks,
+            &firsts,
+            &entry_ids,
+            planned_match,
+            jingle_entry,
+        )
+        .await?;
+        rotation::save_counters(&self.pool, self.station_id, &counters).await?;
+        tracing::info!(
+            tracks = ids.len(),
+            "autofill: queued the tracks rotation picked"
+        );
+        metrics::counter!("heron_api_autofill_tracks_total").increment(ids.len() as u64);
+        let relaxed = picks
+            .iter()
+            .filter(|pick| pick.explanation.step > 0)
+            .count();
+        metrics::counter!("heron_api_rotation_relaxed_total").increment(relaxed as u64);
+        Ok(())
+    }
+
+    /// What a fill needs: the picks missing, the match just closed whose
+    /// winner carries the next vote, the match's two tracks and the time.
+    /// `None`: nothing to fill (autofill off, the queue deep enough, a match
+    /// holding it, a show queued, or rotation resting).
+    async fn need(&self, state: &PlayerState, at_least: usize) -> ApiResult<Option<Need>> {
+        let settings: QueueSettings =
+            settings::load_for(&self.pool, self.station_id, QueueSettings::SETTINGS_NAME).await?;
+        // A cued fallback track gives way to anything queued.
+        let waiting = state
+            .waiting()
+            .filter(|entry| entry.track.source != PlaySource::Fallback)
+            .count();
+        let missing = (settings.min_queued as usize)
+            .saturating_sub(waiting)
+            .max(at_least);
+        if !settings.autofill {
+            return Ok(None);
+        }
+        // Every track: the winner of the match just closed carries the next
+        // vote, whatever the queue's depth.
+        let tried = self.chain_tried.lock().ok().and_then(|tried| *tried);
+        // A match that fails never stops the music: the queue fills as
+        // without one.
+        let chained = crate::matches::chained(&self.pool, self.station_id, state)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "cannot read the last match: the queue fills without it");
+                None
+            })
+            .filter(|(id, _, _)| tried != Some(*id));
+        if missing == 0 && chained.is_none() {
+            return Ok(None);
+        }
+        // Every track: nothing goes behind the match waiting or open.
+        let holds = crate::matches::holds_queue(&self.pool, self.station_id, state)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "cannot read the match waiting: the queue fills without it");
+                false
+            });
+        if chained.is_none() && holds {
+            return Ok(None);
+        }
+        let now = rotation::now_ms();
+        // A match's two tracks: one plays.
+        let alternatives = crate::matches::alternatives(&self.pool, self.station_id, state)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "cannot read the match's tracks: the queue fills without it");
+                None
+            });
+        // A show on air (a top) queues its programme in its hours. A show
+        // that fails never stops the music: the queue fills as without it.
+        let (_, planned_end) = rotation::planned_starts(state, now, alternatives);
+        let shown = self
+            .fill_show(planned_end, missing)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "cannot queue the top's show: the queue fills without it");
+                false
+            });
+        if shown {
+            return Ok(None);
+        }
+        if self.idle() {
+            return Ok(None);
+        }
+        Ok(Some(Need {
+            missing,
+            chained,
+            alternatives,
+            now,
+        }))
+    }
+
+    /// Writes back the fill kept, with the plan. The choice by hand holds
+    /// until its exact time, its fill followed to the end, unless rotation
+    /// built fills of its own for it.
+    fn keep(&self, mut kept: Kept, plan: Option<heron_rotation::Plan>, now: i64) {
+        if kept.choice.as_ref().is_some_and(|choice| {
+            choice.exact_at_unix_ms <= now
+                || plan.as_ref().is_some_and(|plan| {
+                    plan.exact_at_unix_ms() == choice.exact_at_unix_ms && !plan.chosen_by_hand()
+                })
+        }) {
+            kept.choice = None;
+        }
+        kept.plan = plan;
+        if let Ok(mut slot) = self.kept.lock() {
+            *slot = kept;
+        }
+    }
+
+    /// Queues the announcement of the match behind the winner: every
+    /// track, over the winner's intro, right before it. Returns its entry.
+    async fn queue_announcement(
+        &self,
+        state: &PlayerState,
+        planned_match: Option<&crate::matches::Planned>,
+    ) -> ApiResult<Option<u64>> {
         let mut jingle_entry = None;
-        if let Some(planned) = &planned_match
+        if let Some(planned) = planned_match
             && let (Some(announcement), Some(vote_entry)) =
                 (&planned.announce_before, planned.vote_entry)
             && let Some(position) = state
@@ -757,16 +831,23 @@ impl QueueManager {
                 Err(error) => tracing::warn!(%error, "cannot queue the match's announcement"),
             }
         }
-        let ids: Vec<u64> = picks.iter().map(|pick| pick.track).collect();
-        let tracks = self.tracks(&ids, PlaySource::Rotation).await?;
-        let (tracks, linked, firsts) = entries(&picks, tracks)?;
-        let entry_ids = self.engine.enqueue(tracks, None, linked).await?;
-        self.awaiting(entry_ids.iter().copied().chain(jingle_entry));
-        self.queued_from(&ahead, &picks, &firsts, &entry_ids);
+        Ok(jingle_entry)
+    }
+
+    /// Records each pick queued in the rotation log, and the match queued.
+    async fn record_queued(
+        &self,
+        state: &PlayerState,
+        picks: &[heron_rotation::Pick],
+        firsts: &[usize],
+        entry_ids: &[u64],
+        planned_match: Option<crate::matches::Planned>,
+        jingle_entry: Option<u64>,
+    ) -> ApiResult<()> {
         let mut log_ids = Vec::new();
         // Each pick's first entry: a shortened medley queues two.
         let mut pick_entries = Vec::new();
-        for (pick, index) in picks.iter().zip(firsts) {
+        for (pick, &index) in picks.iter().zip(firsts) {
             let Some(entry_id) = entry_ids.get(index) else {
                 break;
             };
@@ -780,7 +861,7 @@ impl QueueManager {
                 &self.pool,
                 self.station_id,
                 &planned,
-                &picks,
+                picks,
                 state.engine_started_at_unix_ms,
                 &pick_entries,
                 &log_ids,
@@ -791,17 +872,6 @@ impl QueueManager {
             // Its tracks stay queued, as ordinary tracks.
             tracing::warn!(%error, "cannot record the match queued");
         }
-        rotation::save_counters(&self.pool, self.station_id, &counters).await?;
-        tracing::info!(
-            tracks = ids.len(),
-            "autofill: queued the tracks rotation picked"
-        );
-        metrics::counter!("heron_api_autofill_tracks_total").increment(ids.len() as u64);
-        let relaxed = picks
-            .iter()
-            .filter(|pick| pick.explanation.step > 0)
-            .count();
-        metrics::counter!("heron_api_rotation_relaxed_total").increment(relaxed as u64);
         Ok(())
     }
 

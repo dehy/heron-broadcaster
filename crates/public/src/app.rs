@@ -27,11 +27,7 @@ use crate::actions::{self, Delivery};
 
 /// The script of the shows' pages and small widgets, its texts put in.
 static WIDGET_JS: LazyLock<String> = LazyLock::new(|| {
-    include_str!("widget.js").replacen(
-        TEXT_MARKER,
-        include_str!("widget-text.json").trim_end(),
-        1,
-    )
+    include_str!("widget.js").replacen(TEXT_MARKER, include_str!("widget-text.json").trim_end(), 1)
 });
 /// Where the widget's texts go in its script.
 const TEXT_MARKER: &str = "/* TEXT */ {}";

@@ -475,6 +475,15 @@ impl ListContext {
     ) -> ApiResult<()> {
         // Tracks in the trash are listed by `/library/trash`.
         query.push(" WHERE t.deleted_at IS NULL");
+        self.push_where_from(query, params);
+        query.push(self.filter_condition(params.filter));
+        push_labels(query, params)?;
+        self.push_values(query, params);
+        Ok(())
+    }
+
+    /// The words searched, and the category or station the tracks are in.
+    fn push_where_from(&self, query: &mut QueryBuilder<sqlx::MySql>, params: &TrackQuery) {
         for word in params.q.iter().flat_map(|q| q.split_whitespace()).take(10) {
             let pattern = like_pattern(word);
             // Paths compare as bytes: search case- and accent-insensitively.
@@ -523,8 +532,12 @@ impl ListContext {
                 query.push("))");
             }
         }
+    }
+
+    /// The condition of a status filter.
+    fn filter_condition(&self, filter: Option<TrackFilter>) -> &'static str {
         let on_station = self.on_station_id.is_some();
-        let condition = match params.filter {
+        match filter {
             None => "",
             Some(TrackFilter::Playable) if on_station => {
                 " AND t.enabled AND COALESCE(sr.enabled, TRUE) AND t.missing_since IS NULL
@@ -554,41 +567,11 @@ impl ListContext {
                                   WHERE tm.track_id = t.id AND tm.hook_in_ms IS NOT NULL
                                     AND tm.hook_out_ms IS NOT NULL)"
             }
-        };
-        query.push(condition);
-
-        let labels = |name: &str, ids: &Option<String>| -> ApiResult<Vec<u64>> {
-            ids.iter()
-                .flat_map(|ids| ids.split(','))
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-                .map(|id| {
-                    id.parse()
-                        .map_err(|_| ApiError::BadRequest(format!("{name}: {id:?} is not an ID")))
-                })
-                .collect()
-        };
-        for id in labels("labels_all", &params.labels_all)? {
-            query.push(" AND EXISTS (SELECT 1 FROM track_labels tl WHERE tl.track_id = t.id AND tl.label_id = ");
-            query.push_bind(id).push(")");
         }
-        for (ids, negate) in [
-            (labels("labels_any", &params.labels_any)?, ""),
-            (labels("labels_none", &params.labels_none)?, " NOT"),
-        ] {
-            if ids.is_empty() {
-                continue;
-            }
-            query.push(format!(
-                " AND{negate} EXISTS (SELECT 1 FROM track_labels tl WHERE tl.track_id = t.id AND tl.label_id IN ("
-            ));
-            let mut separated = query.separated(", ");
-            for id in ids {
-                separated.push_bind(id);
-            }
-            query.push("))");
-        }
+    }
 
+    /// Played, added, moved, tags, analysis, ratio, votes and dayparts.
+    fn push_values(&self, query: &mut QueryBuilder<sqlx::MySql>, params: &TrackQuery) {
         if params.never_played == Some(true) {
             query.push(" AND h.track_id IS NULL");
         }
@@ -616,6 +599,12 @@ impl ListContext {
             self.push_era(query);
             query.push(") = ").push_bind(era.clone());
         }
+        self.push_ranges(query, params);
+    }
+
+    /// Mood, sound code, genre, and the ranges of year, BPM, ratio, likes
+    /// and votes; a track's own dayparts.
+    fn push_ranges(&self, query: &mut QueryBuilder<sqlx::MySql>, params: &TrackQuery) {
         for (column, value) in [
             ("p.mood", &params.mood),
             ("p.sound_code", &params.sound_code),
@@ -627,31 +616,37 @@ impl ListContext {
                     .push_bind(value.clone());
             }
         }
-        if let Some(year) = params.year_min {
-            query
-                .push(" AND COALESCE(mb.first_release_year, t.year) >= ")
-                .push_bind(year);
+        for (column, comparison, year) in [
+            (
+                "COALESCE(mb.first_release_year, t.year)",
+                ">=",
+                params.year_min,
+            ),
+            (
+                "COALESCE(mb.first_release_year, t.year)",
+                "<=",
+                params.year_max,
+            ),
+        ] {
+            if let Some(year) = year {
+                query
+                    .push(format!(" AND {column} {comparison} "))
+                    .push_bind(year);
+            }
         }
-        if let Some(year) = params.year_max {
-            query
-                .push(" AND COALESCE(mb.first_release_year, t.year) <= ")
-                .push_bind(year);
+        for (comparison, bpm) in [(">=", params.bpm_min), ("<=", params.bpm_max)] {
+            if let Some(bpm) = bpm {
+                query
+                    .push(format!(" AND COALESCE(p.bpm, a.bpm) {comparison} "))
+                    .push_bind(bpm);
+            }
         }
-        if let Some(bpm) = params.bpm_min {
-            query.push(" AND COALESCE(p.bpm, a.bpm) >= ").push_bind(bpm);
-        }
-        if let Some(bpm) = params.bpm_max {
-            query.push(" AND COALESCE(p.bpm, a.bpm) <= ").push_bind(bpm);
-        }
-        if let Some(ratio) = params.ratio_min {
-            query
-                .push(format!(" AND {} >= ", self.effective_ratio()))
-                .push_bind(ratio);
-        }
-        if let Some(ratio) = params.ratio_max {
-            query
-                .push(format!(" AND {} <= ", self.effective_ratio()))
-                .push_bind(ratio);
+        for (comparison, ratio) in [(">=", params.ratio_min), ("<=", params.ratio_max)] {
+            if let Some(ratio) = ratio {
+                query
+                    .push(format!(" AND {} {comparison} ", self.effective_ratio()))
+                    .push_bind(ratio);
+            }
         }
         for (share, comparison) in [(params.liked_min, ">="), (params.liked_max, "<=")] {
             if let Some(share) = share {
@@ -675,9 +670,50 @@ impl ListContext {
                 " AND p.dayparts IS NULL AND p.daypart_days IS NULL"
             });
         }
-        Ok(())
     }
+}
 
+/// The label IDs of a comma-separated parameter.
+fn label_ids(name: &str, ids: &Option<String>) -> ApiResult<Vec<u64>> {
+    ids.iter()
+        .flat_map(|ids| ids.split(','))
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(|id| {
+            id.parse()
+                .map_err(|_| ApiError::BadRequest(format!("{name}: {id:?} is not an ID")))
+        })
+        .collect()
+}
+
+/// The labels the tracks have all, any or none of.
+fn push_labels(query: &mut QueryBuilder<sqlx::MySql>, params: &TrackQuery) -> ApiResult<()> {
+    for id in label_ids("labels_all", &params.labels_all)? {
+        query.push(
+            " AND EXISTS (SELECT 1 FROM track_labels tl WHERE tl.track_id = t.id AND tl.label_id = ",
+        );
+        query.push_bind(id).push(")");
+    }
+    for (ids, negate) in [
+        (label_ids("labels_any", &params.labels_any)?, ""),
+        (label_ids("labels_none", &params.labels_none)?, " NOT"),
+    ] {
+        if ids.is_empty() {
+            continue;
+        }
+        query.push(format!(
+            " AND{negate} EXISTS (SELECT 1 FROM track_labels tl WHERE tl.track_id = t.id AND tl.label_id IN ("
+        ));
+        let mut separated = query.separated(", ");
+        for id in ids {
+            separated.push_bind(id);
+        }
+        query.push("))");
+    }
+    Ok(())
+}
+
+impl ListContext {
     /// `ORDER BY` of `sort`. Tracks without the value come last.
     fn push_order(&self, query: &mut QueryBuilder<sqlx::MySql>, sort: TrackSort, desc: bool) {
         let direction = |ascending: bool| if ascending != desc { "" } else { " DESC" };

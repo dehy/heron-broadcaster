@@ -330,6 +330,73 @@ fn check_public_url(url: Option<String>) -> ApiResult<Option<String>> {
     Ok(Some(url))
 }
 
+/// A relay of `master`: a master of the station that is no relay itself,
+/// for a server (`id`) no output streams to and that has no relays.
+async fn check_relay(
+    tx: &mut Transaction<'_, MySql>,
+    station: &Station,
+    id: Option<u64>,
+    master: u64,
+) -> ApiResult<()> {
+    if Some(master) == id {
+        return Err(ApiError::Invalid("a server cannot relay itself".to_owned()));
+    }
+    let row: Option<(u64, Option<u64>)> =
+        sqlx::query_as("SELECT station_id, relay_of FROM stream_servers WHERE id = ?")
+            .bind(master)
+            .fetch_optional(&mut **tx)
+            .await?;
+    match row {
+        Some((station_id, None)) if station_id == station.id() => {}
+        Some((station_id, Some(_))) if station_id == station.id() => {
+            return Err(ApiError::Invalid(
+                "a relay's master cannot be a relay itself".to_owned(),
+            ));
+        }
+        _ => {
+            return Err(ApiError::Invalid(format!(
+                "no stream server {master} on this station"
+            )));
+        }
+    }
+    let Some(id) = id else {
+        return Ok(());
+    };
+    let outputs = users_of(tx, id).await?;
+    if !outputs.is_empty() {
+        return Err(ApiError::Conflict(format!(
+            "outputs stream to this server, so it cannot be a relay: {}",
+            names(&outputs)
+        )));
+    }
+    let relays = relays_of(tx, id).await?;
+    if !relays.is_empty() {
+        return Err(ApiError::Conflict(format!(
+            "this server has relays, so it cannot be a relay: {}",
+            names(&relays)
+        )));
+    }
+    Ok(())
+}
+
+/// A relay's mounts: valid, each listed once.
+fn check_relay_mounts(mounts: &[RelayMount]) -> ApiResult<()> {
+    let mut seen = std::collections::HashSet::new();
+    for relayed in mounts {
+        check_mount(&relayed.mount)?;
+        if let Some(other) = &relayed.relay_mount {
+            check_mount(other)?;
+        }
+        if !seen.insert(relayed.mount.as_str()) {
+            return Err(ApiError::Invalid(format!(
+                "the mount {} is listed twice",
+                relayed.mount
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Checks an input against what is stored, and gives the row to write.
 async fn checked(
     tx: &mut Transaction<'_, MySql>,
@@ -369,57 +436,9 @@ async fn checked(
         stored.and_then(|s| s.admin_password.clone()),
     );
     if let Some(master) = input.relay_of {
-        if Some(master) == id {
-            return Err(ApiError::Invalid("a server cannot relay itself".to_owned()));
-        }
-        let row: Option<(u64, Option<u64>)> =
-            sqlx::query_as("SELECT station_id, relay_of FROM stream_servers WHERE id = ?")
-                .bind(master)
-                .fetch_optional(&mut **tx)
-                .await?;
-        match row {
-            Some((station_id, None)) if station_id == station.id() => {}
-            Some((station_id, Some(_))) if station_id == station.id() => {
-                return Err(ApiError::Invalid(
-                    "a relay's master cannot be a relay itself".to_owned(),
-                ));
-            }
-            _ => {
-                return Err(ApiError::Invalid(format!(
-                    "no stream server {master} on this station"
-                )));
-            }
-        }
-        if let Some(id) = id {
-            let outputs = users_of(tx, id).await?;
-            if !outputs.is_empty() {
-                return Err(ApiError::Conflict(format!(
-                    "outputs stream to this server, so it cannot be a relay: {}",
-                    names(&outputs)
-                )));
-            }
-            let relays = relays_of(tx, id).await?;
-            if !relays.is_empty() {
-                return Err(ApiError::Conflict(format!(
-                    "this server has relays, so it cannot be a relay: {}",
-                    names(&relays)
-                )));
-            }
-        }
+        check_relay(tx, station, id, master).await?;
         if let Some(mounts) = &input.relay_mounts {
-            let mut seen = std::collections::HashSet::new();
-            for relayed in mounts {
-                check_mount(&relayed.mount)?;
-                if let Some(other) = &relayed.relay_mount {
-                    check_mount(other)?;
-                }
-                if !seen.insert(relayed.mount.as_str()) {
-                    return Err(ApiError::Invalid(format!(
-                        "the mount {} is listed twice",
-                        relayed.mount
-                    )));
-                }
-            }
+            check_relay_mounts(mounts)?;
         }
     } else {
         if input.tls {
