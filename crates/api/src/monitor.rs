@@ -209,8 +209,10 @@ impl Listener {
         };
         self.samples.clear();
         self.samples.extend(
-            pcm.chunks_exact(2)
-                .map(|bytes| i16::from_le_bytes([bytes[0], bytes[1]])),
+            pcm.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|bytes| i16::from_le_bytes(*bytes)),
         );
         // A short chunk would be refused by Opus: pad it with silence.
         self.samples.resize(CHUNK_FRAMES * usize::from(CHANNELS), 0);

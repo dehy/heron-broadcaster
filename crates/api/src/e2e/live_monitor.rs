@@ -61,8 +61,10 @@ async fn the_live_monitor_streams_both_taps() {
         if let tungstenite::Message::Binary(audio) = next(&mut socket).await {
             assert_eq!(audio.len(), 3_840);
             loud |= audio
-                .chunks_exact(2)
-                .any(|bytes| i16::from_le_bytes([bytes[0], bytes[1]]).unsigned_abs() > 1_000);
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .any(|bytes| i16::from_le_bytes(*bytes).unsigned_abs() > 1_000);
             chunks += 1;
         }
     }

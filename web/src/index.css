@@ -233,6 +233,13 @@ code,
   overflow: visible;
 }
 
+/* Out of the button's flow, so the headphones stay centred. */
+.monitor-notes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
 .monitor-notes span {
   position: absolute;
   top: 0.1rem;

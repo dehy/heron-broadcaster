@@ -352,11 +352,10 @@ impl EngineLink {
     /// The engine's stream is read once for all of them, from the first
     /// to the last.
     pub fn listen_monitor(self: &Arc<Self>, max: usize) -> Option<MonitorListener> {
-        self.monitor_listeners
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                (count < max).then_some(count + 1)
-            })
-            .ok()?;
+        if self.monitor_listeners.fetch_add(1, Ordering::AcqRel) >= max {
+            self.monitor_listeners.fetch_sub(1, Ordering::AcqRel);
+            return None;
+        }
         let listener = MonitorListener {
             link: Arc::clone(self),
             feed: self.monitor.subscribe(),
