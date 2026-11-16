@@ -247,11 +247,19 @@ pub async fn load_library(pool: &MySqlPool, station_id: u64) -> ApiResult<Librar
     .await?;
     let mut restrictions = Vec::with_capacity(rows.len());
     for (id, kind, target_id, rule) in rows {
-        let rule: Rule = serde_json::from_str(&rule)
-            .map_err(|error| ApiError::Internal(format!("restriction {id}: {error}")))?;
-        let target = target(&kind, target_id)
-            .ok_or_else(|| ApiError::Internal(format!("restriction {id}: target {kind}")))?;
-        restrictions.push(Restriction { id, target, rule });
+        let Some(target) = target(&kind, target_id) else {
+            tracing::warn!(
+                restriction = id,
+                target = kind,
+                "a restriction's target cannot be read: left out"
+            );
+            continue;
+        };
+        restrictions.push(Restriction {
+            id,
+            target,
+            rule: stored_rule(id, &rule),
+        });
     }
     let similar: Vec<(u64, u64)> =
         sqlx::query_as("SELECT artist_id, similar_id FROM artist_similar")
@@ -329,6 +337,22 @@ pub async fn load_library(pool: &MySqlPool, station_id: u64) -> ApiResult<Librar
 /// A medley whose file lasts longer or shorter than its layout by more
 /// than this has a layout that is not its file's (as the web page says).
 const LAYOUT_TOLERANCE_MS: u32 = 250;
+
+/// A restriction's rule as stored. One that cannot be read (written by a
+/// newer version, a restore, an import) bans its target at all times:
+/// failing would stop the music, and ignoring it could play what it
+/// forbids, rights included (docs/rotation.md#restrictions).
+fn stored_rule(id: u64, json: &str) -> Rule {
+    serde_json::from_str(json).unwrap_or_else(|error| {
+        tracing::warn!(restriction = id, %error, "a restriction's rule cannot be read: its target is banned at all times");
+        Rule::Daypart {
+            mode: heron_rotation::Mode::Ban,
+            days: (1..=7).collect(),
+            start_hour: 0,
+            end_hour: 24,
+        }
+    })
+}
 
 /// A slot's exact time as stored; invalid JSON counts as none.
 pub fn exact_time(json: Option<&str>) -> Option<ExactTime> {
@@ -1072,6 +1096,25 @@ async fn simulate(
         simulation,
         tracks,
     }))
+}
+
+#[cfg(test)]
+mod stored_tests {
+    use super::*;
+
+    #[test]
+    fn an_unreadable_restriction_bans_its_target_at_all_times() {
+        let readable = r#"{"kind": "not_after", "category_id": 4}"#;
+        assert_eq!(stored_rule(1, readable), Rule::NotAfter { category_id: 4 });
+        let never = Rule::Daypart {
+            mode: heron_rotation::Mode::Ban,
+            days: vec![1, 2, 3, 4, 5, 6, 7],
+            start_hour: 0,
+            end_hour: 24,
+        };
+        assert_eq!(stored_rule(2, r#"{"kind": "no_such_rule"}"#), never);
+        assert_eq!(stored_rule(3, "not json"), never);
+    }
 }
 
 #[cfg(test)]

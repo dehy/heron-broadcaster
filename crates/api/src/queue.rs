@@ -530,7 +530,7 @@ impl QueueManager {
             return Ok(());
         }
         // Every track: nothing goes behind the match waiting or open.
-        let holds = crate::matches::holds_queue(&self.pool, self.station_id)
+        let holds = crate::matches::holds_queue(&self.pool, self.station_id, state)
             .await
             .unwrap_or_else(|error| {
                 tracing::warn!(%error, "cannot read the match waiting: the queue fills without it");
@@ -1161,12 +1161,12 @@ impl QueueManager {
         if self.idle() {
             return Err(conflict("rotation could pick nothing a moment ago"));
         }
-        if crate::matches::holds_queue(&self.pool, self.station_id).await? {
+        let state = self.engine.fetch_state().await?;
+        if crate::matches::holds_queue(&self.pool, self.station_id, &state).await? {
             return Err(conflict(
                 "a match is waiting or open: nothing goes behind it",
             ));
         }
-        let state = self.engine.fetch_state().await?;
         let queue = &state.queue;
         let rows = self.picks_of(&state).await?;
         let kept_of = |entry: u64| {

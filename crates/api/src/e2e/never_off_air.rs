@@ -938,7 +938,6 @@ async fn never_off_air_with_a_top30_item_made_unplayable() {
 /// Scenario 3a: a match stuck in `queued`, its loop not running: the
 /// vote's track, A and B play, and the queue must not wait for it.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "off air: #221 a match stuck queued holds the queue for good (holds_queue)"]
 async fn never_off_air_with_a_match_stuck_queued() {
     let Some(mut station) = Station::start().await else {
         return;
@@ -960,7 +959,6 @@ async fn never_off_air_with_a_match_stuck_queued() {
 /// Scenario 3b: a match stuck in `open` (status forced in the database),
 /// its loop not running: its tracks play by themselves.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "off air: #221 a match stuck open holds the queue for good (holds_queue)"]
 async fn never_off_air_with_a_match_stuck_open() {
     let Some(mut station) = Station::start().await else {
         return;
@@ -993,7 +991,6 @@ async fn never_off_air_with_a_match_stuck_open() {
 /// matches: the music goes on without the match, and an operator can still
 /// skip and clear.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "off air: #221 a match table error refuses the operator's skip and clear (matches::pending `?`)"]
 async fn never_off_air_with_the_matches_table_failing() {
     let Some(mut station) = Station::start().await else {
         return;
@@ -1051,7 +1048,6 @@ async fn never_off_air_with_the_matches_table_failing() {
 /// unknown field, written straight into the database (a restore, an
 /// import, a downgrade): each in turn, the queue must still fill.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "off air: #221 one bad restriction or settings group fails every fill"]
 async fn never_off_air_with_bad_stored_data() {
     let Some(station) = Station::start().await else {
         return;
@@ -1305,7 +1301,6 @@ async fn never_off_air_with_a_match_s_track_disabled_or_deleted() {
 /// while its vote is open: the queue must not stay empty until the vote
 /// closes, and the vote's track ending must not be silence.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "off air: #221 a match whose two tracks are gone holds an empty queue until its vote closes"]
 async fn never_off_air_with_both_of_a_match_s_tracks_gone() {
     let Some(mut station) = Station::start().await else {
         return;

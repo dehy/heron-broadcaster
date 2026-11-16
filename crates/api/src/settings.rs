@@ -347,11 +347,82 @@ fn per_station(name: &str) {
 }
 
 fn parse<T: DeserializeOwned + Default>(name: &str, value: Option<String>) -> ApiResult<T> {
-    match value {
-        None => Ok(T::default()),
-        Some(json) => serde_json::from_str(&json)
-            .map_err(|error| ApiError::Internal(format!("stored {name} settings: {error}"))),
+    Ok(match value {
+        None => T::default(),
+        Some(json) => read_stored(name, &json),
+    })
+}
+
+/// Parts of stored settings left out before giving up on them.
+const MAX_REPAIRS: usize = 32;
+
+/// Reads a stored settings group, never failing: the queue and the engine
+/// read them all the time, and settings written by another version (a
+/// restore, an import, a downgrade) must not stop the music
+/// (docs/audio-engine.md#failure-handling). What cannot be read (an
+/// unknown field, a wrong value) is left out and takes its default; the
+/// rest is kept. A warning names what was left out.
+fn read_stored<T: DeserializeOwned + Default>(name: &str, json: &str) -> T {
+    let mut value: serde_json::Value = match serde_json::from_str(json) {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(settings = name, %error, "stored settings are not JSON: using the defaults");
+            return T::default();
+        }
+    };
+    let mut left_out = Vec::new();
+    for _ in 0..MAX_REPAIRS {
+        let error = match serde_path_to_error::deserialize::<_, T>(&value) {
+            Ok(settings) => {
+                if !left_out.is_empty() {
+                    tracing::warn!(
+                        settings = name,
+                        left_out = %left_out.join(", "),
+                        "stored settings could not all be read: the rest is kept"
+                    );
+                }
+                return settings;
+            }
+            Err(error) => error,
+        };
+        // The path names the field that cannot be read, an unknown one too.
+        let path: Vec<String> = error
+            .path()
+            .iter()
+            .filter_map(|segment| match segment {
+                serde_path_to_error::Segment::Map { key } => Some(key.clone()),
+                _ => None,
+            })
+            .collect();
+        let removed = !path.is_empty() && remove_at(&mut value, &path);
+        if !removed {
+            tracing::warn!(settings = name, error = %error, "stored settings cannot be read: using the defaults");
+            return T::default();
+        }
+        left_out.push(format!("{} ({})", path.join("."), error.inner()));
     }
+    tracing::warn!(
+        settings = name,
+        "stored settings cannot be read: using the defaults"
+    );
+    T::default()
+}
+
+/// Takes the value at `path` (object keys) out of `value`.
+fn remove_at(value: &mut serde_json::Value, path: &[String]) -> bool {
+    let Some((last, parents)) = path.split_last() else {
+        return false;
+    };
+    let mut current = value;
+    for key in parents {
+        match current.get_mut(key) {
+            Some(next) => current = next,
+            None => return false,
+        }
+    }
+    current
+        .as_object_mut()
+        .is_some_and(|object| object.remove(last).is_some())
 }
 
 /// Reads a station's settings group; its defaults when it was never saved.
@@ -847,6 +918,61 @@ async fn put_statistics(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stored_settings_keep_what_can_be_read() {
+        // An unknown field: left out, the rest kept.
+        let queue: QueueSettings = read_stored(
+            "queue",
+            r#"{"autofill": false, "min_queued": 7, "unknown_field": 1}"#,
+        );
+        assert_eq!(
+            queue,
+            QueueSettings {
+                autofill: false,
+                min_queued: 7
+            }
+        );
+        // A wrong value: that field takes its default, the rest kept.
+        let queue: QueueSettings =
+            read_stored("queue", r#"{"autofill": false, "min_queued": "seven"}"#);
+        assert!(!queue.autofill);
+        assert_eq!(queue.min_queued, QueueSettings::default().min_queued);
+        // Several, at any depth.
+        #[derive(Debug, Default, PartialEq, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        struct Inner {
+            level: u32,
+            on: bool,
+        }
+        #[derive(Debug, Default, PartialEq, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        struct Outer {
+            name: String,
+            inner: Inner,
+        }
+        let outer: Outer = read_stored(
+            "outer",
+            r#"{"name": "kept", "later": 1, "inner": {"level": 3, "on": "yes", "x": {}}}"#,
+        );
+        assert_eq!(
+            outer,
+            Outer {
+                name: "kept".to_owned(),
+                inner: Inner {
+                    level: 3,
+                    on: false
+                }
+            }
+        );
+        // Not even JSON: the defaults.
+        let queue: QueueSettings = read_stored("queue", "{");
+        assert_eq!(queue, QueueSettings::default());
+        assert_eq!(
+            parse::<QueueSettings>("queue", Some(r#"[1, 2]"#.to_owned())).unwrap(),
+            QueueSettings::default()
+        );
+    }
 
     #[test]
     fn library_patch_tells_null_from_missing() {
