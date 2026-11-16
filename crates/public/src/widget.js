@@ -22,395 +22,19 @@
   // The show's key: its module's (`match`), or a top's (`top-4`; `top30`
   // is the first top).
   var key = match[3];
-  var module = /^top-[0-9]+$/.test(key) ? "top30" : key;
-  var mode = script.getAttribute("data-mode") === "page" ? "page" : "widget";
+  var module = /^top-\d+$/.test(key) ? "top30" : key;
+  var mode = script.dataset.mode === "page" ? "page" : "widget";
 
-  var TEXT = {
-    en: {
-      names: { dedications: "Dedications", match: "The match", top30: "Top", likes: "Do you like it?", featured_artist: "Featured artist" },
-      featured_artist: { week: "Artist of the week", day: "Artist of the day", next: "Next at {hour}", none: "No featured artist right now." },
-      until: "Until {hour}",
-      likes: {
-        sub: "Only the track playing can be voted on",
-        like: "I like it",
-        dislike: "I don't like it",
-        nothing: "Nothing to vote on right now.",
-        sending: "Sending…",
-        thanks: "Thank you! You can change your mind while it plays.",
-        refused: "Your vote could not be counted. Try again.",
-        closed: "This track has ended: the vote is closed.",
-      },
-      open: "Open now",
-      closed: "{name}: closed",
-      back: "Back {day} at {hour}.",
-      nowPlaying: "Now playing",
-      sep: " to ",
-      dedications: {
-        remaining: "{n} more requests possible",
-        full: "Full for today",
-        track: "The track",
-        search: "A title, an artist…",
-        searchMore: "Type at least 2 letters.",
-        noResult: "No track found.",
-        from: "Your first name",
-        to: "For whom?",
-        message: "Your message",
-        send: "Send my dedication",
-        sending: "Sending…",
-        pick: "Choose a track first.",
-        note: "Your message is read before it is shown. {per} per range. First names and messages are deleted after {days} days.",
-        perOne: "One request",
-        perMany: "{n} requests",
-        tooMany: "You have already sent your request for this range.",
-        fullError: "Full for today: no more requests in this range.",
-        closedError: "Dedications have just closed.",
-        failed: "Your request could not be sent. Try again.",
-        yours: "Your dedication",
-        said: "{who}: “{message}”",
-        forFrom: "For {to}, from {from}",
-        sent: "Sent",
-        accepted: "Accepted",
-        onAirAt: "On air around {hour}",
-        played: "Played at {hour}",
-        keepOpen: "Keep this page open: it updates itself.",
-        refused: "Not this time",
-        reasons: {
-          just_played: "This track has just played. Try another one!",
-          unavailable: "This track cannot play now. Try another one!",
-          closed: "The dedications closed before it could be chosen.",
-          removed: "It could not be played in the end.",
-        },
-        followLink: "Follow link:",
-        another: "Send another one",
-        today: "Today's dedications",
-        playedTag: "played",
-        upcoming: "coming up",
-        onlyAccepted: "Only accepted dedications are shown.",
-      },
-      match: {
-        sub: "Choose the next track",
-        question: "Which track next?",
-        versus: "VS",
-        votes: "{n} votes",
-        oneVote: "1 vote",
-        mine: "Your choice",
-        change: "You can change your mind until the end.",
-        sending: "Sending…",
-        refused: "Your vote could not be counted. Try again.",
-        closed: "The vote is closed: the result on air!",
-        next: "The next vote is coming in a few tracks.",
-        won: "{title} won with {percent}",
-        last: "Last match",
-        today: "Today's results",
-        against: "against {track}",
-        tie: "tie, least recently played",
-        noVotes: "no vote",
-      },
-      top30: {
-        live: "Live: the places to come are revealed on air",
-        week: "Chart of {date}",
-        hidden: "? ? ?",
-        answer: "The answer on air",
-        onAir: "ON AIR",
-        isNew: "NEW",
-        reentry: "RE-ENTRY",
-        weeks: "{n} charts",
-        newRelease: "New release",
-        none: "No chart yet.",
-        votesFor: "Your vote counts for {name}, {day}.",
-      },
-    },
-    fr: {
-      names: { dedications: "Dédicaces", match: "Le match", top30: "Top", likes: "Vous aimez ?", featured_artist: "L'artiste à l'honneur" },
-      featured_artist: { week: "L'artiste de la semaine", day: "L'artiste du jour", next: "Prochain passage à {hour}", none: "Pas d'artiste à l'honneur pour le moment." },
-      until: "Jusqu'à {hour}",
-      likes: {
-        sub: "On ne vote que pour le titre en cours",
-        like: "J'aime",
-        dislike: "J'aime pas",
-        nothing: "Rien à voter pour l'instant.",
-        sending: "Envoi…",
-        thanks: "Merci ! Vous pouvez changer d'avis tant que le titre passe.",
-        refused: "Votre vote n'a pas pu être compté. Réessayez.",
-        closed: "Ce titre est fini : vote fermé.",
-      },
-      open: "Ouvert en ce moment",
-      closed: "{name} : fermé",
-      back: "Réouverture {day} à {hour}.",
-      nowPlaying: "En ce moment",
-      sep: " au ",
-      dedications: {
-        remaining: "encore {n} demandes possibles",
-        full: "Complet pour aujourd'hui",
-        track: "Le titre",
-        search: "Un titre, un artiste…",
-        searchMore: "Tapez au moins 2 lettres.",
-        noResult: "Aucun titre trouvé.",
-        from: "Votre prénom",
-        to: "Pour qui ?",
-        message: "Votre message",
-        send: "Envoyer ma dédicace",
-        sending: "Envoi…",
-        pick: "Choisissez d'abord un titre.",
-        note: "Votre message est relu avant d'être affiché. {per} par plage. Prénoms et messages effacés après {days} jours.",
-        perOne: "Une demande",
-        perMany: "{n} demandes",
-        tooMany: "Vous avez déjà envoyé votre demande pour cette plage.",
-        fullError: "Complet pour aujourd'hui : plus de demandes sur cette plage.",
-        closedError: "Les dédicaces viennent de fermer.",
-        failed: "Votre demande n'a pas pu être envoyée. Réessayez.",
-        yours: "Votre dédicace",
-        said: "{who} : « {message} »",
-        forFrom: "Pour {to}, de la part de {from}",
-        sent: "Envoyée",
-        accepted: "Acceptée",
-        onAirAt: "À l'antenne vers {hour}",
-        played: "Diffusée à {hour}",
-        keepOpen: "Gardez cette page ouverte : elle s'actualise seule.",
-        refused: "Pas retenue cette fois",
-        reasons: {
-          just_played: "Ce titre vient de passer. Essayez-en un autre !",
-          unavailable: "Ce titre ne peut pas passer en ce moment. Essayez-en un autre !",
-          closed: "Les dédicaces ont fermé avant qu'elle soit choisie.",
-          removed: "Elle n'a finalement pas pu passer.",
-        },
-        followLink: "Lien de suivi :",
-        another: "Envoyer une autre dédicace",
-        today: "Les dédicaces du jour",
-        playedTag: "diffusée",
-        upcoming: "à venir",
-        onlyAccepted: "Seules les dédicaces acceptées s'affichent.",
-      },
-      match: {
-        sub: "Choisissez le prochain titre",
-        question: "Quel titre juste après ?",
-        versus: "CONTRE",
-        votes: "{n} votes",
-        oneVote: "1 vote",
-        mine: "Votre choix",
-        change: "Vous pouvez changer d'avis jusqu'à la fin.",
-        sending: "Envoi…",
-        refused: "Votre vote n'a pas pu être compté. Réessayez.",
-        closed: "Vote fermé : le résultat à l'antenne !",
-        next: "Le prochain vote arrive dans quelques titres.",
-        won: "{title} l'emporte avec {percent}",
-        last: "Dernier match",
-        today: "Les résultats du jour",
-        against: "contre {track}",
-        tie: "égalité, le moins récent",
-        noVotes: "aucun vote",
-      },
-      top30: {
-        live: "En direct : les places à venir se découvrent à l'antenne",
-        week: "Classement du {date}",
-        hidden: "? ? ?",
-        answer: "Réponse à l'antenne",
-        onAir: "EN ONDE",
-        isNew: "NOUVEAU",
-        reentry: "RETOUR",
-        weeks: "{n} classements",
-        newRelease: "La nouveauté",
-        none: "Pas encore de classement.",
-        votesFor: "Votre vote compte pour {name}, {day}.",
-      },
-    },
-    es: {
-      names: { dedications: "Dedicatorias", match: "El duelo", top30: "Top", likes: "¿Te gusta?", featured_artist: "Artista destacado" },
-      featured_artist: { week: "El artista de la semana", day: "El artista del día", next: "Próximo a las {hour}", none: "Ningún artista destacado por ahora." },
-      until: "Hasta las {hour}",
-      likes: {
-        sub: "Solo se vota la canción que suena",
-        like: "Me gusta",
-        dislike: "No me gusta",
-        nothing: "Nada que votar ahora.",
-        sending: "Enviando…",
-        thanks: "¡Gracias! Puedes cambiar de opinión mientras suena.",
-        refused: "No se pudo contar tu voto. Inténtalo de nuevo.",
-        closed: "Esta canción terminó: votación cerrada.",
-      },
-      open: "Abierto ahora",
-      closed: "{name}: cerrado",
-      back: "Vuelve el {day} a las {hour}.",
-      nowPlaying: "Suena ahora",
-      sep: " a ",
-      dedications: {
-        remaining: "quedan {n} peticiones",
-        full: "Completo por hoy",
-        track: "La canción",
-        search: "Una canción, un artista…",
-        searchMore: "Escribe al menos 2 letras.",
-        noResult: "No se encontró ninguna canción.",
-        from: "Tu nombre",
-        to: "¿Para quién?",
-        message: "Tu mensaje",
-        send: "Enviar mi dedicatoria",
-        sending: "Enviando…",
-        pick: "Elige primero una canción.",
-        note: "Tu mensaje se revisa antes de mostrarse. {per} por franja. Los nombres y mensajes se borran a los {days} días.",
-        perOne: "Una petición",
-        perMany: "{n} peticiones",
-        tooMany: "Ya enviaste tu petición para esta franja.",
-        fullError: "Completo por hoy: no hay más peticiones en esta franja.",
-        closedError: "Las dedicatorias acaban de cerrar.",
-        failed: "No se pudo enviar tu petición. Inténtalo de nuevo.",
-        yours: "Tu dedicatoria",
-        said: "{who}: «{message}»",
-        forFrom: "Para {to}, de parte de {from}",
-        sent: "Enviada",
-        accepted: "Aceptada",
-        onAirAt: "En antena hacia las {hour}",
-        played: "Emitida a las {hour}",
-        keepOpen: "Deja esta página abierta: se actualiza sola.",
-        refused: "Esta vez no",
-        reasons: {
-          just_played: "Esta canción acaba de sonar. ¡Prueba con otra!",
-          unavailable: "Esta canción no puede sonar ahora. ¡Prueba con otra!",
-          closed: "Las dedicatorias cerraron antes de elegirla.",
-          removed: "Al final no pudo sonar.",
-        },
-        followLink: "Enlace de seguimiento:",
-        another: "Enviar otra",
-        today: "Las dedicatorias de hoy",
-        playedTag: "emitida",
-        upcoming: "por venir",
-        onlyAccepted: "Solo se muestran las dedicatorias aceptadas.",
-      },
-      match: {
-        sub: "Elige la próxima canción",
-        question: "¿Qué canción después?",
-        versus: "CONTRA",
-        votes: "{n} votos",
-        oneVote: "1 voto",
-        mine: "Tu elección",
-        change: "Puedes cambiar de opinión hasta el final.",
-        sending: "Enviando…",
-        refused: "No se pudo contar tu voto. Inténtalo de nuevo.",
-        closed: "Votación cerrada: ¡el resultado en antena!",
-        next: "La próxima votación llega en unas canciones.",
-        won: "{title} gana con {percent}",
-        last: "Último duelo",
-        today: "Los resultados de hoy",
-        against: "contra {track}",
-        tie: "empate, la menos reciente",
-        noVotes: "ningún voto",
-      },
-      top30: {
-        live: "En directo: los puestos que faltan se descubren en antena",
-        week: "Lista del {date}",
-        hidden: "? ? ?",
-        answer: "La respuesta en antena",
-        onAir: "EN ANTENA",
-        isNew: "NUEVO",
-        reentry: "VUELVE",
-        weeks: "{n} listas",
-        newRelease: "La novedad",
-        none: "Todavía no hay lista.",
-        votesFor: "Tu voto cuenta para {name}, el {day}.",
-      },
-    },
-    de: {
-      names: { dedications: "Widmungen", match: "Das Duell", top30: "Top", likes: "Gefällt's dir?", featured_artist: "Künstler im Fokus" },
-      featured_artist: { week: "Künstler der Woche", day: "Künstler des Tages", next: "Nächstes Mal um {hour}", none: "Gerade kein Künstler im Fokus." },
-      until: "Bis {hour}",
-      likes: {
-        sub: "Abgestimmt wird nur über den laufenden Titel",
-        like: "Gefällt mir",
-        dislike: "Gefällt mir nicht",
-        nothing: "Gerade gibt es nichts abzustimmen.",
-        sending: "Wird gesendet…",
-        thanks: "Danke! Solange der Titel läuft, kannst du deine Meinung ändern.",
-        refused: "Deine Stimme konnte nicht gezählt werden. Versuch es noch einmal.",
-        closed: "Dieser Titel ist vorbei: Abstimmung geschlossen.",
-      },
-      open: "Jetzt geöffnet",
-      closed: "{name}: geschlossen",
-      back: "Wieder da am {day} um {hour}.",
-      nowPlaying: "Jetzt läuft",
-      sep: " bis ",
-      dedications: {
-        remaining: "noch {n} Wünsche möglich",
-        full: "Für heute voll",
-        track: "Der Titel",
-        search: "Ein Titel, ein Interpret…",
-        searchMore: "Mindestens 2 Buchstaben eingeben.",
-        noResult: "Kein Titel gefunden.",
-        from: "Dein Vorname",
-        to: "Für wen?",
-        message: "Deine Nachricht",
-        send: "Meine Widmung senden",
-        sending: "Wird gesendet…",
-        pick: "Wähle zuerst einen Titel.",
-        note: "Deine Nachricht wird gelesen, bevor sie erscheint. {per} pro Zeitfenster. Vornamen und Nachrichten werden nach {days} Tagen gelöscht.",
-        perOne: "Ein Wunsch",
-        perMany: "{n} Wünsche",
-        tooMany: "Du hast deinen Wunsch für dieses Zeitfenster schon gesendet.",
-        fullError: "Für heute voll: keine Wünsche mehr in diesem Zeitfenster.",
-        closedError: "Die Widmungen sind gerade geschlossen.",
-        failed: "Dein Wunsch konnte nicht gesendet werden. Versuch es noch einmal.",
-        yours: "Deine Widmung",
-        said: "{who}: „{message}“",
-        forFrom: "Für {to}, von {from}",
-        sent: "Gesendet",
-        accepted: "Angenommen",
-        onAirAt: "Im Radio gegen {hour}",
-        played: "Gespielt um {hour}",
-        keepOpen: "Lass diese Seite offen: Sie aktualisiert sich selbst.",
-        refused: "Diesmal nicht",
-        reasons: {
-          just_played: "Dieser Titel lief gerade. Probier einen anderen!",
-          unavailable: "Dieser Titel kann gerade nicht laufen. Probier einen anderen!",
-          closed: "Die Widmungen haben geschlossen, bevor er gewählt wurde.",
-          removed: "Er konnte am Ende nicht gespielt werden.",
-        },
-        followLink: "Link zum Verfolgen:",
-        another: "Noch eine senden",
-        today: "Die Widmungen von heute",
-        playedTag: "gespielt",
-        upcoming: "kommt noch",
-        onlyAccepted: "Nur angenommene Widmungen werden gezeigt.",
-      },
-      match: {
-        sub: "Wähle den nächsten Titel",
-        question: "Welcher Titel als Nächstes?",
-        versus: "GEGEN",
-        votes: "{n} Stimmen",
-        oneVote: "1 Stimme",
-        mine: "Deine Wahl",
-        change: "Du kannst deine Meinung bis zum Schluss ändern.",
-        sending: "Wird gesendet…",
-        refused: "Deine Stimme konnte nicht gezählt werden. Versuche es noch einmal.",
-        closed: "Abstimmung beendet: das Ergebnis im Programm!",
-        next: "Die nächste Abstimmung kommt in ein paar Titeln.",
-        won: "{title} gewinnt mit {percent}",
-        last: "Letztes Duell",
-        today: "Die Ergebnisse von heute",
-        against: "gegen {track}",
-        tie: "Gleichstand, der am längsten nicht gespielte",
-        noVotes: "keine Stimme",
-      },
-      top30: {
-        live: "Live: die nächsten Plätze gibt es im Radio",
-        week: "Charts vom {date}",
-        hidden: "? ? ?",
-        answer: "Die Antwort im Radio",
-        onAir: "LÄUFT",
-        isNew: "NEU",
-        reentry: "WIEDER DA",
-        weeks: "{n} Charts",
-        newRelease: "Die Neuheit",
-        none: "Noch keine Charts.",
-        votesFor: "Deine Stimme zählt für {name} am {day}.",
-      },
-    },
-  };
-  var wanted = script.getAttribute("data-lang") || document.documentElement.lang || navigator.language || "en";
+  // The texts, per language: widget-text.json, put in by the gateway.
+  var TEXT = /* TEXT */ {};
+  var wanted = script.dataset.lang || document.documentElement.lang || navigator.language || "en";
   var lang = wanted.slice(0, 2).toLowerCase();
   var t = TEXT[lang] || TEXT.en;
   if (!TEXT[lang]) lang = "en";
 
   function fill(text, values) {
     return text.replace(/\{([a-z]+)\}/g, function (all, name) {
-      return Object.prototype.hasOwnProperty.call(values, name) ? values[name] : all;
+      return Object.hasOwn(values, name) ? values[name] : all;
     });
   }
 
@@ -427,6 +51,10 @@
     return new Intl.DateTimeFormat(lang, { weekday: "long", timeZone: "UTC" }).format(Date.UTC(2026, 10, 8 + n));
   }
 
+  function padHour(h) {
+    return (h < 10 ? "0" : "") + h + ":00";
+  }
+
   function hoursText(hours) {
     return hours.map(function (range) {
       var days = range.days.slice().sort();
@@ -434,8 +62,7 @@
       var named = days.length > 2 && consecutive
         ? dayName(days[0]) + t.sep + dayName(days[days.length - 1])
         : days.map(dayName).join(", ");
-      var pad = function (h) { return (h < 10 ? "0" : "") + h + ":00"; };
-      return named + ", " + pad(range.start_hour) + "–" + pad(range.end_hour);
+      return named + ", " + padHour(range.start_hour) + "–" + padHour(range.end_hour);
     }).join(" · ");
   }
 
@@ -463,8 +90,8 @@
 
   var host = document.createElement("div");
   host.className = "heron-widget heron-" + module + (key !== module ? " heron-" + key : "");
-  host.setAttribute("data-mode", mode);
-  var target = script.getAttribute("data-target");
+  host.dataset.mode = mode;
+  var target = script.dataset.target;
   var parent = target && document.querySelector(target);
   if (parent) parent.appendChild(host);
   else script.parentNode.insertBefore(host, script.nextSibling);
@@ -573,15 +200,20 @@
   // What a show shows while it is open; each show adds its own here.
   var RENDERERS = {};
 
+  // A cover's address, at a size unless it already asks for one.
+  function sized(url, size) {
+    return url.includes("?") ? url : url + "?size=" + size;
+  }
+
   function generic(body, show, state) {
     body.appendChild(el("p", "muted", t.open));
-    var now = state.now_playing && state.now_playing.now;
+    var now = state.now_playing?.now;
     if (now) {
       var np = el("div", "np");
       if (now.cover_url) {
         var img = el("img");
         img.alt = "";
-        img.src = now.cover_url + (now.cover_url.indexOf("?") < 0 ? "?size=96" : "");
+        img.src = sized(now.cover_url, 96);
         np.appendChild(img);
       }
       var words = el("div");
@@ -602,11 +234,18 @@
       "M17 14V2M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 " +
       "2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z",
   };
+  /** @type {{ play: ?number, vote: ?string, note: ?string }} */
   var mine = { play: null, vote: null, note: null };
 
+  // What a vote's answer says: accepted, too late (409) or refused.
+  function answerNote(response, accepted, texts) {
+    if (response.ok) return accepted;
+    return response.status === 409 ? texts.closed : texts.refused;
+  }
+
   RENDERERS.likes = function (body, show, state, api) {
-    var play = show.state && show.state.play_id;
-    var now = state.now_playing && state.now_playing.now;
+    var play = show.state?.play_id;
+    var now = state.now_playing?.now;
     if (!play || !now) {
       body.appendChild(el("p", "muted", mine.vote ? t.likes.closed : t.likes.nothing));
       return;
@@ -635,7 +274,7 @@
         render(latest);
         api.send("vote", { play_id: play, vote: vote }).then(
           function (response) {
-            voted.note = response.ok ? t.likes.thanks : response.status === 409 ? t.likes.closed : t.likes.refused;
+            voted.note = answerNote(response, t.likes.thanks, t.likes);
             if (!response.ok) voted.vote = null;
             render(latest);
           },
@@ -653,7 +292,7 @@
     // The votes of now count for the top whose next show plays them first.
     var top = null;
     (state.shows || []).forEach(function (s) {
-      var at = s.module === "top30" && s.enabled && s.state && s.state.votes_count_for_unix_ms;
+      var at = s.module === "top30" && s.enabled && s.state?.votes_count_for_unix_ms;
       if (at && (!top || at < top.state.votes_count_for_unix_ms)) top = s;
     });
     if (top) {
@@ -819,7 +458,7 @@
     ded.follow = key;
     clearInterval(ded.polling);
     var poll = function () {
-      fetch(base + "/dedications/follow?id=" + key)
+      fetch(base + "/dedications/follow?id=" + encodeURIComponent(key))
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (followed) {
           if (ded.follow !== key) return;
@@ -886,11 +525,42 @@
     list.appendChild(li);
   }
 
+  // Where a dedication followed is: sent, accepted, on air.
+  function followSteps(f, zone) {
+    var steps = el("ol", "steps");
+    if (f.status === "refused") {
+      step(steps, false, "✕", t.dedications.refused, t.dedications.reasons[f.reason] || "");
+      return steps;
+    }
+    step(steps, true, "✓", t.dedications.sent, hour(f.submitted_at_unix_ms, zone));
+    if (f.status === "accepted" || f.status === "played") {
+      step(steps, true, "✓", t.dedications.accepted, f.decided_at_unix_ms ? hour(f.decided_at_unix_ms, zone) : "");
+    } else {
+      step(steps, false, "2", t.dedications.accepted, "");
+    }
+    if (f.status === "played") {
+      step(steps, true, "✓", fill(t.dedications.played, { hour: hour(f.played_at_unix_ms, zone) }), "");
+    } else {
+      var at = f.planned_at_unix_ms ? hour(f.planned_at_unix_ms, zone) : "…";
+      step(steps, false, "3", fill(t.dedications.onAirAt, { hour: at }), t.dedications.keepOpen);
+    }
+    return steps;
+  }
+
+  function followLink() {
+    var url = location.href.split("#")[0] + "#heron-dedication=" + ded.follow;
+    var link = el("p", "muted small", t.dedications.followLink + " ");
+    var a = el("a", "", url.replace(/^https?:\/\//, "").slice(0, 48) + (url.length > 56 ? "…" : ""));
+    a.href = url;
+    link.appendChild(a);
+    return link;
+  }
+
   function followCard(show, zone) {
     var f = ded.followed;
     var card = el("div", "card");
     var color = /^#[0-9a-fA-F]{6}$/.test(show.color) ? show.color : "#c62828";
-    card.style.setProperty("--color", f && f.status === "refused" ? "#5f6067" : color);
+    card.style.setProperty("--color", f?.status === "refused" ? "#5f6067" : color);
     var head = el("div", "head");
     head.appendChild(el("p", "title", t.dedications.yours));
     if (f) head.appendChild(el("p", "sub", trackText(f)));
@@ -903,31 +573,8 @@
     }
     var quote = fill(t.dedications.forFrom, { to: f.to, from: f.from });
     body.appendChild(el("p", "quote", f.message ? fill(t.dedications.said, { who: quote, message: f.message }) : quote));
-    var steps = el("ol", "steps");
-    if (f.status === "refused") {
-      step(steps, false, "✕", t.dedications.refused, t.dedications.reasons[f.reason] || "");
-    } else {
-      step(steps, true, "✓", t.dedications.sent, hour(f.submitted_at_unix_ms, zone));
-      if (f.status === "accepted" || f.status === "played") {
-        step(steps, true, "✓", t.dedications.accepted, f.decided_at_unix_ms ? hour(f.decided_at_unix_ms, zone) : "");
-      } else {
-        step(steps, false, "2", t.dedications.accepted, "");
-      }
-      if (f.status === "played") {
-        step(steps, true, "✓", fill(t.dedications.played, { hour: hour(f.played_at_unix_ms, zone) }), "");
-      } else if (f.planned_at_unix_ms) {
-        step(steps, false, "3", fill(t.dedications.onAirAt, { hour: hour(f.planned_at_unix_ms, zone) }), t.dedications.keepOpen);
-      } else {
-        step(steps, false, "3", fill(t.dedications.onAirAt, { hour: "…" }), t.dedications.keepOpen);
-      }
-    }
-    body.appendChild(steps);
-    var url = location.href.split("#")[0] + "#heron-dedication=" + ded.follow;
-    var link = el("p", "muted small", t.dedications.followLink + " ");
-    var a = el("a", "", url.replace(/^https?:\/\//, "").slice(0, 48) + (url.length > 56 ? "…" : ""));
-    a.href = url;
-    link.appendChild(a);
-    body.appendChild(link);
+    body.appendChild(followSteps(f, zone));
+    body.appendChild(followLink());
     if (f.status === "refused" || f.status === "played") {
       var again = el("button", "link", t.dedications.another);
       again.type = "button";
@@ -945,7 +592,7 @@
   }
 
   function todayList(show, zone) {
-    var today = (show.state && show.state.today) || [];
+    var today = show.state?.today || [];
     if (mode !== "page" || !today.length) return null;
     var card = el("div", "card");
     card.style.marginTop = "16px";
@@ -1025,7 +672,7 @@
   var clockOffset = 0;
 
   function remaining(show) {
-    var closes = show && show.state && show.state.closes_at_unix_ms;
+    var closes = show?.state?.closes_at_unix_ms;
     if (!closes) return null;
     return Math.max(0, closes - (Date.now() + clockOffset));
   }
@@ -1038,14 +685,14 @@
   // Updates the countdowns between two events, without drawing again.
   function tick() {
     if (module !== "match") return;
-    var show = latest && (latest.shows || []).filter(function (s) { return s.module === "match"; })[0];
+    var show = latest && (latest.shows || []).find(function (s) { return s.module === "match"; });
     var left = remaining(show);
     var clocks = root.querySelectorAll(".clock");
-    for (var i = 0; i < clocks.length; i++) clocks[i].textContent = left === null ? "" : clockText(left);
+    for (var clock of clocks) clock.textContent = left === null ? "" : clockText(left);
     var card = root.querySelector(".card");
     if (card) card.classList.toggle("hurry", left !== null && left > 0 && left <= 5000);
     var buttons = root.querySelectorAll(".choice");
-    for (var j = 0; j < buttons.length; j++) buttons[j].disabled = left === 0;
+    for (var button of buttons) button.disabled = left === 0;
   }
 
   function votesText(n) {
@@ -1056,7 +703,7 @@
     if (track.cover_url) {
       var img = el("img", "art");
       img.alt = "";
-      img.src = track.cover_url + (track.cover_url.indexOf("?") < 0 ? "?size=" + (mode === "page" ? 600 : 160) : "");
+      img.src = sized(track.cover_url, mode === "page" ? 600 : 160);
       return img;
     }
     return el("span", "art", (track.title || "?").charAt(0).toUpperCase());
@@ -1066,14 +713,19 @@
     return [track.artist, track.title].filter(Boolean).join(" – ");
   }
 
+  // How a match was won: by a tie, without votes, or by its share.
+  function decidedText(result) {
+    if (result.decided_by === "tie") return t.match.tie;
+    if (result.decided_by === "no_votes") return t.match.noVotes;
+    return result.percent + " %";
+  }
+
   function resultLine(result, zone) {
     var li = el("li");
     if (result.closed_at_unix_ms) li.appendChild(el("time", "", hour(result.closed_at_unix_ms, zone)));
     var who = el("div", "who");
     var line = el("strong", "", trackName(result.winner));
-    var how = result.decided_by === "tie" ? t.match.tie
-      : result.decided_by === "no_votes" ? t.match.noVotes : result.percent + " %";
-    line.appendChild(el("span", "pill", how));
+    line.appendChild(el("span", "pill", decidedText(result)));
     who.appendChild(line);
     who.appendChild(el("span", "muted", fill(t.match.against, { track: trackName(result.loser) })));
     li.appendChild(who);
@@ -1082,8 +734,7 @@
 
   RENDERERS.match = function (body, show, state, api) {
     var match = show.state || {};
-    var zone = show.timezone || state.timezone;
-    if (state.now_playing && state.now_playing.server_time_unix_ms) {
+    if (state.now_playing?.server_time_unix_ms) {
       clockOffset = state.now_playing.server_time_unix_ms - Date.now();
     }
     if (!match.match_id) {
@@ -1139,7 +790,7 @@
         render(latest);
         api.send("vote", { match_id: match.match_id, choice: choice.choice }).then(
           function (response) {
-            mine.note = response.ok ? t.match.change : response.status === 409 ? t.match.closed : t.match.refused;
+            mine.note = answerNote(response, t.match.change, t.match);
             if (!response.ok) mine.choice = null;
             render(latest);
           },
@@ -1159,8 +810,8 @@
 
   // Today's results, under the page.
   function matchResults(show, zone) {
-    var today = show.state && show.state.today;
-    if (mode !== "page" || !today || !today.length) return null;
+    var today = show.state?.today;
+    if (mode !== "page" || !today?.length) return null;
     var card = el("div", "card");
     card.style.marginTop = "16px";
     var body = el("div", "body");
@@ -1178,21 +829,83 @@
     if (!state) return;
     // What is typed keeps its focus and caret when the card is drawn again.
     var focused = root.activeElement || null;
-    var caret = focused && typeof focused.selectionStart === "number"
+    var caret = typeof focused?.selectionStart === "number"
       ? [focused.selectionStart, focused.selectionEnd] : null;
     box.textContent = "";
     var shows = state.shows || [];
-    var show = shows.filter(function (s) { return (s.key || s.module) === key; })[0];
+    var show = shows.find(function (s) { return (s.key || s.module) === key; });
     // `top30.js`: the first top.
-    if (!show && key === "top30") show = shows.filter(function (s) { return s.module === "top30"; })[0];
+    if (!show && key === "top30") show = shows.find(function (s) { return s.module === "top30"; });
     if (!show) return;
     draw(state, show);
-    if (focused && focused.isConnected && root.activeElement !== focused) {
+    if (focused?.isConnected && root.activeElement !== focused) {
       focused.focus();
       if (caret) {
         try { focused.setSelectionRange(caret[0], caret[1]); } catch (error) { /* not a text field */ }
       }
     }
+  }
+
+  // The card's head: the show's name and, open, until when or how long.
+  function headFor(show, state, name, zone) {
+    var head = el("div", "head");
+    head.appendChild(el("p", "title", name));
+    if (!show.open) {
+      head.appendChild(el("p", "sub", state.name || ""));
+    } else if (module === "likes") {
+      head.appendChild(el("p", "sub", t.likes.sub));
+    } else if (module === "match") {
+      // The countdown, in the head of the small widget; nothing more.
+      var words = el("div");
+      words.appendChild(head.firstChild);
+      words.appendChild(el("p", "sub", t.match.sub));
+      head.appendChild(words);
+      head.className = "head timed";
+      var left = remaining(show);
+      if (mode === "widget" && left !== null) head.appendChild(el("span", "clock", clockText(left)));
+    } else if (show.closes_at_unix_ms) {
+      head.appendChild(el("p", "sub", untilText(show, zone)));
+    }
+    return head;
+  }
+
+  // Until when a show is open, with the dedications left.
+  function untilText(show, zone) {
+    var until = fill(t.until, { hour: hour(show.closes_at_unix_ms, zone) });
+    var places = module === "dedications" && show.state ? show.state.remaining : null;
+    if (places === 0) return until + " · " + t.dedications.full;
+    if (typeof places === "number") return until + " · " + fill(t.dedications.remaining, { n: places });
+    return until;
+  }
+
+  // A closed show: when it opens again, its hours, the last top's chart.
+  function closedParts(card, show, name, zone) {
+    var closed = el("div", "closed");
+    closed.insertAdjacentHTML(
+      "beforeend",
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
+        '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>'
+    );
+    closed.appendChild(el("strong", "", fill(t.closed, { name: name })));
+    var next = show.next_opening_unix_ms;
+    var values = next ? { day: day(next, zone), hour: hour(next, zone) } : { day: "", hour: "" };
+    if (show.closed_message) closed.appendChild(el("p", "muted", fill(show.closed_message, values)));
+    else if (next) closed.appendChild(el("p", "muted", fill(t.back, values)));
+    if (show.hours?.length) closed.appendChild(el("p", "muted", hoursText(show.hours)));
+    card.appendChild(closed);
+    // Outside the show, the Top 30 shows the chart of the last one.
+    if (module === "top30" && show.state?.chart) {
+      var last = el("div", "body");
+      chart(last, show);
+      card.appendChild(last);
+    }
+  }
+
+  // Under the card, on the page: today's dedications or match results.
+  function belowCard(show, zone) {
+    if (module === "dedications") return todayList(show, zone);
+    if (module === "match" && show.open) return matchResults(show, zone);
+    return null;
   }
 
   function draw(state, show) {
@@ -1210,72 +923,26 @@
     var card = el("div", "card");
     var color = /^#[0-9a-fA-F]{6}$/.test(show.color) ? show.color : "#c62828";
     card.style.setProperty("--color", show.open ? color : "#5f6067");
-    var head = el("div", "head");
-    head.appendChild(el("p", "title", name));
-    if (show.open && module === "likes") {
-      head.appendChild(el("p", "sub", t.likes.sub));
-    } else if (show.open && module === "match") {
-      // The countdown, in the head of the small widget; nothing more.
-      var words = el("div");
-      words.appendChild(head.firstChild);
-      words.appendChild(el("p", "sub", t.match.sub));
-      head.appendChild(words);
-      head.className = "head timed";
-      var left = remaining(show);
-      if (mode === "widget" && left !== null) head.appendChild(el("span", "clock", clockText(left)));
-    } else if (show.open && show.closes_at_unix_ms) {
-      var until = fill(t.until, { hour: hour(show.closes_at_unix_ms, zone) });
-      var left = module === "dedications" && show.state ? show.state.remaining : null;
-      if (left === 0) until += " · " + t.dedications.full;
-      else if (typeof left === "number") until += " · " + fill(t.dedications.remaining, { n: left });
-      head.appendChild(el("p", "sub", until));
-    } else if (!show.open) {
-      head.appendChild(el("p", "sub", state.name || ""));
-    }
-    card.appendChild(head);
+    card.appendChild(headFor(show, state, name, zone));
     if (show.open) {
       var body = el("div", "body");
       (RENDERERS[module] || generic)(body, show, state, api);
       card.appendChild(body);
     } else {
-      var closed = el("div", "closed");
-      closed.insertAdjacentHTML(
-        "beforeend",
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
-          '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>'
-      );
-      closed.appendChild(el("strong", "", fill(t.closed, { name: name })));
-      var next = show.next_opening_unix_ms;
-      var values = next ? { day: day(next, zone), hour: hour(next, zone) } : { day: "", hour: "" };
-      if (show.closed_message) closed.appendChild(el("p", "muted", fill(show.closed_message, values)));
-      else if (next) closed.appendChild(el("p", "muted", fill(t.back, values)));
-      if (show.hours && show.hours.length) closed.appendChild(el("p", "muted", hoursText(show.hours)));
-      card.appendChild(closed);
-      // Outside the show, the Top 30 shows the chart of the last one.
-      if (module === "top30" && show.state && show.state.chart) {
-        var last = el("div", "body");
-        chart(last, show);
-        card.appendChild(last);
-      }
+      closedParts(card, show, name, zone);
     }
     box.appendChild(card);
-    if (module === "dedications") {
-      var today = todayList(show, zone);
-      if (today) box.appendChild(today);
-    }
-    if (module === "match" && show.open) {
-      var results = matchResults(show, zone);
-      if (results) box.appendChild(results);
-    }
+    var below = belowCard(show, zone);
+    if (below) box.appendChild(below);
     tick();
   }
 
   // For the shows' writes: a proof of work, then the write.
   function leadingZeroBits(bytes) {
     var bits = 0;
-    for (var i = 0; i < bytes.length; i++) {
-      if (bytes[i] === 0) { bits += 8; continue; }
-      return bits + Math.clz32(bytes[i]) - 24;
+    for (var byte of bytes) {
+      if (byte === 0) { bits += 8; continue; }
+      return bits + Math.clz32(byte) - 24;
     }
     return bits;
   }
@@ -1293,7 +960,7 @@
         })(nonce));
       }
       return Promise.all(tries).then(function (found) {
-        var hit = found.filter(function (n) { return n !== null; })[0];
+        var hit = found.find(function (n) { return n !== null; });
         return hit !== undefined ? hit : next();
       });
     }

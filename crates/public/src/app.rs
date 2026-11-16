@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -25,8 +25,16 @@ use tower_http::cors::{Any, CorsLayer};
 use crate::Gateway;
 use crate::actions::{self, Delivery};
 
-/// The script of the shows' pages and small widgets.
-const WIDGET_JS: &str = include_str!("widget.js");
+/// The script of the shows' pages and small widgets, its texts put in.
+static WIDGET_JS: LazyLock<String> = LazyLock::new(|| {
+    include_str!("widget.js").replacen(
+        TEXT_MARKER,
+        include_str!("widget-text.json").trim_end(),
+        1,
+    )
+});
+/// Where the widget's texts go in its script.
+const TEXT_MARKER: &str = "/* TEXT */ {}";
 /// Writes are small: a first name and a message at most.
 const MAX_BODY: usize = 16 * 1024;
 /// Cached reads kept at most; past it, the cache starts again.
@@ -285,7 +293,7 @@ fn script(gateway: &Gateway, code: &str, key: &str, now: Timestamp) -> Response 
             (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
             (header::CACHE_CONTROL, "public, max-age=300"),
         ],
-        WIDGET_JS,
+        WIDGET_JS.as_str(),
     )
         .into_response()
 }
@@ -603,6 +611,18 @@ impl ReadCache {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_widget_carries_its_texts() {
+        assert!(include_str!("widget.js").contains(TEXT_MARKER));
+        assert!(!WIDGET_JS.contains(TEXT_MARKER));
+        let texts: serde_json::Value =
+            serde_json::from_str(include_str!("widget-text.json")).unwrap();
+        for lang in ["en", "fr", "es", "de"] {
+            assert!(texts[lang]["names"].is_object(), "{lang}");
+        }
+        assert!(WIDGET_JS.contains("var TEXT = {"));
+    }
+
     use super::*;
     use crate::actions::tests::{MESSAGE, VOTE};
     use crate::proof::{Proofs, solve};
