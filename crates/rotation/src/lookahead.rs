@@ -969,6 +969,92 @@ impl Attempts {
     }
 }
 
+/// The new fills [`best`] builds, and the best of them so far.
+struct Fills<'s, 'a> {
+    start: &'s From<'a>,
+    attempts: &'s mut Attempts,
+    best: Option<Fill>,
+    /// The best one's number among the attempts.
+    kept_number: Option<u32>,
+    draws: u32,
+    batches: u32,
+}
+
+impl Fills<'_, '_> {
+    /// Searches `fill`'s end, records it and keeps it if better. Returns
+    /// whether the best one lands.
+    fn consider(&mut self, mut fill: Fill, mut draw: Rng, batch: u32, seed: u64) -> bool {
+        // Once a fill lands within a second with nothing filled, the others
+        // are not searched: it saves the time of the search, for less than
+        // a second to gain.
+        let (found, stats) = if self
+            .best
+            .as_ref()
+            .is_none_or(|best| !best.ending.close_enough())
+        {
+            self.start.search(&fill, &mut draw)
+        } else {
+            (None, None)
+        };
+        if let Some(found) = found
+            && found.first.is_some()
+        {
+            fill = found;
+        }
+        let number = self.attempts.push(&fill, batch, seed, stats);
+        if self
+            .best
+            .as_ref()
+            .is_none_or(|best| fill.rank() < best.rank())
+        {
+            self.best = Some(fill);
+            self.kept_number = Some(number);
+        }
+        self.best
+            .as_ref()
+            .is_some_and(|best| best.ending.log().lands())
+    }
+
+    /// Builds new fills, [`DRAWS`] at a time, until the best one lands or
+    /// the `budget` is spent; `landed`: the fill kept already does.
+    fn build(&mut self, rng: &mut Rng, budget: Budget, started: Instant, mut landed: bool) -> Stop {
+        loop {
+            if self.draws >= budget.max_fills {
+                return Stop::MaxFills;
+            }
+            self.batches += 1;
+            for _ in 0..DRAWS {
+                if self.draws >= budget.max_fills {
+                    return Stop::MaxFills;
+                }
+                let spent = budget
+                    .max_duration
+                    .is_some_and(|max| started.elapsed() >= max);
+                if self.draws > 0 && spent {
+                    return Stop::Time;
+                }
+                let seed = rng.next_u64();
+                let mut draw = Rng::new(seed);
+                let start = self.start;
+                let fill = start.simulate(
+                    start.history,
+                    start.at_ms,
+                    start.last,
+                    &[],
+                    Chosen::Slot,
+                    true,
+                    &mut draw,
+                );
+                self.draws += 1;
+                landed = self.consider(fill, draw, self.batches, seed);
+            }
+            if landed {
+                return Stop::Landed;
+            }
+        }
+    }
+}
+
 /// The pick at `at_ms` before the exact time `ahead`: the fill kept in
 /// `plan` played again and followed while it still lands, else the best of
 /// it and new fills, [`DRAWS`] at a time until the best one lands or the
@@ -1033,74 +1119,20 @@ pub(crate) fn best(
             fill
         }
         kept => {
-            let budget = planning.budget;
-            let mut best: Option<Fill> = None;
-            // Searches `fill`'s end, records it and keeps it if better.
-            let mut consider = |mut fill: Fill, mut draw: Rng, batch: u32, seed: u64| {
-                // Once a fill lands within a second with nothing filled,
-                // the others are not searched: it saves the time of the
-                // search, for less than a second to gain.
-                let (found, stats) = if best.as_ref().is_none_or(|best| !best.ending.close_enough())
-                {
-                    start.search(&fill, &mut draw)
-                } else {
-                    (None, None)
-                };
-                if let Some(found) = found
-                    && found.first.is_some()
-                {
-                    fill = found;
-                }
-                let number = attempts.push(&fill, batch, seed, stats);
-                if best.as_ref().is_none_or(|best| fill.rank() < best.rank()) {
-                    best = Some(fill);
-                    kept_number = Some(number);
-                }
-                best.as_ref().is_some_and(|best| best.ending.log().lands())
+            let mut fills = Fills {
+                start: &start,
+                attempts: &mut attempts,
+                best: None,
+                kept_number: None,
+                draws: 0,
+                batches: 0,
             };
             // The fill kept first: it wins a tie.
-            let mut landed = false;
-            if let Some((fill, _, seed, draw)) = kept {
-                landed = consider(fill, draw, 0, seed);
-            }
-            'batches: loop {
-                if draws >= budget.max_fills {
-                    stop = Stop::MaxFills;
-                    break;
-                }
-                batches += 1;
-                for _ in 0..DRAWS {
-                    if draws >= budget.max_fills {
-                        stop = Stop::MaxFills;
-                        break 'batches;
-                    }
-                    let spent = budget
-                        .max_duration
-                        .is_some_and(|max| started.elapsed() >= max);
-                    if draws > 0 && spent {
-                        stop = Stop::Time;
-                        break 'batches;
-                    }
-                    let seed = rng.next_u64();
-                    let mut draw = Rng::new(seed);
-                    let fill = start.simulate(
-                        history,
-                        at_ms,
-                        last.copied(),
-                        &[],
-                        Chosen::Slot,
-                        true,
-                        &mut draw,
-                    );
-                    draws += 1;
-                    landed = consider(fill, draw, batches, seed);
-                }
-                if landed {
-                    stop = Stop::Landed;
-                    break;
-                }
-            }
-            best?
+            let landed =
+                kept.is_some_and(|(fill, _, seed, draw)| fills.consider(fill, draw, 0, seed));
+            stop = fills.build(rng, planning.budget, started, landed);
+            (draws, batches, kept_number) = (fills.draws, fills.batches, fills.kept_number);
+            fills.best?
         }
     };
     *held_by_ratio = std::mem::take(&mut best.first_held);

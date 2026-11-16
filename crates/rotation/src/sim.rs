@@ -384,94 +384,18 @@ pub fn audit(library: &Library, before: &[Play], picks: &[SimulatedPick]) -> Vec
                 expected: category,
             });
         }
-        let longest = i64::from(windows.longest_min()) * 60_000;
-        for earlier in timeline
-            .iter()
-            .rev()
-            .filter(|p| p.start_ms <= at)
-            .take_while(|p| at - p.start_ms < longest)
-        {
-            let gap = at - earlier.start_ms;
-            let close = |minutes: u32| gap < i64::from(minutes) * 60_000;
-            let same_artist = track
-                .artists
-                .iter()
-                .any(|a| earlier.artists.iter().any(|b| library.same_artist(*a, *b)));
-            let same_key = |a: &Option<String>, b: &Option<String>| a.is_some() && a == b;
-            let checks = [
-                (
-                    SeparationRule::Track,
-                    earlier.track == Some(track.id),
-                    windows.track_min,
-                ),
-                (
-                    SeparationRule::Title,
-                    same_key(&track.title_key, &earlier.title_key),
-                    windows.title_min,
-                ),
-                (SeparationRule::Artist, same_artist, windows.artist_min),
-                (
-                    SeparationRule::Album,
-                    same_key(&track.album_key, &earlier.album_key),
-                    windows.album_min,
-                ),
-            ];
-            for (rule, same, window_min) in checks {
-                if same && close(window_min) {
-                    violations.push(Violation::Separation {
-                        pick: index,
-                        rule,
-                        earlier_unix_ms: earlier.start_ms,
-                        window_min,
-                    });
-                }
-            }
-        }
-        if windows.dayparts > 0
-            && let Some(last) = timeline
-                .iter()
-                .rev()
-                .find(|p| p.start_ms <= at && p.track == Some(track.id))
-            && dayparts::holds(
-                library.daypart_count(),
-                windows.dayparts,
-                library.local(last.start_ms).datetime(),
-                library.local(at).datetime(),
-            )
-        {
-            violations.push(Violation::Daypart {
-                pick: index,
-                earlier_unix_ms: last.start_ms,
-                dayparts: windows.dayparts,
-            });
-        }
-        if windows.daypart_days > 0 {
-            let count = library.daypart_count();
-            let local = library.local(at).datetime();
-            let since =
-                at - i64::from(dayparts::days_lookback_min(count, windows.daypart_days)) * 60_000;
-            if let Some(earlier) = timeline
-                .iter()
-                .rev()
-                .filter(|p| p.start_ms <= at)
-                .take_while(|p| p.start_ms >= since)
-                .find(|p| {
-                    p.track == Some(track.id)
-                        && dayparts::holds_days(
-                            count,
-                            windows.daypart_days,
-                            library.local(p.start_ms).datetime(),
-                            local,
-                        )
-                })
-            {
-                violations.push(Violation::DaypartDays {
-                    pick: index,
-                    earlier_unix_ms: earlier.start_ms,
-                    days: windows.daypart_days,
-                });
-            }
-        }
+        separation(
+            library,
+            &timeline,
+            track,
+            windows,
+            at,
+            index,
+            &mut violations,
+        );
+        violations.extend(dayparts_broken(
+            library, &timeline, track, windows, at, index,
+        ));
         let previous = timeline
             .iter()
             .rev()
@@ -495,57 +419,194 @@ pub fn audit(library: &Library, before: &[Play], picks: &[SimulatedPick]) -> Vec
                 type_id,
             });
         }
-        if let Some((depth, category)) = expected_draw(library, &pick.explanation) {
-            let logged = pick.explanation.draw.map(|draw| draw.pct);
-            let step = pick.explanation.step;
-            let pct = if step == 0 || step == FALLBACK_STEP {
-                logged
-                    .unwrap_or(depth.start_pct)
-                    .clamp(depth.start_pct, depth.max_pct)
-            } else {
-                depth.max_pct
-            };
-            let (pool, _) = Call::new(library, category, None).allowed(library, local, previous);
-            let key = last_played.get(&track.id).copied();
-            let rank = if key.is_none() {
-                0
-            } else {
-                pool.iter()
-                    .filter(|(other, _)| {
-                        other.id != track.id && last_played.get(&other.id).copied() < key
-                    })
-                    .count()
-            };
-            let tracks = draw::size(pool.len(), pct);
-            if rank >= tracks {
-                violations.push(Violation::Draw {
-                    pick: index,
-                    rank: u32::try_from(rank).unwrap_or(u32::MAX),
-                    tracks: u32::try_from(tracks).unwrap_or(u32::MAX),
-                });
-            }
-        }
-        if let Some(exact) = expected_exact(library, &pick.explanation) {
-            let logged = pick.explanation.exact.map(|log| log.at_unix_ms);
-            let met = logged.is_some_and(|at_ms| {
-                let local = library.local(at_ms);
-                let into_hour =
-                    u32::from(local.minute() as u8) * 60 + u32::from(local.second() as u8);
-                let window = exact.window(at_ms);
-                into_hour == exact.at_s && (window.from_ms..=window.cut_ms).contains(&at)
-            });
-            if !met {
-                violations.push(Violation::ExactTime {
-                    pick: index,
-                    at_unix_ms: logged,
-                    start_unix_ms: at,
-                });
-            }
-        }
+        let draw = DrawCheck {
+            library,
+            last_played: &last_played,
+            local,
+            previous,
+        };
+        violations.extend(draw.broken(pick, track, index));
+        violations.extend(exact_missed(library, pick, at, index));
         last_played.insert(track.id, at);
         timeline.push(Play::of(track, at));
     }
     violations
+}
+
+/// The separation rules `track`, at `at`, breaks against the plays before.
+fn separation(
+    library: &Library,
+    timeline: &[Play],
+    track: &Track,
+    windows: Windows,
+    at: i64,
+    index: u32,
+    violations: &mut Vec<Violation>,
+) {
+    let longest = i64::from(windows.longest_min()) * 60_000;
+    for earlier in timeline
+        .iter()
+        .rev()
+        .filter(|p| p.start_ms <= at)
+        .take_while(|p| at - p.start_ms < longest)
+    {
+        let gap = at - earlier.start_ms;
+        let close = |minutes: u32| gap < i64::from(minutes) * 60_000;
+        let same_artist = track
+            .artists
+            .iter()
+            .any(|a| earlier.artists.iter().any(|b| library.same_artist(*a, *b)));
+        let same_key = |a: &Option<String>, b: &Option<String>| a.is_some() && a == b;
+        let checks = [
+            (
+                SeparationRule::Track,
+                earlier.track == Some(track.id),
+                windows.track_min,
+            ),
+            (
+                SeparationRule::Title,
+                same_key(&track.title_key, &earlier.title_key),
+                windows.title_min,
+            ),
+            (SeparationRule::Artist, same_artist, windows.artist_min),
+            (
+                SeparationRule::Album,
+                same_key(&track.album_key, &earlier.album_key),
+                windows.album_min,
+            ),
+        ];
+        for (rule, same, window_min) in checks {
+            if same && close(window_min) {
+                violations.push(Violation::Separation {
+                    pick: index,
+                    rule,
+                    earlier_unix_ms: earlier.start_ms,
+                    window_min,
+                });
+            }
+        }
+    }
+}
+
+/// The daypart separation and the same daypart on the days before, that
+/// `track` at `at` breaks.
+fn dayparts_broken(
+    library: &Library,
+    timeline: &[Play],
+    track: &Track,
+    windows: Windows,
+    at: i64,
+    index: u32,
+) -> Vec<Violation> {
+    let mut violations = Vec::new();
+    if windows.dayparts > 0
+        && let Some(last) = timeline
+            .iter()
+            .rev()
+            .find(|p| p.start_ms <= at && p.track == Some(track.id))
+        && dayparts::holds(
+            library.daypart_count(),
+            windows.dayparts,
+            library.local(last.start_ms).datetime(),
+            library.local(at).datetime(),
+        )
+    {
+        violations.push(Violation::Daypart {
+            pick: index,
+            earlier_unix_ms: last.start_ms,
+            dayparts: windows.dayparts,
+        });
+    }
+    if windows.daypart_days > 0 {
+        let count = library.daypart_count();
+        let local = library.local(at).datetime();
+        let since =
+            at - i64::from(dayparts::days_lookback_min(count, windows.daypart_days)) * 60_000;
+        if let Some(earlier) = timeline
+            .iter()
+            .rev()
+            .filter(|p| p.start_ms <= at)
+            .take_while(|p| p.start_ms >= since)
+            .find(|p| {
+                p.track == Some(track.id)
+                    && dayparts::holds_days(
+                        count,
+                        windows.daypart_days,
+                        library.local(p.start_ms).datetime(),
+                        local,
+                    )
+            })
+        {
+            violations.push(Violation::DaypartDays {
+                pick: index,
+                earlier_unix_ms: earlier.start_ms,
+                days: windows.daypart_days,
+            });
+        }
+    }
+    violations
+}
+
+/// What the draw depth of a pick is checked against: the tracks' last
+/// plays so far, the time and the category played before.
+struct DrawCheck<'a> {
+    library: &'a Library,
+    last_played: &'a std::collections::HashMap<TrackId, i64>,
+    local: jiff::civil::DateTime,
+    previous: Option<&'a [CategoryId]>,
+}
+
+impl DrawCheck<'_> {
+    /// The tracks of its pool played longer ago than the pick are fewer
+    /// than its draw had.
+    fn broken(&self, pick: &SimulatedPick, track: &Track, index: u32) -> Option<Violation> {
+        let (library, local, previous, last_played) =
+            (self.library, self.local, self.previous, self.last_played);
+        let (depth, category) = expected_draw(library, &pick.explanation)?;
+        let logged = pick.explanation.draw.map(|draw| draw.pct);
+        let step = pick.explanation.step;
+        let pct = if step == 0 || step == FALLBACK_STEP {
+            logged
+                .unwrap_or(depth.start_pct)
+                .clamp(depth.start_pct, depth.max_pct)
+        } else {
+            depth.max_pct
+        };
+        let (pool, _) = Call::new(library, category, None).allowed(library, local, previous);
+        let key = last_played.get(&track.id).copied();
+        let rank = if key.is_none() {
+            0
+        } else {
+            pool.iter()
+                .filter(|(other, _)| {
+                    other.id != track.id && last_played.get(&other.id).copied() < key
+                })
+                .count()
+        };
+        let tracks = draw::size(pool.len(), pct);
+        (rank >= tracks).then(|| Violation::Draw {
+            pick: index,
+            rank: u32::try_from(rank).unwrap_or(u32::MAX),
+            tracks: u32::try_from(tracks).unwrap_or(u32::MAX),
+        })
+    }
+}
+
+/// An exact time the pick does not meet.
+fn exact_missed(library: &Library, pick: &SimulatedPick, at: i64, index: u32) -> Option<Violation> {
+    let exact = expected_exact(library, &pick.explanation)?;
+    let logged = pick.explanation.exact.map(|log| log.at_unix_ms);
+    let met = logged.is_some_and(|at_ms| {
+        let local = library.local(at_ms);
+        let into_hour = u32::from(local.minute() as u8) * 60 + u32::from(local.second() as u8);
+        let window = exact.window(at_ms);
+        into_hour == exact.at_s && (window.from_ms..=window.cut_ms).contains(&at)
+    });
+    (!met).then_some(Violation::ExactTime {
+        pick: index,
+        at_unix_ms: logged,
+        start_unix_ms: at,
+    })
 }
 
 /// The windows across stations a pick must respect, from its slot and step.
