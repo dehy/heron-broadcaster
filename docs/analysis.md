@@ -35,7 +35,7 @@ After (and during) a scan, every present track whose analysis is missing, made b
 | Situation | What happens |
 |---|---|
 | Transient error (file unreadable, database down) | Retried after 30 s, then 60 s; 3 attempts in total |
-| Broken file (cannot be decoded) | Failed at once, and any older analysis of the track is removed. Not retried while the file is unchanged |
+| Broken file (cannot be decoded) | Failed at once, and any older analysis of the track is removed. Not retried while the file is unchanged, unless Heron learns to decode it (Opus files were retried once when Heron could decode them) |
 | File changed during analysis, or differs from what the scanner recorded | Result dropped, job postponed by 30 s without counting an attempt. Network shares report modification times lazily, so a file can still be copying after it looked settled |
 | Worker crashed | Its jobs are reclaimed after a 5 min lease, or immediately when the same instance restarts |
 | Analyzer shut down | Running jobs are put back without counting the attempt |
@@ -50,7 +50,7 @@ Re-analysis happens automatically when `ALGORITHM_VERSION` in `heron-analysis` i
 
 `heron-analyzer` runs `HERON_ANALYZER_WORKERS` workers in parallel, by default the number of CPUs minus one, so the engine always keeps a core on small machines such as a Raspberry Pi.
 
-Decoding uses Symphonia:
+Decoding uses Symphonia, and libopus for Opus:
 
 | Format | Status |
 |---|---|
@@ -58,10 +58,11 @@ Decoding uses Symphonia:
 | M4A / MP4: AAC-LC, ALAC | Supported |
 | FLAC, Ogg Vorbis, WAV, AIFF | Supported |
 | HE-AAC (AAC+) in M4A | Not supported by Symphonia's AAC decoder |
-| Opus | Not supported by Symphonia; needs libopus (BSD), see the [open questions](open-questions.md) |
+| Ogg Opus, mono and stereo | Supported, decoded with libopus (BSD, built with Heron); the header's output gain is applied |
+| Opus with more than two channels | Not supported, reported as an unsupported format |
 | MP3 inside a WAV (RIFF) container | Not supported, reported as failed |
 
-Decoding is gapless (encoder delay and padding removed). MP3s with a broken Xing/LAME header, whose frame count makes gapless trimming drop everything, are decoded again without gapless trimming. Decoded audio peaking above +12 dBTP is rejected as corrupt: playing it would be dangerous.
+Decoding is gapless (encoder delay and padding removed: an Opus file's pre-skip and the end its last page sets). MP3s with a broken Xing/LAME header, whose frame count makes gapless trimming drop everything, are decoded again without gapless trimming. Decoded audio peaking above +12 dBTP is rejected as corrupt: playing it would be dangerous.
 
 ## Measurements
 

@@ -552,6 +552,47 @@ mod tests {
         db.drop().await;
     }
 
+    #[tokio::test]
+    async fn failed_opus_analyses_are_queued_again_once_after_the_upgrade() {
+        let Some(db) = ScratchDatabase::create().await else {
+            return;
+        };
+        let pool = &db.pool;
+        let settings = AnalysisSettings::default();
+        let opus = add_track(pool, "a.opus").await;
+        // An Ogg file holding Opus, as the scanner records it.
+        let ogg = add_track(pool, "b.ogg").await;
+        sqlx::query("UPDATE tracks SET codec = 'Opus' WHERE id = ?")
+            .bind(ogg)
+            .execute(pool)
+            .await
+            .unwrap();
+        add_track(pool, "c.mp3").await;
+        enqueue_stale(pool, &settings).await.unwrap();
+        while let Some(job) = claim(pool, "test/1", LEASE).await.unwrap() {
+            retry_or_fail(pool, &job, "unsupported audio codec", false, Duration::ZERO)
+                .await
+                .unwrap();
+        }
+        assert_eq!(counts(pool).await.unwrap().failed, 3);
+        assert_eq!(enqueue_stale(pool, &settings).await.unwrap(), 0);
+
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/20271116000000_opus_analysis_retry.sql"
+        ))
+        .execute(pool)
+        .await
+        .unwrap();
+        assert_eq!(enqueue_stale(pool, &settings).await.unwrap(), 2);
+        let mut queued = Vec::new();
+        while let Some(job) = claim(pool, "test/1", LEASE).await.unwrap() {
+            queued.push(job.track_id);
+        }
+        queued.sort_unstable();
+        assert_eq!(queued, [opus, ogg], "the MP3 stays failed");
+        db.drop().await;
+    }
+
     #[test]
     fn retry_delays_grow_and_are_capped() {
         assert_eq!(retry_delay(1), Duration::from_secs(30));

@@ -2,6 +2,12 @@
 
 What changed in each release of Heron. Before upgrading, read the release's notes in [Upgrading](docs/upgrading.md#release-notes).
 
+## Edge
+
+### Added
+
+- **Opus files** (Ogg Opus, mono and stereo) are analysed and played, decoded with libopus; until now every `.opus` file failed its analysis ([Import and analysis](docs/analysis.md#analyzer)).
+
 ## 0.5.0 – 2026-11-16
 
 The live monitor (M20): the station straight from its engine, a fraction of a second behind the air, before or after the processing, to tune the sound by ear. Upgrading from 0.4.0 keeps the station on air: see [0.4.0 to 0.5.0](docs/upgrading.md#040-to-050).

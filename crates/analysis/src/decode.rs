@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Decoding files with Symphonia.
+//! Decoding files with Symphonia, and libopus for Opus.
 //!
 //! [`Decoder`] is shared by the analysis and the engine, so the engine plays
 //! exactly the samples the analysis measured and cue points line up.
@@ -134,8 +134,7 @@ impl Decoder {
             .and_then(|params| params.audio())
             .ok_or(Error::NoAudioTrack)?;
         let decoder_options = AudioDecoderOptions::default().gapless(gapless);
-        let decoder =
-            symphonia::default::get_codecs().make_audio_decoder(codec_params, &decoder_options)?;
+        let decoder = crate::opus::codecs().make_audio_decoder(codec_params, &decoder_options)?;
         Ok(Self {
             path: path.to_path_buf(),
             contents,
@@ -344,6 +343,123 @@ mod tests {
         let analysis = analyze_file(&path, &AnalysisSettings::default()).unwrap();
         assert!(analysis.duration_ms.abs_diff(4_000) <= 30, "{analysis:?}");
         assert!(analysis.cue_in_ms.abs_diff(1_000) <= 30, "{analysis:?}");
+    }
+
+    fn fixture(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name)
+    }
+
+    /// Every frame of a file, and its rate and channels.
+    fn decode_all(path: &Path) -> (u32, usize, Vec<f32>) {
+        let mut decoder = Decoder::open(path).unwrap();
+        let mut samples = Vec::new();
+        let mut spec = (0, 0);
+        while let Some(block) = decoder.next_block().unwrap() {
+            spec = (block.rate, block.channels);
+            samples.extend_from_slice(block.samples);
+        }
+        (spec.0, spec.1, samples)
+    }
+
+    // The Opus fixtures were made with ffmpeg's libopus encoder, and their
+    // loudness and true peak measured with its `ebur128` filter (libopus
+    // decoding): -9.06 LUFS and -5.73 dBTP for the stereo one, -13.48 LUFS
+    // and -10.26 dBTP for the mono one.
+
+    #[test]
+    fn analyzes_a_stereo_opus_file() {
+        let path = fixture("stereo-1s-silence-2s-tone.opus");
+        // 3 s at 48 kHz exactly: the pre-skip and the end trim are applied.
+        let (rate, channels, samples) = decode_all(&path);
+        assert_eq!((rate, channels), (48_000, 2));
+        assert_eq!(samples.len(), 2 * 144_000);
+
+        let analysis = analyze_file(&path, &AnalysisSettings::default()).unwrap();
+        assert_eq!(analysis.duration_ms, 3_000);
+        assert!(analysis.cue_in_ms.abs_diff(1_000) <= 30, "{analysis:?}");
+        let lufs = analysis.integrated_lufs.unwrap();
+        assert!((lufs - -9.06).abs() <= 0.1, "{lufs}");
+        let peak = analysis.true_peak_db.unwrap();
+        assert!((peak - -5.73).abs() <= 0.1, "{peak}");
+    }
+
+    #[test]
+    fn analyzes_a_mono_opus_file() {
+        // Encoded from 44.1 kHz: Opus decodes it at 48 kHz.
+        let path = fixture("mono-2.5s-44k1.opus");
+        let (rate, channels, samples) = decode_all(&path);
+        assert_eq!((rate, channels), (48_000, 1));
+        assert_eq!(samples.len(), 120_000);
+
+        let analysis = analyze_file(&path, &AnalysisSettings::default()).unwrap();
+        assert_eq!(analysis.duration_ms, 2_500);
+        let lufs = analysis.integrated_lufs.unwrap();
+        assert!((lufs - -13.48).abs() <= 0.1, "{lufs}");
+        let peak = analysis.true_peak_db.unwrap();
+        assert!((peak - -10.26).abs() <= 0.1, "{peak}");
+    }
+
+    /// The fixture with its header's output gain set to `gain` (Q7.8 dB),
+    /// and the CRC of its first Ogg page updated.
+    fn with_output_gain(gain: i16) -> Vec<u8> {
+        let mut bytes = std::fs::read(fixture("stereo-1s-silence-2s-tone.opus")).unwrap();
+        let segments = usize::from(bytes[26]);
+        let body = 27 + segments;
+        let length: usize = bytes[27..body].iter().map(|&n| usize::from(n)).sum();
+        assert_eq!(&bytes[body..body + 8], b"OpusHead");
+        bytes[body + 16..body + 18].copy_from_slice(&gain.to_le_bytes());
+        // Ogg's CRC-32: polynomial 0x04c11db7, not reflected, computed with
+        // the CRC field zeroed.
+        bytes[22..26].fill(0);
+        let mut crc = 0_u32;
+        for &byte in &bytes[..body + length] {
+            crc ^= u32::from(byte) << 24;
+            for _ in 0..8 {
+                crc = if crc & 0x8000_0000 != 0 {
+                    (crc << 1) ^ 0x04c1_1db7
+                } else {
+                    crc << 1
+                };
+            }
+        }
+        bytes[22..26].copy_from_slice(&crc.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn applies_the_opus_output_gain() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("quieter.opus");
+        std::fs::write(&path, with_output_gain(-6 * 256)).unwrap();
+        let analysis = analyze_file(&path, &AnalysisSettings::default()).unwrap();
+        let lufs = analysis.integrated_lufs.unwrap();
+        assert!((lufs - (-9.06 - 6.0)).abs() <= 0.1, "{lufs}");
+        assert_eq!(analysis.duration_ms, 3_000);
+    }
+
+    #[test]
+    fn opus_with_more_than_two_channels_is_unsupported() {
+        let error = analyze_file(
+            &fixture("three-channels.opus"),
+            &AnalysisSettings::default(),
+        )
+        .unwrap_err();
+        assert!(error.is_unsupported_format(), "{error}");
+        assert!(!error.is_transient());
+    }
+
+    #[test]
+    fn opus_decodes_from_memory_like_from_disk() {
+        let path = fixture("stereo-1s-silence-2s-tone.opus");
+        let contents: Arc<[u8]> = std::fs::read(&path).unwrap().into();
+        let mut from_memory = Decoder::from_memory(&path, contents).unwrap();
+        let mut samples = Vec::new();
+        while let Some(block) = from_memory.next_block().unwrap() {
+            samples.extend_from_slice(block.samples);
+        }
+        assert_eq!(samples, decode_all(&path).2);
     }
 
     #[test]
