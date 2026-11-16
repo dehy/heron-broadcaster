@@ -4,7 +4,7 @@
 
 ## Why
 
-A station whose online audience is certified by a recognized body can show audited figures to advertisers. These bodies measure from the stream servers' access logs, which the station's streaming provider sends them today. Heron runs or knows those servers: it can read their logs, keep them for the time asked, and export them, then send them by itself ([#189](https://github.com/frequencehit/heron-broadcaster/issues/189)).
+A station whose online audience is certified by a recognized body can show audited figures to advertisers. These bodies measure from the stream servers' access logs, which the station's streaming provider sends them today. Heron runs or knows those servers: it can read their logs, keep them for the time asked, and export them, then send them by itself.
 
 The bodies' exact formats and delivery channels come with each agreement and are not public: this milestone builds the generic part, and leaves a preset per body for when its specification is obtained.
 

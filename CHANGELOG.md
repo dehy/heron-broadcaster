@@ -10,7 +10,7 @@ What changed in each release of Heron. Before upgrading, read the release's note
 
 ### Fixed
 
-Never off air ([#221](https://github.com/frequencehit/heron-broadcaster/issues/221)): what the queue reads can no longer stop the music ([Audio engine – Failure handling](docs/audio-engine.md#failure-handling)).
+Never off air: what the queue reads can no longer stop the music ([Audio engine – Failure handling](docs/audio-engine.md#failure-handling)).
 
 - **A match that stops moving no longer holds the queue:** every track, the queue waits behind a match only while its vote's track and one of its tracks are there, and no longer than 2 minutes after its vote should have closed. Before, a match whose loop stopped, or whose two tracks were gone, let the queue run dry.
 - **The match table failing** no longer stops an operator from skipping, clearing, removing or queueing tracks.
