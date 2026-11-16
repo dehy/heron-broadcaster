@@ -230,6 +230,49 @@ impl EngineRpc for EngineService {
         Ok(Response::new(Box::pin(stream)))
     }
 
+    type WatchMonitorStream = Pin<Box<dyn Stream<Item = Result<pb::MonitorChunk, Status>> + Send>>;
+
+    async fn watch_monitor(
+        &self,
+        _: Request<pb::WatchMonitorRequest>,
+    ) -> Reply<Self::WatchMonitorStream> {
+        let mut chunks = self.engine.subscribe_monitor();
+        let (sender, receiver) = tokio::sync::mpsc::channel(4);
+        tokio::spawn(async move {
+            let mut lost = 0_u32;
+            loop {
+                let chunk = match chunks.recv().await {
+                    Ok(chunk) => chunk,
+                    // A client too slow to keep up loses audio rather than
+                    // stalling the engine; it is told how much.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        lost = lost.saturating_add(u32::try_from(skipped).unwrap_or(u32::MAX));
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
+                let message = pb::MonitorChunk {
+                    frame: chunk.frame,
+                    raw: chunk.raw.clone(),
+                    processed: chunk.processed.clone(),
+                    lost,
+                };
+                match sender.try_send(Ok(message)) {
+                    Ok(()) => lost = 0,
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        lost = lost.saturating_add(1);
+                    }
+                    // The client went away: the tap turns off with the
+                    // last receiver.
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
+                }
+            }
+        });
+        Ok(Response::new(Box::pin(
+            tokio_stream::wrappers::ReceiverStream::new(receiver),
+        )))
+    }
+
     async fn get_config(&self, _: Request<pb::GetConfigRequest>) -> Reply<pb::EngineConfig> {
         let config = self.engine.config();
         Ok(Response::new(pb::EngineConfig {

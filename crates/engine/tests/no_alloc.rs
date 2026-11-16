@@ -117,6 +117,9 @@ impl AudioSource for Starved {
 fn the_mixer_does_not_allocate() {
     let (mut mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
     let mut block = vec![0.0_f32; BLOCK_FRAMES * CHANNELS];
+    // The live monitor's tap on, then off, then on again.
+    let mut monitor = handle.monitor.take().unwrap();
+    handle.status.monitoring.store(true, Ordering::Relaxed);
     let crossfade = FrameTransition {
         next_start: 30_000,
         fade_out: Some(FrameRamp {
@@ -266,6 +269,17 @@ fn the_mixer_does_not_allocate() {
         while let Ok(track) = handle.trash.pop() {
             drop(track);
         }
+        // The live monitor's thread: it reads the ring, but not always
+        // in time.
+        if index % 7 != 0
+            && let Ok(read) = monitor.read_chunk(monitor.slots())
+        {
+            read.commit_all();
+        }
+        handle
+            .status
+            .monitoring
+            .store(!(150..250).contains(&index), Ordering::Relaxed);
     }
     assert!(script.is_empty());
     assert_eq!(total, 0, "the audio thread allocated or freed memory");

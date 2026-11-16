@@ -33,6 +33,9 @@ service Engine {
   rpc GetAbout(GetAboutRequest) returns (AboutInfo);
   // Track changes as they happen.
   rpc WatchEvents(WatchEventsRequest) returns (stream EngineEvent);
+  // The live monitor: the master bus before and after the AGC chain, 20 ms
+  // at a time, while the stream is open (docs/audio-engine.md#live-monitor).
+  rpc WatchMonitor(WatchMonitorRequest) returns (stream MonitorChunk);
 
   // Configuration, kept by the engine across restarts.
   rpc GetConfig(GetConfigRequest) returns (EngineConfig);
@@ -266,6 +269,21 @@ message AgcLevels {
 }
 
 message WatchEventsRequest {}
+
+message WatchMonitorRequest {}
+
+// 960 frames (20 ms) of the master bus: 16-bit little-endian, interleaved
+// stereo, 48 kHz.
+message MonitorChunk {
+  // Its first frame, counted from when the monitor was turned on.
+  uint64 frame = 1;
+  // Before the AGC chain.
+  bytes raw = 2;
+  // After the AGC chain and the clip: what the encoders get.
+  bytes processed = 3;
+  // Chunks this stream lost since the last one, having fallen behind.
+  uint32 lost = 4;
+}
 
 enum EndReason {
   END_REASON_UNSPECIFIED = 0;
