@@ -210,6 +210,23 @@ code,
   color: var(--accent);
 }
 
+/* Heron's name and the live monitor's button, at the top of the menu. */
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* The live monitor's button while listening. */
+.btn.monitor-button.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.monitor-panel {
+  z-index: 40;
+}
+
 .nav {
   display: flex;
   flex-direction: column;

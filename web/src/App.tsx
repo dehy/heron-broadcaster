@@ -4,6 +4,7 @@ import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-quer
 import { type ReactNode, useEffect, useReducer, useState } from "react";
 import { api, can, done, errorMessage, fetchStatus, unwrap } from "./api";
 import { BackupWarnings } from "./components/BackupKey";
+import { LiveMonitorButton } from "./components/LiveMonitor";
 import { StatusBar } from "./components/StatusBar";
 import { Enrolment, RecoveryCodesHost } from "./components/TwoFactor";
 import { ModuleGate } from "./components/Modules";
@@ -13,6 +14,7 @@ import { setTimeZone } from "./lib/format";
 import { ALL_ON, useStationModules } from "./lib/modules";
 import { PAGES, isCurrent, placeOf } from "./lib/pages";
 import { startLive, stopLive, useLive } from "./lib/live";
+import { restartMonitor, stopMonitor } from "./lib/monitor";
 import { Link, match, navigate, useLocation } from "./lib/router";
 import { ME_KEY, StationScope, UserContext, useCan, useMeQuery, useUser } from "./lib/session";
 import { chooseStation, here, initialStation, stationRole, useStation } from "./lib/station";
@@ -106,6 +108,7 @@ export function App() {
 async function signOut(client: QueryClient) {
   await done(api.POST("/api/v1/auth/logout")).catch(() => {});
   stopLive();
+  stopMonitor();
   client.setQueryData(ME_KEY, null);
   client.removeQueries({ predicate: (query) => query.queryKey[0] !== ME_KEY[0] });
   navigate("/");
@@ -279,6 +282,8 @@ function Shell() {
     if (station !== null) {
       stopLive();
       startLive();
+      // The monitor too, if listening.
+      restartMonitor();
     }
   }, [station]);
   const switchTo = (id: number) => {
@@ -305,9 +310,12 @@ function Shell() {
         <div className="scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />
       )}
       <aside className="sidebar" aria-label={t("nav.label")}>
-        <Link to="/" className="brand">
-          <Logo /> Heron
-        </Link>
+        <div className="brand-row">
+          <Link to="/" className="brand">
+            <Logo /> Heron
+          </Link>
+          <LiveMonitorButton />
+        </div>
         {(stations.data?.length ?? 0) > 1 && (
           <label className="station-switcher">
             <span className="visually-hidden">{t("stations.switch")}</span>
@@ -391,6 +399,7 @@ function Shell() {
           </Link>
           <span className="spacer" />
           <OnAirBadge />
+          <LiveMonitorButton />
         </div>
         <main className="content">
           {station === null ? (
