@@ -81,6 +81,8 @@ Restrictions are hard rules: unlike separation, **they are never relaxed**. With
 
 A **ban** forbids the track while it matches. **Allow** rules restrict the track to where they match: for each target and kind of rule, at least one must match (two dayparts allowed on a category add up; an allowed daypart on the category and one on the artist must both hold). Times are the track's planned start, in the station's time zone.
 
+A restriction whose rule cannot be read (written by a newer version, a restore, an import) **bans its target at all times** and logs a warning: ignoring it could play what it forbids.
+
 When a slot finds no candidate that respects the restrictions, it goes through the relaxation steps of the separation rules, and then to the fallback category, still respecting the restrictions. If even the fallback has nothing allowed, the slot is skipped for the next one in the clock; if no slot can play, nothing is queued and the engine's fallback directory takes over.
 
 ### Total time

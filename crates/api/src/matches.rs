@@ -968,16 +968,57 @@ pub async fn chained(
     Ok(at_the_end.then_some((id, entry, track)))
 }
 
+/// How long after its vote should have closed a match still holds the
+/// queue: its loop closes it within a few seconds when it runs.
+const HOLD_OVERDUE_MS: i64 = 120_000;
+
 /// Every track: whether the queue waits behind the match waiting or open,
-/// the next one queued behind its winner at its close.
-pub async fn holds_queue(pool: &MySqlPool, station_id: u64) -> ApiResult<bool> {
+/// the next one queued behind its winner at its close. Only while the
+/// match can still go on (`player`: the engine's state): a match that
+/// stopped moving holds nothing (docs/listener-interaction.md#on-air).
+pub async fn holds_queue(
+    pool: &MySqlPool,
+    station_id: u64,
+    player: &PlayerState,
+) -> ApiResult<bool> {
     if !crate::modules::is_on(pool, Some(station_id), Module::Match).await? {
         return Ok(false);
     }
     if load_settings(pool, station_id).await?.every_tracks != 1 {
         return Ok(false);
     }
-    Ok(pending(pool, station_id).await?.is_some())
+    let Some(found) = pending(pool, station_id).await? else {
+        return Ok(false);
+    };
+    let started_at = found.engine_started_at;
+    let holds = still_holds(
+        |entry| present(player, started_at, entry),
+        &found,
+        crate::rotation::now_ms(),
+    );
+    if !holds {
+        tracing::warn!(
+            station = station_id,
+            r#match = found.id,
+            status = found.status,
+            "the match stopped moving: the queue fills without it"
+        );
+    }
+    Ok(holds)
+}
+
+/// Whether the match waiting or open can still go on: its vote's track
+/// and one of its two tracks are in the queue or on a deck (`present`),
+/// and its vote is not long overdue. Its loop stopped otherwise (the
+/// vote's track played without the vote opening, or ended without the
+/// close), or its tracks are gone.
+fn still_holds(present: impl Fn(u64) -> bool, found: &Row, now_ms: i64) -> bool {
+    let overdue = found
+        .closes_ms
+        .is_some_and(|closes| now_ms > closes + HOLD_OVERDUE_MS);
+    present(found.vote_entry_id)
+        && (present(found.entry_a_id) || present(found.entry_b_id))
+        && !overdue
 }
 
 // ---------------------------------------------------------------------------
@@ -1071,7 +1112,7 @@ impl MatchDecision {
     }
 }
 
-#[derive(Clone, Debug, sqlx::FromRow)]
+#[derive(Clone, Debug, Default, sqlx::FromRow)]
 struct Row {
     id: u64,
     station_id: u64,
@@ -1711,19 +1752,20 @@ pub(crate) fn between() -> ApiError {
 }
 
 /// The lock of the station's match waiting or open, for the engine's state
-/// `player`; `None` without one.
-pub(crate) async fn lock(
-    pool: &MySqlPool,
-    station_id: u64,
-    player: &PlayerState,
-) -> ApiResult<Option<Lock>> {
-    let Some(found) = pending(pool, station_id).await? else {
-        return Ok(None);
+/// `player`; `None` without one. A match that cannot be read locks
+/// nothing: an operator works on the queue as without a match.
+pub(crate) async fn lock(pool: &MySqlPool, station_id: u64, player: &PlayerState) -> Option<Lock> {
+    let found = match pending(pool, station_id).await {
+        Ok(found) => found?,
+        Err(error) => {
+            tracing::warn!(station = station_id, %error, "cannot read the match in progress: the queue is not locked");
+            return None;
+        }
     };
     if player.engine_started_at_unix_ms != found.engine_started_at {
-        return Ok(None);
+        return None;
     }
-    Ok(Some(Lock::new(&found, player)))
+    Some(Lock::new(&found, player))
 }
 
 /// The queue entries of the two tracks of the station's match waiting or
@@ -2412,6 +2454,44 @@ mod tests {
     fn nothing_is_refused_once_the_entries_are_gone() {
         assert!(!lock(&[1, 2]).refuses(0, None));
         assert!(!lock(&[]).refuses(0, None));
+    }
+
+    /// A match whose vote's track is entry 11, A 12 and B 13, its vote
+    /// closing at `closes_ms`.
+    fn waiting_match(closes_ms: Option<i64>) -> Row {
+        Row {
+            vote_entry_id: 11,
+            entry_a_id: 12,
+            entry_b_id: 13,
+            closes_ms,
+            ..Row::default()
+        }
+    }
+
+    #[test]
+    fn a_match_holds_the_queue_while_it_can_go_on() {
+        let there = |entries: &'static [u64]| move |entry| entries.contains(&entry);
+        let open = waiting_match(Some(1_000_000));
+        // The vote's track and its two tracks there: the queue waits.
+        assert!(still_holds(there(&[11, 12, 13]), &open, 990_000));
+        // One of the two gone (disabled, say): it still goes on.
+        assert!(still_holds(there(&[11, 13]), &open, 990_000));
+        // Both gone: nothing to wait for.
+        assert!(!still_holds(there(&[11]), &open, 990_000));
+        // The vote's track played without the match opening or closing:
+        // its loop stopped, A and B play by themselves.
+        assert!(!still_holds(there(&[12, 13]), &waiting_match(None), 0));
+        // The vote long overdue.
+        assert!(still_holds(
+            there(&[11, 12, 13]),
+            &open,
+            1_000_000 + HOLD_OVERDUE_MS
+        ));
+        assert!(!still_holds(
+            there(&[11, 12, 13]),
+            &open,
+            1_000_001 + HOLD_OVERDUE_MS
+        ));
     }
 
     #[test]

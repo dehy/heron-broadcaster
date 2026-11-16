@@ -86,7 +86,12 @@ async fn skip(
     station: Station,
 ) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
-    matches::close_before_skip(&state.pool, &state.webhooks, &station, user.id).await?;
+    // A match that cannot be closed never stops the skip.
+    if let Err(error) =
+        matches::close_before_skip(&state.pool, &state.webhooks, &station, user.id).await
+    {
+        tracing::warn!(%error, "cannot close the match's vote before the skip");
+    }
     station.engine.skip().await?;
     tracing::info!(user = %user.username, "skip");
     Ok(StatusCode::NO_CONTENT)
@@ -195,7 +200,7 @@ async fn enqueue(
     }
     if let Some(position) = request.position {
         let player = station.engine.fetch_state().await?;
-        let lock = matches::lock(&state.pool, station.id(), &player).await?;
+        let lock = matches::lock(&state.pool, station.id(), &player).await;
         if lock.is_some_and(|lock| lock.refuses(position, None)) {
             return Err(matches::between());
         }
@@ -224,7 +229,7 @@ async fn clear_queue(
 ) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
     let player = station.engine.fetch_state().await?;
-    let Some(lock) = matches::lock(&state.pool, station.id(), &player).await? else {
+    let Some(lock) = matches::lock(&state.pool, station.id(), &player).await else {
         station.engine.clear().await?;
         tracing::info!(user = %user.username, "queue cleared");
         return Ok(StatusCode::NO_CONTENT);
@@ -254,7 +259,7 @@ async fn remove_entry(
 ) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
     let player = station.engine.fetch_state().await?;
-    let lock = matches::lock(&state.pool, station.id(), &player).await?;
+    let lock = matches::lock(&state.pool, station.id(), &player).await;
     if lock.is_some_and(|lock| lock.holds(entry_id)) {
         return Err(matches::locked());
     }
@@ -283,7 +288,7 @@ async fn move_entry(
 ) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
     let player = station.engine.fetch_state().await?;
-    if let Some(lock) = matches::lock(&state.pool, station.id(), &player).await? {
+    if let Some(lock) = matches::lock(&state.pool, station.id(), &player).await {
         if lock.holds(entry_id) {
             return Err(matches::locked());
         }
