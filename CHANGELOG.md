@@ -15,6 +15,7 @@ Never off air: what the queue reads can no longer stop the music ([Audio engine 
 - **A match that stops moving no longer holds the queue:** every track, the queue waits behind a match only while its vote's track and one of its tracks are there, and no longer than 2 minutes after its vote should have closed. Before, a match whose loop stopped, or whose two tracks were gone, let the queue run dry.
 - **The match table failing** no longer stops an operator from skipping, clearing, removing or queueing tracks.
 - **Stored data that cannot be read** no longer fails every fill: a settings group keeps what can be read (the rest takes its default), and a restriction whose rule cannot be read bans its target at all times.
+- **Segmented choices have their frame again**, and the status bar's rows their padding: the style that takes the frame off labelled groups no longer covers theirs.
 
 ## 0.5.0 – 2026-11-16
 
