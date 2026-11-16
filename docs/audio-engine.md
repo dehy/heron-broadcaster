@@ -11,7 +11,10 @@ How `heron-engine`, the real-time playout process, works. Functional requirement
  decode thread A ──ring──►┌──────────┐ commands ┌──────────────┐ ring ┌─────────┐ ┌─► encoder thread (MP3 128k) ─┬─► output task (Icecast A)
  decode thread B ──ring──►│  player  │─────────►│ audio thread │─────►│ fan-out │─┤                              └─► output task (Icecast B)
  decode thread FX ─ring──►│ (control)│◄─────────│ mixer, clock │      └─────────┘ └─► encoder thread (MP3 64k) ──► output task (Icecast C)
-                          └──────────┘  events  └──────────────┘                 └─► monitor (optional)
+                          └──────────┘  events  └──────┬───────┘                 └─► monitor (optional)
+                                                          │ ring (while someone listens)
+                                                          ▼
+                                                   monitor thread ──gRPC──► heron-api ──WebSocket──► browsers
 ```
 
 | Thread | Role | May allocate, lock, log |
@@ -24,6 +27,7 @@ How `heron-engine`, the real-time playout process, works. Functional requirement
 | Queue writer | Writes the saved queue to disk | Yes |
 | Watchdog | Exits the process when the audio thread is stuck for 10 s, so Docker restarts it | Yes |
 | Fan-out | Copies the master bus to every encoder (and the monitor) | Yes |
+| Live monitor thread | While someone listens: reads the tap's ring, converts it to 16 bits and streams it to the API ([Live monitor](#live-monitor)) | Yes |
 | Encoder threads | One per encoder profile in use | Yes |
 | Output tasks | One per output: connect, stream, metadata, reconnect | Yes |
 
@@ -34,6 +38,15 @@ Every hop between them is bounded and **drops rather than blocks**, so nothing d
 - Internal format: **f32, stereo, 48 kHz**, blocks of 480 frames (10 ms).
 - **No sound card required.** The audio thread renders each block against the system's monotonic clock, 50 ms ahead of real time. Deadlines come from the number of frames rendered since the start, so timing errors never accumulate: 24 h of stream hold exactly 24 h of audio. After a stall of more than 1 s (machine suspended), the clock starts again from now instead of bursting audio, and counts a reset.
 - A local monitor output is optional: build with `--features monitor` and run with `--monitor` (`HERON_MONITOR=true`). It plays the master bus on the default sound card (`cpal`), fed from the fan-out like an encoder. Docker images are built without it.
+
+## Live monitor
+
+The station's sound for the [live monitor](web.md#live-monitor) of the web UI, a fraction of a second behind the air, raw or processed ([M20](roadmap/m20-live-monitor.md)).
+
+- **A tap on the master bus**, in the audio thread, only while someone listens: the API asks for it with `WatchMonitor` (gRPC, a stream), and the audio thread reads a flag at each block. When it is set, it writes the block twice into a lock-free ring, frame by frame: **raw**, the master bus before the [AGC chain](#master-agc-chain) (the decks, fades and loudness gain, the [deck EQ](#deck-eq), the FX player, the pause), and **processed**, after the chain and the clip at full scale, what the encoders get. The two are sample-aligned. The ring holds 0.5 s: when it is full, the block is dropped and counted (`heron_engine_monitor_dropped_blocks_total`), never waited for.
+- **The monitor thread** reads the ring, converts to 16-bit integers and sends chunks of 20 ms (960 frames, both taps) to every `WatchMonitor` stream. A stream that falls behind loses chunks. When the last one ends, the flag is cleared: the audio thread is back to doing nothing for the monitor. Listened to or not, the air is the same, sample for sample.
+- **Latency**: the audio thread renders 50 ms ahead of the clock and the chunks are 20 ms; the API and the browser add their encoding, the network and a small buffer: about 0.3 s with Opus, 0.15 s uncompressed.
+- **One engine at a time**: during a [handover](handover.md), the old engine's streams end and the API asks the new one.
 
 ## Real-time safety
 
@@ -167,6 +180,8 @@ Ten slider gains, from 60 Hz up, each from −12 to +12 dB. By default both EQs 
 ## Master AGC chain
 
 The processing of a station's sound, built in [M10](roadmap/m10-agc-multiband.md) and modeled on SAM Broadcaster's AGC tab. One chain per engine, so per station, on the master bus: after the decks and the FX player are summed and the pause applied, before the clip at full scale, the master meter and the encoders.
+
+To tune it by ear, the [live monitor](#live-monitor) plays the station raw or processed, a fraction of a second behind the air, without touching it.
 
 ```
 Σ ─► pause ─┬─► gated AGC ─► stereo expander ─► bass EQ ─► 5-band ─► dual-band ─► limiter or clipper ─► clip ─► master meter ─► encoders

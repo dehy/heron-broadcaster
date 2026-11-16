@@ -235,6 +235,10 @@ A new engine can only take over from an engine that speaks the same handover pro
 
 What each release asks of an upgrade, on top of the steps above. What it brings is in the [changelog](../CHANGELOG.md).
 
+### Edge
+
+The engines, the API and the web interface are upgraded as usual. The API now carries its own Opus encoder for the [live monitor](web.md#live-monitor), built from source with the API: building it needs CMake (`cmake` on Debian), nothing changes for the published images. An engine from before the live monitor answers `WatchMonitor` with *unimplemented*: the monitor says the engine is too old until it is upgraded too.
+
 ### 0.3.0 to 0.4.0
 
 The upgrade is done on air with `scripts/upgrade.sh 0.4.0` (or `--swarm <stack> 0.4.0`): the handover protocol has not changed, so the 0.4.0 engine of each station takes over from the 0.3.0 one without a gap.

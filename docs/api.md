@@ -109,6 +109,7 @@ What belongs to a station (its engine and decks, queue, history, clocks, schedul
 | Gateway | `GET /gateway/state`, and each show's writes under `/gateway/stations/{code}/{module}/…`: for `heron-public` only, with the gateway token, see [below](#the-public-gateway) |
 | Public | `GET /public/now-playing`, `GET /public/history` (`before`, `limit`), `GET /public/queue`, and the same per station under `/public/stations/{code}/…` — no sign-in, see [below](#public-endpoints) |
 | Live | `GET /live` (WebSocket) |
+| Live monitor | `GET /monitor` (WebSocket; operators and admins) — see [below](#live-monitor) |
 
 Every engine action is there: queue (enqueue, remove, clear, move, and replace, which the queue manager uses), transport (skip, pause, resume), FX player, state, levels, track changes (WebSocket), playout settings, outputs, the deck EQ and the AGC chain. Tracks the engine plays from its fallback directory show with the source `fallback`; autofill does not count them as queued, and anything queued replaces a cued one.
 
@@ -136,6 +137,17 @@ Each station has a name, a code (1 to 32 lowercase letters and digits, unique), 
 | `track` | Each track change | `event`: `started` (with `resumed`: the track on air going on in a restarted engine, or one taking over, not a new play) or `ended` (with `played_ms` and `reason`: finished, skipped, stopped, replaced) |
 
 The API polls the engine's state twice a second and its levels ten times a second, only while someone watches them.
+
+## Live monitor
+
+`/api/v1/monitor` (or `/stations/{id}/monitor`): the station's sound as a WebSocket, a fraction of a second behind the air, for the [live monitor](web.md#live-monitor) ([M20](roadmap/m20-live-monitor.md)). **Operators and admins**: viewers get `403`. At most **8 listeners per station**: a ninth gets `429`.
+
+- **Query**: `codec`, `opus` (the default) or `pcm`; `tap`, `processed` (the default) or `raw`.
+- **First message** (text): `{"type": "ready", "codec": "opus", "sample_rate": 48000, "channels": 2, "frame_ms": 20, "bitrate": 256000, "tap": "processed"}` (`bitrate` with Opus only).
+- **Then binary messages**, one per 20 ms: an Opus packet (stereo, 48 kHz, 256 kbit/s, *audio* application, constrained VBR), or 960 frames of PCM, 16-bit little-endian, interleaved stereo (3,840 bytes).
+- **Switching**: the client sends `{"tap": "raw"}` or `{"tap": "processed"}` (text); the next message is from that tap. The two are sample-aligned and Opus keeps its state: no gap, no click.
+- **Status** (text): `{"type": "tap", "tap": "raw"}` after a switch; `{"type": "lost", "chunks": 3}` when the API dropped audio for a listener falling behind; `{"type": "engine", "reachable": false}` while the engine cannot be reached (the socket stays open and the audio comes back with it); `{"type": "too_old"}` when the engine has no live monitor yet (older than it), then the socket closes.
+- **The engine side**: the API asks the engine for `WatchMonitor` while at least one listener of the station is connected, once for all of them, and stops when the last one leaves ([Audio engine – Live monitor](audio-engine.md#live-monitor)). Each listener has its own encoder.
 
 ## Webhooks
 
