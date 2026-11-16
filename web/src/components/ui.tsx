@@ -98,8 +98,59 @@ export function Icon({ name, size = 18, label }: Readonly<{ name: IconName; size
   );
 }
 
+/** The logo's water: a sine from x = 3 to 29 around y = 26, a wavelength of 15. */
+const WAVE_FROM = 3;
+const WAVE_TO = 29;
+const WAVE_LENGTH = 15;
+const WAVE_HEIGHT = 1.5;
+const WAVE_SEGMENTS = 10;
+
+/**
+ * The water at `phase` (0 to 1, a wavelength travelled), as cubic Béziers
+ * through points of the sine: every phase has the same commands, so the
+ * browser moves smoothly from one to the next.
+ */
+export function wavePath(phase: number, height = WAVE_HEIGHT): string {
+  const k = (2 * Math.PI) / WAVE_LENGTH;
+  const y = (x: number) => 26 - height * Math.sin(k * (x - WAVE_FROM) - 2 * Math.PI * phase);
+  const slope = (x: number) => -height * k * Math.cos(k * (x - WAVE_FROM) - 2 * Math.PI * phase);
+  const round = (n: number) => Math.round(n * 100) / 100;
+  const step = (WAVE_TO - WAVE_FROM) / WAVE_SEGMENTS;
+  let d = `M${WAVE_FROM} ${round(y(WAVE_FROM))}`;
+  for (let i = 0; i < WAVE_SEGMENTS; i++) {
+    const x0 = WAVE_FROM + i * step;
+    const x1 = x0 + step;
+    d += `C${round(x0 + step / 3)} ${round(y(x0) + (step / 3) * slope(x0))} ${round(x1 - step / 3)} ${round(y(x1) - (step / 3) * slope(x1))} ${round(x1)} ${round(y(x1))}`;
+  }
+  return d;
+}
+
+/**
+ * Every 8 seconds a swell goes by: the water flows a wavelength to the
+ * right in about 2.5 s, rising a little and settling, then rests.
+ */
+const WATER_SECONDS = 8;
+const SWELL_FRAMES = 16;
+const SWELL_START = 0.68;
+const WATER = (() => {
+  const values = [wavePath(0)];
+  const times = [0];
+  for (let i = 0; i <= SWELL_FRAMES; i++) {
+    const t = i / SWELL_FRAMES;
+    // Eased: slow to start, slow to stop.
+    const eased = (1 - Math.cos(Math.PI * t)) / 2;
+    values.push(wavePath(eased, WAVE_HEIGHT * (1 + 0.25 * Math.sin(Math.PI * t))));
+    times.push(SWELL_START + (1 - SWELL_START) * t);
+  }
+  return { values: values.join(";"), keyTimes: times.map((time) => time.toFixed(4)).join(";") };
+})();
+
+function reducedMotion(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+}
+
 export function Logo({ size = 24 }: Readonly<{ size?: number }>) {
-  // A heron's head and beak over a wave.
+  // A heron's head and beak over the water; it blinks (index.css) and the water moves now and then.
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
       <path
@@ -109,13 +160,18 @@ export function Logo({ size = 24 }: Readonly<{ size?: number }>) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <circle cx="17" cy="11.5" r="1.3" fill="currentColor" />
-      <path
-        d="M3 26c2.5-2 5-2 7.5 0s5 2 7.5 0 5-2 7.5 0 3 1.5 4 1"
-        stroke="currentColor"
-        strokeWidth={2}
-        strokeLinecap="round"
-      />
+      <circle className="logo-eye" cx="17" cy="11.5" r="1.3" fill="currentColor" />
+      <path d={wavePath(0)} stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+        {!reducedMotion() && (
+          <animate
+            attributeName="d"
+            dur={`${WATER_SECONDS}s`}
+            repeatCount="indefinite"
+            values={WATER.values}
+            keyTimes={WATER.keyTimes}
+          />
+        )}
+      </path>
     </svg>
   );
 }

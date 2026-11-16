@@ -277,9 +277,32 @@ code,
   }
 }
 
+/* The heron is alive: it blinks now and then. */
+.logo-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: heron-blink 4.7s infinite;
+}
+
+@keyframes heron-blink {
+  0%,
+  93%,
+  97%,
+  100% {
+    transform: none;
+  }
+  95% {
+    transform: scaleY(0.1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .monitor-notes {
     display: none;
+  }
+
+  .logo-eye {
+    animation: none;
   }
 }
 
