@@ -2,13 +2,17 @@
 
 What changed in each release of Heron. Before upgrading, read the release's notes in [Upgrading](docs/upgrading.md#release-notes).
 
-## Edge
+## 0.5.0 – 2026-11-16
 
-What `main` has since the last release: it is published as the `edge` images. Read the [Edge upgrade notes](docs/upgrading.md#edge) first.
+The live monitor (M20): the station straight from its engine, a fraction of a second behind the air, before or after the processing, to tune the sound by ear. Upgrading from 0.4.0 keeps the station on air: see [0.4.0 to 0.5.0](docs/upgrading.md#040-to-050).
 
 ### Added
 
 - **Live monitor** (M20): a button at the top of the menu plays the station straight from its engine, about 0.3 s behind the air instead of the 8 to 10 s of a stream, **processed or raw** (before the processing chain, without touching the air), in Opus or uncompressed: to tune the sound by ear ([Web UI – Live monitor](docs/web.md#live-monitor), [API – Live monitor](docs/api.md#live-monitor)).
+
+### Changed
+
+- **A living logo:** the heron blinks now and then, and every 8 seconds a swell goes by on the water under it; nothing moves when the browser asks for reduced motion.
 
 ## 0.4.0 – 2026-11-15
 
