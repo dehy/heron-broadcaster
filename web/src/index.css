@@ -227,6 +227,15 @@ code,
   z-index: 40;
 }
 
+/* The monitor's panel is a <dialog> left open, placed by its button: none
+   of the browser's centring. */
+dialog.monitor-panel {
+  margin: 0.25rem 0 0;
+  right: auto;
+  bottom: auto;
+  color: inherit;
+}
+
 /* Notes rising from the headphones while the sound plays. */
 .monitor-button {
   position: relative;

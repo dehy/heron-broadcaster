@@ -43,9 +43,9 @@ export function DaypartSettings({
   onChange: (count: number) => void;
 }>) {
   const [played, setPlayed] = useState(0);
-  const [chosen, setSeparation] = useState(1);
+  const [chosenSeparation, setChosenSeparation] = useState(1);
   const max = maxSeparation(count);
-  const separation = Math.min(chosen, max);
+  const separation = Math.min(chosenSeparation, max);
   const from = Math.min(played, count - 1);
   const days = exampleDays(count, separation, from);
   return (
@@ -79,7 +79,7 @@ export function DaypartSettings({
             label={t("dayparts.separation")}
             value={String(separation)}
             options={Array.from({ length: max + 1 }, (_, n) => ({ value: String(n), label: String(n) }))}
-            onChange={(value) => setSeparation(Number(value))}
+            onChange={(value) => setChosenSeparation(Number(value))}
           />
           <span className="hint">{t("dayparts.separationHint", { max, last: count - 1 })}</span>
         </div>
@@ -87,13 +87,15 @@ export function DaypartSettings({
       <div className="stack daypart-example">
         <span className="small" style={{ fontWeight: 550 }}>{t("dayparts.example")}</span>
         <div className="daypart-days">
-          {days.map((states, day) => (
-            <DayRow key={day} day={day} count={count} states={states} onPick={day === 0 ? setPlayed : undefined} />
-          ))}
+          {days
+            .map((states, day) => ({ day, label: dayLabel(day), states }))
+            .map(({ day, label, states }) => (
+              <DayRow key={label} day={day} count={count} states={states} onPick={day === 0 ? setPlayed : undefined} />
+            ))}
           <span />
           <div className="daypart-hours" aria-hidden="true">
-            {Array.from({ length: count + 1 }, (_, i) => (
-              <span key={i}>{`${(i * 24) / count}h`}</span>
+            {Array.from({ length: count + 1 }, (_, i) => (i * 24) / count).map((hour) => (
+              <span key={hour}>{`${hour}h`}</span>
             ))}
           </div>
         </div>
@@ -128,8 +130,7 @@ function DayRow({
     <>
       <span className="small muted">{label}</span>
       <div className="daypart-strip">
-        {states.map((state, index) => {
-          const letter = daypartLetter(index);
+        {states.map((state, index) => ({ state, index, letter: daypartLetter(index) })).map(({ state, index, letter }) => {
           const title = `${label} · ${letter}: ${t(STATES[state])}`;
           const content = (
             <>
@@ -139,7 +140,7 @@ function DayRow({
           );
           return onPick ? (
             <button
-              key={index}
+              key={letter}
               type="button"
               className={`daypart ${state}`}
               title={title}
@@ -149,7 +150,7 @@ function DayRow({
               {content}
             </button>
           ) : (
-            <span key={index} className={`daypart ${state}`} title={title}>
+            <span key={letter} className={`daypart ${state}`} title={title}>
               {content}
             </span>
           );
@@ -252,6 +253,36 @@ export function DaypartBadge({ explanation }: Readonly<{ explanation: Explanatio
  * many tracks they held back, and the track's own values when it has
  * them. Nothing when both are off and the category's.
  */
+type DaypartLog = NonNullable<Explanation["daypart"]>;
+
+/** The track's own daypart values, for the note. */
+function ownValues(daypart: DaypartLog, days: number, ownSeparation: boolean, ownDays: boolean): string {
+  const values: string[] = [];
+  if (ownSeparation) {
+    values.push(`${t("rotation.window.dayparts")} ${daypart.separation}`);
+  }
+  if (ownDays) {
+    values.push(`${t("rotation.window.daypartDays")} ${t("format.days", { count: days })}`);
+  }
+  return t("trackDayparts.logOwn", { values: values.join(", ") });
+}
+
+/** Where the track last played: the separation halved at step 3, else its daypart and time. */
+function lastDaypartNote(explanation: Explanation, daypart: DaypartLog): string | null {
+  const last = daypart.last_daypart;
+  if (last === null || last === undefined) return null;
+  if (explanation.step === 3 && daypart.separation > 0) {
+    return t("dayparts.halved", {
+      from: daypart.separation,
+      to: explanation.windows.dayparts,
+      played: daypartLetter(last),
+      part: daypartLetter(daypart.daypart),
+    });
+  }
+  if (!explanation.last_played_unix_ms) return null;
+  return t("dayparts.lastIn", { part: daypartLetter(last), time: dateTime(explanation.last_played_unix_ms) });
+}
+
 export function daypartNote(explanation: Explanation): string | null {
   const daypart = explanation.daypart;
   const days = daypart?.days ?? 0;
@@ -266,30 +297,12 @@ export function daypartNote(explanation: Explanation): string | null {
   }
   const parts: string[] = [];
   if (ownSeparation || ownDays) {
-    const values: string[] = [];
-    if (ownSeparation) {
-      values.push(`${t("rotation.window.dayparts")} ${daypart.separation}`);
-    }
-    if (ownDays) {
-      values.push(`${t("rotation.window.daypartDays")} ${t("format.days", { count: days })}`);
-    }
-    parts.push(t("trackDayparts.logOwn", { values: values.join(", ") }));
+    parts.push(ownValues(daypart, days, ownSeparation, ownDays));
   }
-  const last = daypart.last_daypart;
   const step = explanation.step;
-  if (step === 3 && daypart.separation > 0 && last !== null && last !== undefined) {
-    parts.push(
-      t("dayparts.halved", {
-        from: daypart.separation,
-        to: explanation.windows.dayparts,
-        played: daypartLetter(last),
-        part: daypartLetter(daypart.daypart),
-      }),
-    );
-  } else if (last !== null && last !== undefined && explanation.last_played_unix_ms) {
-    parts.push(
-      t("dayparts.lastIn", { part: daypartLetter(last), time: dateTime(explanation.last_played_unix_ms) }),
-    );
+  const lastNote = lastDaypartNote(explanation, daypart);
+  if (lastNote) {
+    parts.push(lastNote);
   }
   if (step === 3 && days > 0) {
     parts.push(t("dayparts.daysHalved", { from: days, to: explanation.windows.daypart_days }));

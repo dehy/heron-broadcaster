@@ -51,7 +51,7 @@ export function LiveMonitorButton() {
   const status = useMonitor((state) => state.status);
   const [open, setOpen] = useState<{ top: number; left: number } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
-  const panel = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     if (!open) {
@@ -114,15 +114,15 @@ export function LiveMonitorButton() {
         )}
       </button>
       {open && (
-        <div
+        <dialog
+          open
           ref={panel}
           className="menu-panel monitor-panel stack"
-          role="dialog"
           aria-label={t("monitor.title")}
           style={{ position: "fixed", top: open.top, left: open.left, width: PANEL_WIDTH }}
         >
           <MonitorPanel listening={listening} />
-        </div>
+        </dialog>
       )}
     </>
   );
@@ -143,16 +143,16 @@ function MonitorPanel({ listening }: Readonly<{ listening: boolean }>) {
           <Icon name={listening ? "stop" : "play"} size={14} /> {listening ? t("monitor.stop") : t("monitor.listen")}
         </button>
       </div>
-      <p className="hint" role="status" style={{ margin: 0 }}>
+      <output className="hint" style={{ margin: 0 }}>
         {monitorLine(state)}
-      </p>
-      <div className="segmented" role="group" aria-label={t("monitor.tap")}>
+      </output>
+      <fieldset className="segmented" aria-label={t("monitor.tap")}>
         {(["processed", "raw"] as const).map((tap) => (
           <button key={tap} type="button" aria-pressed={state.tap === tap} onClick={() => setMonitorTap(tap)}>
             {tap === "processed" ? t("monitor.processed") : t("monitor.raw")}
           </button>
         ))}
-      </div>
+      </fieldset>
       <label className="field">
         <span>{t("monitor.quality")}</span>
         <select

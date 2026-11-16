@@ -1201,7 +1201,7 @@ function Row({
 
 /** `0.2` and a bar a fifth full; `0` for a disabled track. Listed on a
  * station: its ratio there, marked when it is the station's own. */
-function RatioPill({ track }: { track: TrackSummary }) {
+function RatioPill({ track }: Readonly<{ track: TrackSummary }>) {
   const ratio = effectiveRatio(track);
   const here = track.station_ratio;
   let title = ratioSummary(ratio);

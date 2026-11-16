@@ -291,6 +291,34 @@ function Summary({
   );
 }
 
+/** How an exact time was met, or is planned to be. */
+function MetResult({ exact, met }: Readonly<{ exact: ExactTimeOfDay; met: NonNullable<ExactTimeOfDay["met"]> }>) {
+  const status = metStatus(exact);
+  return (
+    <div className={`card exact-tile exact-result tone-box-${status.tone}`}>
+      <span className="small">{exact.planned ? t("exactTimes.resultPlanned") : t("exactTimes.resultMet")}</span>
+      <strong>{status.label}</strong>
+      <span className="small">
+        {t(exact.planned ? "exactTimes.plannedAt" : "exactTimes.startedAt", {
+          time: clockTime(met.at_unix_ms + met.offset_ms),
+        })}
+      </span>
+    </div>
+  );
+}
+
+/** The rank of an attempt, or whether it is the one in use: kept, or chosen by hand. */
+function inUseLabel(byHand: boolean): string {
+  return byHand ? t("exactTimes.chosen") : t("exactTimes.kept");
+}
+
+/** The slot of the clock a track of an attempt fills. */
+function slotLabel(track: { chosen: string; slot?: number | null }): string {
+  if (track.chosen === "filler") return t("exactTimes.fillerSlot");
+  if (track.chosen === "medley") return t("exactTimes.medleySlot");
+  return track.slot === null || track.slot === undefined ? "–" : number(track.slot + 1);
+}
+
 function Result({
   exact,
   latest,
@@ -305,18 +333,7 @@ function Result({
   // On air: how it was met. Ahead: how the fill in use ends.
   const last = exact.calculations.at(-1);
   if (exact.met) {
-    const status = metStatus(exact);
-    return (
-      <div className={`card exact-tile exact-result tone-box-${status.tone}`}>
-        <span className="small">{exact.planned ? t("exactTimes.resultPlanned") : t("exactTimes.resultMet")}</span>
-        <strong>{status.label}</strong>
-        <span className="small">
-          {t(exact.planned ? "exactTimes.plannedAt" : "exactTimes.startedAt", {
-            time: clockTime(exact.met.at_unix_ms + exact.met.offset_ms),
-          })}
-        </span>
-      </div>
-    );
+    return <MetResult exact={exact} met={exact.met} />;
   }
   if (!latest || !last) {
     return (
@@ -327,7 +344,7 @@ function Result({
     );
   }
   // Chosen by hand: the chosen attempt's ending, not the automatic best's.
-  const chosen = choice && choice.exact_at_unix_ms === window.at ? choice : null;
+  const chosen = choice?.exact_at_unix_ms === window.at ? choice : null;
   const ending = chosen ? chosen.ending : last.ending;
   const number = chosen ? chosen.attempt : latest.kept;
   const tone = ending.faded || !ending.in_window ? "bad" : "good";
@@ -364,7 +381,7 @@ function HandChosen({ choice }: Readonly<{ choice: Schemas["HandChoice"] }>) {
     { success: t("exactTimes.backDone"), invalidate: [["exact-times"], ["exact-calculation"]] },
   );
   return (
-    <div role="status" className="exact-hand row between">
+    <output className="exact-hand row between">
       <span>
         {rich("exactTimes.byHandBanner", {
           attempt: <strong>{t("exactTimes.byHandAttempt", { number: String(choice.attempt) })}</strong>,
@@ -378,7 +395,7 @@ function HandChosen({ choice }: Readonly<{ choice: Schemas["HandChoice"] }>) {
           {t("exactTimes.backToAutomatic")}
         </button>
       )}
-    </div>
+    </output>
   );
 }
 
@@ -601,11 +618,7 @@ function AttemptsCard({
                 onClick={() => setSearch({ calculation: detail.id, attempt: attempt.number })}
               >
                 <span className={attempt.number === inUse ? "exact-rank in-use" : "exact-rank"}>
-                  {attempt.number === inUse
-                    ? choice?.calculation_id === detail.id
-                      ? t("exactTimes.chosen")
-                      : t("exactTimes.kept")
-                    : number(attempt.rank)}
+                  {attempt.number === inUse ? inUseLabel(choice?.calculation_id === detail.id) : number(attempt.rank)}
                 </span>
                 <span className="muted">#{attempt.number}</span>
                 <span className="exact-bar">
@@ -753,13 +766,7 @@ function AttemptDetail({
                 return (
                   <tr key={`${index}-${track.track_id}`}>
                     <td>
-                      {track.chosen === "filler"
-                        ? t("exactTimes.fillerSlot")
-                        : track.chosen === "medley"
-                          ? t("exactTimes.medleySlot")
-                          : track.slot === null || track.slot === undefined
-                            ? "–"
-                            : number(track.slot + 1)}
+                      {slotLabel(track)}
                     </td>
                     <td>
                       {category ? (

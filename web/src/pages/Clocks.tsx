@@ -29,9 +29,11 @@ import {
   type ClockSlot,
   type ClockView,
   type Method,
+  type Schemas,
   type SimulationReport,
   api,
   done,
+  errorMessage,
   query,
   unwrap,
 } from "../api";
@@ -62,7 +64,6 @@ import {
   methodLabel,
   stepLabel,
 } from "../lib/rotation";
-import { type Schemas, errorMessage } from "../api";
 import { Link, navigate } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
 import { here, useStation } from "../lib/station";
@@ -207,6 +208,12 @@ export function Clocks() {
 const AUTOSAVE_MS = 800;
 
 /** Where an existing clock's changes stand: saving, saved, or not saved and why. */
+/** What looping does for a clock: never with an exact time. */
+function loopHelp(hasExact: boolean, loops: boolean): string {
+  if (hasExact) return t("clocks.loopExact");
+  return loops ? t("clocks.loopHelp") : t("clocks.noLoopHelp");
+}
+
 function SaveState({
   dirty,
   saving,
@@ -218,9 +225,7 @@ function SaveState({
   }
   if (saving || (dirty && !error)) {
     return (
-      <span className="muted small" role="status">
-        {t("clocks.saving")}
-      </span>
+      <output className="muted small">{t("clocks.saving")}</output>
     );
   }
   if (error && dirty) {
@@ -231,9 +236,9 @@ function SaveState({
     );
   }
   return (
-    <span className="muted small" role="status">
+    <output className="muted small">
       <Icon name="check" size={12} /> {t("clocks.savedAuto")}
-    </span>
+    </output>
   );
 }
 
@@ -436,7 +441,7 @@ function Editor({ clock }: Readonly<{ clock: ClockView | null }>) {
                 {t("clocks.loop")}
               </label>
               <p className="muted small" style={{ margin: "0.25rem 0 0" }}>
-                {hasExact ? t("clocks.loopExact") : loops ? t("clocks.loopHelp") : t("clocks.noLoopHelp")}
+                {loopHelp(hasExact, loops)}
               </p>
             </div>
             {categories.data?.length === 0 && (

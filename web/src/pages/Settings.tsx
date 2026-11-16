@@ -907,7 +907,7 @@ function StationModulesCard() {
 }
 
 /** The station logo, which stands in for a missing cover on the public side. */
-function StationLogo({ canEdit }: { canEdit: boolean }) {
+function StationLogo({ canEdit }: Readonly<{ canEdit: boolean }>) {
   const station = useStation();
   const [version, setVersion] = useState(0);
   const file = useRef<HTMLInputElement>(null);

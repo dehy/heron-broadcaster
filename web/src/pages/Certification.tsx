@@ -84,6 +84,12 @@ function Sources() {
   );
 }
 
+/** Where a server's access log is read from. */
+function logPlace(log: AccessLogView | null): string | null | undefined {
+  if (!log) return t("certification.noLog");
+  return log.source === "file" ? log.path : log.url;
+}
+
 function Source({ serverId, name, log }: Readonly<{ serverId: number; name: string; log: AccessLogView | null }>) {
   const [editing, setEditing] = useState(false);
   const remove = useAction(
@@ -101,7 +107,7 @@ function Source({ serverId, name, log }: Readonly<{ serverId: number; name: stri
         <div>
           <strong>{name}</strong>
           <div className="muted small">
-            {log ? (log.source === "file" ? log.path : log.url) : t("certification.noLog")}
+            {logPlace(log)}
           </div>
           {log && <State log={log} />}
         </div>
@@ -257,13 +263,10 @@ function Days() {
         </div>
       }
     >
-      {days.isPending ? (
-        <Loading />
-      ) : days.isError ? (
-        <ErrorView error={days.error} />
-      ) : days.data.length === 0 ? (
-        <Empty>{t("certification.noDay")}</Empty>
-      ) : (
+      {days.isPending && <Loading />}
+      {days.isError && <ErrorView error={days.error} />}
+      {days.isSuccess && days.data.length === 0 && <Empty>{t("certification.noDay")}</Empty>}
+      {days.isSuccess && days.data.length > 0 && (
         <table className="table">
           <thead>
             <tr>

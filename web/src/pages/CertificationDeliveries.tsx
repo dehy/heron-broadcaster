@@ -141,9 +141,9 @@ function Delivery({ delivery }: Readonly<{ delivery: CertificationDelivery }>) {
             <div className="muted small">{t("certification.notSentYet")}</div>
           )}
           {test && (
-            <div className="small" role="status" style={{ color: test.ok ? "var(--good)" : "var(--bad)" }}>
+            <output className="small" style={{ color: test.ok ? "var(--good)" : "var(--bad)" }}>
               {test.ok ? t("certification.testOk") : t("certification.testFailed", { error: test.error ?? "" })}
-            </div>
+            </output>
           )}
         </div>
         <div className="row" style={{ gap: "0.25rem", flexWrap: "wrap" }}>

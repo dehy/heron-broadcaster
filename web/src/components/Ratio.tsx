@@ -30,7 +30,7 @@ export function RatioScale({
 }>) {
   const steps = Array.from({ length: withZero ? 11 : 10 }, (_, index) => (withZero ? index : index + 1));
   return (
-    <div className="segmented ratio-scale" role="group" aria-label={t("ratio.title")}>
+    <fieldset className="segmented ratio-scale" aria-label={t("ratio.title")}>
       {steps.map((step) => (
         <button
           key={step}
@@ -42,7 +42,7 @@ export function RatioScale({
           {ratioLabel(step)}
         </button>
       ))}
-    </div>
+    </fieldset>
   );
 }
 
@@ -85,6 +85,12 @@ export function WeightOrRatio() {
 }
 
 /** Asks before disabling tracks: a ratio of 0. `name` for one track. */
+/** What disabling keeps: the ratio the track had, to give it back. */
+function keepsText(previous: number | undefined, station: string | undefined, count: number): string {
+  if (previous === undefined) return t("ratio.disableKeeps", { count });
+  return t(station ? "ratio.disableKeepsOneOn" : "ratio.disableKeepsOne", { ratio: ratioLabel(previous) });
+}
+
 export function DisableDialog({
   open,
   onClose,
@@ -142,9 +148,7 @@ export function DisableDialog({
           {station ? t("ratio.disableQuestionOn", { count, station }) : t("ratio.disableQuestion", { count })}
         </p>
         <p className="muted small" style={{ margin: 0 }}>
-          {previous !== undefined
-            ? t(station ? "ratio.disableKeepsOneOn" : "ratio.disableKeepsOne", { ratio: ratioLabel(previous) })
-            : t("ratio.disableKeeps", { count })}
+          {keepsText(previous, station, count)}
         </p>
         {queued > 0 && <Banner kind="warn">{t("ratio.disableQueued", { count: queued })}</Banner>}
       </div>

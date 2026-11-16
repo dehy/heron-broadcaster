@@ -193,10 +193,10 @@ function Request({ dedication, now }: Readonly<{ dedication: Dedication; now: nu
         {dedication.message && <blockquote className="dedication-message">{dedication.message}</blockquote>}
         {dedication.status === "pending" && (
           <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-            {dedication.checks.map((check, index) => {
+            {dedication.checks.map((check) => {
               const badge = checkBadge(check, shortTime);
               return (
-                <span key={index} className={`badge ${badge.tone}`}>
+                <span key={`${check.kind}:${check.restriction_id ?? ""}`} className={`badge ${badge.tone}`}>
                   {badge.text}
                 </span>
               );

@@ -70,7 +70,7 @@ export function ToDo() {
               <button
                 key={value}
                 type="button"
-                aria-selected={tab === value}
+                aria-current={tab === value ? "page" : undefined}
                 onClick={() =>
                   setSearch({ tab: value === "review" ? undefined : value, page: undefined, sort: undefined, desc: undefined })
                 }
@@ -111,12 +111,12 @@ function MissingSongs({
   filter,
   empty,
   trackTab,
-}: {
+}: Readonly<{
   filter: "no_intro" | "no_hook" | "no_cover";
   empty: PlainKey;
   /** The tab of the track's page that fixes it: *Sound* by default. */
   trackTab?: "details";
-}) {
+}>) {
   const { search } = useLocation();
   const page = Math.max(0, Number(search.get("page") ?? 0) || 0);
   const sort: MissingSort = search.get("sort") === "title" ? "title" : "artist";
@@ -284,7 +284,7 @@ function CoversToCheck() {
   );
 }
 
-function CoverAlbum({ album }: { album: Schemas["CandidateAlbum"] }) {
+function CoverAlbum({ album }: Readonly<{ album: Schemas["CandidateAlbum"] }>) {
   const canEdit = useCan("operator");
   const client = useQueryClient();
   const refresh = () => {

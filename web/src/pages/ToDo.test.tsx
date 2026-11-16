@@ -49,7 +49,7 @@ describe("To do", () => {
     expect(within(tab("todo.tab.covers")).getByText("1")).toBeTruthy();
     // Nothing missing: no count.
     expect(tab("todo.tab.hooks").querySelector(".count")).toBeNull();
-    expect(tab("todo.tab.identify").getAttribute("aria-selected")).toBe("true");
+    expect(tab("todo.tab.identify").getAttribute("aria-current")).toBe("page");
     expect(sent("GET /api/v1/tracks")).toHaveLength(0);
   });
 

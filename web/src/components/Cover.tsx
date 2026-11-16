@@ -21,7 +21,9 @@ export function coverSrc(url: string | null | undefined, small: boolean): string
   if (!url) {
     return null;
   }
-  return small ? `${url}${url.includes("?") ? "&" : "?"}size=96` : url;
+  if (!small) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}size=96`;
 }
 
 /** An image, or the neutral placeholder when there is none or it fails. */
@@ -36,8 +38,9 @@ export function CoverImage({
   const classes = ["cover-art", className].filter(Boolean).join(" ");
   if (!src || failed === src) {
     return (
-      <span className={`${classes} placeholder`} style={style} role={alt ? "img" : undefined} aria-label={alt || undefined}>
+      <span className={`${classes} placeholder`} style={style}>
         <Icon name="image" size={Math.max(12, Math.round(px / 2.6))} />
+        {alt && <span className="visually-hidden">{alt}</span>}
       </span>
     );
   }

@@ -126,6 +126,43 @@ function Redirect({ to }: { to: string }) {
   return null;
 }
 
+/** The pages at a fixed address. */
+const ROUTES: Record<string, () => ReactNode> = {
+  "/about": () => <About />,
+  "/": () => <Dashboard />,
+  "/queue": () => <QueuePage />,
+  "/history": () => <History />,
+  "/statistics": () => <Statistics />,
+  "/certification": () => <Certification />,
+  "/library": () => <Library />,
+  "/import-music": () => <Buffer />,
+  "/trash": () => <Trash />,
+  "/categories": () => <Categories />,
+  "/labels": () => <Labels />,
+  "/medleys": () => <Medleys />,
+  "/artists": () => <Artists />,
+  "/clocks": () => <Clocks />,
+  "/schedule": () => <Schedule />,
+  "/restrictions": () => <Restrictions />,
+  "/rotation-log": () => <Rotation />,
+  "/exact-times": () => <ExactTimes />,
+  "/to-do": () => <ToDo />,
+  // Its former address, tabs kept.
+  "/to-organize": () => <Redirect to={`/to-do${window.location.search}`} />,
+  "/migrate": () => <Import />,
+  "/playout": () => <Playout />,
+  "/eq": () => <Eq />,
+  "/processing": () => <Agc />,
+  "/outputs": () => <Outputs />,
+  "/settings": () => <Settings />,
+  "/webhooks": () => <Webhooks />,
+  "/users": () => <Users />,
+  "/backups": () => <Backups />,
+  "/modules": () => <ModulesPage />,
+  "/stations": () => <Stations />,
+  "/account": () => <Account />,
+};
+
 /** The page at `pathname`, its module aside. */
 function pageAt(pathname: string): ReactNode {
   const track = match("/library/:id", pathname);
@@ -160,79 +197,15 @@ function pageAt(pathname: string): ReactNode {
   if (clock) {
     return <ClockEditor id={clock.id === "new" ? null : Number(clock.id)} />;
   }
-  switch (pathname) {
-    case "/about":
-      return <About />;
-    case "/":
-      return <Dashboard />;
-    case "/queue":
-      return <QueuePage />;
-    case "/history":
-      return <History />;
-    case "/statistics":
-      return <Statistics />;
-    case "/certification":
-      return <Certification />;
-    case "/library":
-      return <Library />;
-    case "/import-music":
-      return <Buffer />;
-    case "/trash":
-      return <Trash />;
-    case "/categories":
-      return <Categories />;
-    case "/labels":
-      return <Labels />;
-    case "/medleys":
-      return <Medleys />;
-    case "/artists":
-      return <Artists />;
-    case "/clocks":
-      return <Clocks />;
-    case "/schedule":
-      return <Schedule />;
-    case "/restrictions":
-      return <Restrictions />;
-    case "/rotation-log":
-      return <Rotation />;
-    case "/exact-times":
-      return <ExactTimes />;
-    case "/to-do":
-      return <ToDo />;
-    case "/to-organize":
-      // Its former address, tabs kept.
-      return <Redirect to={`/to-do${window.location.search}`} />;
-    case "/migrate":
-      return <Import />;
-    case "/playout":
-      return <Playout />;
-    case "/eq":
-      return <Eq />;
-    case "/processing":
-      return <Agc />;
-    case "/outputs":
-      return <Outputs />;
-    case "/settings":
-      return <Settings />;
-    case "/webhooks":
-      return <Webhooks />;
-    case "/users":
-      return <Users />;
-    case "/backups":
-      return <Backups />;
-    case "/modules":
-      return <ModulesPage />;
-    case "/stations":
-      return <Stations />;
-    case "/account":
-      return <Account />;
-    default:
-      return (
-        <Banner kind="warn">
-          {rich("app.noPage", { back: <Link to="/">{t("app.backOnAir")}</Link> })}
-        </Banner>
-      );
+  const page = ROUTES[pathname];
+  if (page) {
+    return page();
   }
+  return (
+    <Banner kind="warn">
+      {rich("app.noPage", { back: <Link to="/">{t("app.backOnAir")}</Link> })}
+    </Banner>
+  );
 }
 
 function Shell() {

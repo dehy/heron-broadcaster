@@ -100,11 +100,9 @@ export function TrackLikesCard({ trackId }: Readonly<{ trackId: number }>) {
   return (
     <div className="grid-2">
       <Card title={t("likes.opinion")}>
-        {likes.isPending ? (
-          <Loading />
-        ) : likes.isError ? (
-          <ErrorView error={likes.error} />
-        ) : (
+        {likes.isPending && <Loading />}
+        {likes.isError && <ErrorView error={likes.error} />}
+        {likes.isSuccess && (
           <>
             <div className="like-periods">
               {(
@@ -131,7 +129,7 @@ export function TrackLikesCard({ trackId }: Readonly<{ trackId: number }>) {
         )}
       </Card>
       <Card title={t("likes.perPlay")}>
-        {likes.data && likes.data.plays.length === 0 ? (
+        {likes.data?.plays.length === 0 ? (
           <Empty>{t("likes.noVotes")}</Empty>
         ) : (
           <ul className="like-plays">
@@ -167,11 +165,9 @@ export function LikesWeekCard() {
   }
   return (
     <Card title={t("likes.week")}>
-      {week.isPending ? (
-        <Loading />
-      ) : week.isError ? (
-        <ErrorView error={week.error} />
-      ) : (
+      {week.isPending && <Loading />}
+      {week.isError && <ErrorView error={week.error} />}
+      {week.isSuccess && (
         <>
           <p className="muted small">
             {t("likes.weekHelp", { date: dateTime(week.data.from_unix_ms), count: week.data.min_votes ?? MIN_VOTES })}

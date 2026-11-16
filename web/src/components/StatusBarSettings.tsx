@@ -108,7 +108,7 @@ function ColorChoice({
       />
       <span>
         {label}
-        <span className="hint">{value ? value : defaultLabel}</span>
+        <span className="hint">{value || defaultLabel}</span>
       </span>
       {value && (
         <button type="button" className="btn small ghost" onClick={() => onChange(null)}>

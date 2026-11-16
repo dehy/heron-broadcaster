@@ -173,7 +173,7 @@ export function TrackDaypartsCard({
             label={t("dayparts.category")}
             value={separation}
             max={MAX_SEPARATION}
-            option={(n) => String(n)}
+            option={String}
             disabled={!canEdit}
             onChange={setSeparation}
           />
@@ -274,7 +274,7 @@ export function TrackDaypartsDialog({
     },
   );
   const choose = (max: number, option: (n: number) => string, label: string) =>
-    function Input(value: string, set: (value: string) => void) {
+    function renderSelect(value: string, set: (value: string) => void) {
       return (
         <select className="input" aria-label={label} value={value} onChange={(event) => set(event.target.value)}>
           <option value="">{t("selection.choose")}</option>
@@ -318,7 +318,7 @@ export function TrackDaypartsDialog({
           change={separation}
           onChange={setSeparation}
           clearLabel={t("trackDayparts.categoryOption")}
-          renderInput={choose(MAX_SEPARATION, (n) => String(n), t("dayparts.category"))}
+          renderInput={choose(MAX_SEPARATION, String, t("dayparts.category"))}
         />
         <ChangeField
           label={t("dayparts.days")}

@@ -243,7 +243,7 @@ function Item({
   return (
     <li
       ref={setNodeRef}
-      className={`queue-item${isDragging ? " dragging" : ""}${link ? ` linked linked-${link}` : ""}`}
+      className={["queue-item", isDragging && "dragging", link && `linked linked-${link}`].filter(Boolean).join(" ")}
       style={{ transform: CSS.Transform.toString(transform), transition }}
     >
       {canEdit && locked && (

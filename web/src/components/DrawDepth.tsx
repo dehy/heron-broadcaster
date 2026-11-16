@@ -48,13 +48,13 @@ export function DrawDepthEditor({
   inherited,
   onChange,
   disabled,
-}: {
+}: Readonly<{
   value: SeparationOverrides;
   /** What applies where this does not set its own. */
   inherited: DrawDepth;
   onChange: (value: SeparationOverrides) => void;
   disabled?: boolean;
-}) {
+}>) {
   const start = value.draw_start_pct ?? inherited.start_pct;
   const max = value.draw_max_pct ?? inherited.max_pct;
   return (
@@ -154,9 +154,11 @@ export function DrawDepthDiagram({ start, max }: Readonly<{ start: number; max: 
         <span>{t("draw.newest")}</span>
       </div>
       <div className="draw-bar" role="img" aria-label={t("draw.diagramLabel", { start: first, max })}>
-        {cells.map((cell, index) => (
-          <span key={index} className={`draw-cell ${cell}`} />
-        ))}
+        {cells
+          .map((cell, index) => ({ cell, at: (index * 100) / CELLS }))
+          .map(({ cell, at }) => (
+            <span key={at} className={`draw-cell ${cell}`} />
+          ))}
       </div>
       <div className="draw-scale small muted" aria-hidden="true">
         {marks.map((pct) => (
