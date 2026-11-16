@@ -349,6 +349,22 @@ mod tests {
     }
 
     #[test]
+    fn plays_opus_files() {
+        // The analysis' fixture: 1 s of silence, then 2 s of tones, in Ogg Opus.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../analysis/tests/fixtures/stereo-1s-silence-2s-tone.opus");
+        let source = DecodedSource::spawn(SourceFile::on_disk(path), 500, 3_000).unwrap();
+        let audio = read_all(source);
+        assert_eq!(audio.len(), 2_500 * 48 * CHANNELS);
+        // Silence until 1 s, then sound.
+        let loud = audio
+            .chunks(CHANNELS)
+            .position(|frame| frame[0].abs() > 0.01)
+            .unwrap();
+        assert!(loud.abs_diff(500 * 48) < 48, "{loud}");
+    }
+
+    #[test]
     fn cue_out_past_the_end_stops_at_the_end() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("track.wav");

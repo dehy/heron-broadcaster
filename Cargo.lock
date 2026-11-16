@@ -2180,6 +2180,7 @@ dependencies = [
  "heron-core",
  "heron-service",
  "hound",
+ "opus",
  "realfft",
  "rusty-chromaprint",
  "serde_json",

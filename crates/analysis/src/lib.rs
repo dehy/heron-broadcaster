@@ -10,6 +10,7 @@ pub mod decode;
 pub mod fingerprint;
 #[cfg(feature = "mysql")]
 pub mod jobs;
+pub mod opus;
 mod tempo;
 
 pub use analyzer::{
