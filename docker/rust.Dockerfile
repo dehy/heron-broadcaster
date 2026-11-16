@@ -7,9 +7,10 @@
 FROM rust:1.99.1-slim-trixie AS builder
 # LAME (MP3 encoding) is compiled from source by its build script (configure, make).
 # FFmpeg's development libraries and libclang (bindgen) for the engine's AAC-LC
-# encoder (the `aac` feature), which links libavcodec dynamically.
+# encoder (the `aac` feature), which links libavcodec dynamically; CMake builds
+# the API's own libopus (the live monitor).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends clang g++ libavcodec-dev libavformat-dev libavutil-dev \
+    && apt-get install -y --no-install-recommends clang cmake g++ libavcodec-dev libavformat-dev libavutil-dev \
         libclang-dev libswresample-dev make pkg-config \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src

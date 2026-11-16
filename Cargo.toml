@@ -52,6 +52,8 @@ maxminddb = { version = "0.32.0", default-features = false }
 metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
 mp3lame-encoder = "0.3.0"
+opus = "0.4.0"
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 notify = "8.2.0"
 percent-encoding = "2.3.2"
 prost = "0.14.4"

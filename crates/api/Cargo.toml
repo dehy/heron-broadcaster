@@ -33,6 +33,7 @@ heron-rotation = { workspace = true, features = ["openapi"] }
 heron-service = { workspace = true, features = ["mysql", "openapi"] }
 jiff.workspace = true
 # Reads Icecast's listener lists.
+opus.workspace = true
 quick-xml.workspace = true
 # Listener countries, from a local GeoIP country database.
 maxminddb.workspace = true
@@ -91,6 +92,8 @@ libunftp.workspace = true
 unftp-core.workspace = true
 unftp-sbe-fs.workspace = true
 tokio-tungstenite.workspace = true
+# Sending on the WebSocket of the live monitor test.
+futures-util.workspace = true
 
 [lints]
 workspace = true
