@@ -868,3 +868,76 @@ fn the_agc_starts_from_the_gain_handed_over() {
     }
     assert_eq!(mixer.status.agc.agc_gain_db(), Some(4.0));
 }
+
+/// The live monitor's ring, read whole: (raw, processed), interleaved stereo.
+fn monitor_taps(ring: &mut rtrb::Consumer<f32>) -> (Vec<f32>, Vec<f32>) {
+    let mut raw = Vec::new();
+    let mut processed = Vec::new();
+    while let Ok(frame) = ring.read_chunk(MONITOR_CHANNELS) {
+        let (first, second) = frame.as_slices();
+        let samples: Vec<f32> = first.iter().chain(second).copied().collect();
+        raw.extend_from_slice(&samples[..CHANNELS]);
+        processed.extend_from_slice(&samples[CHANNELS..]);
+        frame.commit_all();
+    }
+    (raw, processed)
+}
+
+#[test]
+fn the_monitor_never_changes_the_air() {
+    let samples = tone(9_600, 440.0, 1.5);
+    let render_with = |monitoring: bool, chain: Option<ChainParams>| {
+        let (mut mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
+        let mut ring = handle.monitor.take().unwrap();
+        if let Some(params) = chain {
+            assert!(
+                handle
+                    .commands
+                    .push(Command::SetAgc {
+                        params,
+                        glide: false
+                    })
+                    .is_ok()
+            );
+        }
+        handle
+            .status
+            .monitoring
+            .store(monitoring, Ordering::Relaxed);
+        cue(
+            &mut handle,
+            track(1, &samples),
+            FrameTransition::back_to_back(),
+        );
+        let output = render(&mut mixer, 9_600, BLOCK_FRAMES);
+        (output, monitor_taps(&mut ring))
+    };
+    // Bypassed: the air is the same, sample for sample; the processed tap
+    // is the air, the raw one the same before the clip at full scale.
+    let (quiet, (raw, processed)) = render_with(false, None);
+    assert!(
+        raw.is_empty() && processed.is_empty(),
+        "nobody listens: no tap"
+    );
+    let (heard, (raw, processed)) = render_with(true, None);
+    assert_eq!(heard, quiet);
+    assert_eq!(processed, heard);
+    assert_eq!(raw.len(), heard.len());
+    for (raw, heard) in raw.iter().zip(&heard) {
+        assert_eq!(raw.clamp(-1.0, 1.0), *heard);
+    }
+    assert!(
+        raw.iter().any(|sample| sample.abs() > 1.0),
+        "the raw tap is before the clip"
+    );
+    // With the chain on, the processed tap is still the air.
+    let on = ChainParams {
+        bypass_all: false,
+        ..ChainParams::default()
+    };
+    let (quiet, _) = render_with(false, Some(on));
+    let (heard, (raw, processed)) = render_with(true, Some(on));
+    assert_eq!(heard, quiet);
+    assert_eq!(processed, heard);
+    assert_ne!(raw, processed, "the chain changes the sound");
+}

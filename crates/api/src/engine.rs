@@ -9,6 +9,7 @@
 //! happens here: it never waits for the API.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
 use heron_core::PlaySource;
@@ -25,6 +26,8 @@ use crate::error::{ApiError, ApiResult};
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 const STATE_INTERVAL: Duration = Duration::from_millis(500);
 const LEVELS_INTERVAL: Duration = Duration::from_millis(100);
+/// Chunks of the live monitor kept for a listener falling behind (20 ms each).
+const MONITOR_BACKLOG: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -268,6 +271,34 @@ pub struct EngineLink {
     state: watch::Sender<Option<Arc<PlayerState>>>,
     events: broadcast::Sender<LinkEvent>,
     levels: broadcast::Sender<Levels>,
+    /// The live monitor, read from the engine while someone listens.
+    monitor: broadcast::Sender<MonitorFeed>,
+    monitor_running: AtomicBool,
+    monitor_listeners: AtomicUsize,
+}
+
+/// What the engine's live monitor gives its listeners
+/// (`docs/api.md#live-monitor`).
+#[derive(Clone, Debug)]
+pub enum MonitorFeed {
+    /// 20 ms of both taps.
+    Chunk(Arc<pb::MonitorChunk>),
+    /// The stream could not be opened, or broke: it is tried again.
+    Unreachable,
+    /// The engine has no live monitor (older than it): tried again now and then.
+    Unsupported,
+}
+
+/// A listener of a station's live monitor; leaving drops it.
+pub struct MonitorListener {
+    link: Arc<EngineLink>,
+    pub feed: broadcast::Receiver<MonitorFeed>,
+}
+
+impl Drop for MonitorListener {
+    fn drop(&mut self) {
+        self.link.monitor_listeners.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 impl EngineLink {
@@ -284,6 +315,9 @@ impl EngineLink {
             state: watch::channel(None).0,
             events: broadcast::channel(256).0,
             levels: broadcast::channel(4).0,
+            monitor: broadcast::channel(MONITOR_BACKLOG).0,
+            monitor_running: AtomicBool::new(false),
+            monitor_listeners: AtomicUsize::new(0),
         }))
     }
 
@@ -312,6 +346,79 @@ impl EngineLink {
     /// Levels ten times a second, while there are subscribers.
     pub fn levels(&self) -> broadcast::Receiver<Levels> {
         self.levels.subscribe()
+    }
+
+    /// Joins the live monitor, unless `max` listeners are already there.
+    /// The engine's stream is read once for all of them, from the first
+    /// to the last.
+    pub fn listen_monitor(self: &Arc<Self>, max: usize) -> Option<MonitorListener> {
+        if self.monitor_listeners.fetch_add(1, Ordering::AcqRel) >= max {
+            self.monitor_listeners.fetch_sub(1, Ordering::AcqRel);
+            return None;
+        }
+        let listener = MonitorListener {
+            link: Arc::clone(self),
+            feed: self.monitor.subscribe(),
+        };
+        if !self.monitor_running.swap(true, Ordering::AcqRel) {
+            tokio::spawn(Arc::clone(self).watch_monitor());
+        }
+        Some(listener)
+    }
+
+    /// Reads the engine's monitor while someone listens, again after
+    /// failures; stops with the last listener.
+    async fn watch_monitor(self: Arc<Self>) {
+        loop {
+            let mut delay = Duration::from_millis(500);
+            while self.monitor.receiver_count() > 0 {
+                match self.stream_monitor(&mut delay).await {
+                    Ok(()) => continue,
+                    Err(status) if status.code() == tonic::Code::Unimplemented => {
+                        let _ = self.monitor.send(MonitorFeed::Unsupported);
+                        delay = Duration::from_secs(5);
+                    }
+                    Err(status) => {
+                        tracing::debug!(%status, "engine monitor unavailable");
+                        let _ = self.monitor.send(MonitorFeed::Unreachable);
+                    }
+                }
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(Duration::from_secs(5));
+            }
+            self.monitor_running.store(false, Ordering::Release);
+            // Someone came in after the count was read: carry on for them,
+            // unless they started another reader already.
+            if self.monitor.receiver_count() == 0
+                || self.monitor_running.swap(true, Ordering::AcqRel)
+            {
+                return;
+            }
+        }
+    }
+
+    /// Forwards the monitor until nobody listens (`Ok`) or the stream ends;
+    /// once it flows, the next retry is soon again.
+    async fn stream_monitor(&self, delay: &mut Duration) -> Result<(), tonic::Status> {
+        let mut stream = self
+            .client
+            .clone()
+            .watch_monitor(pb::WatchMonitorRequest {})
+            .await?
+            .into_inner();
+        while let Some(chunk) = stream.message().await? {
+            *delay = Duration::from_millis(500);
+            if self
+                .monitor
+                .send(MonitorFeed::Chunk(Arc::new(chunk)))
+                .is_err()
+            {
+                return Ok(());
+            }
+        }
+        Err(tonic::Status::unavailable(
+            "the engine ended the monitor stream",
+        ))
     }
 
     async fn poll_state(self: Arc<Self>) {

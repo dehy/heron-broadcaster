@@ -2611,6 +2611,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/monitor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Opens the live monitor: a text [`MonitorMessage`] `ready`, then the sound
+         *     as binary messages, one per 20 ms. Operators and admins; at most 8
+         *     listeners per station.
+         */
+        get: operations["monitor"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/outputs": {
         parameters: {
             query?: never;
@@ -4752,6 +4773,27 @@ export interface paths {
          *     station's (`422`). Operators.
          */
         put: operations["put_match_settings_on_station"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stations/{station_id}/monitor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Opens the live monitor: a text [`MonitorMessage`] `ready`, then the sound
+         *     as binary messages, one per 20 ms. Operators and admins; at most 8
+         *     listeners per station.
+         */
+        get: operations["monitor_on_station"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -10687,6 +10729,50 @@ export interface components {
             /** @default true */
             webhooks: boolean;
         };
+        /**
+         * @description The sound sent.
+         * @enum {string}
+         */
+        MonitorCodec: "opus" | "pcm";
+        /** @description The text messages of the monitor; the sound comes as binary messages. */
+        MonitorMessage: {
+            /**
+             * Format: int32
+             * @description With Opus only.
+             */
+            bitrate?: number | null;
+            /** Format: int32 */
+            channels: number;
+            codec: components["schemas"]["MonitorCodec"];
+            /** Format: int32 */
+            frame_ms: number;
+            /** Format: int32 */
+            sample_rate: number;
+            tap: components["schemas"]["MonitorTap"];
+            /** @enum {string} */
+            type: "ready";
+        } | {
+            tap: components["schemas"]["MonitorTap"];
+            /** @enum {string} */
+            type: "tap";
+        } | {
+            /** Format: int64 */
+            chunks: number;
+            /** @enum {string} */
+            type: "lost";
+        } | {
+            reachable: boolean;
+            /** @enum {string} */
+            type: "engine";
+        } | {
+            /** @enum {string} */
+            type: "too_old";
+        };
+        /**
+         * @description Where in the chain the sound is taken.
+         * @enum {string}
+         */
+        MonitorTap: "processed" | "raw";
         MoveName: {
             /**
              * Format: int64
@@ -19892,6 +19978,56 @@ export interface operations {
             };
         };
     };
+    monitor: {
+        parameters: {
+            query?: {
+                /** @description `opus` (the default) or `pcm`. */
+                codec?: components["schemas"]["MonitorCodec"];
+                /** @description `processed` (the default) or `raw`. */
+                tap?: components["schemas"]["MonitorTap"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description WebSocket of the sound and MonitorMessage */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorMessage"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description 8 listeners already */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     list_outputs: {
         parameters: {
             query?: never;
@@ -24736,6 +24872,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MatchSettings"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    monitor_on_station: {
+        parameters: {
+            query?: {
+                /** @description `opus` (the default) or `pcm`. */
+                codec?: components["schemas"]["MonitorCodec"];
+                /** @description `processed` (the default) or `raw`. */
+                tap?: components["schemas"]["MonitorTap"];
+            };
+            header?: never;
+            path: {
+                /** @description The station's ID */
+                station_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description WebSocket of the sound and MonitorMessage */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitorMessage"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description 8 listeners already */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             "4XX": {

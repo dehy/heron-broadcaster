@@ -243,6 +243,16 @@ In development, `?lang=pseudo` on any page shows English accented, a third longe
 
 The layout works from phone width up: below 760 px the navigation moves to a menu, tables drop their secondary columns and cards stack.
 
+### Live monitor
+
+**Live monitor**, a headphones button next to Heron's name at the top of the menu (in the top bar on a phone), for operators and admins, plays the station shown straight from its engine, about 0.3 s behind the air instead of the 8 to 10 s of a stream: to tune the [processing](audio-engine.md#master-agc-chain), the [deck EQ](audio-engine.md#deck-eq) or the crossfades by ear. Its panel has:
+
+- **Processed / Raw**: what the encoders get, or the master bus before the processing chain. Switching is instant and never touches the air, unlike *Bypass all*.
+- **Quality**: *Opus* (256 kbit/s, about 0.3 s, at a distance too) or *Uncompressed* (about 0.15 s, 1.5 Mbit/s: on a local network). A browser without WebCodecs gets *Uncompressed*.
+- **Volume**, and the delay heard.
+
+While it plays, notes rise from the button (not with reduced motion). It keeps playing from page to page; it stops when the station shown changes (and starts again on the new one), when the session ends, and while the engine cannot be reached, saying so. See [API – Live monitor](api.md#live-monitor).
+
 ### Status bar
 
 A line one character high stays at the bottom of every page, in the monospace font. Each user chooses what it shows in *Account › Status bar* (below). In that order:

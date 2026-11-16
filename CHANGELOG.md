@@ -2,6 +2,14 @@
 
 What changed in each release of Heron. Before upgrading, read the release's notes in [Upgrading](docs/upgrading.md#release-notes).
 
+## Edge
+
+What `main` has since the last release: it is published as the `edge` images. Read the [Edge upgrade notes](docs/upgrading.md#edge) first.
+
+### Added
+
+- **Live monitor** (M20): a button at the top of the menu plays the station straight from its engine, about 0.3 s behind the air instead of the 8 to 10 s of a stream, **processed or raw** (before the processing chain, without touching the air), in Opus or uncompressed: to tune the sound by ear ([Web UI – Live monitor](docs/web.md#live-monitor), [API – Live monitor](docs/api.md#live-monitor)).
+
 ## 0.4.0 – 2026-11-15
 
 Listener interaction (M18: the public gateway `heron-public`, likes, tops, dedications, the match and the featured artist) and audience certification (M19: access logs and deliveries by FTPS) as modules, rotation rules (play ratio, daypart separation, draw depth, linked slots, exact times), cover art, two-factor authentication, stream servers, an audience report on the Statistics page, and a status bar set per user, for several stations. Upgrading from 0.3.0 keeps the station on air: see [0.3.0 to 0.4.0](docs/upgrading.md#030-to-040).

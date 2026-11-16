@@ -39,6 +39,7 @@ mod matches;
 mod medleys;
 mod migrate;
 mod modules;
+mod monitor;
 mod outputs;
 mod play_grid;
 mod player;

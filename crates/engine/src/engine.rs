@@ -85,6 +85,8 @@ pub struct Engine {
     started_at: SystemTime,
     #[cfg(feature = "monitor")]
     _monitor: Option<crate::monitor::Monitor>,
+    /// The live monitor of the web UI.
+    live_monitor: crate::live_monitor::LiveMonitor,
     _audio: AudioThread,
 }
 
@@ -126,8 +128,13 @@ impl Engine {
             load_config(&options.state_dir)
         };
 
-        let (mixer, handle) = Mixer::new(BLOCK_FRAMES);
+        let (mixer, mut handle) = Mixer::new(BLOCK_FRAMES);
         let status = Arc::clone(&handle.status);
+        let Some(monitor_ring) = handle.monitor.take() else {
+            return Err(std::io::Error::other("the mixer has no monitor ring").into());
+        };
+        let live_monitor =
+            crate::live_monitor::LiveMonitor::start(monitor_ring, Arc::clone(&status))?;
         let (master_tx, master_rx) =
             rtrb::RingBuffer::new(MASTER_BUFFER_SECONDS * SAMPLE_RATE as usize * CHANNELS);
         let (now_playing_tx, now_playing_rx) = watch::channel(NowPlaying::default());
@@ -196,6 +203,7 @@ impl Engine {
             started_at: SystemTime::now(),
             #[cfg(feature = "monitor")]
             _monitor: monitor,
+            live_monitor,
             _audio: audio,
         });
         runtime.spawn(run_player(Arc::downgrade(&engine)));
@@ -221,6 +229,12 @@ impl Engine {
 
     pub fn subscribe(&self) -> broadcast::Receiver<PlayerEvent> {
         self.events.subscribe()
+    }
+
+    /// The live monitor's chunks: the master bus is tapped while one
+    /// receiver at least is alive.
+    pub fn subscribe_monitor(&self) -> broadcast::Receiver<Arc<crate::live_monitor::MonitorChunk>> {
+        self.live_monitor.subscribe()
     }
 
     pub fn status(&self) -> &MixerStatus {
@@ -503,6 +517,8 @@ impl Engine {
             .absolute(self.clock.resets.load(Ordering::Relaxed));
         metrics::counter!("heron_engine_dropped_blocks_total")
             .absolute(self.clock.dropped_blocks.load(Ordering::Relaxed));
+        metrics::counter!("heron_engine_monitor_dropped_blocks_total")
+            .absolute(self.status.monitor_dropped.load(Ordering::Relaxed));
         metrics::counter!("heron_engine_underruns_total")
             .absolute(status.underruns.load(Ordering::Relaxed));
         metrics::counter!("heron_engine_mixer_overflows_total")

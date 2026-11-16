@@ -159,6 +159,7 @@ fn api() -> OpenApiRouter<AppState> {
         .merge(crate::servers::router())
         .merge(listeners::router())
         .merge(live::router())
+        .merge(crate::monitor::router())
         .merge(webhooks::router())
         .merge(public::router())
         .merge(crate::shows::router())

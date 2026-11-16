@@ -442,6 +442,11 @@ pub struct MixerStatus {
     /// Events or finished tracks that could not be handed to the control
     /// thread because its queues were full.
     pub overflows: AtomicU64,
+    /// Someone listens to the live monitor: the audio thread writes each
+    /// block, raw and processed, into the monitor's ring.
+    pub monitoring: AtomicBool,
+    /// Blocks the live monitor's ring had no room for.
+    pub monitor_dropped: AtomicU64,
 }
 
 /// The control thread's side of the mixer.
@@ -451,6 +456,10 @@ pub struct MixerHandle {
     /// Finished tracks, to be dropped outside the audio thread.
     pub trash: rtrb::Consumer<Box<LoadedTrack>>,
     pub status: Arc<MixerStatus>,
+    /// The live monitor's ring, taken by its thread: frames of four
+    /// samples, the master bus before the AGC chain (left, right) then
+    /// after it (left, right).
+    pub monitor: Option<rtrb::Consumer<f32>>,
 }
 
 struct Voice {
@@ -566,7 +575,15 @@ pub struct Mixer {
     events: rtrb::Producer<Event>,
     trash: rtrb::Producer<Box<LoadedTrack>>,
     status: Arc<MixerStatus>,
+    /// The block before the AGC chain, while monitoring.
+    monitor_raw: Vec<f32>,
+    monitor: rtrb::Producer<f32>,
 }
+
+/// Channels of a frame of the live monitor's ring: raw then processed.
+pub const MONITOR_CHANNELS: usize = 4;
+/// What the live monitor's ring holds, in seconds.
+const MONITOR_RING_SECONDS: usize = 1;
 
 impl Mixer {
     /// Creates a mixer rendering blocks of at most `max_block_frames`.
@@ -574,6 +591,8 @@ impl Mixer {
         let (command_tx, command_rx) = rtrb::RingBuffer::new(64);
         let (event_tx, event_rx) = rtrb::RingBuffer::new(256);
         let (trash_tx, trash_rx) = rtrb::RingBuffer::new(64);
+        let (monitor_tx, monitor_rx) =
+            rtrb::RingBuffer::new(MONITOR_RING_SECONDS * SAMPLE_RATE as usize * MONITOR_CHANNELS);
         let status = Arc::new(MixerStatus::default());
         let mixer = Self {
             voices: [None, None, None],
@@ -598,12 +617,15 @@ impl Mixer {
             events: event_tx,
             trash: trash_tx,
             status: Arc::clone(&status),
+            monitor_raw: vec![0.0; max_block_frames * CHANNELS],
+            monitor: monitor_tx,
         };
         let handle = MixerHandle {
             commands: command_tx,
             events: event_rx,
             trash: trash_rx,
             status,
+            monitor: Some(monitor_rx),
         };
         (mixer, handle)
     }
@@ -678,6 +700,10 @@ impl Mixer {
         } else {
             self.silent_frames = 0;
         }
+        let monitoring = self.status.monitoring.load(Ordering::Relaxed);
+        if monitoring {
+            self.monitor_raw[..out.len()].copy_from_slice(out);
+        }
         self.chain.process(out);
         let mut master = BlockMeter::default();
         for frame in out.as_chunks_mut::<CHANNELS>().0 {
@@ -686,7 +712,34 @@ impl Mixer {
             frame[1] = frame[1].clamp(-1.0, 1.0);
             master.add(frame[0], frame[1]);
         }
+        if monitoring {
+            self.push_monitor(out);
+        }
         self.publish(frames, &master, &input);
+    }
+
+    /// Writes the block, raw and processed, frame by frame into the live
+    /// monitor's ring; drops it whole when there is no room for it.
+    fn push_monitor(&mut self, processed: &[f32]) {
+        let raw = &self.monitor_raw[..processed.len()];
+        let Ok(mut chunk) = self
+            .monitor
+            .write_chunk(processed.len() / CHANNELS * MONITOR_CHANNELS)
+        else {
+            self.status.monitor_dropped.fetch_add(1, Ordering::Relaxed);
+            return;
+        };
+        let (first, second) = chunk.as_mut_slices();
+        let samples = raw
+            .as_chunks::<CHANNELS>()
+            .0
+            .iter()
+            .zip(processed.as_chunks::<CHANNELS>().0)
+            .flat_map(|(raw, processed)| [raw[0], raw[1], processed[0], processed[1]]);
+        for (slot, sample) in first.iter_mut().chain(second.iter_mut()).zip(samples) {
+            *slot = sample;
+        }
+        chunk.commit_all();
     }
 
     fn apply_commands(&mut self) {

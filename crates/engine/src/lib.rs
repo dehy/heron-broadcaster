@@ -14,6 +14,7 @@ pub mod engine;
 pub mod fallback;
 pub mod grpc;
 pub mod handover;
+pub mod live_monitor;
 pub mod mixer;
 #[cfg(feature = "monitor")]
 pub mod monitor;

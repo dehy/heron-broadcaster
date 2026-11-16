@@ -7155,6 +7155,75 @@
         }
       }
     },
+    "/api/v1/monitor": {
+      "get": {
+        "tags": [
+          "live"
+        ],
+        "summary": "Opens the live monitor: a text [`MonitorMessage`] `ready`, then the sound\nas binary messages, one per 20 ms. Operators and admins; at most 8\nlisteners per station.",
+        "operationId": "monitor",
+        "parameters": [
+          {
+            "name": "codec",
+            "in": "query",
+            "description": "`opus` (the default) or `pcm`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MonitorCodec"
+            }
+          },
+          {
+            "name": "tap",
+            "in": "query",
+            "description": "`processed` (the default) or `raw`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MonitorTap"
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "WebSocket of the sound and MonitorMessage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitorMessage"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "8 listeners already",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/outputs": {
       "get": {
         "tags": [
@@ -14129,6 +14198,84 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MatchSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stations/{station_id}/monitor": {
+      "get": {
+        "tags": [
+          "live"
+        ],
+        "summary": "Opens the live monitor: a text [`MonitorMessage`] `ready`, then the sound\nas binary messages, one per 20 ms. Operators and admins; at most 8\nlisteners per station.",
+        "operationId": "monitor_on_station",
+        "parameters": [
+          {
+            "name": "station_id",
+            "in": "path",
+            "description": "The station's ID",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "codec",
+            "in": "query",
+            "description": "`opus` (the default) or `pcm`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MonitorCodec"
+            }
+          },
+          {
+            "name": "tap",
+            "in": "query",
+            "description": "`processed` (the default) or `raw`.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MonitorTap"
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "WebSocket of the sound and MonitorMessage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitorMessage"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "8 listeners already",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -30311,6 +30458,151 @@
             "default": true
           }
         }
+      },
+      "MonitorCodec": {
+        "type": "string",
+        "description": "The sound sent.",
+        "enum": [
+          "opus",
+          "pcm"
+        ]
+      },
+      "MonitorMessage": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "First, before any sound.",
+            "required": [
+              "codec",
+              "sample_rate",
+              "channels",
+              "frame_ms",
+              "tap",
+              "type"
+            ],
+            "properties": {
+              "bitrate": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "description": "With Opus only.",
+                "minimum": 0
+              },
+              "channels": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "codec": {
+                "$ref": "#/components/schemas/MonitorCodec"
+              },
+              "frame_ms": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "sample_rate": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "tap": {
+                "$ref": "#/components/schemas/MonitorTap"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ready"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The next sound is from this tap.",
+            "required": [
+              "tap",
+              "type"
+            ],
+            "properties": {
+              "tap": {
+                "$ref": "#/components/schemas/MonitorTap"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tap"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Chunks of 20 ms lost: the engine's or the API's backlog was full.",
+            "required": [
+              "chunks",
+              "type"
+            ],
+            "properties": {
+              "chunks": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lost"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The engine stopped, or started again, answering.",
+            "required": [
+              "reachable",
+              "type"
+            ],
+            "properties": {
+              "reachable": {
+                "type": "boolean"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "engine"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The engine has no live monitor: it is older than it. The socket closes.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "too_old"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "The text messages of the monitor; the sound comes as binary messages."
+      },
+      "MonitorTap": {
+        "type": "string",
+        "description": "Where in the chain the sound is taken.",
+        "enum": [
+          "processed",
+          "raw"
+        ]
       },
       "MoveName": {
         "type": "object",

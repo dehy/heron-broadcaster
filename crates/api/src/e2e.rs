@@ -25,6 +25,7 @@ use crate::auth::{Passwords, Role};
 use crate::library::Library;
 use crate::{engine, stations, users, webhooks};
 
+mod live_monitor;
 mod never_off_air;
 
 /// Tracks short enough to see several play during a test.
