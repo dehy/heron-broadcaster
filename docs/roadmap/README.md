@@ -32,7 +32,7 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | M17 | [About page](m17-about-page.md) | M5, M13, M16 | Done ([#62](https://github.com/dehy/heron-broadcaster/pull/62)) |
 | M18 | [Listener interaction](m18-listener-interaction.md) | M7, M13, modules | In progress |
 | M19 | [Audience certification](m19-audience-certification.md) | M7b, M13, modules | In progress (part 2: delivery by FTPS done, SFTP waits for age) |
-| M20 | [Live monitor](m20-live-monitor.md) | M10, M13 | In progress |
+| M20 | [Live monitor](m20-live-monitor.md) | M10, M13 | Done ([#244](https://github.com/frequencehit/heron-broadcaster/pull/244)) |
 
 ## Dependency graph
 
