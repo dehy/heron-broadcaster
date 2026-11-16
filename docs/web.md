@@ -251,7 +251,7 @@ The layout works from phone width up: below 760 px the navigation moves to a men
 - **Quality**: *Opus* (256 kbit/s, about 0.3 s, at a distance too) or *Uncompressed* (about 0.15 s, 1.5 Mbit/s: on a local network). A browser without WebCodecs gets *Uncompressed*.
 - **Volume**, and the delay heard.
 
-It keeps playing from page to page; it stops when the station shown changes (and starts again on the new one), when the session ends, and while the engine cannot be reached, saying so. See [API – Live monitor](api.md#live-monitor).
+While it plays, notes rise from the button (not with reduced motion). It keeps playing from page to page; it stops when the station shown changes (and starts again on the new one), when the session ends, and while the engine cannot be reached, saying so. See [API – Live monitor](api.md#live-monitor).
 
 ### Status bar
 

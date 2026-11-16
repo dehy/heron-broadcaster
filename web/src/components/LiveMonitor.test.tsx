@@ -78,12 +78,15 @@ describe("LiveMonitorButton", () => {
     );
     expect(screen.getByRole("status").textContent).toBe("Playing");
     expect(screen.getByRole("button", { name: "Live monitor" }).className).toContain("on");
+    // Notes come out of the headphones while the sound plays.
+    expect(screen.getByRole("button", { name: "Live monitor" }).querySelector(".monitor-notes")).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Raw" }));
     expect(FakeSocket.last.sent).toEqual(['{"tap":"raw"}']);
     expect(screen.getByRole("button", { name: "Raw" }).getAttribute("aria-pressed")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: /Stop/ }));
+    expect(screen.getByRole("button", { name: "Live monitor" }).querySelector(".monitor-notes")).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("a fraction of a second");
 
     // Escape closes the panel.

@@ -104,6 +104,14 @@ export function LiveMonitorButton() {
         onClick={toggle}
       >
         <Icon name="headphones" />
+        {status === "playing" && (
+          // Notes coming out of the headphones while the sound plays.
+          <span className="monitor-notes" aria-hidden="true">
+            <span>♪</span>
+            <span>♫</span>
+            <span>♪</span>
+          </span>
+        )}
       </button>
       {open && (
         <div
