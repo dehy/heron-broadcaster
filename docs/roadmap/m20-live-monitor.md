@@ -31,11 +31,11 @@ Tuning the sound of a station by ear is done today through its stream: an Icecas
 
 ## Acceptance criteria
 
-- [ ] While nobody listens, the audio thread does nothing more than read a flag; the audio is bit-identical, listened to or not (`the_monitor_never_changes_the_air`).
-- [ ] The raw and processed taps are sample-aligned: with the chain bypassed they are equal; with it on, the processed tap is what the encoders get.
-- [ ] The audio thread still never allocates with the tap on (`tests/no_alloc.rs`).
-- [ ] A listener that falls behind loses audio, never stalls the engine or another listener.
-- [ ] The WebSocket answers `403` to viewers, sends Opus packets or PCM chunks of 20 ms, switches between raw and processed on the next 20 ms, and refuses a ninth listener of a station.
-- [ ] In the browser, a control moved on the Processing page is heard within half a second with Opus (a quarter with PCM), on a local network.
-- [ ] Switching raw and processed has no gap or click; the monitor keeps playing across pages, and stops when the session ends or the engine goes away, saying so.
-- [ ] All four catalogs.
+- [x] While nobody listens, the audio thread does nothing more than read a flag; the audio is bit-identical, listened to or not (`the_monitor_never_changes_the_air`).
+- [x] The raw and processed taps are sample-aligned: with the chain bypassed they are equal; with it on, the processed tap is what the encoders get.
+- [x] The audio thread still never allocates with the tap on (`tests/no_alloc.rs`).
+- [x] A listener that falls behind loses audio, never stalls the engine or another listener.
+- [x] The WebSocket answers `403` to viewers, sends Opus packets or PCM chunks of 20 ms, switches between raw and processed on the next 20 ms, and refuses a ninth listener of a station.
+- [x] In the browser, a control moved on the Processing page is heard within half a second with Opus (a quarter with PCM), on a local network.
+- [x] Switching raw and processed has no gap or click; the monitor keeps playing across pages, and stops when the session ends or the engine goes away, saying so.
+- [x] All four catalogs.
