@@ -115,7 +115,7 @@ age -d -i heron-backup-key.txt data/backups/heron-database-2026-11-03T03-30-00Z-
 
 The engines play on throughout, with what they have queued.
 
-The dump has the covers' rows, not their images, which are files of the `covers` volume. Restored next to that volume, nothing is missing. On another machine, or after losing the volume, restore the last configuration file as well: it writes back the covers set by hand and the station logos; the scan and a lookup find the others again. Until then, a cover without its file shows the placeholder.
+The dump has the covers' rows, not their images, which are files of the covers folder (`HERON_COVERS_FOLDER`). Restored next to that folder, nothing is missing. On another machine, or after losing the folder, restore the last configuration file as well: it writes back the covers set by hand and the station logos; the scan and a lookup find the others again. Until then, a cover without its file shows the placeholder.
 
 ## Downloading and uploading
 

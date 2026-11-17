@@ -202,7 +202,7 @@ Swarm refuses to start a task whose bind-mounted folder does not exist: create t
 
 `heron-api` reads the GeoIP country database, when there is one, from `/var/lib/heron/geoip/country.mmdb` (`HERON_GEOIP_DB`): mount the folder holding it read-only ([Listener statistics – Countries](statistics.md#countries)).
 
-`heron-api` and `heron-librarian` share the `covers` volume ([Library management – Where the images are](library.md#where-the-images-are)): give both the volume at `/var/lib/heron/covers`, and keep them on one node, or use a volume driver that shares it between nodes.
+`heron-api` and `heron-librarian` share the covers folder ([Library management – Where the images are](library.md#where-the-images-are)): bind-mount the same folder, owned by `HERON_LIBRARIAN_USER`, at `/var/lib/heron/covers` in both, and keep them on one node, or use a folder shared between nodes.
 
 `heron-engine`, `heron-relay` and their volumes must stay on one node (the volumes are local, and the handover passes connections between processes): pin them with a placement constraint on a multi-node swarm. The relay must be on the network the stream servers are reached from: it connects to them, not the engine.
 
@@ -237,7 +237,16 @@ What each release asks of an upgrade, on top of the steps above. What it brings 
 
 ### Edge
 
-The services are upgraded as usual. Opus files whose analysis failed before are analysed again by themselves: a migration forgets their failed analysis jobs, so the next scan queues them (only those: the rest of the library is not analysed again).
+The services are upgraded as usual, once the cover images have moved to a folder of their own (below). Opus files whose analysis failed before are analysed again by themselves: a migration forgets their failed analysis jobs, so the next scan queues them (only those: the rest of the library is not analysed again).
+
+**The cover images move from the `covers` volume to a folder** (`HERON_COVERS_FOLDER`, `./data/covers` by default), owned by `HERON_LIBRARIAN_USER` like the buffer zone: the images no longer make their folder writable by every user. Before deploying the new `docker-compose.yml` (and the new line of `.env.example`), copy the images out of the running API:
+
+```sh
+mkdir -p data/covers
+docker compose cp heron-api:/var/lib/heron/covers/. data/covers/
+```
+
+With Swarm, run `docker cp <heron-api container>:/var/lib/heron/covers/. data/covers/` on the API's node, and replace the volume with the folder in the stack file, in both services. The folder must belong to `HERON_LIBRARIAN_USER` (`chown -R` it if the copy was made as another user). Once the station shows its covers, remove the old volume (`docker volume rm <project>_covers`). A cover left behind shows the placeholder until the next scan or a restored configuration file brings it back ([Backups](backups.md)).
 
 ### 0.4.0 to 0.5.0
 

@@ -56,7 +56,7 @@ Requirements: Docker with Compose v2.
 
 ```sh
 cp .env.example .env              # then change the passwords
-mkdir -p data/music data/fallback data/incoming data/staging data/backups # or point HERON_MUSIC_DIR, … elsewhere
+mkdir -p data/music data/fallback data/incoming data/staging data/covers data/backups # or point HERON_MUSIC_DIR, … elsewhere
 docker compose up -d --wait       # pulls the images from ghcr.io/dehy
 docker compose exec heron-api heron-api user add admin --role admin   # asks for a password
 ```

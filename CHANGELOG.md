@@ -8,6 +8,10 @@ What changed in each release of Heron. Before upgrading, read the release's note
 
 - **Opus files** (Ogg Opus, mono and stereo) are analysed and played, decoded with libopus; until now every `.opus` file failed its analysis ([Import and analysis](docs/analysis.md#analyzer)).
 
+### Changed
+
+- **The cover images are in a folder of their own** (`HERON_COVERS_FOLDER`, `./data/covers`), owned by `HERON_LIBRARIAN_USER`, instead of the `covers` volume, which every user could write to. Copy the images over before upgrading ([Edge](docs/upgrading.md#edge)).
+
 ### Fixed
 
 Never off air: what the queue reads can no longer stop the music ([Audio engine – Failure handling](docs/audio-engine.md#failure-handling)).

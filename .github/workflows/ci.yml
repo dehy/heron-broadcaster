@@ -178,7 +178,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: |
-          cp .env.example .env && mkdir -p data/fallback data/incoming data/staging data/backups
+          cp .env.example .env && mkdir -p data/fallback data/incoming data/staging data/covers data/backups
           sed -i "s/^HERON_LIBRARIAN_USER=.*/HERON_LIBRARIAN_USER=$(id -u):$(id -g)/" .env
           # The tested images are the ones published, per architecture.
           echo "HERON_VERSION=sha-${GITHUB_SHA::7}-${{ matrix.arch }}" >> "$GITHUB_ENV"

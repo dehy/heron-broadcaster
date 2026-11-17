@@ -20,9 +20,9 @@ Like iTunes' "Keep Music folder organized": new files, uploaded from the browser
 | Music library | `HERON_MUSIC_DIR` | `heron-librarian` read-write; `heron-api`, `heron-analyzer`, `heron-engine` read-only |
 | Incoming folder | `HERON_INCOMING_FOLDER` | `heron-librarian` only |
 | Buffer zone | `HERON_STAGING_FOLDER` | `heron-api` (writes uploads) and `heron-librarian`, read-write |
-| Cover images | The `covers` volume (`HERON_COVERS_DIR` in the containers, `/var/lib/heron/covers`) | `heron-api` and `heron-librarian`, read-write ([Cover art](#cover-art)) |
+| Cover images | `HERON_COVERS_FOLDER` (`HERON_COVERS_DIR` in the containers, `/var/lib/heron/covers`) | `heron-api` and `heron-librarian`, read-write ([Cover art](#cover-art)) |
 
-`heron-librarian` and `heron-api` run as `HERON_LIBRARIAN_USER` (`uid:gid`), which must own the three folders (the `covers` volume is created writable by any user): use the output of `id -u` and `id -g` for the owner of your music. The buffer zone is best on the library's file system, so imports are renames rather than copies.
+`heron-librarian` and `heron-api` run as `HERON_LIBRARIAN_USER` (`uid:gid`), which must own the buffer zone, the covers folder and the library: use the output of `id -u` and `id -g` for the owner of your music. The buffer zone is best on the library's file system, so imports are renames rather than copies.
 
 ## The incoming folder
 
@@ -157,7 +157,7 @@ Heron keeps a copy of each track's cover, sized for display, and shows it in the
 
 ### Where the images are
 
-The two JPEGs are **files**, in the covers folder (`HERON_COVERS_DIR`, `/var/lib/heron/covers` in the images; the `covers` volume of `docker-compose.yml`), shared by `heron-api` and `heron-librarian`, which both store covers. The database keeps what is known of each image (the `covers` table: its hash, width and height), not the image.
+The two JPEGs are **files**, in the covers folder (`HERON_COVERS_DIR`, `/var/lib/heron/covers` in the images; `HERON_COVERS_FOLDER` in `docker-compose.yml`), shared by `heron-api` and `heron-librarian`, which both store covers. The database keeps what is known of each image (the `covers` table: its hash, width and height), not the image.
 
 - **Layout:** one folder per first two characters of the hash, then the hash and the size: `3f/3fa2…c9-600.jpg` and `3f/3fa2…c9-96.jpg`. At most 256 folders, so no folder holds too many files.
 - **Written** to a temporary file in the same folder, then renamed: a crash never leaves half an image under a cover's name. Both files are written before the cover's row is added, so a cover in the database always had its files.

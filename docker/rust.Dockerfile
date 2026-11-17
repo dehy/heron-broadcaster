@@ -68,9 +68,9 @@ USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends mariadb-client \
     && rm -rf /var/lib/apt/lists/*
-# The covers folder (HERON_COVERS_DIR), shared with heron-librarian: a new
-# volume mounted there takes its mode, writable by HERON_LIBRARIAN_USER.
-RUN mkdir -p /var/lib/heron/covers && chmod 0777 /var/lib/heron/covers
+# The covers folder (HERON_COVERS_DIR), shared with heron-librarian:
+# Compose mounts HERON_COVERS_FOLDER there, owned by HERON_LIBRARIAN_USER.
+RUN mkdir -p /var/lib/heron/covers && chown heron:heron /var/lib/heron/covers
 USER heron
 COPY --from=builder /out/heron-api /usr/local/bin/heron-api
 ENV HERON_HTTP_ADDR=0.0.0.0:8080
@@ -90,7 +90,7 @@ ENTRYPOINT ["heron-analyzer"]
 FROM runtime AS heron-librarian
 # The covers folder, as in heron-api.
 USER root
-RUN mkdir -p /var/lib/heron/covers && chmod 0777 /var/lib/heron/covers
+RUN mkdir -p /var/lib/heron/covers && chown heron:heron /var/lib/heron/covers
 USER heron
 COPY --from=builder /out/heron-librarian /usr/local/bin/heron-librarian
 ENV HERON_HTTP_ADDR=0.0.0.0:8083

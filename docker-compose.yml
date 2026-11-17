@@ -94,7 +94,7 @@ services:
       - ${HERON_BACKUP_FOLDER:-./data/backups}:/var/lib/heron/backups
       # Cover images (docs/library.md#where-the-images-are), shared with
       # heron-librarian.
-      - covers:/var/lib/heron/covers
+      - ${HERON_COVERS_FOLDER:-./data/covers}:/var/lib/heron/covers
       # The GeoIP country database the admin provides, read-only.
       - ${HERON_GEOIP_FOLDER:-./data/geoip}:/var/lib/heron/geoip:ro
       # The stream servers' access logs, read-only, for audience
@@ -164,7 +164,7 @@ services:
       - ${HERON_MUSIC_DIR:-./data/music}:/music
       - ${HERON_INCOMING_FOLDER:-./data/incoming}:/incoming
       - ${HERON_STAGING_FOLDER:-./data/staging}:/staging
-      - covers:/var/lib/heron/covers
+      - ${HERON_COVERS_FOLDER:-./data/covers}:/var/lib/heron/covers
     depends_on:
       # Waits for the API so the schema is migrated first.
       heron-api:
@@ -306,6 +306,5 @@ services:
 
 volumes:
   mariadb-data:
-  covers:
   engine-state:
   engine-relay:
