@@ -560,9 +560,7 @@ impl QueueManager {
             .unwrap_or_default();
         let mut plan = kept.plan.take();
         if let (Some((id, entry, track)), Some(planner)) = (chained, planner.as_mut()) {
-            if let Ok(mut tried) = self.chain_tried.lock() {
-                *tried = Some(id);
-            }
+            self.tried_chain(id);
             let start = planned
                 .iter()
                 .find(|(waiting, _)| waiting.entry_id == entry)
@@ -623,19 +621,19 @@ impl QueueManager {
             if let Some(from) = from {
                 ahead.push((first..picks.len(), from));
             }
-            if let Some(planner) = planner.as_mut() {
-                let mut ground = crate::matches::Ground {
-                    library: &library,
-                    history: &mut history,
-                    at: &mut at,
-                    last: &mut last,
-                    plan: &mut plan,
-                    rng: &mut rng,
-                };
-                if let Some(planned) = planner.after(&mut ground, &mut picks) {
-                    planned_match = Some(planned);
-                    break;
-                }
+            let mut ground = crate::matches::Ground {
+                library: &library,
+                history: &mut history,
+                at: &mut at,
+                last: &mut last,
+                plan: &mut plan,
+                rng: &mut rng,
+            };
+            planned_match = planner
+                .as_mut()
+                .and_then(|planner| planner.after(&mut ground, &mut picks));
+            if planned_match.is_some() {
+                break;
             }
         }
         if planned_match.is_some() {
@@ -771,6 +769,13 @@ impl QueueManager {
             alternatives,
             now,
         }))
+    }
+
+    /// The match whose winner carries the next vote is tried once.
+    fn tried_chain(&self, id: u64) {
+        if let Ok(mut tried) = self.chain_tried.lock() {
+            *tried = Some(id);
+        }
     }
 
     /// Writes back the fill kept, with the plan. The choice by hand holds

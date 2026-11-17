@@ -611,6 +611,30 @@ fn survey_blocked(
     (blocked, held)
 }
 
+/// The fallback category's call, its allowed tracks and its own draw depth.
+type Fallback<'l> = (Call<'l>, Vec<(&'l Track, f64)>, Option<DrawDepth>);
+
+/// What the fallback category draws from: its allowed tracks, ordered for
+/// a draw (in its own depth) when the slot draws.
+fn fallback_draw<'l>(
+    library: &'l Library,
+    history: &History,
+    local: jiff::civil::DateTime,
+    previous: Option<&[CategoryId]>,
+    draws: bool,
+    rng: &mut Rng,
+) -> Fallback<'l> {
+    let category = library.fallback_category();
+    let call = Call::new(library, category.map(|c| c.id), None);
+    let (pool, _) = call.allowed(library, local, previous);
+    if !draws {
+        return (call, pool, None);
+    }
+    let depth = library.draw(category.map(|c| &c.separation), None);
+    let pool = draw::order(&pool, history, rng);
+    (call, pool, Some(depth))
+}
+
 /// Tries the relaxation steps in order and picks with the slot's method
 /// among the first step's candidates, within the slot's draw depth: at step
 /// 0 (and 11, in the fallback category) the draw widens from its start to
@@ -670,7 +694,6 @@ fn fill(
     // Ordered once per pick for the draw, played longest ago first, and
     // reused by every step.
     let ordered = slot.draw.map(|_| draw::order(&allowed, history, rng));
-    type Fallback<'l> = (Call<'l>, Vec<(&'l Track, f64)>, Option<DrawDepth>);
     let mut fallback: Option<Fallback<'_>> = None;
     let gap_fill = fit.is_some_and(|fit| fit.mode == FitMode::Medley) || slot.first_only;
     for step in steps(slot.enforce_rules, gap_fill) {
@@ -686,19 +709,7 @@ fn fill(
             (&slot.call, pool, configured, slot.draw)
         } else {
             let (call, pool, depth) = fallback.get_or_insert_with(|| {
-                let category = library.fallback_category();
-                let call = Call::new(library, category.map(|c| c.id), None);
-                let (pool, _) = call.allowed(library, local, previous);
-                // The fallback category's own draw depth.
-                let depth = slot
-                    .draw
-                    .map(|_| library.draw(category.map(|c| &c.separation), None));
-                let pool = if depth.is_some() {
-                    draw::order(&pool, history, rng)
-                } else {
-                    pool
-                };
-                (call, pool, depth)
+                fallback_draw(library, history, local, previous, slot.draw.is_some(), rng)
             });
             (&*call, &*pool, Some(call.windows), *depth)
         };
@@ -2020,6 +2031,23 @@ impl Walk<'_> {
         }
     }
 
+    /// The pick, else the slots `skips` names skipped and `taken` more
+    /// passed.
+    fn picked(
+        &mut self,
+        clock: &Clock,
+        result: Result<Pick, (Vec<(usize, SkipReason)>, usize)>,
+    ) -> Option<Pick> {
+        match result {
+            Ok(pick) => self.done(pick),
+            Err((skips, taken)) => {
+                self.skip_all(clock, skips);
+                self.k += taken - 1;
+                None
+            }
+        }
+    }
+
     /// The pick, with the slots skipped before it.
     fn done(&mut self, mut pick: Pick) -> Option<Pick> {
         pick.explanation.skipped_slots = std::mem::take(&mut self.skipped);
@@ -2185,24 +2213,18 @@ pub(crate) fn pick(
                 if let Some(pick) = picker.gap(ahead, at_ms) {
                     return walk.done(pick);
                 }
-                match picker.exact(ahead, at_ms, false) {
-                    Ok(pick) => return walk.done(pick),
-                    Err((skips, taken)) => {
-                        walk.skip_all(clock, skips);
-                        walk.k += taken - 1;
-                        // The slots after it are not fitted any more.
-                        fitting = false;
-                        continue;
-                    }
+                let exact = picker.exact(ahead, at_ms, false);
+                if let Some(pick) = walk.picked(clock, exact) {
+                    return Some(pick);
                 }
+                // The slots after it are not fitted any more.
+                fitting = false;
+                continue;
             }
             let fit = fit.as_ref().filter(|_| fitting);
-            match picker.group(clock, index, hour_start, at_ms, fit) {
-                Ok(pick) => return walk.done(pick),
-                Err((skips, taken)) => {
-                    walk.skip_all(clock, skips);
-                    walk.k += taken - 1;
-                }
+            let group = picker.group(clock, index, hour_start, at_ms, fit);
+            if let Some(pick) = walk.picked(clock, group) {
+                return Some(pick);
             }
         }
         // Nothing fitted in this run before the next hour's exact time:

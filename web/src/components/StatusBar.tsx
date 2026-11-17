@@ -272,6 +272,33 @@ function NextFixed({ now }: Readonly<{ now: number }>) {
   );
 }
 
+/** A bar per other station, when there are some. */
+function StationRows({
+  stations,
+  colors,
+  onSwitch,
+}: Readonly<{ stations: OtherStation[]; colors: CSSProperties; onSwitch: ((id: number) => void) | undefined }>) {
+  if (stations.length === 0) return null;
+  return (
+    <div className="statusbar-rows">
+      {stations.map((station) => (
+        <StationRow key={station.id} station={station} colors={colors} onSwitch={onSwitch} />
+      ))}
+    </div>
+  );
+}
+
+/** The server's CPU, memory and load. */
+function SystemPart({ summary }: Readonly<{ summary: ReturnType<typeof summarizeSystem> }>) {
+  return (
+    <span className="statusbar-part statusbar-system">
+      <span className={`statusbar-${summary.cpuLevel}`}>cpu {summary.cpu}</span>
+      <span className={`statusbar-${summary.memLevel}`}>mem {summary.mem}</span>
+      <span className={`statusbar-${summary.loadLevel}`}>load {summary.load}</span>
+    </span>
+  );
+}
+
 /** What a station in trouble has. */
 function troubleText(station: OtherStation): string | null {
   switch (station.trouble) {
@@ -413,13 +440,7 @@ export function StatusBar({
 
   return (
     <div className={`statusbar-dock${preview ? " statusbar-preview" : ""}`}>
-      {open && stations && stations.shown.length > 0 && (
-        <div className="statusbar-rows">
-          {stations.shown.map((station) => (
-            <StationRow key={station.id} station={station} colors={colors} onSwitch={preview ? undefined : onSwitch} />
-          ))}
-        </div>
-      )}
+      {open && stations && <StationRows stations={stations.shown} colors={colors} onSwitch={preview ? undefined : onSwitch} />}
     <div
       className={`statusbar${connected ? "" : " statusbar-offline"}${preview ? " statusbar-preview" : ""}`}
       role="status"
@@ -442,13 +463,7 @@ export function StatusBar({
         </Link>
       )}
       {settings.outputs && outputs && outputs.total > 0 && <OutputsLink outputs={outputs} />}
-      {settings.system && summary && (
-        <span className="statusbar-part statusbar-system">
-          <span className={`statusbar-${summary.cpuLevel}`}>cpu {summary.cpu}</span>
-          <span className={`statusbar-${summary.memLevel}`}>mem {summary.mem}</span>
-          <span className={`statusbar-${summary.loadLevel}`}>load {summary.load}</span>
-        </span>
-      )}
+      {settings.system && summary && <SystemPart summary={summary} />}
       {settings.station_time && <span className="statusbar-part statusbar-clock">{clockTime(now)}</span>}
       {!connected && <span className="statusbar-part">{t("statusbar.offline")}</span>}
     </div>

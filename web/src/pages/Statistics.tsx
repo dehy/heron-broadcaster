@@ -455,7 +455,7 @@ function Today({ zone, filter, view }: Readonly<{ zone: string | undefined; filt
   });
   const totals = useQuery({
     queryKey: ["listeners", "days", today, today, filter, "day", all],
-    queryFn: () => days(all, filter, today, today, "day"),
+    queryFn: () => (all ? allStationsDays(today, today, "day") : stationDays(filter, today, today, "day")),
     refetchInterval: 60_000,
   });
   const servers = serversOf(now.data, output);
@@ -547,12 +547,7 @@ function RangeSelect({ value, onChange }: Readonly<{ value: number; onChange: (d
 }
 
 
-/** The totals per hour, day, week or month: one station's, or every one's added up. */
-function days(all: boolean, filter: Filter, from: string, to: string, group: Grouping | "hour") {
-  return all ? allStationsDays(from, to, group) : stationDays(filter, from, to, group);
-}
-
-/** Every station's totals added up. */
+/** Every station's totals per hour, day, week or month, added up. */
 function allStationsDays(from: string, to: string, group: Grouping | "hour") {
   return unwrap(api.GET("/api/v1/stations/listeners/days", { params: { query: { stations: "all", from, to, group } } })).then(
     (d) => d.total,
@@ -575,7 +570,7 @@ function OverTime({ filter, period, view }: Readonly<{ filter: Filter; period: P
   const all = view.kind === "all";
   const totals = useQuery({
     queryKey: ["listeners", "days", from, to, filter, grouping, all],
-    queryFn: () => days(all, filter, from, to, grouping),
+    queryFn: () => (all ? allStationsDays(from, to, grouping) : stationDays(filter, from, to, grouping)),
   });
   const rows = totals.data ?? [];
   const bars: Bar[] = rows.map((row) => ({
@@ -673,7 +668,7 @@ function HoursOfDay({ filter, period, view }: Readonly<{ filter: Filter; period:
   });
   const hourly = useQuery({
     queryKey: ["listeners", "days", from, to, filter, "hour", all],
-    queryFn: () => days(all, filter, from, to, "hour"),
+    queryFn: () => (all ? allStationsDays(from, to, "hour") : stationDays(filter, from, to, "hour")),
   });
   const tunes = byHour.data?.some((h) => h.tune_in != null) ?? false;
   const bars: Bar[] = Array.from({ length: 24 }, (_, hour) => {

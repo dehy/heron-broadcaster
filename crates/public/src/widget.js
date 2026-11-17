@@ -458,7 +458,10 @@
     ded.follow = key;
     clearInterval(ded.polling);
     var poll = function () {
-      fetch(base + "/dedications/follow?id=" + encodeURIComponent(key))
+      var url = new URL(base + "/dedications/follow");
+      // A follow key is 32 hexadecimal digits, nothing else.
+      url.searchParams.set("id", /^[0-9a-f]{32}$/.test(key) ? key : "");
+      fetch(url.href)
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (followed) {
           if (ded.follow !== key) return;

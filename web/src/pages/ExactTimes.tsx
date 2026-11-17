@@ -307,9 +307,9 @@ function MetResult({ exact, met }: Readonly<{ exact: ExactTimeOfDay; met: NonNul
   );
 }
 
-/** The rank of an attempt, or whether it is the one in use: kept, or chosen by hand. */
-function inUseLabel(byHand: boolean): string {
-  return byHand ? t("exactTimes.chosen") : t("exactTimes.kept");
+/** The attempt in use: chosen by hand for this calculation, else kept by rotation. */
+function inUseLabel(chosenIn: number | undefined, calculation: number): string {
+  return chosenIn === calculation ? t("exactTimes.chosen") : t("exactTimes.kept");
 }
 
 /** The slot of the clock a track of an attempt fills. */
@@ -618,7 +618,7 @@ function AttemptsCard({
                 onClick={() => setSearch({ calculation: detail.id, attempt: attempt.number })}
               >
                 <span className={attempt.number === inUse ? "exact-rank in-use" : "exact-rank"}>
-                  {attempt.number === inUse ? inUseLabel(choice?.calculation_id === detail.id) : number(attempt.rank)}
+                  {attempt.number === inUse ? inUseLabel(choice?.calculation_id, detail.id) : number(attempt.rank)}
                 </span>
                 <span className="muted">#{attempt.number}</span>
                 <span className="exact-bar">
