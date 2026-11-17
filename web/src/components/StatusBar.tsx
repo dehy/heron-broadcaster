@@ -370,6 +370,31 @@ function OutputsLink({ outputs }: Readonly<{ outputs: NonNullable<ReturnType<typ
   );
 }
 
+/** The decks the bar shows: the one on air alone when the settings say so. */
+function shownDecks(settings: StatusBarSettings, onAir: string | undefined): ("A" | "B")[] {
+  if (!settings.on_air_only || onAir === undefined) {
+    return ["A", "B"];
+  }
+  return [onAir === "b" ? "B" : "A"];
+}
+
+/** The colors chosen in the settings, as the bar's CSS variables. */
+function barColors(settings: StatusBarSettings): CSSProperties {
+  const colors: Record<string, string> = {};
+  if (settings.track_color) {
+    colors["--deck"] = settings.track_color;
+  }
+  if (settings.intro_color) {
+    colors["--statusbar-intro"] = settings.intro_color;
+  }
+  return colors as CSSProperties;
+}
+
+/** A class name, with the preview's when it is the one in Account. */
+function withPreview(className: string, preview: boolean): string {
+  return preview ? `${className} statusbar-preview` : className;
+}
+
 /**
  * The status bar. `settings` and `preview`: the one in Account › Status
  * bar, which shows settings not saved yet and stays in its place.
@@ -419,12 +444,8 @@ export function StatusBar({
     const position = positionNow(positions, name, paused, wallNow);
     return summarizeDeck(letter, deck, paused, position?.position_ms ?? null, settings);
   };
-  const letters: ("A" | "B")[] =
-    settings.on_air_only && onAir ? [onAir.deck === "b" ? "B" : "A"] : ["A", "B"];
-  const colors = {
-    ...(settings.track_color ? { "--deck": settings.track_color } : {}),
-    ...(settings.intro_color ? { "--statusbar-intro": settings.intro_color } : {}),
-  } as CSSProperties;
+  const letters = shownDecks(settings, onAir?.deck);
+  const colors = barColors(settings);
   const summary = system ? summarizeSystem(system) : null;
   const record = recordOf(listeners.data?.record);
   const outputs = player ? outputsOf(player.outputs) : null;
@@ -439,10 +460,10 @@ export function StatusBar({
   };
 
   return (
-    <div className={`statusbar-dock${preview ? " statusbar-preview" : ""}`}>
+    <div className={withPreview("statusbar-dock", preview)}>
       {open && stations && <StationRows stations={stations.shown} colors={colors} onSwitch={preview ? undefined : onSwitch} />}
     <div
-      className={`statusbar${connected ? "" : " statusbar-offline"}${preview ? " statusbar-preview" : ""}`}
+      className={withPreview(connected ? "statusbar" : "statusbar statusbar-offline", preview)}
       role="status"
       aria-live="off"
       aria-label={t("statusbar.label")}

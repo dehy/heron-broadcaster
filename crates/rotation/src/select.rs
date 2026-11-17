@@ -2080,6 +2080,52 @@ impl Walk<'_> {
 
 /// An hour without a clock: the least recently played track of the
 /// library, with the station's rules.
+impl Walk<'_> {
+    /// The run's slots from `k` on, until one picks. `fitting` turns off
+    /// when the next exact slot gave way: the slots after it are not
+    /// fitted any more.
+    fn slots(
+        &mut self,
+        picker: &mut Picker<'_, '_>,
+        missed: &[usize],
+        upcoming: Option<&Upcoming<'_>>,
+        fit: Option<&Fit<'_>>,
+        fitting: &mut bool,
+    ) -> Option<Pick> {
+        let clock = self.clock;
+        while self.k < self.count {
+            let index = (self.first + self.k) % self.count;
+            self.k += 1;
+            if missed.contains(&index) || self.passed(index) {
+                self.skip_passed(index);
+                continue;
+            }
+            if let Some(ahead) = upcoming.filter(|_| *fitting)
+                && ahead.offset.is_some()
+                && ahead.index == index
+            {
+                // The exact slot before its window: fill the gap, else
+                // it starts early.
+                if let Some(pick) = picker.gap(ahead, self.at_ms) {
+                    return self.done(pick);
+                }
+                let exact = picker.exact(ahead, self.at_ms, false);
+                if let Some(pick) = self.picked(clock, exact) {
+                    return Some(pick);
+                }
+                *fitting = false;
+                continue;
+            }
+            let fit = fit.filter(|_| *fitting);
+            let group = picker.group(clock, index, self.hour_start, self.at_ms, fit);
+            if let Some(pick) = self.picked(clock, group) {
+                return Some(pick);
+            }
+        }
+        None
+    }
+}
+
 fn pick_without_clock(picker: &mut Picker<'_, '_>, at_ms: i64) -> Option<Pick> {
     let library = picker.library;
     let slot = SlotCall {
@@ -2197,35 +2243,14 @@ pub(crate) fn pick(
             options: picker.steer.options,
             quick: picker.steer.quick,
         });
-        while walk.k < count {
-            let index = (first + walk.k) % count;
-            walk.k += 1;
-            if missed.contains(&index) || walk.passed(index) {
-                walk.skip_passed(index);
-                continue;
-            }
-            if let Some(ahead) = upcoming.as_ref().filter(|_| fitting)
-                && ahead.offset.is_some()
-                && ahead.index == index
-            {
-                // The exact slot before its window: fill the gap, else
-                // it starts early.
-                if let Some(pick) = picker.gap(ahead, at_ms) {
-                    return walk.done(pick);
-                }
-                let exact = picker.exact(ahead, at_ms, false);
-                if let Some(pick) = walk.picked(clock, exact) {
-                    return Some(pick);
-                }
-                // The slots after it are not fitted any more.
-                fitting = false;
-                continue;
-            }
-            let fit = fit.as_ref().filter(|_| fitting);
-            let group = picker.group(clock, index, hour_start, at_ms, fit);
-            if let Some(pick) = walk.picked(clock, group) {
-                return Some(pick);
-            }
+        if let Some(pick) = walk.slots(
+            &mut picker,
+            &missed,
+            upcoming.as_ref(),
+            fit.as_ref(),
+            &mut fitting,
+        ) {
+            return Some(pick);
         }
         // Nothing fitted in this run before the next hour's exact time:
         // fill the gap, else the exact slot starts early, as one of this
