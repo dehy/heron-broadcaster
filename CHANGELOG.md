@@ -20,6 +20,7 @@ Never off air: what the queue reads can no longer stop the music ([Audio engine 
 - **The match table failing** no longer stops an operator from skipping, clearing, removing or queueing tracks.
 - **Stored data that cannot be read** no longer fails every fill: a settings group keeps what can be read (the rest takes its default), and a restriction whose rule cannot be read bans its target at all times.
 - **Segmented choices have their frame again**, and the status bar's rows their padding: the style that takes the frame off labelled groups no longer covers theirs.
+- **The live monitor's panel opens above the page** instead of under the main column's cards.
 
 ## 0.5.0 – 2026-11-16
 

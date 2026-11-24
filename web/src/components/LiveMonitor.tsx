@@ -4,6 +4,7 @@
 // Heron's name at the top of the menu, and in the top bar on a phone.
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { can } from "../api";
 import { t } from "../i18n";
 import {
@@ -86,7 +87,7 @@ export function LiveMonitorButton() {
       setOpen(null);
       return;
     }
-    // Fixed, so the menu's scrolling does not cut it.
+    // Fixed, placed under the button.
     const rect = button.current?.getBoundingClientRect();
     const top = (rect?.bottom ?? 0) + 4;
     const left = Math.max(8, Math.min((rect?.left ?? 0), window.innerWidth - PANEL_WIDTH - 8));
@@ -113,17 +114,21 @@ export function LiveMonitorButton() {
           </span>
         )}
       </button>
-      {open && (
-        <dialog
-          open
-          ref={panel}
-          className="menu-panel monitor-panel stack"
-          aria-label={t("monitor.title")}
-          style={{ position: "fixed", top: open.top, left: open.left, width: PANEL_WIDTH }}
-        >
-          <MonitorPanel listening={listening} />
-        </dialog>
-      )}
+      {open &&
+        // On the page's body: the menu is sticky, a stacking context of its
+        // own, and would keep the panel under the main column.
+        createPortal(
+          <dialog
+            open
+            ref={panel}
+            className="menu-panel monitor-panel stack"
+            aria-label={t("monitor.title")}
+            style={{ position: "fixed", top: open.top, left: open.left, width: PANEL_WIDTH }}
+          >
+            <MonitorPanel listening={listening} />
+          </dialog>,
+          document.body,
+        )}
     </>
   );
 }
