@@ -89,6 +89,11 @@ function dialog() {
   return within(screen.getByRole("dialog"));
 }
 
+/** The report, once its dialog is open: its title is there a moment before. */
+function reportDialog() {
+  return screen.findByRole("dialog", { name: t("backups.restored") });
+}
+
 function keyField() {
   return screen.getByPlaceholderText("AGE-SECRET-KEY-1…");
 }
@@ -153,12 +158,11 @@ describe("restoring", () => {
     expect(restore).toHaveProperty("disabled", true);
     fireEvent.change(keyField(), { target: { value: KEY } });
     fireEvent.click(restore);
-    expect(await screen.findByText(t("backups.restored"))).toBeTruthy();
+    const report = within(await reportDialog());
     expect(sent("POST /api/v1/backups/{name}/restore")[0]?.options).toEqual({
       params: { path: { name: CURRENT.name } },
       body: { key: KEY },
     });
-    const report = dialog();
     expect(report.getByText(/3 items were left out/)).toBeTruthy();
     expect(report.getByText("Music/gone.flac")).toBeTruthy();
     expect(report.getByText(/Artists not found: Nobody/)).toBeTruthy();
@@ -184,7 +188,7 @@ describe("restoring", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click((await row(IN_CLEAR)).getByRole("button", { name: t("backups.restore") }));
     fireEvent.click(dialog().getByRole("button", { name: t("backups.restore") }));
-    await screen.findByText(t("backups.restored"));
+    await reportDialog();
     expect(sent("POST /api/v1/backups/{name}/restore")[0]?.options).toMatchObject({ body: {} });
   });
 
@@ -197,7 +201,7 @@ describe("restoring", () => {
     expect(dialog().getByText(/Restore the file heron-config\.json\.age/)).toBeTruthy();
     fireEvent.change(keyField(), { target: { value: KEY } });
     fireEvent.click(dialog().getByRole("button", { name: t("backups.restore") }));
-    await screen.findByText(t("backups.restored"));
+    await reportDialog();
     expect(sent("POST /api/v1/backups/restore")[0]?.options).toMatchObject({
       params: { header: { "X-Heron-Backup-Key": KEY } },
       headers: { "Content-Type": "application/octet-stream" },
@@ -211,7 +215,7 @@ describe("restoring", () => {
     await screen.findByText(/Restore the file heron-config\.json\?/);
     expect(screen.queryByPlaceholderText("AGE-SECRET-KEY-1…")).toBeNull();
     fireEvent.click(dialog().getByRole("button", { name: t("backups.restore") }));
-    await screen.findByText(t("backups.restored"));
+    await reportDialog();
     expect(sent("POST /api/v1/backups/restore")[0]?.options).toMatchObject({ params: { header: {} } });
   });
 });
