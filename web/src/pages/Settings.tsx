@@ -73,7 +73,12 @@ export function Settings() {
         </>
       )}
       {tab === "audio" && <AnalysisCard />}
-      {tab === "library" && <LibraryCard />}
+      {tab === "library" && (
+        <>
+          <LibraryCard />
+          <FileCheckCard />
+        </>
+      )}
       {tab === "statistics" && <StatisticsCard />}
     </>
   );
@@ -1221,6 +1226,54 @@ function ProgrammingCard() {
   );
 }
 
+/** The check of the library's files for damage: how far it is, and again. */
+function FileCheckCard() {
+  const canEdit = useCan("operator");
+  const integrity = useQuery({
+    queryKey: ["library-integrity"],
+    queryFn: () => unwrap(api.GET("/api/v1/library/integrity")),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data && data.checked < data.tracks ? 2000 : 30_000;
+    },
+  });
+  const again = useAction(() => unwrap(api.POST("/api/v1/library/integrity")), {
+    invalidate: [["library-integrity"], ["todo-counts"]],
+  });
+  const data = integrity.data;
+  return (
+    <Card title={t("settings.fileCheck")}>
+      <div className="card-body stack">
+        <p className="muted" style={{ margin: 0 }}>
+          {t("settings.fileCheckHelp")}
+        </p>
+        {data && (
+          <>
+            <div className="progress" style={{ maxWidth: "24rem" }}>
+              <div style={{ width: `${data.tracks ? (100 * data.checked) / data.tracks : 100}%` }} />
+            </div>
+            <span>
+              {t("settings.fileCheckState", { checked: number(data.checked), tracks: number(data.tracks) })}{" "}
+              {data.damaged > 0 ? (
+                <Link to="/to-do?tab=damaged">{t("settings.fileCheckDamaged", { count: data.damaged })}</Link>
+              ) : (
+                <span className="muted">{t("settings.fileCheckNone")}</span>
+              )}
+            </span>
+          </>
+        )}
+        {canEdit && (
+          <div>
+            <button type="button" className="btn small" disabled={again.isPending} onClick={() => again.mutate(undefined)}>
+              {t("settings.fileCheckAgain")}
+            </button>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function LibraryCard() {
   const isAdmin = useCan("admin");
   const coverArt = useModule("cover_art");
@@ -1258,6 +1311,7 @@ function LibraryCard() {
           embed_cover: current.embed_cover,
           write_tags: current.write_tags,
           fetch_covers: current.fetch_covers,
+          identify_library: current.identify_library,
           max_upload_mb: current.max_upload_mb,
           min_free_mb: current.min_free_mb,
           trash_days: current.trash_days,
@@ -1317,6 +1371,18 @@ function LibraryCard() {
                 {t("settings.writeTags")}
               </label>
               <span className="muted small">{t("settings.writeTagsHint")}</span>
+            </div>
+            <div className="stack" style={{ gap: "0.2rem" }}>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={draft.identify_library}
+                  disabled={!isAdmin}
+                  onChange={(e) => set({ identify_library: e.target.checked })}
+                />
+                {t("settings.identifyLibrary")}
+              </label>
+              <span className="muted small">{t("settings.identifyLibraryHint")}</span>
             </div>
             {coverArt && (
               <div className="stack" style={{ gap: "0.2rem" }}>

@@ -49,6 +49,8 @@ const TRACK = {
   playout: { gain_db: -1.5 },
   file: { size: 5_000_000, channels: 2, sample_rate: 44_100, missing_since_unix_ms: null, year_tag: 1983, track_number: 1 },
   identification: null,
+  identification_candidates: [],
+  damage: [],
   musicbrainz: null,
   plays: [],
   programming: { mood: null, sound_code: null, era: null },

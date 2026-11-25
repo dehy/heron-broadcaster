@@ -15,6 +15,7 @@ import { useAction } from "../lib/session";
 import { Field, Modal, Segmented } from "./ui";
 import { NewCategory } from "./NewCategory";
 import { WeightOrRatio } from "./Ratio";
+import { TagValueInput, suggestedField } from "./TagValueInput";
 
 export type Selection = Schemas["TrackSelection"];
 export type TagField = Schemas["TagField"];
@@ -521,6 +522,8 @@ export function TagsDialog({
   });
   // With write_tags off, the tags are kept in Heron: the files are left alone.
   const keep = library.data?.write_tags === false;
+  // The artist albums are proposed for: the one typed, else the track's.
+  const typedArtist = changes.artist?.kind === "set" ? changes.artist.value : current?.artist?.toString();
   const fieldValues = () => {
     const set: Record<string, string | null> = {};
     for (const [field, change] of Object.entries(changes)) {
@@ -625,17 +628,28 @@ export function TagsDialog({
                   }
                   change={changes[field] ?? { kind: "keep" }}
                   onChange={(change) => setChanges((all) => ({ ...all, [field]: change }))}
-                  renderInput={(text, set) => (
-                    <input
-                      className="input"
-                      type={numeric ? "number" : "text"}
-                      min={numeric ? 1 : undefined}
-                      value={text}
-                      list={field === "genre" ? "genre-suggestions" : undefined}
-                      aria-label={name}
-                      onChange={(event) => set(event.target.value)}
-                    />
-                  )}
+                  renderInput={(text, set) => {
+                    const suggested = suggestedField(field);
+                    return suggested ? (
+                      <TagValueInput
+                        field={suggested}
+                        value={text}
+                        onValue={set}
+                        artist={typedArtist}
+                        aria-label={name}
+                      />
+                    ) : (
+                      <input
+                        className="input"
+                        type={numeric ? "number" : "text"}
+                        min={numeric ? 1 : undefined}
+                        value={text}
+                        list={field === "genre" ? "genre-suggestions" : undefined}
+                        aria-label={name}
+                        onChange={(event) => set(event.target.value)}
+                      />
+                    );
+                  }}
                 />
               );
             })}

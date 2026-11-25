@@ -6,7 +6,7 @@
 // they become.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { type Schemas, api, errorMessage, unwrap } from "../api";
 import {
   CategoryDialog,
@@ -17,6 +17,8 @@ import {
   ProgrammingDialog,
   changeValue,
 } from "../components/SelectionActions";
+import { TagValueInput, suggestedField } from "../components/TagValueInput";
+import { ReviewDialog, currentCandidate, isAccepted, isSure, toReview } from "./BufferReview";
 import { TaskState, useTask } from "../components/Task";
 import {
   Banner,
@@ -47,6 +49,9 @@ import {
 } from "../lib/upload";
 
 type StagedFile = Schemas["StagedFile"];
+
+/** Files another one of the buffer zone is a copy of: Heron flags only the later copy. */
+const Copied = createContext<Set<number>>(new Set());
 type StagedGroup = Schemas["StagedGroup"];
 
 /** Files uploaded at the same time. */
@@ -59,6 +64,9 @@ const FLAGS: Record<Schemas["StagedFlag"], { label: PlainKey; help: PlainKey }> 
   undecodable: { label: "buffer.flag.unreadable", help: "buffer.flag.unreadableHelp" },
   too_short: { label: "buffer.flag.tooShort", help: "buffer.flag.tooShortHelp" },
   unsupported_format: { label: "buffer.flag.unsupported", help: "buffer.flag.unsupportedHelp" },
+  broken_seek_table: { label: "buffer.flag.seekTable", help: "buffer.flag.seekTableHelp" },
+  damaged_audio: { label: "buffer.flag.damaged", help: "buffer.flag.damagedHelp" },
+  mixed_streams: { label: "buffer.flag.mixed", help: "buffer.flag.mixedHelp" },
 };
 
 /** Files that can still be prepared: not yet imported, not being imported. */
@@ -67,6 +75,7 @@ function isPreparable(file: StagedFile): boolean {
 }
 
 type Dialog = "category" | "labels" | "programming" | "tags" | null;
+
 
 /** Ready, identified (or identification off) and nothing to look at. */
 function isClean(file: StagedFile): boolean {
@@ -323,6 +332,8 @@ export function Buffer() {
   const [taskId, setTaskId] = useState<number | null>(null);
   const task = useTask(taskId);
   const [dialog, setDialog] = useState<Dialog>(null);
+  // The files reviewed one after another, and where it starts.
+  const [reviewing, setReviewing] = useState<{ queue: number[]; start: number } | null>(null);
   // The last import, to find its tracks in the library.
   const [imported, setImported] = useState<{ batch: number; count: number } | null>(null);
 
@@ -411,6 +422,36 @@ export function Buffer() {
     return file !== undefined && isPreparable(file);
   });
   const importing = taskId !== null && task.data?.status !== "done" && task.data?.status !== "failed";
+  const copied = new Set(files.flatMap((f) => (f.duplicate_of_file_id ? [f.duplicate_of_file_id] : [])));
+  const reviewable = canEdit ? files.filter((f) => f.status === "ready").map((f) => f.id) : [];
+  const waiting = files.filter(toReview);
+  const sure = files.filter(isSure);
+  const accepted = files.filter(isAccepted).map((f) => f.id);
+  const review = (id?: number) => {
+    const first = id ?? waiting[0]?.id;
+    const at = first === undefined ? -1 : reviewable.indexOf(first);
+    if (at >= 0) {
+      setReviewing({ queue: reviewable, start: at });
+    }
+  };
+  const acceptSure = useAction(
+    async (list: StagedFile[]) => {
+      for (const file of list) {
+        const candidate = currentCandidate(file);
+        if (candidate) {
+          await unwrap(
+            api.POST("/api/v1/staging/files/{id}/choice", {
+              params: { path: { id: file.id } },
+              body: { kind: "release", release_id: candidate.release_id, recording_id: candidate.recording_id },
+            }),
+          );
+        }
+      }
+      return list.length;
+    },
+    { invalidate: [["buffer"]], success: (count) => t("buffer.review.acceptedSure", { count }) },
+  );
+
   // Every file that can be selected, in the order shown, across the groups.
   const order = groups.flatMap((group) => group.files.filter((f) => f.status !== "importing").map((f) => f.id));
   const range = useRangeSelection(order, selected, setSelected, null);
@@ -433,6 +474,7 @@ export function Buffer() {
         title={t("nav.buffer")}
         description={t("buffer.description")}
       />
+      <Copied.Provider value={copied}>
       <div className="stack">
         {canEdit && <DropZone onFiles={onFiles} buffer={buffer.data} />}
         <Uploads state={uploads} />
@@ -462,6 +504,38 @@ export function Buffer() {
           <Banner kind="warn">
             {t("buffer.importing")} <TaskState task={task.data} />
           </Banner>
+        )}
+        {canEdit && reviewable.length > 0 && !importing && (
+          <div className="card card-head">
+            <span>
+              {waiting.length > 0
+                ? t("buffer.review.waiting", { count: waiting.length })
+                : t("buffer.review.allAccepted")}
+            </span>
+            <div className="row">
+              {waiting.length > 0 && (
+                <button type="button" className="btn small primary" onClick={() => review()}>
+                  <Icon name="check" size={14} /> {t("buffer.review.action")}
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn small"
+                disabled={sure.length === 0 || acceptSure.isPending}
+                onClick={() => acceptSure.mutate(sure)}
+              >
+                {t("buffer.review.acceptSure", { count: sure.length })}
+              </button>
+              <button
+                type="button"
+                className="btn small primary"
+                disabled={accepted.length === 0 || importFiles.isPending}
+                onClick={() => importFiles.mutate(accepted)}
+              >
+                {t("buffer.review.importAccepted", { count: accepted.length })}
+              </button>
+            </div>
+          </div>
         )}
         {canEdit && selected.size > 0 && (
           <div className="card-head card" style={{ background: "var(--accent-soft)" }}>
@@ -533,9 +607,18 @@ export function Buffer() {
           </Card>
         )}
         {groups.map((group) => (
-          <Group key={group.id} group={group} selected={selected} onToggle={toggle} range={range} canEdit={canEdit} />
+          <Group
+            key={group.id}
+            group={group}
+            selected={selected}
+            onToggle={toggle}
+            range={range}
+            canEdit={canEdit}
+            onFill={review}
+          />
         ))}
       </div>
+      </Copied.Provider>
       <CategoryDialog
         open={dialog === "category"}
         onClose={() => setDialog(null)}
@@ -555,6 +638,15 @@ export function Buffer() {
         tracks={preparable.length}
       />
       <TagsDialog open={dialog === "tags"} onClose={() => setDialog(null)} files={preparable} />
+      {reviewing && (
+        <ReviewDialog
+          key={`${reviewing.queue.join(",")}@${reviewing.start}`}
+          queue={reviewing.queue}
+          start={reviewing.start}
+          files={files}
+          onClose={() => setReviewing(null)}
+        />
+      )}
     </>
   );
 }
@@ -565,14 +657,19 @@ function Group({
   onToggle,
   range,
   canEdit,
+  onFill,
 }: Readonly<{
   group: StagedGroup;
   selected: Set<number>;
   onToggle: (ids: number[], on: boolean) => void;
   range: RangeSelection<number>;
   canEdit: boolean;
+  onFill: (id: number) => void;
 }>) {
-  const [open, setOpen] = useState<number | null>(null);
+  const discard = useAction(
+    (ids: number[]) => unwrap(api.POST("/api/v1/staging/discard", { body: { file_ids: ids } })),
+    { success: (result) => t("buffer.discarded", { count: result.discarded }), invalidate: [["buffer"]] },
+  );
   const selectable = group.files.filter((f) => f.status !== "importing").map((f) => f.id);
   const all = selectable.length > 0 && selectable.every((id) => selected.has(id));
   const ready = group.files.filter((f) => f.status === "ready").length;
@@ -614,7 +711,7 @@ function Group({
               <th className="hide-narrow">{t("buffer.goesTo")}</th>
               <th>{t("buffer.state")}</th>
               <th>
-                <span className="visually-hidden">{t("buffer.details")}</span>
+                <span className="visually-hidden">{t("buffer.actions")}</span>
               </th>
             </tr>
           </thead>
@@ -626,8 +723,8 @@ function Group({
                 canEdit={canEdit}
                 selected={selected.has(file.id)}
                 range={range}
-                open={open === file.id}
-                onOpen={() => setOpen(open === file.id ? null : file.id)}
+                onFill={() => onFill(file.id)}
+                onDiscard={() => discard.mutate([file.id])}
               />
             ))}
           </tbody>
@@ -714,6 +811,7 @@ function tagLine(tags: Schemas["StagedTags"] | null | undefined): string {
 }
 
 function State({ file }: Readonly<{ file: StagedFile }>) {
+  const copied = useContext(Copied);
   const badges: ReactNode[] = [];
   switch (file.status) {
     case "receiving":
@@ -760,7 +858,9 @@ function State({ file }: Readonly<{ file: StagedFile }>) {
   } else {
     badges.push(<span key="id" className="badge">{t("buffer.ownTags")}</span>);
   }
-  for (const flag of file.flags) {
+  const flags: Schemas["StagedFlag"][] =
+    copied.has(file.id) && !file.flags.includes("duplicate_in_buffer") ? [...file.flags, "duplicate_in_buffer"] : file.flags;
+  for (const flag of flags) {
     badges.push(
       <span key={flag} className="badge bad" title={t(FLAGS[flag].help)}>
         {t(FLAGS[flag].label)}
@@ -782,15 +882,15 @@ function FileRows({
   canEdit,
   selected,
   range,
-  open,
-  onOpen,
+  onFill,
+  onDiscard,
 }: Readonly<{
   file: StagedFile;
   canEdit: boolean;
   selected: boolean;
   range: RangeSelection<number>;
-  open: boolean;
-  onOpen: () => void;
+  onFill: () => void;
+  onDiscard: () => void;
 }>) {
   const shown = file.tags ?? file.own_tags;
   return (
@@ -823,40 +923,29 @@ function FileRows({
           <State file={file} />
         </td>
         <td className="actions">
-          <button
-            type="button"
-            className="btn ghost small"
-            aria-expanded={open}
-            onClick={onOpen}
-            disabled={file.status === "receiving"}
-          >
-            {open ? t("buffer.hide") : t("buffer.details")}
-          </button>
+          {canEdit && file.status === "ready" && (
+            <>
+              <ConfirmButton
+                className="btn small ghost"
+                title={t("buffer.discard")}
+                confirm={t("buffer.discardConfirm", { count: 1 })}
+                question={<p>{t("buffer.discardQuestion", { count: 1 })}</p>}
+                onConfirm={onDiscard}
+              >
+                <Icon name="trash" size={14} />
+              </ConfirmButton>
+              <button type="button" className={toReview(file) ? "btn small primary" : "btn small"} onClick={onFill}>
+                {toReview(file) ? t("buffer.review.action") : t("buffer.review.change")}
+              </button>
+            </>
+          )}
         </td>
       </tr>
-      {open && (
-        <tr>
-          <td colSpan={canEdit ? 5 : 4} style={{ background: "var(--surface-2)" }}>
-            <Details file={file} canEdit={canEdit} />
-          </td>
-        </tr>
-      )}
     </>
   );
 }
 
 type TagField = Schemas["TagField"];
-
-/** Tags shown, and the field that edits each. */
-const TAG_FIELDS: { key: keyof Schemas["StagedTags"]; label: PlainKey; field?: TagField }[] = [
-  { key: "title", label: "buffer.tag.title", field: "title" },
-  { key: "artist", label: "buffer.tag.artist", field: "artist" },
-  { key: "album", label: "buffer.tag.album", field: "album" },
-  { key: "album_artist", label: "buffer.tag.albumArtist", field: "album_artist" },
-  { key: "track", label: "buffer.tag.track", field: "track" },
-  { key: "disc", label: "buffer.tag.disc", field: "disc" },
-  { key: "date", label: "buffer.tag.date", field: "year" },
-];
 
 /** Fields edited in the buffer zone. */
 const EDITABLE: { field: TagField; key: keyof Schemas["StagedTags"]; label: PlainKey; number?: boolean }[] = [
@@ -906,6 +995,8 @@ function TagsDialog({
     },
   );
   const edited = Object.values(changes).some((change) => change && change.kind !== "keep");
+  // The artist albums are proposed for: the one typed, else the file's.
+  const typedArtist = changes.artist?.kind === "set" ? changes.artist.value : current?.artist;
   const invalid = EDITABLE.some(({ field, number }) => {
     const change = changes[field];
     return change?.kind === "set" && (!change.value.trim() || (number && (Number.isNaN(Number(change.value)) || Number(change.value) < 1)));
@@ -950,16 +1041,21 @@ function TagsDialog({
                 }
                 change={changes[field] ?? { kind: "keep" }}
                 onChange={(change) => setChanges((all) => ({ ...all, [field]: change }))}
-                renderInput={(text, set) => (
-                  <input
-                    className="input"
-                    type={numeric ? "number" : "text"}
-                    min={numeric ? 1 : undefined}
-                    value={text}
-                    aria-label={name}
-                    onChange={(event) => set(event.target.value)}
-                  />
-                )}
+                renderInput={(text, set) => {
+                  const suggested = suggestedField(field);
+                  return suggested ? (
+                    <TagValueInput field={suggested} value={text} onValue={set} artist={typedArtist} aria-label={name} />
+                  ) : (
+                    <input
+                      className="input"
+                      type={numeric ? "number" : "text"}
+                      min={numeric ? 1 : undefined}
+                      value={text}
+                      aria-label={name}
+                      onChange={(event) => set(event.target.value)}
+                    />
+                  );
+                }}
               />
             );
           })}
@@ -969,176 +1065,3 @@ function TagsDialog({
   );
 }
 
-function Details({ file, canEdit }: Readonly<{ file: StagedFile; canEdit: boolean }>) {
-  const [cover, setCover] = useState(true);
-  const [editing, setEditing] = useState(false);
-  const reset = useAction(
-    (field: TagField) =>
-      unwrap(api.POST("/api/v1/staging/files/tags", { body: { file_ids: [file.id], reset: [field] } })),
-    { invalidate: [["buffer"]] },
-  );
-  const choose = useAction(
-    (body: Schemas["ChoiceRequest"]) =>
-      unwrap(api.POST("/api/v1/staging/files/{id}/choice", { params: { path: { id: file.id } }, body })),
-    { invalidate: [["buffer"]] },
-  );
-  const changing = file.status !== "ready" || choose.isPending;
-  return (
-    <div className="stack" style={{ padding: "0.5rem 0" }}>
-      <div className="row" style={{ alignItems: "flex-start", gap: "1rem" }}>
-        {file.release_id && cover && (
-          <img
-            className="cover-thumb"
-            src={`https://coverartarchive.org/release/${file.release_id}/front-250`}
-            alt={t("buffer.cover")}
-            loading="lazy"
-            onError={() => setCover(false)}
-          />
-        )}
-        <div className="stack" style={{ flex: 1, minWidth: "14rem" }}>
-          <div className="mono small" style={{ overflowWrap: "anywhere" }}>
-            {file.name}
-          </div>
-          {file.status !== "identifying" && (
-            <audio controls preload="none" src={`/api/v1/staging/files/${file.id}/audio`} style={{ width: "100%" }}>
-              <track kind="captions" />
-            </audio>
-          )}
-          {file.identification?.reason && <span className="warn small">{file.identification.reason}</span>}
-          {file.error && <span className="bad small">{file.error}</span>}
-          {file.duplicate_of_track_id && (
-            <span className="small">
-              {rich("buffer.like", {
-                link: <Link to={`/library/${file.duplicate_of_track_id}`}>{t("buffer.likeLink")}</Link>,
-              })}
-            </span>
-          )}
-        </div>
-      </div>
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>{t("buffer.tag")}</th>
-              <th>{t("buffer.inFile")}</th>
-              <th>{t("buffer.onceImported")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {TAG_FIELDS.map(({ key, label, field }) => {
-              const own = file.own_tags?.[key];
-              const applied = file.tags?.[key];
-              const edited = field !== undefined && field in file.tag_edits;
-              return (
-                <tr key={key}>
-                  <td className="muted small">{t(label)}</td>
-                  <td>{own ?? <span className="muted">–</span>}</td>
-                  <td className={applied !== own ? "good" : undefined}>
-                    {applied ?? <span className="muted">–</span>}
-                    {edited && (
-                      <>
-                        {" "}
-                        <span className="badge" title={t("buffer.editedHelp")}>
-                          {t("buffer.edited")}
-                        </span>
-                        {canEdit && (
-                          <button
-                            type="button"
-                            className="btn ghost small"
-                            disabled={reset.isPending || file.status === "importing"}
-                            onClick={() => reset.mutate(field)}
-                          >
-                            {t("buffer.undoEdit")}
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {file.candidates.length > 0 && (
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t("buffer.candidate")}</th>
-                <th className="hide-narrow">{t("review.date")}</th>
-                <th className="hide-narrow">{t("review.country")}</th>
-                <th>{t("buffer.tag.track")}</th>
-                <th>{t("buffer.score")}</th>
-                <th>
-                  <span className="visually-hidden">{t("buffer.actions")}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {file.candidates.map((candidate) => {
-                const picked = file.release_id === candidate.release_id;
-                return (
-                  <tr key={`${candidate.release_id}-${candidate.recording_id}-${candidate.disc}-${candidate.track}`}>
-                    <td className="title-cell">
-                      <a href={`https://musicbrainz.org/release/${candidate.release_id}`} target="_blank" rel="noreferrer">
-                        {candidate.release_title ?? candidate.release_group_title ?? candidate.release_id}
-                      </a>
-                    </td>
-                    <td className="hide-narrow">{candidate.date ?? "–"}</td>
-                    <td className="hide-narrow">{candidate.country ?? "–"}</td>
-                    <td className="num">
-                      {candidate.disc && candidate.disc > 1 ? `${candidate.disc}-` : ""}
-                      {candidate.track ?? "–"}
-                    </td>
-                    <td className="num">{t("buffer.percent", { score: Math.round(candidate.score * 100) })}</td>
-                    <td className="actions">
-                      {picked ? (
-                        <span className="badge good">{t("buffer.chosen")}</span>
-                      ) : (
-                        canEdit && (
-                          <button
-                            type="button"
-                            className="btn small"
-                            disabled={changing}
-                            onClick={() =>
-                              choose.mutate({
-                                kind: "release",
-                                release_id: candidate.release_id,
-                                recording_id: candidate.recording_id,
-                              })
-                            }
-                          >
-                            {t("buffer.use")}
-                          </button>
-                        )
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {canEdit && (
-        <div className="row">
-          <button
-            type="button"
-            className="btn small"
-            disabled={!isPreparable(file)}
-            onClick={() => setEditing(true)}
-          >
-            <Icon name="edit" size={14} /> {t("library.tagsAction")}
-          </button>
-          {file.identification && file.identification.status !== "off" && file.choice?.kind !== "own" && (
-            <button type="button" className="btn small" disabled={changing} onClick={() => choose.mutate({ kind: "own" })}>
-              {t("buffer.keepOwn")}
-            </button>
-          )}
-        </div>
-      )}
-      <TagsDialog open={editing} onClose={() => setEditing(false)} files={[file.id]} current={file.tags ?? file.own_tags} />
-    </div>
-  );
-}

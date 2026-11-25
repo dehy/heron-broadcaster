@@ -424,7 +424,11 @@ export function Modal({
       ref={ref}
       className={wide ? "modal wide" : "modal"}
       onClose={onClose}
-      onCancel={onClose}
+      onCancel={(event) => {
+        // Closed by `open`, so a dialog can ask before it goes.
+        event.preventDefault();
+        onClose();
+      }}
       aria-labelledby="modal-title"
     >
       {open && (
