@@ -49,12 +49,23 @@ New files wait in `HERON_STAGING_FOLDER`, one folder per group, until they are i
 | Unreadable | The file cannot be decoded |
 | Too short | Too short to be fingerprinted (and identified) |
 | Unsupported | An audio format Heron cannot decode |
+| Seeking broken | The [file is damaged](#damaged-files): its seek table is empty or wrong |
+| Damaged | Bytes that are not audio between its frames, or cut short |
+| Files glued together | Its sample rate or channels change along it: files glued together |
 
-**Choices:** for a file, pick another of its candidate releases, or keep its own tags; the librarian works out the tags and the path again. Confident matches and files without anything to look at are selected already, so a clean album is imported in one click.
+**Review:** each file is reviewed in a window, one after another (*Review* on its row; ←/→ for the previous and next file, Space to listen, A to accept, S to search, M to give its tags by hand, D to discard). It shows what MusicBrainz found next to the file's own tags, field by field, and lets an operator:
+
+- **accept the match**, after fixing any field in place (the fixes are [tag edits](#editing-tags-from-the-browser) on top of the release's tags);
+- **pick another album** among those the file was found on;
+- **search MusicBrainz** by title and artist (an album helps), see [Searching MusicBrainz](#searching-musicbrainz);
+- **give its tags by hand** (not on MusicBrainz: its own tags, edited), the artists and albums of the library proposed while typing;
+- put it in a category, or discard it.
+
+The librarian then works out the tags and the path again. Confident matches and files without anything to look at are selected already, so a clean album is imported in one click.
 
 **Import:** a library task (`staging_import`) files the selected ready files like any import: tags written, filed where the layout says, `cover.jpg` saved, as one `import` batch that can be undone, then analyzed. Files picked by hand are recorded as identified, files that kept their own tags as reviewed (`kept`), and files imported while they needed review wait on the review screen.
 
-**Edit tags:** on a file or a selection, set or remove title, artist, album, album artist, year, track and disc. Edits (`tag_edits`) go on top of the tags the file gets otherwise (`base_tags`: from its identification, a release picked by hand or its own tags), so picking another release keeps them; the librarian works the path out again without looking the release up. They are written into the file on import, like an identified file's tags, in the same batch.
+**Edit tags:** on a file or a selection, set or remove title, artist, album, album artist, year, track and disc. Edits (`tag_edits`) go on top of the tags the file gets otherwise (`base_tags`: from its identification, a release picked by hand or its own tags), so picking another release keeps them; the librarian works the path out again without looking the release up. They are written into the file on import, like an identified file's tags, in the same batch. While typing an artist, album artist or album, here and in the review, the names already in the library are proposed, the most used first (an album, those of the artist typed first).
 
 **Prepare:** on a file, a selection or a group, set what its track gets once imported: categories (with a weight), labels, mood and sound code. Files can be prepared until their import starts. Preparing changes neither the library nor the file; it is kept with the file in the database (`staged_file_categories`, `staged_file_labels`, `staged_files.mood` and `sound_code`). The import gives the track all of it in the transaction that creates it, so no track is ever in the library without its preparation, even after a crash. Categories or labels deleted in the meantime are left out.
 
@@ -72,7 +83,7 @@ Identification needs the station's own **AcoustID application key** (free keys a
    - one release matches more files than any other; or
    - exactly one of the tied releases is titled like the files' album tag; or
    - the tied releases are editions of one release group that put every file at the same disc and track (the tags are the same whichever is picked; the earliest is).
-4. **MusicBrainz** gives the release's tags, once per release (not per file).
+4. **MusicBrainz** gives the release's tags, once per release (not per file). A file AcoustID does not know is [searched on MusicBrainz](#searching-musicbrainz) by its title and artist: what is found waits for review, never applied by itself.
 5. **Cover Art Archive:** the release's front cover (500 px), saved as `cover.jpg` in the album folder unless one is there already.
 
 A match is **confident** when its AcoustID score is at least `min_score` (0.9) and it points to a single release: the file is imported with its tags. Otherwise the file keeps its own tags, unless a candidate is picked in the buffer zone, and is marked **needs review**, with the reason and the candidate releases (`track_identifications` once imported):
@@ -83,11 +94,25 @@ A match is **confident** when its AcoustID score is at least `min_score` (0.9) a
 | `best AcoustID score … is below …` | A doubtful match |
 | `matches N releases, none clearly better` | A lone file on an album and a compilation, for example |
 | `the audio could not be fingerprinted` | Undecodable, or too short |
-| `identification failed: …` | AcoustID or MusicBrainz unreachable three times (the folder waits 1, then 2 minutes between tries) |
+| `found on MusicBrainz by its title and artist: pick its release` | Not known to AcoustID, [found by a search](#searching-musicbrainz) |
+| `not found on MusicBrainz by its title and artist` | Not found by a search either |
+| `identification failed: …` | AcoustID or MusicBrainz unreachable three times (the folder waits 1, then 2 minutes between tries), or refusing the request (an invalid AcoustID key, for example: not tried again) |
 
-Tracks imported while they need review wait on the **review screen** of the web UI (*To do › To identify*; `heron-librarian review` lists them too). For each track, pick one of its candidate releases, or keep the file's own tags (`kept`). A picked release is applied by the librarian like an import: MusicBrainz tags written into the file, filed where the layout says, cover saved, as a `review` batch that can be undone (the track then needs review again).
+Tracks imported while they need review wait on *To do › To identify* (`heron-librarian review` lists them too), and are reviewed in the same window as the buffer zone's files: accept the match (with fixes), pick another album, search MusicBrainz, or give the track its tags by hand (`kept`, not on MusicBrainz). Before anything is written, the window shows the tags the album would give the track, next to the file's own (a `review_preview` task: nothing is changed). An accepted album is applied by the librarian like an import: MusicBrainz tags written into the file with the fixes on top, filed where the layout says, cover saved, as a `review` batch that can be undone (the track then needs review again). A track already identified can be reviewed again from its page (*Review its MusicBrainz match*), to correct a wrong match.
 
-**Rate limits:** one request per second to MusicBrainz and to the Cover Art Archive, three per second to AcoustID, with a User-Agent that identifies Heron (`HeronBroadcaster/<version> ( https://heronbroadcaster.org )`). Each request waits a full interval after the previous response, so requests never arrive closer than the limit, even when one was delayed on the way. A `503` or `429` answer slows down and retries.
+**The library is identified too:** with `identify_library` on, the librarian identifies, in the background, a few tracks at a time (10 a minute), the tracks never identified: by their stored fingerprint with the AcoustID key, else by a search of their title and artist. Nothing is written: each waits on *To identify*, a confident match ready to be accepted. Tracks kept with their own tags as not on MusicBrainz are searched again every 3 months (`look_again_at`): one MusicBrainz has added since then waits on *To identify* with the albums found, the others wait 3 months more.
+
+### Searching MusicBrainz
+
+A search looks for the recordings titled like the file by its artist (edition notes such as `(Remastered 2011)` or `- Deluxe` left out) on official releases, and gives **one candidate per album** (release group), never an edition: Heron picks the edition the tags come from (the song's main recording, on its earliest edition). Searches are filtered by **kind of album**, from its MusicBrainz types: *Studio* (an album with no secondary type, the default), *Live*, *Compilation*, *Single / EP* and *Other* (soundtracks, remixes, demos…), several at once; when none of the kinds asked has the song, every kind is shown, and said so. The albums come studio first, then the earliest; an album titled like the album asked (or the file's album tag) first of all. Each shows its kind, its first year and how many editions were found. AcoustID's candidates are shown the same way, one per album.
+
+**An album given by hand:** the album field also takes a MusicBrainz album's address (`https://musicbrainz.org/release-group/…`), an edition's (`https://musicbrainz.org/release/…`) or the ID alone. The search then looks on that album only, whatever its kind: the song titled like the file on it, on the edition given (else its earliest). When none of its tracks is titled so, its tracklist is shown, in order, to pick the song from.
+
+**Rate limits:** one request per second to MusicBrainz (1.2 seconds apart, every part of the librarian together) and to the Cover Art Archive, three per second to AcoustID, with a User-Agent that identifies Heron (`HeronBroadcaster/<version> ( https://heronbroadcaster.org )`). Each request waits a full interval after the previous response, so requests never arrive closer than the limit, even when one was delayed on the way. A `503` or `429` answer slows down and retries, up to 6 times, waiting up to 8 seconds; any other refusal (`4xx`) is not tried again.
+
+### Damaged files
+
+The librarian checks the library's files for damage a decoder skips but a browser or a player that seeks does not, a few files a second in the background, and again when a file changes (its hash differs). MP3 only for now, read frame by frame: a VBR header without a frame count or with an empty or disordered seek table (seeking lands at the start or at the wrong place), bytes that are not audio between frames or a last frame cut short, a sample rate or channels that change along the file. Damaged tracks are listed on *To do › Damaged files* and flagged on their page: replace the file with a sound copy, or move the track to the trash. Files in the buffer zone are checked the same way, and flagged. *Settings › Library* shows how far the check is, and checks every file again.
 
 ## Tags
 
@@ -100,7 +125,7 @@ Written into identified files:
 | Track, track total, disc, disc total | The position on the release |
 | Date | The release group's first release date (the original year, not the reissue's) |
 | Compilation | Set when the album artist is Various Artists |
-| MusicBrainz IDs | Recording, release track, release, release group, artist, album artist (Picard's tag names) |
+| MusicBrainz IDs | Recording, release track, release, release group, artist, album artist (Picard's tag names; the database keeps the recording, release, release group and first artist) |
 
 Fields MusicBrainz leaves empty keep the file's value. Other tags (genre, comments, lyrics, …) are never touched. Cover art is embedded only when `embed_cover` is on, and only in files without one.
 
@@ -133,7 +158,9 @@ When the file changed again since (another edit not undone), or for changes reco
 
 For identified tracks (whose tags carry a MusicBrainz recording and release), the librarian looks up the release on MusicBrainz (`inc=labels recordings isrcs genres release-groups`, one request a second): album, record label and catalog number, ISRC, the year of first release (the earlier of the recording's and the release group's) and genres, most voted first. They are saved in `track_musicbrainz`, not in the files (they can be written there from the tag editor).
 
-The whole library is looked up on request (*Settings*, or `POST /api/v1/library/musicbrainz-details`); once a lookup has finished, tracks without details (new tracks) are looked up in the background, up to 30 releases a minute. A release MusicBrainz does not know is saved empty and not looked up again unless asked for every track.
+The whole library is looked up on request (*Settings*, or `POST /api/v1/library/musicbrainz-details`); once a lookup has finished, tracks without details (new tracks) are looked up in the background, up to 30 releases and artists a minute. A release MusicBrainz does not know is saved empty and not looked up again unless asked for every track.
+
+**Artists:** each MusicBrainz artist the tracks carry is looked up once too (`artist/{mbid}?inc=url-rels`), with the releases and at the same rate, for its **Wikidata item** (`musicbrainz_artists`), which leads to the artist's Wikipedia articles and photo. An artist without a Wikidata link on MusicBrainz is saved without one; asking for every track looks every artist up again. Heron only keeps the item: it sends it to [other systems](api.md#webhooks) with the track's other identifiers, and shows it on the track's page.
 
 ## Cover art
 
@@ -264,6 +291,7 @@ docker compose exec heron-librarian heron-librarian settings --set '{"acoustid_k
 | `trash_days` | 30: days deleted tracks stay in the trash |
 | `write_tags` | true: tags edited from the browser are written into the files; false keeps them in Heron's database ([above](#keeping-tags-in-heron-instead-of-the-files)) |
 | `fetch_covers` | false: albums without a cover are looked up on the Cover Art Archive in the background ([Cover art](#the-cover-art-archive)) |
+| `identify_library` | true: tracks without a MusicBrainz match are identified in the background, and those not on MusicBrainz searched again every 3 months; what is found waits on *To identify* ([above](#identification)) |
 
 ## Work asked through the API
 
@@ -276,7 +304,8 @@ The scanner (in `heron-api`, read-only) and the librarian share a MariaDB named 
 ## Limitations
 
 - The engine holds its upcoming tracks by path. The queue manager follows moves within 5 seconds ([API](api.md#queue-manager)), so only a track due to start in those seconds can be skipped.
-- Existing tracks are fingerprinted but not identified yet: identification runs on new files only.
+- A search finds at most 100 recordings: for a song recorded hundreds of times, the kinds asked for count (several kinds at once leave less room for each).
+- Only MP3 files are checked for damage.
 - Duplicates are flagged, not refused: importing one gives it a ` (2)` suffix.
 - An upload resumes after a dropped connection, not after the page is reloaded: the file starts over (the abandoned one is given up after a day).
 - Restoring works on a whole deletion (batch), not on one track of it.

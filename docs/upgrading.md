@@ -239,6 +239,10 @@ What each release asks of an upgrade, on top of the steps above. What it brings 
 
 The services are upgraded as usual, once the cover images have moved to a folder of their own (below). Opus files whose analysis failed before are analysed again by themselves: a migration forgets their failed analysis jobs, so the next scan queues them (only those: the rest of the library is not analysed again).
 
+The scanner reads every track's tags once more, for its MusicBrainz release group: it reads the tags only, without analysing the audio again. Webhook receivers get a new `musicbrainz` field on each track; receivers that refuse unknown fields must accept it first.
+
+**The librarian starts working through the library by itself:** after the upgrade it checks every file for [damage](library.md#damaged-files), a few files a second, and identifies the tracks never identified, 10 a minute, with the station's AcoustID key and MusicBrainz ([Identification](library.md#identification)). Nothing is written into the files: what it finds waits on *To do*. Turn `identify_library` off (*Settings › Library*) to stop the identification at any time: nothing it did needs undoing.
+
 **The cover images move from the `covers` volume to a folder** (`HERON_COVERS_FOLDER`, `./data/covers` by default), owned by `HERON_LIBRARIAN_USER` like the buffer zone: the images no longer make their folder writable by every user. Before deploying the new `docker-compose.yml` (and the new line of `.env.example`), copy the images out of the running API:
 
 ```sh

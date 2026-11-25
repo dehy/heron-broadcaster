@@ -33,11 +33,12 @@ Progress is tracked here: the status column below and the acceptance checklists 
 | M18 | [Listener interaction](m18-listener-interaction.md) | M7, M13, modules | In progress |
 | M19 | [Audience certification](m19-audience-certification.md) | M7b, M13, modules | In progress (part 2: delivery by FTPS done, SFTP waits for age) |
 | M20 | [Live monitor](m20-live-monitor.md) | M10, M13 | Done ([#69](https://github.com/dehy/heron-broadcaster/pull/69)) |
+| M21 | [Review and MusicBrainz identifiers](m21-musicbrainz-ids.md) | M1b, M5b, M7 | In progress |
 
 ## Dependency graph
 
 ```
-M0 ─► M1 ─┬─► M1b
+M0 ─► M1 ─┬─► M1b ─► M21 (also after M5b, M7)
           └─► M2 ─┬─► M3 ─┬─► M8
                   │       └─► M11
                   ├─► M4 ─┬─► M5 ─┬─► M5b
