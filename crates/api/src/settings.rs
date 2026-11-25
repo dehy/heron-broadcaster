@@ -244,6 +244,9 @@ pub struct LibrarySettingsView {
     /// Albums without a cover are looked up on the Cover Art Archive in
     /// the background.
     pub fetch_covers: bool,
+    /// Tracks without a MusicBrainz match are looked up in the background;
+    /// what is found waits on *To identify*.
+    pub identify_library: bool,
 }
 
 impl From<LibrarySettings> for LibrarySettingsView {
@@ -259,6 +262,7 @@ impl From<LibrarySettings> for LibrarySettingsView {
             trash_days: settings.trash_days,
             write_tags: settings.write_tags,
             fetch_covers: settings.fetch_covers,
+            identify_library: settings.identify_library,
         }
     }
 }
@@ -288,6 +292,8 @@ pub struct LibrarySettingsPatch {
     /// Look albums without a cover up on the Cover Art Archive in the
     /// background.
     pub fetch_covers: Option<bool>,
+    /// Look the tracks without a MusicBrainz match up in the background.
+    pub identify_library: Option<bool>,
 }
 
 /// Tells a field set to `null` (`Some(None)`) from a missing one (`None`).
@@ -688,6 +694,7 @@ async fn patch_library(
     settings.embed_cover = patch.embed_cover.unwrap_or(settings.embed_cover);
     settings.write_tags = patch.write_tags.unwrap_or(settings.write_tags);
     settings.fetch_covers = patch.fetch_covers.unwrap_or(settings.fetch_covers);
+    settings.identify_library = patch.identify_library.unwrap_or(settings.identify_library);
     save(&state.pool, LibrarySettings::SETTINGS_NAME, &settings).await?;
     tracing::info!(user = %user.username, ?settings, "library settings changed");
     Ok(Json(settings.into()))

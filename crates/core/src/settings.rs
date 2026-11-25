@@ -91,6 +91,10 @@ pub struct LibrarySettings {
     /// Albums without a cover are looked up on the Cover Art Archive in
     /// the background.
     pub fetch_covers: bool,
+    /// Tracks without a MusicBrainz match are looked up in the background
+    /// (and those kept untagged looked up again after three months); what
+    /// is found waits on *To identify*.
+    pub identify_library: bool,
 }
 
 impl LibrarySettings {
@@ -112,6 +116,7 @@ impl Default for LibrarySettings {
             trash_days: 30,
             write_tags: true,
             fetch_covers: false,
+            identify_library: true,
         }
     }
 }
@@ -130,6 +135,7 @@ impl std::fmt::Debug for LibrarySettings {
             .field("fetch_covers", &self.fetch_covers)
             .field("trash_days", &self.trash_days)
             .field("write_tags", &self.write_tags)
+            .field("identify_library", &self.identify_library)
             .finish()
     }
 }

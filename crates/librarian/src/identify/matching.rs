@@ -22,10 +22,15 @@ use std::collections::{HashMap, HashSet};
 use serde::Serialize;
 
 /// One place a matched recording appears on a release.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Candidate {
     pub score: f64,
     pub recording_id: String,
+    /// The recording's title and artist, when the service gives them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
     pub release_id: String,
     pub release_title: Option<String>,
     pub release_group_id: Option<String>,
@@ -35,6 +40,24 @@ pub struct Candidate {
     pub country: Option<String>,
     pub disc: Option<u32>,
     pub track: Option<u32>,
+    /// The recording's length, when the service gives it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub length_ms: Option<u32>,
+    /// The kind of album its release group is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_kind: Option<heron_core::library::AlbumKind>,
+    /// The album's earliest release date among the editions found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_date: Option<String>,
+    /// How many editions of the album were found with the recording.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub editions: Option<u32>,
+    /// The release's medium format ("CD", "Digital Media"…) and its
+    /// number of tracks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_count: Option<u32>,
 }
 
 /// The confident matches of one file.
@@ -268,6 +291,8 @@ mod tests {
         Candidate {
             score: 0.97,
             recording_id: format!("rec-{track}"),
+            title: None,
+            artist: None,
             release_id: release.into(),
             release_title: Some(title.into()),
             release_group_id: Some(group.into()),
@@ -276,6 +301,8 @@ mod tests {
             country: None,
             disc: Some(1),
             track: Some(track),
+            length_ms: None,
+            ..Candidate::default()
         }
     }
 

@@ -2345,8 +2345,13 @@ async fn web_ui_routes() {
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, _) = admin.request(Method::POST, &keep, None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+    // Keeping its tags again changes nothing; any track can be kept.
     let (status, _) = admin.request(Method::POST, &keep, None).await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = admin
+        .request(Method::POST, "/tracks/999999/review/keep", None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(viewer.get("/library/review").await["total"], 0);
     station.stop().await;
 }
@@ -10188,7 +10193,7 @@ async fn to_do_lists_the_songs_missing_an_intro_a_hook_or_a_cover() {
     .unwrap();
     assert_eq!(
         viewer.get("/library/todo").await,
-        json!({"to_identify": 1, "no_intro": 1, "no_hook": 2, "no_cover": 2})
+        json!({"to_identify": 1, "damaged": 0, "no_intro": 1, "no_hook": 2, "no_cover": 2})
     );
 
     // A missing file, or a track in the trash, is not to do.
@@ -10204,7 +10209,7 @@ async fn to_do_lists_the_songs_missing_an_intro_a_hook_or_a_cover() {
         .unwrap();
     assert_eq!(
         viewer.get("/library/todo").await,
-        json!({"to_identify": 1, "no_intro": 0, "no_hook": 0, "no_cover": 0})
+        json!({"to_identify": 1, "damaged": 0, "no_intro": 0, "no_hook": 0, "no_cover": 0})
     );
 
     // Without cover art, no count of covers.

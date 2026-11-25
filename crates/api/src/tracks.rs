@@ -59,6 +59,8 @@ pub enum TrackFilter {
     NoIntro,
     /// No hook.
     NoHook,
+    /// Its file is damaged (`GET /library/integrity`).
+    Damaged,
 }
 
 /// The built-in Song category type (`migrations/…_category_types.sql`):
@@ -567,6 +569,10 @@ impl ListContext {
                                   WHERE tm.track_id = t.id AND tm.hook_in_ms IS NOT NULL
                                     AND tm.hook_out_ms IS NOT NULL)"
             }
+            Some(TrackFilter::Damaged) => {
+                " AND EXISTS (SELECT 1 FROM track_integrity ti
+                              WHERE ti.track_id = t.id AND ti.damage IS NOT NULL)"
+            }
         }
     }
 
@@ -1072,6 +1078,12 @@ pub struct TrackDetail {
     pub playout: EffectivePlayout,
     pub categories: Vec<TrackCategory>,
     pub identification: Option<TrackIdentification>,
+    /// The releases its identification found, best first.
+    pub identification_candidates: Vec<crate::librarian::ReviewCandidate>,
+    /// What the check of its file found (`broken_seek_table`,
+    /// `damaged_audio`, `mixed_streams`); empty for a sound file, or one
+    /// not checked yet.
+    pub damage: Vec<String>,
     /// Plays and last play in total and per station.
     pub plays: crate::history::Plays,
     /// Its play ratio and counter on each station, in the stations' order.
@@ -1153,6 +1165,25 @@ async fn get_track(
     .bind(id)
     .fetch_optional(&state.pool)
     .await?;
+    let candidates: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT CAST(candidates AS CHAR) FROM track_identifications WHERE track_id = ?",
+    )
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let identification_candidates = candidates
+        .flatten()
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
+    let damage: Option<Option<String>> =
+        sqlx::query_scalar("SELECT CAST(damage AS CHAR) FROM track_integrity WHERE track_id = ?")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
+    let damage = damage
+        .flatten()
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
     let overrides = load_overrides(&state, id).await?;
     let tag_overrides = heron_library::details::overrides(&state.pool, id)
         .await?
@@ -1182,6 +1213,8 @@ async fn get_track(
         },
         categories,
         identification,
+        identification_candidates,
+        damage,
         plays: crate::history::plays(&state.pool, crate::history::PlaysOf::Track(id)).await?,
         station_ratios,
         cover,

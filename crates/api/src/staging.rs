@@ -24,8 +24,8 @@ use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use heron_core::library::{
-    FieldValues, StagedChoice, StagedFlag, StagedIdentification, StagedIdentificationStatus,
-    TagField, TaskRequest, upload_part_name,
+    AlbumKind, FieldValues, StagedChoice, StagedFlag, StagedIdentification,
+    StagedIdentificationStatus, TagField, TaskRequest, upload_part_name,
 };
 use heron_core::{LibraryPath, LibrarySettings};
 use heron_library::{Tags, is_audio, layout};
@@ -38,7 +38,7 @@ use utoipa_axum::routes;
 use crate::app::AppState;
 use crate::auth::{CurrentUser, Role};
 use crate::error::{ApiError, ApiResult, ErrorBody};
-use crate::librarian::{LibraryTask, ReviewCandidate, ask};
+use crate::librarian::{LibraryTask, ReviewCandidate, ask, dedup_kinds};
 use crate::selection::{CategoryShare, check_categories, check_labels, check_scales};
 use crate::settings::{self, some_or_null};
 use crate::tracks::{LabelRef, TrackCategory};
@@ -806,6 +806,17 @@ pub enum ChoiceRequest {
     },
     /// Keep the file's own tags.
     Own,
+    /// Search MusicBrainz for a title and an artist (an album helps): the
+    /// recordings found replace the file's candidates.
+    Search {
+        title: String,
+        artist: String,
+        #[serde(default)]
+        album: Option<String>,
+        /// The kinds of album to look on; none means studio albums.
+        #[serde(default)]
+        kinds: Vec<AlbumKind>,
+    },
 }
 
 /// Imports a file as one of its candidate releases, or with its own tags:
@@ -828,6 +839,27 @@ async fn choose(
     }
     let choice = match request {
         ChoiceRequest::Own => StagedChoice::Own,
+        ChoiceRequest::Search {
+            title,
+            artist,
+            album,
+            kinds,
+        } => {
+            let (title, artist) = (title.trim().to_owned(), artist.trim().to_owned());
+            if title.is_empty() || artist.is_empty() || title.len() > 200 || artist.len() > 200 {
+                return Err(ApiError::Invalid(
+                    "a search needs a title and an artist".to_owned(),
+                ));
+            }
+            StagedChoice::Search {
+                title,
+                artist,
+                album: album
+                    .map(|album| album.trim().to_owned())
+                    .filter(|album| !album.is_empty()),
+                kinds: dedup_kinds(kinds),
+            }
+        }
         ChoiceRequest::Release {
             release_id,
             recording_id,
@@ -849,11 +881,15 @@ async fn choose(
     };
     let json =
         serde_json::to_string(&choice).map_err(|error| ApiError::Internal(error.to_string()))?;
+    // A search keeps the tags worked out so far, in case it fails.
+    let keep_base = matches!(choice, StagedChoice::Search { .. });
     let updated = sqlx::query(
-        "UPDATE staged_files SET choice = ?, base_tags = NULL, status = 'identifying', error = NULL
+        "UPDATE staged_files SET choice = ?, base_tags = IF(?, base_tags, NULL),
+             status = 'identifying', error = NULL
          WHERE id = ? AND status = 'ready'",
     )
     .bind(json)
+    .bind(keep_base)
     .bind(id)
     .execute(&state.pool)
     .await?

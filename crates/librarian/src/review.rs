@@ -42,6 +42,51 @@ pub struct Choice {
     pub recording_id: String,
     pub disc: Option<u32>,
     pub track: Option<u32>,
+    /// Fields corrected by hand, written over the release's tags.
+    pub fixes: heron_core::library::FieldValues,
+}
+
+/// The tags of a track's file, and those `choice` would give it.
+#[derive(Debug, serde::Serialize)]
+pub struct Preview {
+    pub own: Tags,
+    pub applied: Tags,
+}
+
+/// What [`apply`] would write, without the fixes: nothing is changed.
+pub async fn preview(
+    pool: &sqlx::MySqlPool,
+    roots: &Roots,
+    identifier: &Identifier,
+    choice: &Choice,
+) -> Result<Preview, Error> {
+    let path: Option<String> = sqlx::query_scalar("SELECT path FROM tracks WHERE id = ?")
+        .bind(choice.track_id)
+        .fetch_optional(pool)
+        .await?;
+    let Some(path) = path else {
+        return Err(Error::Refused(format!("no track {}", choice.track_id)));
+    };
+    let Some(identified) = identifier
+        .release_tags(
+            &choice.release_id,
+            &choice.recording_id,
+            choice.disc,
+            choice.track,
+        )
+        .await?
+    else {
+        return Err(Error::Refused(
+            "MusicBrainz does not list this recording on the release".into(),
+        ));
+    };
+    let absolute = LibraryPath::from_stored(path).resolve(&roots.library);
+    let own = tokio::task::spawn_blocking(move || tags::read(&absolute))
+        .await?
+        .map_err(OpError::from)?
+        .tags;
+    let applied = import::merge(identified, &own);
+    Ok(Preview { own, applied })
 }
 
 /// Applies `choice`. Takes the library lock for the file operation.
@@ -66,8 +111,9 @@ pub async fn apply(
     if missing {
         return Err(Error::Refused("the track's file is missing".into()));
     }
-    if status.as_deref() != Some("needs_review") {
-        return Err(Error::Refused("the track does not need review".into()));
+    // An identified or kept track can be pointed at a release again.
+    if status.is_none() {
+        return Err(Error::Refused("the track was never identified".into()));
     }
 
     let Some(identified) = identifier
@@ -104,7 +150,7 @@ pub async fn apply(
             .map_err(OpError::from)?
     };
     let own: Tags = read.tags;
-    let applied = import::merge(identified, &own);
+    let applied = crate::staging::apply_edits(&import::merge(identified, &own), &choice.fixes);
     let embed = cover
         .as_ref()
         .filter(|_| settings.embed_cover && !read.has_cover);

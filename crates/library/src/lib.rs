@@ -6,6 +6,7 @@
 //! - [`covers`]: cover art kept in Heron, its images in the covers folder.
 //! - [`details`]: the track columns read from a file.
 //! - [`files`]: which files are audio, and how their content is identified.
+//! - [`integrity`]: damage a file plays with but should not be kept with.
 //! - [`tags`]: the tags Heron reads and writes.
 //! - [`properties`]: codec, bitrate, sample rate and channels.
 //! - [`layout`]: where files go in the library (`{album_artist}/{album}/…`).
@@ -16,6 +17,7 @@
 pub mod covers;
 pub mod details;
 pub mod files;
+pub mod integrity;
 pub mod layout;
 pub mod lock;
 pub mod properties;
