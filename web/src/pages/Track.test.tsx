@@ -49,6 +49,8 @@ const TRACK = {
   playout: { gain_db: -1.5 },
   file: { size: 5_000_000, channels: 2, sample_rate: 44_100, missing_since_unix_ms: null, year_tag: 1983, track_number: 1 },
   identification: null,
+  identification_candidates: [],
+  damage: [],
   musicbrainz: null,
   plays: [],
   programming: { mood: null, sound_code: null, era: null },
@@ -98,6 +100,19 @@ describe("Track", () => {
     expect(screen.getByText(t("track.waveform"))).toBeTruthy();
     expect(screen.getAllByText(t("track.cueIn")).length).toBeGreaterThan(0);
     expect(screen.getByText(t("track.stereo"), { exact: false })).toBeTruthy();
+  });
+
+  it("links the album on MusicBrainz and the artist on Wikidata", async () => {
+    const group = "0f0c3e52-0000-4000-8000-000000000002";
+    page({
+      ...TRACK,
+      file: { ...(TRACK.file as object), musicbrainz_release_group_id: group, artist_wikidata_id: "Q15862" },
+    });
+    const album = (await screen.findByText(group)).closest("a");
+    expect(album?.getAttribute("href")).toBe(`https://musicbrainz.org/release-group/${group}`);
+    expect(screen.getByText(t("track.releaseGroup"))).toBeTruthy();
+    const artist = screen.getByText("Q15862").closest("a");
+    expect(artist?.getAttribute("href")).toBe("https://www.wikidata.org/wiki/Q15862");
   });
 
   it("offers the actions to an operator, not to a viewer", async () => {

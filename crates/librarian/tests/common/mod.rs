@@ -138,6 +138,10 @@ pub struct MockState {
     pub artists: HashMap<String, Value>,
     /// Release searches: a word of the query → MusicBrainz `releases`.
     pub searches: HashMap<String, Value>,
+    /// Recording searches: a word of the query → MusicBrainz `recordings`.
+    pub recordings: HashMap<String, Value>,
+    /// The query of every recording search.
+    pub recording_queries: Vec<String>,
     pub requests: Vec<(Service, Instant)>,
     /// User-Agent of every request.
     pub user_agents: Vec<String>,
@@ -154,6 +158,7 @@ impl Mock {
         let router = Router::new()
             .route("/v2/lookup", post(acoustid))
             .route("/ws/2/release", get(search))
+            .route("/ws/2/recording", get(search_recordings))
             .route("/ws/2/release/{id}", get(release))
             .route("/ws/2/artist/{id}", get(artist))
             .route("/caa/release/{id}/front-500", get(cover))
@@ -203,11 +208,15 @@ async fn acoustid(
     Form(form): Form<HashMap<String, String>>,
 ) -> Response {
     log(&state, Service::AcoustId, &headers);
+    // As AcoustID answers it: 400.
     if form.get("client").map(String::as_str) != Some("test-key") {
-        return axum::Json(
-            json!({"status": "error", "error": {"code": 4, "message": "invalid API key"}}),
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(
+                json!({"status": "error", "error": {"code": 4, "message": "invalid API key"}}),
+            ),
         )
-        .into_response();
+            .into_response();
     }
     let results = form
         .get("fingerprint")
@@ -244,6 +253,24 @@ async fn search(
         .map(|(_, releases)| releases.clone())
         .unwrap_or_else(|| json!([]));
     axum::Json(json!({"count": 1, "offset": 0, "releases": releases})).into_response()
+}
+
+async fn search_recordings(
+    state: Shared,
+    headers: axum::http::HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<HashMap<String, String>>,
+) -> Response {
+    log(&state, Service::MusicBrainz, &headers);
+    let asked = query.get("query").cloned().unwrap_or_default();
+    let mut state = state.lock().unwrap();
+    state.recording_queries.push(asked.clone());
+    let recordings = state
+        .recordings
+        .iter()
+        .find(|(word, _)| asked.contains(word.as_str()))
+        .map(|(_, recordings)| recordings.clone())
+        .unwrap_or_else(|| json!([]));
+    axum::Json(json!({"count": 1, "offset": 0, "recordings": recordings})).into_response()
 }
 
 async fn artist(
@@ -440,4 +467,29 @@ pub async fn import_ready(
     heron_librarian::staging::import(pool, roots, &endpoints, &settings, &ready)
         .await
         .unwrap()
+}
+
+/// Asks the librarian for a task and runs it: it must succeed.
+pub async fn ask_and_run(
+    runner: &heron_librarian::tasks::TaskRunner,
+    pool: &MySqlPool,
+    request: &heron_core::library::TaskRequest,
+) -> Option<Value> {
+    let id = sqlx::query("INSERT INTO library_tasks (kind, params) VALUES (?, ?)")
+        .bind(request.kind())
+        .bind(serde_json::to_string(request).unwrap())
+        .execute(pool)
+        .await
+        .unwrap()
+        .last_insert_id();
+    assert!(runner.run_next().await.unwrap());
+    let (status, result, error): (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT CAST(status AS CHAR), CAST(result AS CHAR), error FROM library_tasks WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "done", "{error:?}");
+    result.map(|result| serde_json::from_str(&result).unwrap())
 }

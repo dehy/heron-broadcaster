@@ -15,8 +15,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use heron_core::LibrarySettings;
 use heron_core::library::{
-    BatchReport, CoversReport, DetailsReport, OrganizePlan, PurgeReport, RelationsReport,
-    TRASH_DIR, TaskRequest,
+    AlbumKind, BatchReport, CoversReport, DetailsReport, FieldValues, OrganizePlan, PurgeReport,
+    RelationsReport, TRASH_DIR, TagField, TaskRequest,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -38,9 +38,13 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_batches))
         .routes(routes!(undo_batch))
         .routes(routes!(todo_counts))
+        .routes(routes!(tag_values))
         .routes(routes!(list_review))
         .routes(routes!(apply_release))
+        .routes(routes!(preview_release))
         .routes(routes!(keep_tags))
+        .routes(routes!(search_track))
+        .routes(routes!(integrity, check_files_again))
         .routes(routes!(fetch_details))
         .routes(routes!(count_tag_overrides))
         .routes(routes!(write_tag_overrides))
@@ -79,10 +83,25 @@ pub struct LibraryTask {
     pub purge: Option<PurgeReport>,
     /// What a finished Cover Art Archive lookup did.
     pub covers: Option<CoversReport>,
+    /// The tags a release would give a track (`review_preview`).
+    pub preview: Option<ReleasePreview>,
     pub requested_by: Option<String>,
     pub created_at_unix_ms: i64,
     pub started_at_unix_ms: Option<i64>,
     pub finished_at_unix_ms: Option<i64>,
+}
+
+/// A track's tags, and those a release would give it.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReleasePreview {
+    pub own: crate::staging::StagedTags,
+    pub applied: crate::staging::StagedTags,
+}
+
+#[derive(Deserialize)]
+struct PreviewResult {
+    own: heron_library::Tags,
+    applied: heron_library::Tags,
 }
 
 type TaskRow = (
@@ -118,6 +137,7 @@ fn task(
     let result = result.as_deref().filter(|_| status == TaskStatus::Done);
     let (mut plan, mut report, mut relations, mut details, mut purge, mut covers) =
         (None, None, None, None, None, None);
+    let mut preview = None;
     match (&request, result) {
         (_, None) => {}
         (TaskRequest::OrganizePlan, Some(result)) => plan = serde_json::from_str(result).ok(),
@@ -130,6 +150,14 @@ fn task(
         (TaskRequest::EmptyTrash, Some(result)) => purge = serde_json::from_str(result).ok(),
         (TaskRequest::FetchCovers { .. } | TaskRequest::ApplyCover { .. }, Some(result)) => {
             covers = serde_json::from_str(result).ok();
+        }
+        (TaskRequest::ReviewPreview { .. }, Some(result)) => {
+            preview = serde_json::from_str::<PreviewResult>(result)
+                .ok()
+                .map(|found| ReleasePreview {
+                    own: found.own.into(),
+                    applied: found.applied.into(),
+                });
         }
         (_, Some(result)) => report = serde_json::from_str(result).ok(),
     }
@@ -144,6 +172,7 @@ fn task(
         details,
         purge,
         covers,
+        preview,
         requested_by,
         created_at_unix_ms: created,
         started_at_unix_ms: started,
@@ -399,6 +428,11 @@ async fn undo_batch(
 pub struct ReviewCandidate {
     pub score: f64,
     pub recording_id: String,
+    /// The recording's title and artist, when known.
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub artist: Option<String>,
     pub release_id: String,
     pub release_title: Option<String>,
     pub release_group_id: Option<String>,
@@ -408,6 +442,23 @@ pub struct ReviewCandidate {
     pub country: Option<String>,
     pub disc: Option<u32>,
     pub track: Option<u32>,
+    /// The recording's length, when known.
+    #[serde(default)]
+    pub length_ms: Option<u32>,
+    /// The kind of album its release group is, when known.
+    #[serde(default)]
+    pub album_kind: Option<AlbumKind>,
+    /// The album's earliest release date among the editions found.
+    #[serde(default)]
+    pub album_date: Option<String>,
+    /// How many editions of the album were found with the recording.
+    #[serde(default)]
+    pub editions: Option<u32>,
+    /// The release's medium format ("CD", "Digital Media"…).
+    #[serde(default)]
+    pub format: Option<String>,
+    #[serde(default)]
+    pub track_count: Option<u32>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -445,6 +496,8 @@ pub struct TodoCounts {
     pub no_hook: u64,
     /// Active songs with no cover; `null` while cover art is turned off.
     pub no_cover: Option<u64>,
+    /// Tracks whose file is damaged (`GET /tracks?filter=damaged`).
+    pub damaged: u64,
 }
 
 /// How many tracks to identify, and active songs missing an intro, a hook
@@ -480,7 +533,130 @@ async fn todo_counts(
             .count(&state.pool, &songs(TrackFilter::NoHook))
             .await?,
         no_cover,
+        damaged: damaged(&state.pool).await?,
     }))
+}
+
+async fn damaged(pool: &sqlx::MySqlPool) -> ApiResult<u64> {
+    let total: i64 = sqlx::query_scalar(
+        "SELECT CAST(COUNT(*) AS SIGNED) FROM track_integrity i
+         JOIN tracks t ON t.id = i.track_id AND t.deleted_at IS NULL
+         WHERE i.damage IS NOT NULL",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(u64::try_from(total).unwrap_or(0))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Integrity {
+    /// Tracks of the library (the trash and missing files left out).
+    pub tracks: u64,
+    /// Checked since their file last changed.
+    pub checked: u64,
+    /// Damaged.
+    pub damaged: u64,
+}
+
+/// How far the check of the library's files is, and what it found. Files
+/// are checked in the background, and again when they change.
+#[utoipa::path(get, path = "/library/integrity", tag = "library",
+    responses((status = 200, body = Integrity), (status = "4XX", body = ErrorBody)))]
+async fn integrity(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Integrity>> {
+    let (tracks, checked): (i64, i64) = sqlx::query_as(
+        "SELECT CAST(COUNT(*) AS SIGNED),
+                CAST(COALESCE(SUM(i.track_id IS NOT NULL AND i.file_hash <=> t.file_hash), 0) AS SIGNED)
+         FROM tracks t LEFT JOIN track_integrity i ON i.track_id = t.id
+         WHERE t.deleted_at IS NULL AND t.missing_since IS NULL",
+    )
+    .fetch_one(&state.pool)
+    .await?;
+    Ok(Json(Integrity {
+        tracks: u64::try_from(tracks).unwrap_or(0),
+        checked: u64::try_from(checked).unwrap_or(0),
+        damaged: damaged(&state.pool).await?,
+    }))
+}
+
+/// Checks every file of the library again, from the start. Operators and
+/// admins.
+#[utoipa::path(post, path = "/library/integrity", tag = "library",
+    responses((status = 200, body = Integrity), (status = "4XX", body = ErrorBody)))]
+async fn check_files_again(
+    user: CurrentUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Integrity>> {
+    user.require(Role::Operator)?;
+    sqlx::query("DELETE FROM track_integrity")
+        .execute(&state.pool)
+        .await?;
+    integrity(user, State(state)).await
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TrackSearch {
+    pub title: String,
+    pub artist: String,
+    #[serde(default)]
+    pub album: Option<String>,
+    /// The kinds of album to look on; none means studio albums.
+    #[serde(default)]
+    pub kinds: Vec<AlbumKind>,
+}
+
+/// The kinds of album asked for, each once, in order.
+pub(crate) fn dedup_kinds(mut kinds: Vec<AlbumKind>) -> Vec<AlbumKind> {
+    kinds.sort_unstable();
+    kinds.dedup();
+    kinds
+}
+
+/// Searches MusicBrainz for a track by a title and an artist (an album
+/// helps): what is found becomes its candidates on *To identify*.
+/// Operators and admins.
+#[utoipa::path(post, path = "/tracks/{id}/review/search", tag = "library",
+    params(("id" = u64, Path)), request_body = TrackSearch,
+    responses((status = 202, body = LibraryTask), (status = "4XX", body = ErrorBody)))]
+async fn search_track(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(track_id): Path<u64>,
+    Json(search): Json<TrackSearch>,
+) -> ApiResult<(StatusCode, Json<LibraryTask>)> {
+    user.require(Role::Operator)?;
+    let (title, artist) = (
+        search.title.trim().to_owned(),
+        search.artist.trim().to_owned(),
+    );
+    if title.is_empty() || artist.is_empty() || title.len() > 200 || artist.len() > 200 {
+        return Err(ApiError::Invalid(
+            "a search needs a title and an artist".to_owned(),
+        ));
+    }
+    let exists: Option<u64> =
+        sqlx::query_scalar("SELECT id FROM tracks WHERE id = ? AND deleted_at IS NULL")
+            .bind(track_id)
+            .fetch_optional(&state.pool)
+            .await?;
+    if exists.is_none() {
+        return Err(ApiError::not_found("track"));
+    }
+    let request = TaskRequest::ReviewSearch {
+        track_id,
+        title,
+        artist,
+        album: search
+            .album
+            .map(|album| album.trim().to_owned())
+            .filter(|album| !album.is_empty()),
+        kinds: dedup_kinds(search.kinds),
+    };
+    let task = ask(&state, &user, request).await?;
+    Ok((StatusCode::ACCEPTED, Json(task)))
 }
 
 /// How many tracks wait for review.
@@ -491,6 +667,123 @@ async fn needs_review(pool: &sqlx::MySqlPool) -> ApiResult<u64> {
     .fetch_one(pool)
     .await?;
     Ok(u64::try_from(total).unwrap_or(0))
+}
+
+/// A tag whose values are proposed while it is typed.
+#[derive(Clone, Copy, Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TagValueField {
+    Artist,
+    AlbumArtist,
+    Album,
+}
+
+impl TagValueField {
+    /// Its column in `tracks`: a constant, safe to put in the query.
+    const fn column(self) -> &'static str {
+        match self {
+            Self::Artist => "artist",
+            Self::AlbumArtist => "album_artist",
+            Self::Album => "album",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct TagValueQuery {
+    #[param(inline)]
+    pub field: TagValueField,
+    /// What was typed: 1 to 100 characters, matching the start of a word,
+    /// ignoring case and accents.
+    pub q: String,
+    /// For `album`: this artist's (or album artist's) albums come first.
+    pub artist: Option<String>,
+    /// 1 to 50, 10 by default.
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, ToSchema, sqlx::FromRow)]
+pub struct TagValue {
+    pub value: String,
+    /// The library's tracks with this value.
+    pub tracks: i64,
+    /// For an album: its album artist (else its artist). An album of the
+    /// same name by another artist is another value.
+    pub album_artist: Option<String>,
+    /// For an album: the earliest year of its tracks.
+    pub year: Option<i64>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TagValues {
+    pub values: Vec<TagValue>,
+}
+
+/// The values a tag already has in the library, the most used first: what
+/// the tag editors propose while an artist or an album is typed.
+#[utoipa::path(get, path = "/library/tag-values", tag = "library",
+    params(TagValueQuery),
+    responses((status = 200, body = TagValues), (status = "4XX", body = ErrorBody)))]
+async fn tag_values(
+    _user: CurrentUser,
+    State(state): State<AppState>,
+    Query(query): Query<TagValueQuery>,
+) -> ApiResult<Json<TagValues>> {
+    Ok(Json(TagValues {
+        values: find_tag_values(&state.pool, &query).await?,
+    }))
+}
+
+async fn find_tag_values(
+    pool: &sqlx::MySqlPool,
+    query: &TagValueQuery,
+) -> ApiResult<Vec<TagValue>> {
+    let limit = query.limit.unwrap_or(10);
+    if !(1..=50).contains(&limit) {
+        return Err(ApiError::BadRequest("limit is 1 to 50".to_owned()));
+    }
+    let typed = query.q.trim();
+    if typed.is_empty() || typed.chars().count() > 100 {
+        return Err(ApiError::BadRequest("q is 1 to 100 characters".to_owned()));
+    }
+    let typed = typed
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let column = query.field.column();
+    // An album comes with who it is by and its year.
+    let (details, by) = match query.field {
+        TagValueField::Album => (
+            "COALESCE(NULLIF(album_artist, ''), artist) AS album_artist,
+             CAST(MIN(year) AS SIGNED) AS year",
+            ", COALESCE(NULLIF(album_artist, ''), artist)",
+        ),
+        TagValueField::Artist | TagValueField::AlbumArtist => {
+            ("NULL AS album_artist, CAST(NULL AS SIGNED) AS year", "")
+        }
+    };
+    // The column's collation ignores case and accents; a value is matched
+    // at its start or after a space.
+    let values = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {column} AS value, CAST(COUNT(*) AS SIGNED) AS tracks, {details}
+         FROM tracks
+         WHERE deleted_at IS NULL AND {column} <> ''
+           AND ({column} LIKE CONCAT(?, '%') OR {column} LIKE CONCAT('% ', ?, '%'))
+         GROUP BY {column}{by}
+         ORDER BY MAX(? IS NOT NULL AND (artist <=> ? OR album_artist <=> ?)) DESC,
+                  tracks DESC, value
+         LIMIT ?"
+    )))
+    .bind(&typed)
+    .bind(&typed)
+    .bind(&query.artist)
+    .bind(&query.artist)
+    .bind(&query.artist)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(values)
 }
 
 /// Tracks whose identification was not confident enough to apply, with the
@@ -549,6 +842,11 @@ async fn list_review(
 pub struct ReleaseChoice {
     pub release_id: String,
     pub recording_id: String,
+    /// Fields corrected by hand (title, artist, album, album_artist, year,
+    /// track, disc), written over the release's tags; `null` removes one.
+    #[serde(default)]
+    #[schema(value_type = std::collections::HashMap<String, Option<String>>)]
+    pub fixes: FieldValues,
 }
 
 /// Applies one of the track's candidate releases: heron-librarian writes
@@ -572,6 +870,29 @@ async fn apply_release(
             "pick one of the track's candidate releases".to_owned(),
         ));
     };
+    for (field, value) in &choice.fixes {
+        if !matches!(
+            field,
+            TagField::Title
+                | TagField::Artist
+                | TagField::Album
+                | TagField::AlbumArtist
+                | TagField::Year
+                | TagField::Track
+                | TagField::Disc
+        ) {
+            return Err(ApiError::Invalid(format!(
+                "{} cannot be fixed on a match",
+                field.as_str()
+            )));
+        }
+        if value
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > 500)
+        {
+            return Err(ApiError::Invalid(format!("{} is too long", field.as_str())));
+        }
+    }
     let pending: Option<u64> = sqlx::query_scalar(
         "SELECT id FROM library_tasks
          WHERE kind = 'review_apply' AND status IN ('pending', 'running')
@@ -592,6 +913,39 @@ async fn apply_release(
         recording_id: candidate.recording_id,
         disc: candidate.disc,
         track: candidate.track,
+        fixes: choice.fixes,
+    };
+    let task = ask(&state, &user, request).await?;
+    Ok((StatusCode::ACCEPTED, Json(task)))
+}
+
+/// Computes the tags one of the track's candidate releases would give it,
+/// written nowhere: the task's result is `{own, applied}`. Operators and
+/// admins.
+#[utoipa::path(post, path = "/tracks/{id}/review/preview", tag = "library",
+    params(("id" = u64, Path)), request_body = ReleaseChoice,
+    responses((status = 202, body = LibraryTask), (status = "4XX", body = ErrorBody)))]
+async fn preview_release(
+    user: CurrentUser,
+    State(state): State<AppState>,
+    Path(track_id): Path<u64>,
+    Json(choice): Json<ReleaseChoice>,
+) -> ApiResult<(StatusCode, Json<LibraryTask>)> {
+    user.require(Role::Operator)?;
+    let candidates = review_candidates(&state, track_id).await?;
+    let Some(candidate) = candidates.into_iter().find(|candidate| {
+        candidate.release_id == choice.release_id && candidate.recording_id == choice.recording_id
+    }) else {
+        return Err(ApiError::Invalid(
+            "pick one of the track's candidate releases".to_owned(),
+        ));
+    };
+    let request = TaskRequest::ReviewPreview {
+        track_id,
+        release_id: candidate.release_id,
+        recording_id: candidate.recording_id,
+        disc: candidate.disc,
+        track: candidate.track,
     };
     let task = ask(&state, &user, request).await?;
     Ok((StatusCode::ACCEPTED, Json(task)))
@@ -606,12 +960,11 @@ async fn review_candidates(state: &AppState, track_id: u64) -> ApiResult<Vec<Rev
     .bind(track_id)
     .fetch_optional(&state.pool)
     .await?;
+    // An identified track can be pointed at another of its releases too.
     match row {
-        Some((status, candidates)) if status == "needs_review" => Ok(candidates
-            .and_then(|json| serde_json::from_str(&json).ok())
-            .unwrap_or_default()),
+        Some((_, Some(candidates))) => Ok(serde_json::from_str(&candidates).unwrap_or_default()),
         _ => Err(ApiError::Conflict(
-            "the track does not need review".to_owned(),
+            "the track has no releases to pick from".to_owned(),
         )),
     }
 }
@@ -627,19 +980,22 @@ async fn keep_tags(
     Path(track_id): Path<u64>,
 ) -> ApiResult<StatusCode> {
     user.require(Role::Operator)?;
-    let updated = sqlx::query(
-        "UPDATE track_identifications SET status = 'kept'
-         WHERE track_id = ? AND status = 'needs_review'",
+    let exists: Option<u64> =
+        sqlx::query_scalar("SELECT id FROM tracks WHERE id = ? AND deleted_at IS NULL")
+            .bind(track_id)
+            .fetch_optional(&state.pool)
+            .await?;
+    if exists.is_none() {
+        return Err(ApiError::not_found("track"));
+    }
+    // Any track: "not on MusicBrainz" is said of identified ones too.
+    sqlx::query(
+        "INSERT INTO track_identifications (track_id, status) VALUES (?, 'kept')
+         ON DUPLICATE KEY UPDATE status = 'kept', look_again_at = NULL",
     )
     .bind(track_id)
     .execute(&state.pool)
-    .await?
-    .rows_affected();
-    if updated == 0 {
-        return Err(ApiError::Conflict(
-            "the track does not need review".to_owned(),
-        ));
-    }
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -910,6 +1266,116 @@ async fn empty_trash(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn typed(field: TagValueField, q: &str, artist: Option<&str>) -> TagValueQuery {
+        TagValueQuery {
+            field,
+            q: q.to_owned(),
+            artist: artist.map(str::to_owned),
+            limit: None,
+        }
+    }
+
+    fn values(found: &[TagValue]) -> Vec<(&str, i64)> {
+        found.iter().map(|v| (v.value.as_str(), v.tracks)).collect()
+    }
+
+    #[tokio::test]
+    async fn tag_values_match_word_starts_most_used_first() {
+        let Some(db) = heron_service::db::ScratchDatabase::create().await else {
+            return;
+        };
+        let tracks = [
+            ("Björk", None, "Homogenic", Some(1998), None),
+            ("Björk", None, "Homogenic", Some(1997), None),
+            ("Björk", None, "Post", None, None),
+            ("The Bjorn Again", None, "Gold", None, None),
+            ("Ambjörn", None, "Post Rock", None, None),
+            ("Various", Some("Various Artists"), "Post Punk", None, None),
+            ("Björk", None, "Debut", None, Some("2026-11-01 00:00:00")),
+            ("Hommage", None, "Homogenic", Some(2020), None),
+        ];
+        for (n, (artist, album_artist, album, year, deleted_at)) in tracks.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO tracks (path, artist, album_artist, album, year, deleted_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(format!("{n}.mp3"))
+            .bind(artist)
+            .bind(album_artist)
+            .bind(album)
+            .bind(year)
+            .bind(deleted_at)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        }
+        let find = |query| {
+            let pool = db.pool.clone();
+            async move { find_tag_values(&pool, &query).await.unwrap() }
+        };
+
+        // Case and accents ignored, at the start of a word only, deleted
+        // tracks left out.
+        let found = find(typed(TagValueField::Artist, "bjo", None)).await;
+        assert_eq!(values(&found), [("Björk", 3), ("The Bjorn Again", 1)]);
+        let found = find(typed(TagValueField::AlbumArtist, "var", None)).await;
+        assert_eq!(values(&found), [("Various Artists", 1)]);
+
+        // The artist's albums first, then the most used.
+        let found = find(typed(TagValueField::Album, "post", Some("Ambjörn"))).await;
+        assert_eq!(
+            values(&found),
+            [("Post Rock", 1), ("Post", 1), ("Post Punk", 1)]
+        );
+        let found = find(typed(TagValueField::Album, "post", Some("Various Artists"))).await;
+        assert_eq!(values(&found)[0], ("Post Punk", 1));
+        let found = find(typed(TagValueField::Album, "deb", None)).await;
+        assert!(found.is_empty());
+
+        // An album tells who it is by and its first year; one of the same
+        // name by another artist is proposed apart.
+        let found = find(typed(TagValueField::Album, "homo", Some("Björk"))).await;
+        let albums: Vec<_> = found
+            .iter()
+            .map(|v| {
+                (
+                    v.value.as_str(),
+                    v.album_artist.as_deref(),
+                    v.year,
+                    v.tracks,
+                )
+            })
+            .collect();
+        assert_eq!(
+            albums,
+            [
+                ("Homogenic", Some("Björk"), Some(1997), 2),
+                ("Homogenic", Some("Hommage"), Some(2020), 1)
+            ]
+        );
+        let found = find(typed(TagValueField::Artist, "bjö", None)).await;
+        assert_eq!(
+            (found[0].album_artist.as_deref(), found[0].year),
+            (None, None)
+        );
+
+        // LIKE's wildcards are plain text.
+        let found = find(typed(TagValueField::Artist, "%", None)).await;
+        assert!(found.is_empty());
+
+        for bad in ["", "  ", &"x".repeat(101)] {
+            let error = find_tag_values(&db.pool, &typed(TagValueField::Artist, bad, None)).await;
+            assert!(matches!(error, Err(ApiError::BadRequest(_))), "{bad:?}");
+        }
+        let mut wide = typed(TagValueField::Artist, "b", None);
+        wide.limit = Some(51);
+        assert!(matches!(
+            find_tag_values(&db.pool, &wide).await,
+            Err(ApiError::BadRequest(_))
+        ));
+        db.drop().await;
+    }
 
     #[test]
     fn trash_paths_tell_their_batch_and_origin() {

@@ -8,7 +8,7 @@
 mod common;
 
 use common::{Album, Mock, MockState, insert_track, snapshot, temp_roots, write_tagged};
-use heron_core::library::{BatchReport, OrganizePlan, TaskRequest};
+use heron_core::library::{BatchReport, OrganizePlan, TagField, TaskRequest};
 use heron_librarian::tasks::TaskRunner;
 use heron_library::Tags;
 use heron_service::db::ScratchDatabase;
@@ -175,6 +175,7 @@ async fn a_release_picked_on_the_review_screen() {
         recording_id: recording.clone(),
         disc: Some(1),
         track: Some(2),
+        fixes: Default::default(),
     };
     let task = ask(pool, &pick).await;
     let (status, result, error) = run(&runner, pool, task).await;
@@ -201,12 +202,6 @@ async fn a_release_picked_on_the_review_screen() {
     assert_eq!(written.title.as_deref(), Some(title.as_str()));
     assert_eq!(written.album.as_deref(), Some("Album 7"));
     assert!(library.join("Band 7/Album 7/cover.jpg").exists());
-
-    // Reviewed tracks are not reviewed twice.
-    let twice = ask(pool, &pick).await;
-    let (status, _, error) = run(&runner, pool, twice).await;
-    assert_eq!(status, "failed");
-    assert!(error.unwrap().contains("does not need review"));
 
     let undo = ask(
         pool,
@@ -236,6 +231,100 @@ async fn a_release_picked_on_the_review_screen() {
     .await
     .unwrap();
     assert_eq!(status, "needs_review");
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn a_match_previewed_fixed_then_reviewed_again() {
+    let Some(db) = ScratchDatabase::create().await else {
+        return;
+    };
+    let pool = &db.pool;
+    let (_dir, roots) = temp_roots();
+    let library = &roots.library;
+    let album = Album::new(8, 3, false);
+    let (recording, title) = album.tracks[1].clone();
+    write_tagged(
+        &library.join("loose/track.wav"),
+        4,
+        &tags("someone", "something", 9, "song"),
+    );
+    let track_id = insert_track(pool, library, "loose/track.wav").await;
+    let candidates = json!([
+        {"score": 0.8, "recording_id": recording, "release_id": album.release_id,
+         "release_title": album.title, "disc": 1, "track": 2},
+    ]);
+    sqlx::query(
+        "INSERT INTO track_identifications (track_id, status, reason, score, candidates)
+         VALUES (?, 'needs_review', 'doubtful', 0.8, ?)",
+    )
+    .bind(track_id)
+    .bind(candidates.to_string())
+    .execute(pool)
+    .await
+    .unwrap();
+    let mut state = MockState::default();
+    state
+        .releases
+        .insert(album.release_id.clone(), album.musicbrainz());
+    let mock = Mock::start(state).await;
+    let runner = TaskRunner::new(pool.clone(), roots.clone(), mock.endpoints());
+
+    // The tags it would get, written nowhere.
+    let before = snapshot(library);
+    let preview = ask(
+        pool,
+        &TaskRequest::ReviewPreview {
+            track_id,
+            release_id: album.release_id.clone(),
+            recording_id: recording.clone(),
+            disc: Some(1),
+            track: Some(2),
+        },
+    )
+    .await;
+    let (status, result, error) = run(&runner, pool, preview).await;
+    assert_eq!(status, "done", "{error:?}");
+    let result = result.unwrap();
+    assert_eq!(result["own"]["title"], "song");
+    assert_eq!(result["applied"]["title"], title.as_str());
+    assert_eq!(result["applied"]["album"], "Album 8");
+    assert_eq!(snapshot(library), before, "a preview changes nothing");
+
+    // Applied with a fix on top.
+    let apply = |fixes| TaskRequest::ReviewApply {
+        track_id,
+        release_id: album.release_id.clone(),
+        recording_id: recording.clone(),
+        disc: Some(1),
+        track: Some(2),
+        fixes,
+    };
+    let fixed = ask(
+        pool,
+        &apply([(TagField::Title, Some("Fixed".to_owned()))].into()),
+    )
+    .await;
+    let (status, _, error) = run(&runner, pool, fixed).await;
+    assert_eq!(status, "done", "{error:?}");
+    let written = heron_library::tags::read(&library.join("Band 8/Album 8/02 Fixed.wav"))
+        .unwrap()
+        .tags;
+    assert_eq!(written.title.as_deref(), Some("Fixed"));
+    assert_eq!(written.album.as_deref(), Some("Album 8"));
+
+    // An identified track can be reviewed again: the release's tags back.
+    let again = ask(pool, &apply(Default::default())).await;
+    let (status, _, error) = run(&runner, pool, again).await;
+    assert_eq!(status, "done", "{error:?}");
+    let expected = format!("Band 8/Album 8/02 {title}.wav");
+    let path: String = sqlx::query_scalar("SELECT path FROM tracks WHERE id = ?")
+        .bind(track_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(path, expected);
+    common::assert_tracks_match_files(pool, library).await;
     db.drop().await;
 }
 

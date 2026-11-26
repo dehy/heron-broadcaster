@@ -254,3 +254,43 @@ async fn flags_and_choices() {
     assert_eq!(imported, 3);
     db.drop().await;
 }
+
+#[tokio::test]
+async fn an_invalid_key_sends_the_files_to_review_at_once() {
+    let Some(db) = ScratchDatabase::create().await else {
+        return;
+    };
+    let pool = &db.pool;
+    let (_dir, roots) = temp_roots();
+    write_wav(&roots.incoming.join("song.wav"), 5);
+    let mock = Mock::start(MockState::default()).await;
+    sqlx::query("INSERT INTO settings (name, value) VALUES ('library', ?)")
+        .bind(
+            serde_json::to_string(&LibrarySettings {
+                acoustid_key: Some("not-a-key".into()),
+                ..LibrarySettings::default()
+            })
+            .unwrap(),
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+
+    common::stage(pool, &roots, mock.endpoints(), Duration::ZERO).await;
+    // Asked once, not again in a minute: trying again changes nothing.
+    assert_eq!(mock.requests(common::Service::AcoustId).len(), 1);
+    let (status, identification): (String, String) = sqlx::query_as(
+        "SELECT CAST(status AS CHAR), CAST(identification AS CHAR) FROM staged_files
+         WHERE original_name = 'song.wav'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "ready");
+    assert!(
+        identification.contains("invalid API key"),
+        "{identification}"
+    );
+    assert!(identification.contains("needs_review"), "{identification}");
+    db.drop().await;
+}

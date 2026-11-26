@@ -16,6 +16,8 @@ pub mod fsops;
 pub mod identify;
 pub mod import;
 pub mod journal;
+pub mod library_review;
+pub mod look_again;
 pub mod medley;
 pub mod musicbrainz;
 pub mod organize;

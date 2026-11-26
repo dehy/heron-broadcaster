@@ -13,7 +13,8 @@ The schema lives in `migrations/`; this page summarizes it. Tables not used yet 
 | `track_fingerprints` | track_id, chromaprint (compressed, first two minutes), created_at |
 | `track_waveforms` | track_id, interval_ms (50), peaks (one byte per interval: the highest sample peak on a dB scale, 0 for −72 dBFS or below, 255 for full scale) — drawn by the web UI, computed with the analysis |
 | `track_levels` | track_id, min_db, max_db (the lowest and highest peak between the cue points, dBFS), the cue points and analysis time they were computed from — computed by `heron-api` from the waveform ([Import and analysis](analysis.md#job-queue)) |
-| `track_identifications` | track_id, status (identified, needs_review, kept: reviewed, the file keeps its own tags), reason, score, recording_mbid, release_mbid, candidates (JSON, for the review screen), updated_at |
+| `track_identifications` | track_id, status (identified, needs_review, kept: reviewed, the file keeps its own tags), reason, score, recording_mbid, release_mbid, candidates (JSON, for the review screen), look_again_at (a track kept as not on MusicBrainz is searched again then; `NULL`: 3 months after it was settled), updated_at |
+| `track_integrity` | track_id, file_hash (of the file checked: checked again when it differs), damage (JSON: `broken_seek_table`, `damaged_audio`, `mixed_streams`; `NULL` for a sound file), checked_at ([Damaged files](library.md#damaged-files)) |
 
 ## Track details and labels
 
@@ -21,9 +22,10 @@ See [M5b](roadmap/m5b-track-details-tags.md). The date a track was added is `tra
 
 | Table | Columns |
 |---|---|
-| `tracks` (added) | album_artist, genre, year, track_number, disc_number (tags); musicbrainz_recording_id, musicbrainz_release_id (tags); codec, bitrate_kbps, bitrate_mode (cbr, vbr, lossless), sample_rate, channels; details_version (what the scanner read: older tracks are read again) |
+| `tracks` (added) | album_artist, genre, year, track_number, disc_number (tags); musicbrainz_recording_id, musicbrainz_release_id, musicbrainz_release_group_id (tags); codec, bitrate_kbps, bitrate_mode (cbr, vbr, lossless), sample_rate, channels; details_version (what the scanner read: older tracks are read again) |
 | `track_analysis` (added) | bpm (measured) |
 | `track_musicbrainz` | track_id, release_id and recording_id (looked up for), album, record_label, catalog_number, isrc, first_release_year, genres (JSON), fetched_at |
+| `musicbrainz_artists` | mbid, wikidata_id (NULL: no Wikidata link on MusicBrainz), fetched_at — each MusicBrainz artist the tracks carry, looked up with the [MusicBrainz details](library.md#musicbrainz-details) |
 | `track_programming` | track_id, bpm (set by hand, replaces the measured one), mood, sound_code (values of the scales in the `programming` settings), play_ratio (tenths, 1 to 10; NULL is 10: see [Rotation – Play ratio](rotation.md#play-ratio)), dayparts (0 to 10) and daypart_days (0 to 7): the track's own [daypart separation](rotation.md#daypart-separation), replacing its categories' (NULL: theirs), updated_at |
 | `labels` | id, name (unique ignoring case), color |
 | `track_labels` | track_id, label_id, created_at |
@@ -43,7 +45,7 @@ See [Library management](library.md).
 | `track_import_changes` | import_id, track_id, previous (JSON: what the import changed, as it was, for undo) |
 | `track_tag_overrides` | track_id, field (a tag: title, artist, album, album_artist, year, genre, track, disc), value (NULL removes the field), updated_by, updated_at. Tags kept in Heron instead of the files while `write_tags` is off; applied on top of the file's tags whenever the track's columns are read from its file |
 | `track_tag_changes` | id, track_id, move_id, kind (tags: identification's, fields: edited from the browser), previous and applied tags (JSON), cover_embedded, restore (rebuilds the previous file byte for byte from the one written), created_at, undone_at |
-| `library_tasks` | id, kind (organize_plan, organize_apply, undo, review_apply, artist_relations, edit_tags, musicbrainz_details, staging_import, delete, empty_trash, render_medley, preview_medley, fetch_covers, apply_cover), params (JSON, the request), status (pending, running, done, failed), result (JSON: the dry run's moves or the batch report), error, requested_by, created_at, started_at, finished_at — work the API asks of `heron-librarian` |
+| `library_tasks` | id, kind (organize_plan, organize_apply, undo, review_apply, artist_relations, edit_tags, musicbrainz_details, staging_import, delete, empty_trash, render_medley, preview_medley, fetch_covers, apply_cover, write_tag_overrides, review_search, review_preview), params (JSON, the request), status (pending, running, done, failed), result (JSON: the dry run's moves or the batch report), error, requested_by, created_at, started_at, finished_at — work the API asks of `heron-librarian` |
 
 ## Buffer zone and trash
 
@@ -52,7 +54,7 @@ See [Library management](library.md#the-buffer-zone).
 | Table | Columns |
 |---|---|
 | `staged_groups` | id, source (upload, incoming), name, created_by, created_at — the files of one upload or one incoming folder, identified together |
-| `staged_files` | id, group_id, staged_path (relative to the buffer folder), original_name, size, content_hash, status (receiving, identifying, ready, importing, imported, discarded, failed), tags (the file's own), duration_ms, has_cover, chromaprint, identification (JSON: status identified, needs_review or off, reason, score, MBIDs, candidates), choice (JSON: a release picked by hand, or own tags), base_tags (before hand edits), tag_edits (JSON: fields edited by hand), applied_tags (base_tags with tag_edits), planned_path, mood and sound_code (given to its track), flags (JSON), duplicate_of_track_id, duplicate_of_staged_id, track_id (once imported), error, uploaded_by, created_at, updated_at |
+| `staged_files` | id, group_id, staged_path (relative to the buffer folder), original_name, size, content_hash, status (receiving, identifying, ready, importing, imported, discarded, failed), tags (the file's own), duration_ms, has_cover, chromaprint, identification (JSON: status identified, needs_review or off, reason, score, MBIDs, candidates), choice (JSON: a release picked by hand, own tags, or a MusicBrainz search with the kinds of album asked), base_tags (before hand edits), tag_edits (JSON: fields edited by hand), applied_tags (base_tags with tag_edits), planned_path, mood and sound_code (given to its track), flags (JSON), duplicate_of_track_id, duplicate_of_staged_id, track_id (once imported), error, uploaded_by, created_at, updated_at |
 | `staged_file_categories` | staged_file_id, category_id, weight — categories its track is put in when imported |
 | `staged_file_labels` | staged_file_id, label_id — labels its track gets when imported |
 | `tracks` (added) | deleted_at (in the trash until purged; also marked missing) |
@@ -195,7 +197,7 @@ Authentication is local only for now ([Decisions](decisions.md#decisions-made-af
 tracks 1──1 track_analysis
 tracks 1──0..1 track_overrides
 tracks 1──* analysis_jobs
-tracks 1──0..1 track_fingerprints, track_identifications, track_waveforms, track_musicbrainz, track_programming
+tracks 1──0..1 track_fingerprints, track_identifications, track_integrity, track_waveforms, track_musicbrainz, track_programming
 tracks *──* labels            (through track_labels)
 tracks *──0..1 album_covers   (through album_key), 1──0..1 track_covers
 album_covers, track_covers, stations *──1 covers

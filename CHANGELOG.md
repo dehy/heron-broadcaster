@@ -6,6 +6,11 @@ What changed in each release of Heron. Before upgrading, read the release's note
 
 ### Added
 
+- **MusicBrainz identifiers for other systems** (M21): webhooks and the public endpoints send each track's MusicBrainz recording, release, release group and artist, the artist's Wikidata item and the year of first release, so a website finds its biography, photo or album without searching by name ([API – Webhooks](docs/api.md#webhooks)). The release group is read from the tags, and the artists' Wikidata items are looked up with the [MusicBrainz details](docs/library.md#musicbrainz-details).
+- **Files and tracks reviewed in a window, one after another:** on Import music and on *To do › To identify*, each file or track opens a review window with keyboard shortcuts: what MusicBrainz found next to its own tags, field by field, to accept with fixes in place, another album to pick, a MusicBrainz search, or the tags given by hand, the library's artists and albums proposed while typing ([Library management – The buffer zone](docs/library.md#the-buffer-zone)). A track's page reviews its match again, to correct a wrong one.
+- **MusicBrainz searched by album, not by edition:** a search by title and artist gives one row per album, studio albums first then the earliest, filtered by kind (studio, live, compilation, single or EP, other), and Heron picks the edition the tags come from; edition notes such as "(Remastered 2011)" are left out of the search, and an album can be given by its MusicBrainz address to search that one only. A file AcoustID does not know is searched this way by itself ([Library management – Searching MusicBrainz](docs/library.md#searching-musicbrainz)).
+- **The library is identified in the background:** tracks never identified are identified a few at a time, by their fingerprint or a search, and wait on *To identify*; tracks not on MusicBrainz are searched again every 3 months. `identify_library` turns it off ([Library management – Identification](docs/library.md#identification)).
+- **Damaged files:** MP3 files with a broken seek table, damaged frames or glued together are found, in the library (*To do › Damaged files*, the track's page) and in the buffer zone ([Library management – Damaged files](docs/library.md#damaged-files)).
 - **Opus files** (Ogg Opus, mono and stereo) are analysed and played, decoded with libopus; until now every `.opus` file failed its analysis ([Import and analysis](docs/analysis.md#analyzer)).
 
 ### Changed
@@ -21,6 +26,7 @@ Never off air: what the queue reads can no longer stop the music ([Audio engine 
 - **Stored data that cannot be read** no longer fails every fill: a settings group keeps what can be read (the rest takes its default), and a restriction whose rule cannot be read bans its target at all times.
 - **Segmented choices have their frame again**, and the status bar's rows their padding: the style that takes the frame off labelled groups no longer covers theirs.
 - **The live monitor's panel opens above the page** instead of under the main column's cards.
+- **An invalid AcoustID key no longer holds a group for 3 minutes:** a refusal that trying again will not change sends the files to review at once, with the reason; a busy MusicBrainz is tried up to 6 times instead of 3 ([Library management – Identification](docs/library.md#identification)).
 
 ## 0.5.0 – 2026-11-16
 

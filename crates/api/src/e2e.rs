@@ -2345,8 +2345,13 @@ async fn web_ui_routes() {
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, _) = admin.request(Method::POST, &keep, None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+    // Keeping its tags again changes nothing; any track can be kept.
     let (status, _) = admin.request(Method::POST, &keep, None).await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = admin
+        .request(Method::POST, "/tracks/999999/review/keep", None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(viewer.get("/library/review").await["total"], 0);
     station.stop().await;
 }
@@ -4083,6 +4088,31 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
     let admin = station.signed_in("admin").await;
     let viewer = station.signed_in("viewer").await;
     let (mut received, receiver) = webhook_receiver().await;
+    // Identified tracks: their MusicBrainz identifiers go with them.
+    let pool = &station.db.pool;
+    sqlx::query(
+        "UPDATE tracks SET musicbrainz_recording_id = '0f0c3e52-0000-4000-8000-000000000001',
+             musicbrainz_release_group_id = '0f0c3e52-0000-4000-8000-000000000002',
+             musicbrainz_artist_id = '0f0c3e52-0000-4000-8000-000000000003', year = 1977",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO musicbrainz_artists (mbid, wikidata_id)
+         VALUES ('0f0c3e52-0000-4000-8000-000000000003', 'Q15862')",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    let identified = json!({
+        "recording_id": "0f0c3e52-0000-4000-8000-000000000001",
+        "release_id": null,
+        "release_group_id": "0f0c3e52-0000-4000-8000-000000000002",
+        "artist_id": "0f0c3e52-0000-4000-8000-000000000003",
+        "artist_wikidata_id": "Q15862",
+        "first_release_year": 1977,
+    });
 
     let (status, created) = admin
         .send(
@@ -4186,6 +4216,7 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
             at - event_at
         );
         assert_eq!(headers["x-heron-event"], payload["event"].as_str().unwrap());
+        assert_eq!(payload["track"]["musicbrainz"], identified, "{payload}");
         reported.push((payload["event"].as_str().unwrap().to_owned(), event_at));
     }
     for change in &expected {
@@ -4264,6 +4295,21 @@ async fn webhooks_report_track_changes_and_public_endpoints_answer_anyone() {
     check_public_endpoints(station.api).await;
     let anyone = reqwest::Client::new();
     let base = format!("http://{}/api/v1/public", station.api);
+    for (path, found) in [
+        ("now-playing", "/now/musicbrainz"),
+        ("history", "/0/musicbrainz"),
+        ("queue", "/upcoming/0/musicbrainz"),
+    ] {
+        let answer: Value = anyone
+            .get(format!("{base}/{path}"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(answer.pointer(found), Some(&identified), "{path}: {answer}");
+    }
 
     // Editing a webhook keeps its secret; a new one replaces it.
     let edited = json!({"name": "Website", "url": format!("http://{receiver}/json"),
@@ -10188,7 +10234,7 @@ async fn to_do_lists_the_songs_missing_an_intro_a_hook_or_a_cover() {
     .unwrap();
     assert_eq!(
         viewer.get("/library/todo").await,
-        json!({"to_identify": 1, "no_intro": 1, "no_hook": 2, "no_cover": 2})
+        json!({"to_identify": 1, "damaged": 0, "no_intro": 1, "no_hook": 2, "no_cover": 2})
     );
 
     // A missing file, or a track in the trash, is not to do.
@@ -10204,7 +10250,7 @@ async fn to_do_lists_the_songs_missing_an_intro_a_hook_or_a_cover() {
         .unwrap();
     assert_eq!(
         viewer.get("/library/todo").await,
-        json!({"to_identify": 1, "no_intro": 0, "no_hook": 0, "no_cover": 0})
+        json!({"to_identify": 1, "damaged": 0, "no_intro": 0, "no_hook": 0, "no_cover": 0})
     );
 
     // Without cover art, no count of covers.

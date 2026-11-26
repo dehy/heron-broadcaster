@@ -201,6 +201,8 @@ pub struct PayloadTrack {
     /// Its cover, else the station's logo: a full address when the station
     /// has its public address (docs/api.md#public-endpoints).
     pub cover_url: Option<String>,
+    /// Its MusicBrainz identifiers; `null` when it has none.
+    pub musicbrainz: Option<crate::musicbrainz_ids::MusicBrainzIds>,
     pub duration_ms: u32,
     pub deck: DeckName,
     pub source: PlaySource,
@@ -278,6 +280,7 @@ impl Payload {
                 title: track.title.clone(),
                 album: track.album.clone(),
                 cover_url: None,
+                musicbrainz: None,
                 duration_ms: track.duration_ms,
                 deck,
                 source: track.source,
@@ -424,6 +427,21 @@ impl Payload {
             "dedication_from" => text(self.dedication.as_ref().map(|d| &d.from)),
             "dedication_to" => text(self.dedication.as_ref().map(|d| &d.to)),
             "dedication_message" => text(self.dedication.as_ref().map(|d| &d.message)),
+            name if name.starts_with("musicbrainz.") => {
+                let ids = track.and_then(|track| track.musicbrainz.as_ref());
+                let year = ids.and_then(|ids| ids.first_release_year);
+                match &name["musicbrainz.".len()..] {
+                    "recording_id" => text(ids.and_then(|ids| ids.recording_id.as_ref())),
+                    "release_id" => text(ids.and_then(|ids| ids.release_id.as_ref())),
+                    "release_group_id" => text(ids.and_then(|ids| ids.release_group_id.as_ref())),
+                    "artist_id" => text(ids.and_then(|ids| ids.artist_id.as_ref())),
+                    "artist_wikidata_id" => {
+                        text(ids.and_then(|ids| ids.artist_wikidata_id.as_ref()))
+                    }
+                    "first_release_year" => year.map(|year| year.to_string()).unwrap_or_default(),
+                    _ => return None,
+                }
+            }
             "next.planned_start_unix_ms" => next
                 .map(|next| next.planned_start_unix_ms.to_string())
                 .unwrap_or_default(),
@@ -433,7 +451,7 @@ impl Payload {
 }
 
 /// The placeholders a body template can use.
-pub const PLACEHOLDERS: [&str; 27] = [
+pub const PLACEHOLDERS: [&str; 33] = [
     "event",
     "station",
     "delivery_id",
@@ -461,6 +479,12 @@ pub const PLACEHOLDERS: [&str; 27] = [
     "dedication_from",
     "dedication_to",
     "dedication_message",
+    "musicbrainz.recording_id",
+    "musicbrainz.release_id",
+    "musicbrainz.release_group_id",
+    "musicbrainz.artist_id",
+    "musicbrainz.artist_wikidata_id",
+    "musicbrainz.first_release_year",
 ];
 
 /// Splits a template into text and `{{placeholder}}` names (spaces inside
@@ -731,6 +755,7 @@ impl Webhooks {
                 Ok(covers) => track.cover_url = covers.url(track.track_id),
                 Err(error) => tracing::warn!(%error, "cannot read the cover"),
             }
+            track.musicbrainz = crate::musicbrainz_ids::of(&self.pool, track.track_id).await;
         }
         let mut queued = false;
         for id in matching {
@@ -799,7 +824,7 @@ impl Webhooks {
             sent = Some(current);
             let mut tracks: Vec<UpcomingTrack> =
                 upcoming_now.into_iter().map(|(_, track)| track).collect();
-            crate::public::fill_covers(&self.pool, station_id, &mut tracks).await;
+            crate::public::fill_details(&self.pool, station_id, &mut tracks).await;
             let payload = Payload::queue_changed(tracks, now);
             if let Err(error) = self.queue_for(station_id, payload).await {
                 tracing::error!(%error, "cannot queue webhook deliveries");
@@ -1774,6 +1799,41 @@ mod tests {
     }
 
     #[test]
+    fn tracks_carry_their_musicbrainz_identifiers() {
+        let mut started = Payload::of(&ended(EndReason::Finished));
+        let body: serde_json::Value = serde_json::from_str(&body_default(&started)).unwrap();
+        assert!(body["track"]["musicbrainz"].is_null());
+        assert_eq!(
+            render("[{{musicbrainz.release_group_id}}]", "text/plain", &started),
+            "[]"
+        );
+        started.track.as_mut().unwrap().musicbrainz =
+            Some(crate::musicbrainz_ids::MusicBrainzIds {
+                recording_id: Some("rec".to_owned()),
+                release_group_id: Some("group".to_owned()),
+                artist_wikidata_id: Some("Q42".to_owned()),
+                first_release_year: Some(1977),
+                ..Default::default()
+            });
+        let body: serde_json::Value = serde_json::from_str(&body_default(&started)).unwrap();
+        assert_eq!(body["track"]["musicbrainz"]["release_group_id"], "group");
+        assert_eq!(body["track"]["musicbrainz"]["first_release_year"], 1977);
+        assert!(body["track"]["musicbrainz"]["release_id"].is_null());
+        assert_eq!(
+            render(
+                "{{musicbrainz.recording_id}}|{{musicbrainz.release_id}}|\
+                 {{musicbrainz.release_group_id}}|{{musicbrainz.artist_id}}|\
+                 {{musicbrainz.artist_wikidata_id}}|{{musicbrainz.first_release_year}}",
+                "text/plain",
+                &started
+            ),
+            "rec||group||Q42|1977"
+        );
+        assert!(check_template("{{musicbrainz.release_group_id}}").is_ok());
+        assert!(check_template("{{musicbrainz.isrc}}").is_err());
+    }
+
+    #[test]
     fn show_events_carry_their_message() {
         let show = PayloadShow {
             module: heron_core::Module::Dedications,
@@ -1814,6 +1874,7 @@ mod tests {
             title: Some("Space \"Cowboy\"".to_owned()),
             album: None,
             cover_url: None,
+            musicbrainz: None,
             duration_ms: 212_000,
             planned_start_unix_ms: 1_792_918_037_000,
         }];

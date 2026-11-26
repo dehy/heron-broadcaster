@@ -24,7 +24,8 @@ use crate::tags::FileTags;
 /// - 1: M5b, album artist, genre, year, track and disc numbers, MusicBrainz
 ///   recording and release IDs, codec, bitrate, sample rate, channels.
 /// - 2: cover art, embedded or beside the file.
-pub const DETAILS_VERSION: u8 = 2;
+/// - 3: the MusicBrainz release group ID.
+pub const DETAILS_VERSION: u8 = 3;
 
 /// Saves the tags and properties of `read` to the track `id`, with the
 /// track's overrides applied on top, then its covers ([`covers::from_file`]):
@@ -54,7 +55,7 @@ pub async fn save(
          SET title = ?, artist = ?, album = ?, album_artist = ?, genre = ?, year = ?,
              track_number = ?, disc_number = ?, musicbrainz_artist_id = ?,
              musicbrainz_recording_id = ?, musicbrainz_release_id = ?,
-             duration_ms = COALESCE(?, duration_ms), codec = ?, bitrate_kbps = ?,
+             musicbrainz_release_group_id = ?, duration_ms = COALESCE(?, duration_ms), codec = ?, bitrate_kbps = ?,
              bitrate_mode = ?, sample_rate = ?, channels = ?, details_version = ?
          WHERE id = ?",
     )
@@ -69,6 +70,7 @@ pub async fn save(
     .bind(tags.musicbrainz.first_artist())
     .bind(mbid(&tags.musicbrainz.recording))
     .bind(mbid(&tags.musicbrainz.release))
+    .bind(mbid(&tags.musicbrainz.release_group))
     .bind(read.duration_ms)
     .bind(&properties.codec)
     .bind(properties.bitrate_kbps)

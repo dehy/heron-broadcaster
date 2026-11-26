@@ -29,6 +29,8 @@ pub struct PublicTrack {
     pub album: Option<String>,
     /// Its cover, else the station's logo (docs/api.md#public-endpoints).
     pub cover_url: Option<String>,
+    /// Its MusicBrainz identifiers; `null` when it has none.
+    pub musicbrainz: Option<crate::musicbrainz_ids::MusicBrainzIds>,
     pub started_at_unix_ms: u64,
     /// From the cue-in to the cue-out.
     pub duration_ms: u64,
@@ -60,6 +62,9 @@ pub struct PublicPlay {
     /// Its cover, else the station's logo.
     #[sqlx(skip)]
     pub cover_url: Option<String>,
+    /// Its MusicBrainz identifiers; `null` when it has none.
+    #[sqlx(skip)]
+    pub musicbrainz: Option<crate::musicbrainz_ids::MusicBrainzIds>,
     pub started_at_unix_ms: i64,
     /// Missing while the track plays.
     pub ended_at_unix_ms: Option<i64>,
@@ -75,8 +80,11 @@ pub struct UpcomingTrack {
     pub artist: Option<String>,
     pub title: Option<String>,
     pub album: Option<String>,
-    /// Its cover, else the station's logo; filled by [`fill_covers`].
+    /// Its cover, else the station's logo; filled by [`fill_details`].
     pub cover_url: Option<String>,
+    /// Its MusicBrainz identifiers, filled by [`fill_details`]; `null` when
+    /// it has none.
+    pub musicbrainz: Option<crate::musicbrainz_ids::MusicBrainzIds>,
     /// From the cue-in to the cue-out.
     pub duration_ms: u64,
     /// When it should start, crossfades included, as the Queue page shows it.
@@ -115,6 +123,7 @@ pub fn upcoming(player: &PlayerState, now_ms: u64) -> Vec<(u64, UpcomingTrack)> 
                     title: track.title.clone(),
                     album: track.album.clone(),
                     cover_url: None,
+                    musicbrainz: None,
                     duration_ms: u64::try_from(crate::rotation::planned_length_ms(entry))
                         .unwrap_or(0),
                     planned_start_unix_ms: u64::try_from(at).unwrap_or(0),
@@ -124,17 +133,26 @@ pub fn upcoming(player: &PlayerState, now_ms: u64) -> Vec<(u64, UpcomingTrack)> 
         .collect()
 }
 
-/// Gives upcoming tracks their cover addresses. Without them when the
-/// database cannot be read: the list matters more.
-pub async fn fill_covers(pool: &sqlx::MySqlPool, station_id: u64, tracks: &mut [UpcomingTrack]) {
+/// Gives upcoming tracks their cover addresses and MusicBrainz
+/// identifiers. Without them when the database cannot be read: the list
+/// matters more.
+pub async fn fill_details(pool: &sqlx::MySqlPool, station_id: u64, tracks: &mut [UpcomingTrack]) {
     let ids: Vec<u64> = tracks.iter().filter_map(|track| track.track_id).collect();
     match crate::covers::PublicCovers::load(pool, station_id, &ids).await {
         Ok(covers) => {
-            for track in tracks {
+            for track in tracks.iter_mut() {
                 track.cover_url = covers.url(track.track_id);
             }
         }
         Err(error) => tracing::warn!(%error, "cannot read the covers"),
+    }
+    match crate::musicbrainz_ids::load(pool, &ids).await {
+        Ok(found) => {
+            for track in tracks {
+                track.musicbrainz = track.track_id.and_then(|id| found.get(&id).cloned());
+            }
+        }
+        Err(error) => tracing::warn!(%error, "cannot read the MusicBrainz identifiers"),
     }
 }
 
@@ -203,6 +221,7 @@ pub async fn now_playing_of(state: &AppState, station: &Station) -> NowPlaying {
                     title: track.title.clone(),
                     album: track.album.clone(),
                     cover_url: None,
+                    musicbrainz: None,
                     started_at_unix_ms: now.saturating_sub(deck.position_ms),
                     duration_ms: deck.length_ms,
                     position_ms: deck.position_ms,
@@ -247,6 +266,7 @@ pub async fn now_playing_of(state: &AppState, station: &Station) -> NowPlaying {
             Ok(covers) => track.cover_url = covers.url(track_id),
             Err(error) => tracing::warn!(%error, "cannot read the cover"),
         }
+        track.musicbrainz = crate::musicbrainz_ids::of(&state.pool, track_id).await;
     }
     NowPlaying {
         now: track,
@@ -276,7 +296,7 @@ async fn public_queue(
                 .collect()
         })
         .unwrap_or_default();
-    fill_covers(&state.pool, station.id(), &mut upcoming).await;
+    fill_details(&state.pool, station.id(), &mut upcoming).await;
     (
         [(header::CACHE_CONTROL, "public, max-age=5")],
         Json(PublicQueue {
@@ -324,8 +344,10 @@ async fn public_history(
     let mut plays: Vec<PublicPlay> = sql.build_query_as().fetch_all(&state.pool).await?;
     let ids: Vec<u64> = plays.iter().filter_map(|play| play.track_id).collect();
     let covers = crate::covers::PublicCovers::load(&state.pool, station.id(), &ids).await?;
+    let found = crate::musicbrainz_ids::load(&state.pool, &ids).await?;
     for play in &mut plays {
         play.cover_url = covers.url(play.track_id);
+        play.musicbrainz = play.track_id.and_then(|id| found.get(&id).cloned());
     }
     Ok(([(header::CACHE_CONTROL, "public, max-age=15")], Json(plays)))
 }
@@ -364,6 +386,7 @@ async fn last_song(
                 title,
                 album,
                 cover_url: None,
+                musicbrainz: None,
                 started_at_unix_ms: started,
                 duration_ms: u64::from(duration_ms.unwrap_or(0)),
                 position_ms: now.saturating_sub(started),

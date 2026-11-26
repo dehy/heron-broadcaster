@@ -40,6 +40,7 @@ mod medleys;
 mod migrate;
 mod modules;
 mod monitor;
+mod musicbrainz_ids;
 mod outputs;
 mod play_grid;
 mod player;

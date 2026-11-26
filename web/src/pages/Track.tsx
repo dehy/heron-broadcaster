@@ -57,6 +57,7 @@ import { withNextStart } from "../lib/nextStart";
 import { Link, setSearch, useLocation } from "../lib/router";
 import { useAction, useCan, useCanOn } from "../lib/session";
 import { DeleteQuestion, bitrate } from "./Library";
+import { LibraryReviewDialog } from "./LibraryReview";
 import { type StationInfo, currentStation, here } from "../lib/station";
 import { levelAt, levelText } from "../lib/level";
 
@@ -830,8 +831,33 @@ function TrackBanners({
 }>) {
   const trashOn = useModule("trash");
   const reviewOn = useModule("review");
+  const canEdit = useCan("operator");
+  const [reviewing, setReviewing] = useState(false);
+  const damage: Record<string, PlainKey> = {
+    broken_seek_table: "buffer.flag.seekTable",
+    damaged_audio: "buffer.flag.damaged",
+    mixed_streams: "buffer.flag.mixed",
+  };
   return (
     <>
+      {track.damage.length > 0 && (
+        <Banner kind="bad">
+          {t("track.damaged", { damage: track.damage.map((flag) => t(damage[flag] ?? "buffer.flag.damaged")).join(", ") })}{" "}
+          {canEdit && (
+            <button type="button" className="link-button" onClick={() => setReviewing(true)}>
+              {t("buffer.review.action")}
+            </button>
+          )}
+        </Banner>
+      )}
+      {canEdit && track.damage.length === 0 && track.identification?.status !== "needs_review" && !deleted && (
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <button type="button" className="btn small" onClick={() => setReviewing(true)}>
+            <Icon name="check" size={14} /> {t("track.reviewMb")}
+          </button>
+        </div>
+      )}
+      {reviewing && <LibraryReviewDialog queue={[track.id]} start={0} onClose={() => setReviewing(false)} />}
       {removing && (
         <Banner kind="warn">
           {t("library.deleting")} <TaskState task={task} />
@@ -860,7 +886,13 @@ function TrackBanners({
         <Banner kind="warn">
           {rich("track.needsReview", {
             reason: track.identification.reason,
-            link: <Link to="/to-do">{t("track.reviewIt")}</Link>,
+            link: canEdit ? (
+              <button type="button" className="link-button" onClick={() => setReviewing(true)}>
+                {t("track.reviewIt")}
+              </button>
+            ) : (
+              <Link to="/to-do">{t("track.reviewIt")}</Link>
+            ),
           })}
         </Banner>
       )}
@@ -1304,6 +1336,34 @@ function ProgrammingCard({ track, canEdit }: Readonly<{ track: TrackDetail; canE
             <dt>MusicBrainz</dt>
             <dd className="muted">
               {track.file.musicbrainz_release_id ? t("track.notLookedUp") : t("track.notIdentified")}
+            </dd>
+          </>
+        )}
+        {track.file.musicbrainz_release_group_id && (
+          <>
+            <dt>{t("track.releaseGroup")}</dt>
+            <dd>
+              <a
+                href={`https://musicbrainz.org/release-group/${encodeURIComponent(track.file.musicbrainz_release_group_id)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <code>{track.file.musicbrainz_release_group_id}</code>
+              </a>
+            </dd>
+          </>
+        )}
+        {track.file.artist_wikidata_id && (
+          <>
+            <dt>{t("track.artistWikidata")}</dt>
+            <dd>
+              <a
+                href={`https://www.wikidata.org/wiki/${encodeURIComponent(track.file.artist_wikidata_id)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <code>{track.file.artist_wikidata_id}</code>
+              </a>
             </dd>
           </>
         )}

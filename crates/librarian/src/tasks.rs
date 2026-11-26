@@ -32,6 +32,10 @@ const PURGE_INTERVAL: Duration = Duration::from_secs(3600);
 
 /// Wait between background MusicBrainz details passes.
 const DETAILS_INTERVAL: Duration = Duration::from_secs(60);
+/// Library files checked for damage at each poll.
+const FILES_PER_POLL: u32 = 5;
+/// Library tracks identified at each pass.
+const IDENTIFY_PER_PASS: u32 = 10;
 
 pub struct TaskRunner {
     pool: MySqlPool,
@@ -76,6 +80,12 @@ impl TaskRunner {
                 Ok(false) => {}
                 Err(error) => tracing::warn!(%error, "cannot read library tasks"),
             }
+            // A few files a second, so a check of the whole library moves on.
+            if let Err(error) =
+                crate::library_review::check_files(&self.pool, &self.roots, FILES_PER_POLL).await
+            {
+                tracing::warn!(%error, "cannot check the library's files");
+            }
             if Instant::now() >= details_due {
                 details_due = Instant::now() + DETAILS_INTERVAL;
                 if let Err(error) = self.new_details().await {
@@ -83,6 +93,9 @@ impl TaskRunner {
                 }
                 if let Err(error) = self.new_covers().await {
                     tracing::warn!(%error, "cannot look covers up");
+                }
+                if let Err(error) = self.identify_library().await {
+                    tracing::warn!(%error, "cannot identify the library");
                 }
             }
             tokio::select! {
@@ -180,6 +193,7 @@ impl TaskRunner {
                 recording_id,
                 disc,
                 track,
+                fixes,
             } => {
                 self.module_on(Module::Review).await?;
                 // Looking a release up needs no AcoustID key.
@@ -192,8 +206,44 @@ impl TaskRunner {
                     recording_id: recording_id.clone(),
                     disc: *disc,
                     track: *track,
+                    fixes: fixes.clone(),
                 };
                 json(review::apply(&self.pool, &self.roots, &identifier, &settings, &choice).await)
+            }
+            TaskRequest::ReviewPreview {
+                track_id,
+                release_id,
+                recording_id,
+                disc,
+                track,
+            } => {
+                let choice = Choice {
+                    track_id: *track_id,
+                    release_id: release_id.clone(),
+                    recording_id: recording_id.clone(),
+                    disc: *disc,
+                    track: *track,
+                    fixes: heron_core::library::FieldValues::new(),
+                };
+                json(review::preview(&self.pool, &self.roots, &self.musicbrainz()?, &choice).await)
+            }
+            TaskRequest::ReviewSearch {
+                track_id,
+                title,
+                artist,
+                album,
+                kinds,
+            } => {
+                crate::library_review::search_track(
+                    &self.pool,
+                    &self.musicbrainz()?,
+                    *track_id,
+                    title,
+                    artist,
+                    album.as_deref(),
+                    kinds,
+                )
+                .await
             }
             TaskRequest::ArtistRelations => {
                 self.module_on(Module::Artists).await?;
@@ -295,6 +345,37 @@ impl TaskRunner {
         } else {
             Err(format!("the {} module is turned off", module.name()))
         }
+    }
+
+    /// Identifies a few tracks of the library never identified, and looks
+    /// those kept untagged up again. Off with `identify_library`.
+    async fn identify_library(&self) -> Result<(), String> {
+        let settings = import::load_settings(&self.pool)
+            .await
+            .map_err(|error| error.to_string())?;
+        if !settings.identify_library {
+            return Ok(());
+        }
+        let musicbrainz = self.musicbrainz()?;
+        if let Err(error) = crate::look_again::look_again(&self.pool, &musicbrainz).await {
+            tracing::warn!(%error, "cannot look tracks up again");
+        }
+        let by_sound = match settings.acoustid_key.clone() {
+            Some(key) => Some(
+                Identifier::new(self.endpoints.clone(), key, settings.min_score)
+                    .map_err(|error| error.to_string())?,
+            ),
+            None => None,
+        };
+        crate::library_review::identify_library(
+            &self.pool,
+            by_sound.as_ref(),
+            &musicbrainz,
+            IDENTIFY_PER_PASS,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string())
     }
 
     /// A MusicBrainz client (MusicBrainz needs no AcoustID key).

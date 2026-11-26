@@ -315,6 +315,17 @@ async fn a_hundred_dropped_files() {
     .fetch_one(pool)
     .await
     .unwrap();
+    // Its release group is kept with its other identifiers.
+    let group: Option<String> =
+        sqlx::query_scalar("SELECT musicbrainz_release_group_id FROM tracks WHERE id = ?")
+            .bind(track_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        group.as_deref(),
+        Some("00000002-0000-4000-8000-000000000001")
+    );
     sqlx::query(
         "INSERT INTO track_analysis (track_id, analysis_version, params_hash, cue_in_ms, cue_out_ms)
          VALUES (?, 2, '', 0, 8000)",

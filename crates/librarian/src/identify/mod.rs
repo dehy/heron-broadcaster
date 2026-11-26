@@ -11,10 +11,12 @@
 pub mod matching;
 pub mod ratelimit;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use heron_analysis::Chromaprint;
+use heron_core::library::AlbumKind;
 use heron_library::{MusicBrainzIds, Tags};
 use matching::{Candidate, Choice, FileMatches};
 use ratelimit::RateLimiter;
@@ -24,8 +26,11 @@ use serde::Deserialize;
 /// MusicBrainz ID of the "Various Artists" artist.
 const VARIOUS_ARTISTS_ID: &str = "89ad4ac3-39f7-470e-963a-56509c546377";
 
-/// Attempts at a request the service answered with 503 (slow down) or 429.
-const ATTEMPTS: u32 = 3;
+/// Attempts at a request the service answered with 503 (slow down) or 429:
+/// a busy MusicBrainz often refuses several in a row.
+const ATTEMPTS: u32 = 6;
+/// The longest wait between two of them.
+const MAX_BACK_OFF: Duration = Duration::from_secs(8);
 
 /// Base URLs, configurable for mirrors and tests.
 #[derive(Clone, Debug)]
@@ -35,6 +40,22 @@ pub struct Endpoints {
     /// The MusicBrainz web service root, ending with `/ws/2`.
     pub musicbrainz: String,
     pub cover_art: String,
+}
+
+/// The rate limiter of a service, shared by every [`Identifier`] of the
+/// process: the stager, the tasks and the background passes each make
+/// their own, and together they must keep to the service's rate.
+fn shared_limiter(url: &str, interval: Duration) -> Arc<RateLimiter> {
+    static LIMITERS: LazyLock<std::sync::Mutex<HashMap<String, Arc<RateLimiter>>>> =
+        LazyLock::new(Default::default);
+    // A poisoned map still holds valid limiters.
+    let mut limiters = LIMITERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    limiters
+        .entry(url.to_owned())
+        .or_insert_with(|| Arc::new(RateLimiter::new(interval)))
+        .clone()
 }
 
 impl Default for Endpoints {
@@ -57,6 +78,15 @@ pub enum IdentifyError {
         status: u16,
         message: String,
     },
+}
+
+impl IdentifyError {
+    /// A refusal that trying again will not change, such as an invalid
+    /// key: 4xx except 429 (too many requests).
+    #[must_use]
+    pub fn is_permanent(&self) -> bool {
+        matches!(self, Self::Service { status, .. } if (400..500).contains(status) && *status != 429)
+    }
 }
 
 /// What is known about a file to identify.
@@ -88,9 +118,9 @@ pub struct Identifier {
     endpoints: Endpoints,
     key: String,
     min_score: f64,
-    acoustid: RateLimiter,
-    musicbrainz: RateLimiter,
-    cover_art: RateLimiter,
+    acoustid: Arc<RateLimiter>,
+    musicbrainz: Arc<RateLimiter>,
+    cover_art: Arc<RateLimiter>,
 }
 
 impl Identifier {
@@ -105,12 +135,14 @@ impl Identifier {
             .build()?;
         Ok(Self {
             http,
-            endpoints,
             key,
             min_score,
-            acoustid: RateLimiter::new(Duration::from_millis(334)),
-            musicbrainz: RateLimiter::new(Duration::from_secs(1)),
-            cover_art: RateLimiter::new(Duration::from_secs(1)),
+            acoustid: shared_limiter(&endpoints.acoustid, Duration::from_millis(334)),
+            // MusicBrainz allows one request a second over a rolling window:
+            // exactly one a second gets refused (503) when the passes are busy.
+            musicbrainz: shared_limiter(&endpoints.musicbrainz, Duration::from_millis(1200)),
+            cover_art: shared_limiter(&endpoints.cover_art, Duration::from_secs(1)),
+            endpoints,
         })
     }
 
@@ -258,6 +290,8 @@ impl Identifier {
                             candidates.push(Candidate {
                                 score: result.score,
                                 recording_id: recording.id.clone(),
+                                title: recording.title.clone(),
+                                artist: recording.artist(),
                                 release_id: release.id.clone(),
                                 release_title: release
                                     .title
@@ -269,6 +303,14 @@ impl Identifier {
                                 country: release.country.clone(),
                                 disc,
                                 track,
+                                length_ms: recording
+                                    .duration
+                                    .map(|seconds| (seconds * 1000.0).round() as u32),
+                                album_kind: Some(AlbumKind::of(
+                                    group.kind.as_deref(),
+                                    &group.secondary_types,
+                                )),
+                                ..Candidate::default()
                             });
                         }
                     }
@@ -367,6 +409,26 @@ impl Identifier {
             .collect())
     }
 
+    /// The Wikidata item of the artist `id` (`Q42`), from its MusicBrainz
+    /// URL relationships. `None` when MusicBrainz has no Wikidata link for
+    /// the artist, or does not know it.
+    pub async fn artist_wikidata(&self, id: &str) -> Result<Option<String>, IdentifyError> {
+        let url = format!("{}/artist/{id}", self.endpoints.musicbrainz);
+        let response = self
+            .send("MusicBrainz", &self.musicbrainz, || {
+                self.http
+                    .get(&url)
+                    .query(&[("inc", "url-rels"), ("fmt", "json")])
+            })
+            .await;
+        let artist: MbArtistUrls = match response {
+            Ok(response) => response.json().await?,
+            Err(IdentifyError::Service { status: 404, .. }) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        Ok(artist.wikidata())
+    }
+
     /// The release's front cover (500 px JPEG), if it has one.
     pub async fn cover(&self, release_id: &str) -> Result<Option<Vec<u8>>, IdentifyError> {
         let url = format!(
@@ -431,6 +493,124 @@ impl Identifier {
         Ok(hits)
     }
 
+    /// Searches MusicBrainz for recordings titled `title` by `artist`, on
+    /// official albums of these `kinds` (none: studio albums): one
+    /// candidate per album, studio albums first, then the earliest. Those
+    /// titled `album` come first.
+    pub async fn search_recordings(
+        &self,
+        title: &str,
+        artist: &str,
+        album: Option<&str>,
+        kinds: &[AlbumKind],
+    ) -> Result<Vec<Candidate>, IdentifyError> {
+        let kinds = if kinds.is_empty() {
+            &[AlbumKind::Studio][..]
+        } else {
+            kinds
+        };
+        let title = search_title(title);
+        if let Some(asked) = album.and_then(AlbumId::parse) {
+            return self.search_album(&asked, &title).await;
+        }
+        let base = format!(
+            "recording:{} AND artist:{}{}",
+            lucene_phrase(&title),
+            lucene_phrase(artist),
+            kinds_query(kinds)
+        );
+        let album = album.map(str::trim).filter(|album| !album.is_empty());
+        // On its album first: a well-known song is on hundreds of releases.
+        if let Some(album) = album {
+            let query = format!("{base} AND release:{}", lucene_phrase(album));
+            let found = album_candidates(
+                self.search_recording_query(&query).await?,
+                &title,
+                Some(album),
+                kinds,
+                Album::Any,
+            );
+            // `release:"Post"` also finds "Post Live": only that album.
+            let wanted = album.to_lowercase();
+            if found.iter().any(|candidate| {
+                candidate
+                    .release_group_title
+                    .as_deref()
+                    .is_some_and(|name| name.to_lowercase() == wanted)
+            }) {
+                return Ok(found);
+            }
+        }
+        let found = album_candidates(
+            self.search_recording_query(&base).await?,
+            &title,
+            album,
+            kinds,
+            Album::Any,
+        );
+        // None of these kinds: every kind, the results show which.
+        const EVERY: [AlbumKind; 5] = EVERY_KIND;
+        if !found.is_empty() || EVERY.iter().all(|kind| kinds.contains(kind)) {
+            return Ok(found);
+        }
+        let base = format!(
+            "recording:{} AND artist:{}",
+            lucene_phrase(&title),
+            lucene_phrase(artist)
+        );
+        Ok(album_candidates(
+            self.search_recording_query(&base).await?,
+            &title,
+            album,
+            &EVERY,
+            Album::Any,
+        ))
+    }
+
+    /// The song `title` on the album `asked` (a release group, or one of its
+    /// releases), whatever its kind; its tracklist when no track of it is
+    /// titled so, to pick the song from.
+    async fn search_album(
+        &self,
+        asked: &AlbumId,
+        title: &str,
+    ) -> Result<Vec<Candidate>, IdentifyError> {
+        let on_it = asked.query();
+        let query = format!("{on_it} AND recording:{}", lucene_phrase(title));
+        let found = album_candidates(
+            self.search_recording_query(&query).await?,
+            title,
+            None,
+            &EVERY_KIND,
+            Album::Only(asked),
+        );
+        if !found.is_empty() {
+            return Ok(found);
+        }
+        Ok(album_candidates(
+            self.search_recording_query(&on_it).await?,
+            title,
+            None,
+            &EVERY_KIND,
+            Album::Tracklist(asked),
+        ))
+    }
+
+    async fn search_recording_query(
+        &self,
+        query: &str,
+    ) -> Result<MbRecordingSearch, IdentifyError> {
+        let url = format!("{}/recording", self.endpoints.musicbrainz);
+        let response = self
+            .send("MusicBrainz", &self.musicbrainz, || {
+                self.http
+                    .get(&url)
+                    .query(&[("query", query), ("limit", "100"), ("fmt", "json")])
+            })
+            .await?;
+        Ok(response.json().await?)
+    }
+
     /// Sends a request in its rate-limit slot, retrying when the service
     /// asks to slow down.
     async fn send(
@@ -454,7 +634,7 @@ impl Identifier {
             if slow_down && attempt < ATTEMPTS {
                 tracing::info!(service, %status, "rate limited, slowing down");
                 limiter
-                    .back_off(Duration::from_secs(2_u64.pow(attempt)))
+                    .back_off(Duration::from_secs(2_u64.pow(attempt)).min(MAX_BACK_OFF))
                     .await;
                 attempt += 1;
                 continue;
@@ -504,14 +684,53 @@ struct AcoustidResult {
 #[derive(Debug, Deserialize)]
 struct AcoustidRecording {
     id: String,
+    title: Option<String>,
+    #[serde(default)]
+    artists: Vec<AcoustidArtist>,
+    /// In seconds.
+    duration: Option<f64>,
     #[serde(default)]
     releasegroups: Vec<AcoustidReleaseGroup>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AcoustidArtist {
+    name: String,
+    #[serde(default)]
+    joinphrase: Option<String>,
+}
+
+impl AcoustidRecording {
+    /// The artists as credited (`A feat. B`).
+    fn artist(&self) -> Option<String> {
+        let text: String = self
+            .artists
+            .iter()
+            .enumerate()
+            .map(|(index, artist)| {
+                let join = artist.joinphrase.clone().unwrap_or_else(|| {
+                    if index + 1 < self.artists.len() {
+                        ", "
+                    } else {
+                        ""
+                    }
+                    .to_owned()
+                });
+                format!("{}{join}", artist.name)
+            })
+            .collect();
+        (!text.is_empty()).then_some(text)
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct AcoustidReleaseGroup {
     id: String,
     title: Option<String>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    #[serde(rename = "secondarytypes", default)]
+    secondary_types: Vec<String>,
     #[serde(default)]
     releases: Vec<AcoustidRelease>,
 }
@@ -580,6 +799,354 @@ fn credit_text(credits: &[MbCredit]) -> String {
         .iter()
         .map(|credit| format!("{}{}", credit.name, credit.joinphrase))
         .collect()
+}
+
+/// Words of an edition, not of the song: `We Will Rock You (Remastered
+/// 2011)` is `We Will Rock You` on MusicBrainz.
+const EDITION_WORDS: [&str; 5] = ["remaster", "deluxe", "bonus", "anniversary", "reissue"];
+
+/// `title` without the edition notes a file's tags often carry, in
+/// brackets or after a dash: what MusicBrainz names the recording.
+fn search_title(title: &str) -> String {
+    let edition = |text: &str| {
+        let text = text.to_lowercase();
+        EDITION_WORDS.iter().any(|word| text.contains(word))
+    };
+    let mut kept = String::new();
+    let mut rest = title;
+    while let Some(open) = rest.find(['(', '[']) {
+        let close = if rest[open..].starts_with('(') {
+            ')'
+        } else {
+            ']'
+        };
+        let Some(length) = rest[open..].find(close) else {
+            break;
+        };
+        let group = &rest[open..=open + length];
+        kept.push_str(&rest[..open]);
+        if !edition(group) {
+            kept.push_str(group);
+        }
+        rest = &rest[open + length + 1..];
+    }
+    kept.push_str(rest);
+    let kept = match kept.rfind(" - ") {
+        Some(dash) if edition(&kept[dash..]) => kept[..dash].to_owned(),
+        _ => kept,
+    };
+    let cleaned = kept.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.is_empty() {
+        title.trim().to_owned()
+    } else {
+        cleaned
+    }
+}
+
+/// The query clauses that keep the recordings on official albums of
+/// `kinds`. A recording matches a clause when any of its releases does,
+/// so the kinds are checked again on each release: only "live" in a
+/// recording's disambiguation tells a live recording apart.
+fn kinds_query(kinds: &[AlbumKind]) -> String {
+    let mut query = " AND status:official".to_owned();
+    if !kinds.contains(&AlbumKind::Other) {
+        let mut primary = Vec::new();
+        if kinds.iter().any(|kind| {
+            matches!(
+                kind,
+                AlbumKind::Studio | AlbumKind::Live | AlbumKind::Compilation
+            )
+        }) {
+            primary.push("album");
+        }
+        if kinds.contains(&AlbumKind::Single) {
+            primary.extend(["single", "ep"]);
+        }
+        query.push_str(&format!(" AND primarytype:({})", primary.join(" OR ")));
+    }
+    if !kinds.contains(&AlbumKind::Live) {
+        query.push_str(" AND NOT comment:live");
+    }
+    query
+}
+
+/// At most this many albums from a search.
+const SEARCH_CANDIDATES: usize = 25;
+
+const EVERY_KIND: [AlbumKind; 5] = [
+    AlbumKind::Studio,
+    AlbumKind::Live,
+    AlbumKind::Compilation,
+    AlbumKind::Single,
+    AlbumKind::Other,
+];
+
+/// An album given by its MusicBrainz ID or address, instead of its title.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AlbumId {
+    /// `https://musicbrainz.org/release-group/…`
+    ReleaseGroup(String),
+    /// `https://musicbrainz.org/release/…`: that edition only.
+    Release(String),
+    /// An ID alone: a release group or a release.
+    Either(String),
+}
+
+impl AlbumId {
+    /// The album `text` names, if it is a MusicBrainz ID or the address of
+    /// a release group or a release (`?…` and `#…` ignored).
+    pub fn parse(text: &str) -> Option<Self> {
+        let text = text.trim();
+        let path = text.split(['?', '#']).next().unwrap_or_default();
+        let mut parts = path.trim_end_matches('/').rsplit('/');
+        let id = parts.next()?.to_ascii_lowercase();
+        if !is_mbid(&id) {
+            return None;
+        }
+        match parts.next() {
+            None if path == text && !text.contains('/') => Some(Self::Either(id)),
+            Some("release-group") => Some(Self::ReleaseGroup(id)),
+            Some("release") => Some(Self::Release(id)),
+            _ => None,
+        }
+    }
+
+    /// The search clause for its recordings.
+    fn query(&self) -> String {
+        match self {
+            Self::ReleaseGroup(id) => format!("rgid:{id}"),
+            Self::Release(id) => format!("reid:{id}"),
+            Self::Either(id) => format!("(rgid:{id} OR reid:{id})"),
+        }
+    }
+}
+
+/// A MusicBrainz ID: 8-4-4-4-12 hexadecimal digits.
+fn is_mbid(id: &str) -> bool {
+    let groups: Vec<&str> = id.split('-').collect();
+    groups.len() == 5
+        && groups
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(group, len)| group.len() == len && group.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Which albums of a search are kept.
+#[derive(Clone, Copy)]
+enum Album<'a> {
+    Any,
+    /// The one asked for, one candidate.
+    Only(&'a AlbumId),
+    /// The one asked for, a candidate per recording on it.
+    Tracklist(&'a AlbumId),
+}
+
+impl Album<'_> {
+    fn has(self, group: &str, release: &str) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Only(asked) | Self::Tracklist(asked) => match asked {
+                AlbumId::ReleaseGroup(id) => id == group,
+                AlbumId::Release(id) => id == release,
+                AlbumId::Either(id) => id == group || id == release,
+            },
+        }
+    }
+}
+
+/// The albums of a recording search, one candidate each: the edition of
+/// the recording most likely the song's original (named `title`, with no
+/// disambiguation, on the most releases), the earliest. Albums titled
+/// `album` first, then by kind (studio first), then the earliest.
+fn album_candidates(
+    found: MbRecordingSearch,
+    title: &str,
+    album: Option<&str>,
+    kinds: &[AlbumKind],
+    asked: Album<'_>,
+) -> Vec<Candidate> {
+    struct Found {
+        best: (bool, usize, Candidate),
+        earliest: Option<String>,
+        editions: HashSet<String>,
+    }
+    let title = title.to_lowercase();
+    let album = album.map(str::to_lowercase);
+    let mut albums: HashMap<String, Found> = HashMap::new();
+    for recording in found.recordings {
+        let score = f64::from(recording.score.min(100)) / 100.0;
+        let artist = Some(credit_text(&recording.artist_credit)).filter(|text| !text.is_empty());
+        let plain = recording.disambiguation.is_empty()
+            && recording
+                .title
+                .as_deref()
+                .is_some_and(|name| name.to_lowercase() == title);
+        let releases = recording.releases.len();
+        for release in recording.releases {
+            if release
+                .status
+                .as_deref()
+                .is_some_and(|status| !status.eq_ignore_ascii_case("official"))
+            {
+                continue;
+            }
+            let Some(group) = release.release_group else {
+                continue;
+            };
+            let kind = AlbumKind::of(group.primary_type.as_deref(), &group.secondary_types);
+            if !kinds.contains(&kind) || !asked.has(&group.id, &release.id) {
+                continue;
+            }
+            let medium = release.media.first();
+            let date = release.date.filter(|date| !date.is_empty());
+            let candidate = Candidate {
+                score,
+                recording_id: recording.id.clone(),
+                title: recording.title.clone(),
+                artist: artist.clone(),
+                release_id: release.id.clone(),
+                release_title: Some(release.title),
+                release_group_id: Some(group.id.clone()),
+                release_group_title: group.title,
+                date: date.clone(),
+                country: release.country.filter(|country| !country.is_empty()),
+                disc: medium.and_then(|medium| medium.position),
+                track: medium.and_then(|medium| medium.track_offset.map(|offset| offset + 1)),
+                length_ms: recording.length,
+                album_kind: Some(kind),
+                format: medium.and_then(|medium| medium.format.clone()),
+                track_count: release.track_count,
+                ..Candidate::default()
+            };
+            let key = match asked {
+                Album::Tracklist(_) => format!("{}/{}", group.id, recording.id),
+                Album::Any | Album::Only(_) => group.id,
+            };
+            let entry = albums.entry(key).or_insert_with(|| Found {
+                best: (plain, releases, candidate.clone()),
+                earliest: None,
+                editions: HashSet::new(),
+            });
+            entry.editions.insert(release.id);
+            if let Some(date) = &date
+                && entry
+                    .earliest
+                    .as_ref()
+                    .is_none_or(|earliest| date < earliest)
+            {
+                entry.earliest = Some(date.clone());
+            }
+            let (best_plain, best_releases, best) = &entry.best;
+            let better = (plain, releases)
+                .cmp(&(*best_plain, *best_releases))
+                .then_with(|| earlier(candidate.date.as_ref(), best.date.as_ref()))
+                .is_gt();
+            if better {
+                entry.best = (plain, releases, candidate);
+            }
+        }
+    }
+    let mut candidates: Vec<Candidate> = albums
+        .into_values()
+        .map(|album| {
+            let (_, _, mut candidate) = album.best;
+            candidate.album_date = album.earliest;
+            candidate.editions = u32::try_from(album.editions.len()).ok();
+            candidate
+        })
+        .collect();
+    let on_album = |candidate: &Candidate| {
+        album.as_deref().is_some_and(|album| {
+            candidate
+                .release_group_title
+                .as_deref()
+                .is_some_and(|name| name.to_lowercase() == album)
+        })
+    };
+    if let Album::Tracklist(_) = asked {
+        // In the album's order, every track: the song is picked from it.
+        candidates.sort_by_key(|candidate| (candidate.disc, candidate.track));
+    } else {
+        candidates.sort_by(|a, b| {
+            on_album(b)
+                .cmp(&on_album(a))
+                .then(a.album_kind.cmp(&b.album_kind))
+                .then_with(|| earlier(b.album_date.as_ref(), a.album_date.as_ref()))
+                .then(b.score.total_cmp(&a.score))
+        });
+        candidates.truncate(SEARCH_CANDIDATES);
+    }
+    // A search's score says how well the words match, not which album is
+    // right: every album gets the best one, so the order above stays.
+    let best = candidates.iter().map(|c| c.score).fold(0.0, f64::max);
+    for candidate in &mut candidates {
+        candidate.score = best;
+    }
+    candidates
+}
+
+/// `Greater` when `a` is earlier than `b`; a missing date is the latest.
+fn earlier(a: Option<&String>, b: Option<&String>) -> std::cmp::Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => b.cmp(a),
+        (Some(_), None) => std::cmp::Ordering::Greater,
+        (None, Some(_)) => std::cmp::Ordering::Less,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct MbRecordingSearch {
+    #[serde(default)]
+    recordings: Vec<MbSearchRecording>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbSearchRecording {
+    id: String,
+    title: Option<String>,
+    #[serde(default)]
+    disambiguation: String,
+    #[serde(rename = "artist-credit", default)]
+    artist_credit: Vec<MbCredit>,
+    #[serde(default)]
+    score: u32,
+    length: Option<u32>,
+    #[serde(default)]
+    releases: Vec<MbSearchRecordingRelease>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbSearchRecordingRelease {
+    id: String,
+    title: String,
+    status: Option<String>,
+    date: Option<String>,
+    country: Option<String>,
+    #[serde(rename = "track-count")]
+    track_count: Option<u32>,
+    #[serde(rename = "release-group")]
+    release_group: Option<MbSearchReleaseGroup>,
+    #[serde(default)]
+    media: Vec<MbSearchMedium>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbSearchReleaseGroup {
+    id: String,
+    title: Option<String>,
+    #[serde(rename = "primary-type")]
+    primary_type: Option<String>,
+    #[serde(rename = "secondary-types", default)]
+    secondary_types: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbSearchMedium {
+    position: Option<u32>,
+    format: Option<String>,
+    #[serde(rename = "track-offset")]
+    track_offset: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -831,6 +1398,44 @@ struct MbRelation {
     artist: Option<MbArtist>,
 }
 
+// MusicBrainz artist lookups (`inc=url-rels`).
+#[derive(Debug, Deserialize)]
+struct MbArtistUrls {
+    #[serde(default)]
+    relations: Vec<MbUrlRelation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbUrlRelation {
+    #[serde(rename = "type")]
+    kind: String,
+    url: Option<MbUrl>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbUrl {
+    resource: String,
+}
+
+impl MbArtistUrls {
+    /// The item of the first `wikidata` link (`https://www.wikidata.org/wiki/Q42`).
+    fn wikidata(&self) -> Option<String> {
+        self.relations
+            .iter()
+            .filter(|relation| relation.kind == "wikidata")
+            .filter_map(|relation| relation.url.as_ref())
+            .find_map(|url| wikidata_item(&url.resource))
+    }
+}
+
+/// `Q42` from a Wikidata item's address, if it is one.
+fn wikidata_item(address: &str) -> Option<String> {
+    let item = address.trim_end_matches('/').rsplit('/').next()?;
+    let digits = item.strip_prefix('Q')?;
+    (!digits.is_empty() && digits.len() <= 15 && digits.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| item.to_owned())
+}
+
 fn credited(credits: &[MbCredit]) -> Option<String> {
     let name: String = credits
         .iter()
@@ -892,7 +1497,332 @@ impl MbRelease {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn edition_notes_are_left_out_of_searches() {
+        use super::search_title;
+        assert_eq!(
+            search_title("We Will Rock You (Remastered 2011)"),
+            "We Will Rock You"
+        );
+        assert_eq!(search_title("Drive Home - 2013 Remaster"), "Drive Home");
+        assert_eq!(search_title("Jóga [Deluxe Edition] (Live)"), "Jóga (Live)");
+        assert_eq!(
+            search_title("Bachelorette (Radio Edit)"),
+            "Bachelorette (Radio Edit)"
+        );
+        assert_eq!(search_title("(Remastered)"), "(Remastered)");
+    }
+
     use super::*;
+
+    /// A release in a test search: `(release id, group id, group title,
+    /// primary type, secondary types, date, status)`.
+    type TestRelease<'a> = (
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a [&'a str],
+        &'a str,
+        &'a str,
+    );
+
+    /// A recording search as MusicBrainz answers it: `recordings`, each
+    /// with its ID, title, disambiguation and releases.
+    fn found(recordings: &[(&str, &str, &str, &[TestRelease])]) -> MbRecordingSearch {
+        let recordings: Vec<serde_json::Value> = recordings
+            .iter()
+            .map(|(id, title, disambiguation, releases)| {
+                serde_json::json!({
+                    "id": id, "title": title, "disambiguation": disambiguation, "score": 100,
+                    "artist-credit": [{"name": "Queen", "joinphrase": "", "artist": {"id": "queen"}}],
+                    "releases": releases.iter().map(|(release, group, name, primary, secondary, date, status)| {
+                        serde_json::json!({
+                            "id": release, "title": name, "status": status, "date": date,
+                            "country": "GB", "track-count": 11,
+                            "release-group": {"id": group, "title": name,
+                                              "primary-type": primary, "secondary-types": secondary},
+                            "media": [{"position": 1, "format": "CD", "track-offset": 0}],
+                        })
+                    }).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({ "recordings": recordings })).unwrap()
+    }
+
+    fn search_of_a_well_known_song() -> MbRecordingSearch {
+        found(&[
+            // Covered on one compilation, a lone recording listed first.
+            (
+                "cover",
+                "We Will Rock You",
+                "",
+                &[(
+                    "c1",
+                    "g-tribute",
+                    "Tribute",
+                    "Album",
+                    &[],
+                    "2000",
+                    "Official",
+                )],
+            ),
+            // The original: on its album (three editions), a best-of and a
+            // bootleg.
+            (
+                "original",
+                "We Will Rock You",
+                "",
+                &[
+                    (
+                        "n3",
+                        "g-news",
+                        "News of the World",
+                        "Album",
+                        &[],
+                        "2011-03-14",
+                        "Official",
+                    ),
+                    (
+                        "n1",
+                        "g-news",
+                        "News of the World",
+                        "Album",
+                        &[],
+                        "1977-10-28",
+                        "Official",
+                    ),
+                    (
+                        "n2",
+                        "g-news",
+                        "News of the World",
+                        "Album",
+                        &[],
+                        "1977-11-01",
+                        "Official",
+                    ),
+                    (
+                        "b1",
+                        "g-best",
+                        "Greatest Hits",
+                        "Album",
+                        &["Compilation"],
+                        "1981",
+                        "Official",
+                    ),
+                    (
+                        "x1",
+                        "g-boot",
+                        "Live in Rio",
+                        "Album",
+                        &[],
+                        "1985",
+                        "Bootleg",
+                    ),
+                ],
+            ),
+            // A live recording.
+            (
+                "live",
+                "We Will Rock You",
+                "live, 1979",
+                &[(
+                    "l1",
+                    "g-killers",
+                    "Live Killers",
+                    "Album",
+                    &["Live"],
+                    "1979",
+                    "Official",
+                )],
+            ),
+            // A demo, on the single.
+            (
+                "demo",
+                "We Will Rock You (demo)",
+                "",
+                &[
+                    (
+                        "s1",
+                        "g-single",
+                        "We Will Rock You",
+                        "Single",
+                        &[],
+                        "1977-10-07",
+                        "Official",
+                    ),
+                    (
+                        "s2",
+                        "g-news",
+                        "News of the World",
+                        "Album",
+                        &[],
+                        "2017-11-17",
+                        "Official",
+                    ),
+                ],
+            ),
+        ])
+    }
+
+    #[test]
+    fn a_search_gives_one_candidate_per_album_studio_first() {
+        let albums = album_candidates(
+            search_of_a_well_known_song(),
+            "we will rock you",
+            None,
+            &[AlbumKind::Studio],
+            Album::Any,
+        );
+        let rows: Vec<(&str, &str, &str, Option<u32>)> = albums
+            .iter()
+            .map(|c| {
+                (
+                    c.release_group_title.as_deref().unwrap(),
+                    c.release_id.as_str(),
+                    c.album_date.as_deref().unwrap(),
+                    c.editions,
+                )
+            })
+            .collect();
+        // The original's earliest edition (not the demo's), every edition
+        // counted; no compilation, live album or bootleg.
+        assert_eq!(
+            rows,
+            [
+                ("News of the World", "n1", "1977-10-28", Some(4)),
+                ("Tribute", "c1", "2000", Some(1)),
+            ]
+        );
+        assert_eq!(albums[0].recording_id, "original");
+        assert_eq!(albums[0].album_kind, Some(AlbumKind::Studio));
+        assert_eq!(albums[0].format.as_deref(), Some("CD"));
+        // Every album has the same score: the order stays.
+        assert!(albums.iter().all(|c| (c.score - 1.0).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn a_search_keeps_the_kinds_asked_and_the_album_asked_first() {
+        let albums = album_candidates(
+            search_of_a_well_known_song(),
+            "we will rock you",
+            Some("Live Killers"),
+            &[AlbumKind::Studio, AlbumKind::Live, AlbumKind::Single],
+            Album::Any,
+        );
+        let groups: Vec<&str> = albums
+            .iter()
+            .map(|c| c.release_group_title.as_deref().unwrap())
+            .collect();
+        assert_eq!(
+            groups,
+            [
+                "Live Killers",
+                "News of the World",
+                "Tribute",
+                "We Will Rock You"
+            ]
+        );
+    }
+
+    #[test]
+    fn an_album_asked_by_its_id_is_the_only_one() {
+        let only = |asked: AlbumId| {
+            album_candidates(
+                search_of_a_well_known_song(),
+                "we will rock you",
+                None,
+                &EVERY_KIND,
+                Album::Only(&asked),
+            )
+            .into_iter()
+            .map(|c| c.release_id)
+            .collect::<Vec<_>>()
+        };
+        // A compilation too, whatever kinds the search had.
+        assert_eq!(only(AlbumId::ReleaseGroup("g-best".into())), ["b1"]);
+        // That edition, not the album's earliest.
+        assert_eq!(only(AlbumId::Release("n2".into())), ["n2"]);
+        assert_eq!(only(AlbumId::Either("n3".into())), ["n3"]);
+        assert_eq!(only(AlbumId::Either("g-news".into())), ["n1"]);
+        assert!(only(AlbumId::ReleaseGroup("g-other".into())).is_empty());
+        // Its tracklist: a candidate per recording on it.
+        let asked = AlbumId::ReleaseGroup("g-news".into());
+        let tracks = album_candidates(
+            search_of_a_well_known_song(),
+            "not on it",
+            None,
+            &EVERY_KIND,
+            Album::Tracklist(&asked),
+        );
+        assert!(!tracks.is_empty());
+        assert!(
+            tracks
+                .iter()
+                .all(|c| c.release_group_id.as_deref() == Some("g-news"))
+        );
+        let mut recordings: Vec<&str> = tracks.iter().map(|c| c.recording_id.as_str()).collect();
+        recordings.dedup();
+        assert_eq!(recordings.len(), tracks.len());
+    }
+
+    #[test]
+    fn albums_are_given_by_id_or_address() {
+        const ID: &str = "6a1c9b8e-1f0d-4c33-9a39-6d5f0a3b5b11";
+        assert_eq!(
+            AlbumId::parse(&format!("https://musicbrainz.org/release-group/{ID}")),
+            Some(AlbumId::ReleaseGroup(ID.into()))
+        );
+        assert_eq!(
+            AlbumId::parse(&format!(
+                " https://musicbrainz.org/release/{}/?tab=x#top ",
+                ID.to_uppercase()
+            )),
+            Some(AlbumId::Release(ID.into()))
+        );
+        assert_eq!(AlbumId::parse(ID), Some(AlbumId::Either(ID.into())));
+        assert_eq!(AlbumId::parse("News of the World"), None);
+        assert_eq!(
+            AlbumId::parse(&format!("https://musicbrainz.org/artist/{ID}")),
+            None
+        );
+        assert_eq!(AlbumId::parse(&format!("{ID} OR rgid:x")), None);
+        assert_eq!(
+            AlbumId::Either(ID.into()).query(),
+            format!("(rgid:{ID} OR reid:{ID})")
+        );
+    }
+
+    #[test]
+    fn kinds_become_query_clauses() {
+        assert_eq!(
+            kinds_query(&[AlbumKind::Studio]),
+            " AND status:official AND primarytype:(album) AND NOT comment:live"
+        );
+        assert_eq!(
+            kinds_query(&[AlbumKind::Live, AlbumKind::Single]),
+            " AND status:official AND primarytype:(album OR single OR ep)"
+        );
+        assert_eq!(
+            kinds_query(&[AlbumKind::Studio, AlbumKind::Other]),
+            " AND status:official AND NOT comment:live"
+        );
+    }
+
+    #[test]
+    fn only_refusals_that_will_not_change_are_permanent() {
+        let answer = |status| IdentifyError::Service {
+            service: "AcoustID",
+            status,
+            message: String::new(),
+        };
+        assert!(answer(400).is_permanent());
+        assert!(answer(401).is_permanent());
+        assert!(!answer(429).is_permanent());
+        assert!(!answer(503).is_permanent());
+        assert!(!answer(200).is_permanent());
+    }
 
     #[test]
     fn search_phrases_are_quoted() {
@@ -963,5 +1893,29 @@ mod tests {
         assert_eq!(so_what.first_release_year, Some(1959));
         let alternate = &recordings["bc80349a-c5d6-4d35-8d29-87d5b10e5d5d"];
         assert_eq!(alternate.first_release_year, Some(1959));
+    }
+
+    #[test]
+    fn an_artist_gets_its_wikidata_item() {
+        let artist: MbArtistUrls = serde_json::from_value(serde_json::json!({
+            "relations": [
+                {"type": "official homepage", "url": {"resource": "https://example.org/"}},
+                {"type": "wikidata", "url": {"resource": "https://www.wikidata.org/wiki/Q15862"}},
+            ]
+        }))
+        .unwrap();
+        assert_eq!(artist.wikidata().as_deref(), Some("Q15862"));
+        let none: MbArtistUrls = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(none.wikidata(), None);
+        assert_eq!(
+            wikidata_item("https://www.wikidata.org/wiki/Q42/"),
+            Some("Q42".into())
+        );
+        assert_eq!(
+            wikidata_item("https://www.wikidata.org/wiki/Property:P31"),
+            None
+        );
+        assert_eq!(wikidata_item("https://www.wikidata.org/wiki/Q"), None);
+        assert_eq!(wikidata_item("https://www.wikidata.org/wiki/Q12x"), None);
     }
 }

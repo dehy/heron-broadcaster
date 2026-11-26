@@ -205,7 +205,7 @@ impl Stager {
             if !fresh.is_empty() {
                 let key = settings.acoustid_key.is_some().then_some(&identifier);
                 match self
-                    .identify_group(group, fresh, key, &layout, &mut planned)
+                    .identify_group(group, fresh, key, &identifier, &layout, &mut planned)
                     .await?
                 {
                     Some(ready) => report.ready += ready,
@@ -213,7 +213,10 @@ impl Stager {
                 }
             }
             for file in chosen {
-                let ready = if file.base.is_some() {
+                let ready = if matches!(file.choice, Some(StagedChoice::Search { .. })) {
+                    self.search_again(file, &identifier, &layout, &mut planned)
+                        .await?
+                } else if file.base.is_some() {
                     self.apply_edits(file, &layout, &mut planned).await?
                 } else {
                     self.apply_choice(group, file, &identifier, &layout, &mut planned)
@@ -270,6 +273,7 @@ impl Stager {
         group: u64,
         files: Vec<Waiting>,
         identifier: Option<&Identifier>,
+        searcher: &Identifier,
         layout: &Layout,
         planned: &mut HashSet<String>,
     ) -> Result<Option<u64>, StagingError> {
@@ -305,7 +309,7 @@ impl Stager {
                             at: Instant::now(),
                         });
                         retry.attempts += 1;
-                        if retry.attempts < LOOKUP_ATTEMPTS {
+                        if retry.attempts < LOOKUP_ATTEMPTS && !error.is_permanent() {
                             retry.at = Instant::now() + RETRY_DELAY * 2_u32.pow(retry.attempts - 1);
                             tracing::warn!(group, %error, attempt = retry.attempts, "identification failed, will retry");
                             return Ok(None);
@@ -330,7 +334,7 @@ impl Stager {
         for ((file, mut read), identified) in files.into_iter().zip(reads).zip(identified) {
             let own = read.file.tags.clone();
             let edits = file.edits();
-            let (identification, base) = match identified {
+            let (mut identification, base) = match identified {
                 None => (
                     StagedIdentification {
                         status: StagedIdentificationStatus::Off,
@@ -371,6 +375,17 @@ impl Stager {
                     own.clone(),
                 ),
             };
+
+            // Not found by its sound: searched by its title and artist.
+            // Without a key identification is off: the file keeps its tags.
+            if !matches!(
+                identification.status,
+                StagedIdentificationStatus::Identified | StagedIdentificationStatus::Off
+            ) && identification.candidates.is_empty()
+                && let Some(Ok(searched)) = search(searcher, &apply_edits(&own, &edits), &[]).await
+            {
+                identification = searched;
+            }
 
             let chromaprint = read.chromaprint.as_ref().map(|c| c.as_bytes().to_vec());
             let duplicates = self
@@ -431,7 +446,9 @@ impl Stager {
     ) -> Result<bool, StagingError> {
         let own = file.own.clone().unwrap_or_default();
         let (applied, error) = match &file.choice {
-            None | Some(StagedChoice::Own) => (Some(own.clone()), None),
+            None | Some(StagedChoice::Own | StagedChoice::Search { .. }) => {
+                (Some(own.clone()), None)
+            }
             Some(StagedChoice::Release {
                 release_id,
                 recording_id,
@@ -452,7 +469,7 @@ impl Stager {
                         at: Instant::now(),
                     });
                     retry.attempts += 1;
-                    if retry.attempts < LOOKUP_ATTEMPTS {
+                    if retry.attempts < LOOKUP_ATTEMPTS && !error.is_permanent() {
                         retry.at = Instant::now() + RETRY_DELAY * 2_u32.pow(retry.attempts - 1);
                         return Ok(false);
                     }
@@ -492,6 +509,72 @@ impl Stager {
                 .await?
             }
         };
+        Ok(updated.rows_affected() > 0)
+    }
+
+    /// Searches MusicBrainz for the words given, else the file's tags as
+    /// edited: its candidates are replaced, and it is undecided again.
+    async fn search_again(
+        &self,
+        file: Waiting,
+        identifier: &Identifier,
+        layout: &Layout,
+        planned: &mut HashSet<String>,
+    ) -> Result<bool, StagingError> {
+        let own = file.own.clone().unwrap_or_default();
+        let applied = apply_edits(&own, &file.edits());
+        let (query, kinds) = match &file.choice {
+            Some(StagedChoice::Search {
+                title,
+                artist,
+                album,
+                kinds,
+            }) => (
+                Tags {
+                    title: Some(title.clone()),
+                    artist: Some(artist.clone()),
+                    album: album.clone(),
+                    ..Tags::default()
+                },
+                kinds.as_slice(),
+            ),
+            _ => (applied.clone(), &[][..]),
+        };
+        let identification = match search(identifier, &query, kinds).await {
+            Some(Ok(found)) => found,
+            // What it had stays: the search can be tried again.
+            failed => {
+                let error = match failed {
+                    Some(Err(error)) => format!("cannot search MusicBrainz: {error}"),
+                    _ => "give it a title and an artist to search MusicBrainz".to_owned(),
+                };
+                let updated = sqlx::query(
+                    "UPDATE staged_files SET status = 'ready', choice = NULL, error = ?
+                     WHERE id = ? AND status = 'identifying'",
+                )
+                .bind(error)
+                .bind(file.id)
+                .execute(&self.pool)
+                .await?;
+                return Ok(updated.rows_affected() > 0);
+            }
+        };
+        let planned_path = self
+            .plan_path(layout, &applied, &file.staged_path, planned)
+            .await?;
+        let updated = sqlx::query(
+            "UPDATE staged_files SET status = 'ready', choice = NULL, identification = ?,
+                 base_tags = ?, applied_tags = ?, planned_path = ?, error = NULL
+             WHERE id = ? AND status = 'identifying' AND tag_edits <=> ?",
+        )
+        .bind(json(&identification))
+        .bind(json(&own))
+        .bind(json(&applied))
+        .bind(planned_path)
+        .bind(file.id)
+        .bind(&file.edits)
+        .execute(&self.pool)
+        .await?;
         Ok(updated.rows_affected() > 0)
     }
 
@@ -643,12 +726,64 @@ fn read_file(path: &std::path::Path) -> Read {
             None
         }
     };
+    for damage in heron_library::integrity::check(path) {
+        let flag = match damage {
+            heron_library::integrity::Damage::SeekTable => StagedFlag::BrokenSeekTable,
+            heron_library::integrity::Damage::Frames { .. } => StagedFlag::DamagedAudio,
+            heron_library::integrity::Damage::Mixed { .. } => StagedFlag::MixedStreams,
+        };
+        tracing::info!(path = %path.display(), ?damage, "damaged file");
+        flags.push(flag);
+    }
     Read {
         file,
         content_hash,
         chromaprint,
         flags,
     }
+}
+
+/// What a search of MusicBrainz by a file's title and artist found, as its
+/// identification: `None` without both.
+async fn search(
+    identifier: &Identifier,
+    tags: &Tags,
+    kinds: &[heron_core::library::AlbumKind],
+) -> Option<Result<StagedIdentification, crate::identify::IdentifyError>> {
+    let title = tags
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())?;
+    let artist = tags
+        .artist
+        .as_deref()
+        .map(str::trim)
+        .filter(|a| !a.is_empty())?;
+    let (reason, candidates) = match identifier
+        .search_recordings(title, artist, tags.album.as_deref(), kinds)
+        .await
+    {
+        Ok(found) if found.is_empty() => {
+            ("not found on MusicBrainz by its title and artist", found)
+        }
+        Ok(found) => (
+            "found on MusicBrainz by its title and artist: pick its release",
+            found,
+        ),
+        Err(error) => {
+            tracing::warn!(%error, "cannot search MusicBrainz");
+            return Some(Err(error));
+        }
+    };
+    Some(Ok(StagedIdentification {
+        status: StagedIdentificationStatus::NeedsReview,
+        reason: Some(reason.to_owned()),
+        score: candidates.iter().map(|c| c.score).reduce(f64::max),
+        recording_mbid: None,
+        release_mbid: None,
+        candidates: candidates_list(&candidates),
+    }))
 }
 
 fn candidates_list(candidates: &[crate::identify::matching::Candidate]) -> Vec<serde_json::Value> {
@@ -739,7 +874,8 @@ impl ToImport {
                 Some(release_id.clone()),
             ),
             Some(StagedChoice::Own) => (IdentificationStatus::Kept, None, None, None),
-            None => match identification.status {
+            // A search is done before a file is ready again.
+            None | Some(StagedChoice::Search { .. }) => match identification.status {
                 StagedIdentificationStatus::Identified => (
                     IdentificationStatus::Identified,
                     None,

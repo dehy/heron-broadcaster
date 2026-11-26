@@ -26,8 +26,9 @@ import { type PlainKey, number, rich, t } from "../i18n";
 import { dateTime, duration, trackName } from "../lib/format";
 import { Link, setSearch, useLocation } from "../lib/router";
 import { useAction, useCan } from "../lib/session";
+import { LibraryReviewDialog } from "./LibraryReview";
 
-type Tab = "review" | "intros" | "hooks" | "covers" | "organize" | "batches";
+type Tab = "review" | "damaged" | "intros" | "hooks" | "covers" | "organize" | "batches";
 
 /** The query key of the tabs' counts, refreshed with what changes them. */
 export const TODO_COUNTS = ["todo-counts"];
@@ -42,6 +43,7 @@ export function ToDo() {
   });
   const count: Partial<Record<Tab, number | null | undefined>> = {
     review: counts.data?.to_identify,
+    damaged: counts.data?.damaged,
     intros: counts.data?.no_intro,
     hooks: counts.data?.no_hook,
     covers: counts.data?.no_cover,
@@ -56,6 +58,7 @@ export function ToDo() {
         {(
           [
             ["review", "todo.tab.identify"],
+            ["damaged", "todo.tab.damaged"],
             ["intros", "todo.tab.intros"],
             ["hooks", "todo.tab.hooks"],
             ["covers", "todo.tab.covers"],
@@ -81,6 +84,7 @@ export function ToDo() {
           })}
       </nav>
       {tab === "review" && <Identifications />}
+      {tab === "damaged" && <DamagedTracks />}
       {tab === "intros" && <MissingSongs filter="no_intro" empty="todo.noMissingIntro" />}
       {tab === "hooks" && <MissingSongs filter="no_hook" empty="todo.noMissingHook" />}
       {tab === "covers" &&
@@ -326,7 +330,83 @@ function CoverAlbum({ album }: Readonly<{ album: Schemas["CandidateAlbum"] }>) {
 
 // Identifications -----------------------------------------------------------
 
+/** Damaged files of the library, reviewed one after another. */
+function DamagedTracks() {
+  const canEdit = useCan("operator");
+  const [reviewing, setReviewing] = useState<number | null>(null);
+  const tracks = useQuery({
+    queryKey: ["tracks", "damaged"],
+    queryFn: () => unwrap(api.GET("/api/v1/tracks", { params: { query: { filter: "damaged", limit: 200 } } })),
+  });
+  if (tracks.isPending) {
+    return <Loading />;
+  }
+  if (tracks.isError) {
+    return <ErrorView error={tracks.error} />;
+  }
+  const ids = tracks.data.items.map((track) => track.id);
+  if (ids.length === 0) {
+    return (
+      <Card>
+        <Empty>{t("todo.noDamaged")}</Empty>
+      </Card>
+    );
+  }
+  return (
+    <div className="stack">
+      <div className="row between">
+        <p className="muted" style={{ margin: 0 }}>
+          {t("todo.damagedIntro", { count: tracks.data.total })}
+        </p>
+        {canEdit && (
+          <button type="button" className="btn small primary" onClick={() => setReviewing(0)}>
+            <Icon name="check" size={14} /> {t("buffer.review.action")}
+          </button>
+        )}
+      </div>
+      <Card flush>
+        <ul className="review-list" style={{ maxHeight: "none", border: 0 }}>
+          {tracks.data.items.map((track, at) => (
+            <li key={track.id}>
+              <TrackRow track={track} onOpen={canEdit ? () => setReviewing(at) : undefined} />
+            </li>
+          ))}
+        </ul>
+      </Card>
+      {reviewing !== null && <LibraryReviewDialog queue={ids} start={reviewing} onClose={() => setReviewing(null)} />}
+    </div>
+  );
+}
+
+/** A track to check: its name (a link to its page), and the button that
+ * opens the review. */
+function TrackRow({
+  track,
+  onOpen,
+}: Readonly<{ track: Schemas["TrackSummary"]; onOpen: (() => void) | undefined }>) {
+  return (
+    <>
+      <span className="candidate-text">
+        <Link to={`/library/${track.id}`} className="ellipsis">
+          {trackName(track)}
+        </Link>
+        <span className="ellipsis muted small">
+          <code>{track.path}</code> · {duration(track.duration_ms)}
+        </span>
+      </span>
+      <span />
+      {onOpen && (
+        <button type="button" className="btn small" onClick={onOpen}>
+          {t("buffer.review.action")}
+        </button>
+      )}
+    </>
+  );
+}
+
 function Identifications() {
+  const canEdit = useCan("operator");
+  const [reviewing, setReviewing] = useState<number | null>(null);
   const review = useQuery({
     queryKey: ["review"],
     queryFn: () => unwrap(api.GET("/api/v1/library/review", { params: { query: { limit: 50 } } })),
@@ -348,130 +428,33 @@ function Identifications() {
   }
   return (
     <div className="stack">
-      <p className="muted" style={{ margin: 0 }}>
-        {t("review.intro", { count: review.data.total })}
-      </p>
-      {review.data.items.map((item) => (
-        <ReviewItem key={item.track.id} item={item} />
-      ))}
-    </div>
-  );
-}
-
-function ReviewItem({ item }: Readonly<{ item: Schemas["ReviewItem"] }>) {
-  const canEdit = useCan("operator");
-  const client = useQueryClient();
-  const toast = useToast();
-  const [taskId, setTaskId] = useState<number | null>(null);
-  const task = useTask(taskId);
-  const apply = useAction(
-    (candidate: Schemas["ReviewCandidate"]) =>
-      unwrap(
-        api.POST("/api/v1/tracks/{id}/review/apply", {
-          params: { path: { id: item.track.id } },
-          body: { release_id: candidate.release_id, recording_id: candidate.recording_id },
-        }),
-      ),
-    { onSuccess: (queued) => setTaskId(queued.id) },
-  );
-  const keep = useAction(
-    () => done(api.POST("/api/v1/tracks/{id}/review/keep", { params: { path: { id: item.track.id } } })),
-    { success: t("review.kept"), invalidate: [["review"], ["review-count"], TODO_COUNTS] },
-  );
-
-  useEffect(() => {
-    if (task.data?.status === "done") {
-      toast(t("review.applied", { track: trackName(item.track) }));
-      void client.invalidateQueries({ queryKey: ["review"] });
-      void client.invalidateQueries({ queryKey: ["review-count"] });
-      void client.invalidateQueries({ queryKey: TODO_COUNTS });
-      void client.invalidateQueries({ queryKey: ["library-batches"] });
-    } else if (task.data?.status === "failed") {
-      toast(task.data.error ?? t("review.applyFailed"), true);
-    }
-  }, [task.data?.status, task.data?.error, client, toast, item.track]);
-
-  const busy = taskId !== null && task.data?.status !== "failed";
-  return (
-    <Card
-      title={
-        <div style={{ minWidth: 0 }}>
-          <h2 className="ellipsis">
-            <Link to={`/library/${item.track.id}`}>{trackName(item.track)}</Link>
-          </h2>
-          <div className="muted small ellipsis">
-            <code>{item.track.path}</code> · {duration(item.track.duration_ms)}
-          </div>
-        </div>
-      }
-      actions={
-        canEdit && (
-          <button type="button" className="btn small" disabled={busy} onClick={() => keep.mutate(undefined)}>
-            <Icon name="check" size={14} /> {t("review.keep")}
+      <div className="row between">
+        <p className="muted" style={{ margin: 0 }}>
+          {t("review.intro", { count: review.data.total })}
+        </p>
+        {canEdit && (
+          <button type="button" className="btn small primary" onClick={() => setReviewing(0)}>
+            <Icon name="check" size={14} /> {t("buffer.review.action")}
           </button>
-        )
-      }
-      flush
-    >
-      <div className="card-body row between">
-        <span className="warn small">{item.reason ?? t("library.filter.needsReview")}</span>
-        <TaskState task={task.data} />
+        )}
       </div>
-      {item.candidates.length === 0 ? (
-        <Empty>{t("review.noCandidate")}</Empty>
-      ) : (
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t("review.release")}</th>
-                <th className="hide-narrow">{t("review.date")}</th>
-                <th className="hide-narrow">{t("review.country")}</th>
-                <th>{t("history.track")}</th>
-                <th>{t("review.score")}</th>
-                <th>
-                  <span className="visually-hidden">{t("library.actions")}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {item.candidates.map((candidate) => (
-                <tr key={`${candidate.release_id}-${candidate.recording_id}-${candidate.disc}-${candidate.track}`}>
-                  <td className="title-cell">
-                    <a
-                      href={`https://musicbrainz.org/release/${candidate.release_id}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {candidate.release_title ?? candidate.release_group_title ?? candidate.release_id}
-                    </a>
-                  </td>
-                  <td className="hide-narrow">{candidate.date ?? "–"}</td>
-                  <td className="hide-narrow">{candidate.country ?? "–"}</td>
-                  <td className="num">
-                    {candidate.disc && candidate.disc > 1 ? `${candidate.disc}-` : ""}
-                    {candidate.track ?? "–"}
-                  </td>
-                  <td className="num">{number(candidate.score, { style: "percent" })}</td>
-                  <td className="actions">
-                    {canEdit && (
-                      <button
-                        type="button"
-                        className="btn small primary"
-                        disabled={busy || apply.isPending}
-                        onClick={() => apply.mutate(candidate)}
-                      >
-                        {t("review.apply")}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <Card flush>
+        <ul className="review-list" style={{ maxHeight: "none", border: 0 }}>
+          {review.data.items.map((item, at) => (
+            <li key={item.track.id}>
+              <TrackRow track={item.track} onOpen={canEdit ? () => setReviewing(at) : undefined} />
+            </li>
+          ))}
+        </ul>
+      </Card>
+      {reviewing !== null && (
+        <LibraryReviewDialog
+          queue={review.data.items.map((item) => item.track.id)}
+          start={reviewing}
+          onClose={() => setReviewing(null)}
+        />
       )}
-    </Card>
+    </div>
   );
 }
 

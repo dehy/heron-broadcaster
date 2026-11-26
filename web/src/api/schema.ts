@@ -1861,6 +1861,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/integrity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How far the check of the library's files is, and what it found. Files
+         *     are checked in the background, and again when they change.
+         */
+        get: operations["integrity"];
+        put?: never;
+        /**
+         * Checks every file of the library again, from the start. Operators and
+         *     admins.
+         */
+        post: operations["check_files_again"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/musicbrainz-details": {
         parameters: {
             query?: never;
@@ -1997,6 +2021,26 @@ export interface paths {
          *     kept in Heron. Admins.
          */
         post: operations["write_tag_overrides"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/tag-values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The values a tag already has in the library, the most used first: what
+         *     the tag editors propose while an artist or an album is typed.
+         */
+        get: operations["tag_values"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6391,6 +6435,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracks/{id}/review/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Computes the tags one of the track's candidate releases would give it,
+         *     written nowhere: the task's result is `{own, applied}`. Operators and
+         *     admins.
+         */
+        post: operations["preview_release"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracks/{id}/review/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Searches MusicBrainz for a track by a title and an artist (an album
+         *     helps): what is found becomes its candidates on *To identify*.
+         *     Operators and admins.
+         */
+        post: operations["search_track"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracks/{id}/waveform": {
         parameters: {
             query?: never;
@@ -6978,6 +7064,12 @@ export interface components {
              */
             stereo_expander: components["schemas"]["StereoExpanderSettings"];
         };
+        /**
+         * @description A kind of album, from its MusicBrainz release group types: what a
+         *     search looks on and what its results show.
+         * @enum {string}
+         */
+        AlbumKind: "studio" | "live" | "compilation" | "single" | "other";
         AnalysisQueueStatus: {
             /** Format: int64 */
             failed: number;
@@ -7249,6 +7341,9 @@ export interface components {
         AudienceComparison: {
             current: components["schemas"]["Audience"];
             previous: components["schemas"]["Audience"];
+        };
+        BTreeMap: {
+            [key: string]: null | string;
         };
         /**
          * @description Which key opens an encrypted backup.
@@ -7902,6 +7997,14 @@ export interface components {
         } | {
             /** @enum {string} */
             kind: "own";
+        } | {
+            album?: string | null;
+            artist: string;
+            /** @enum {string} */
+            kind: "search";
+            /** @description The kinds of album to look on; none means studio albums. */
+            kinds?: components["schemas"]["AlbumKind"][];
+            title: string;
         };
         /**
          * @description How a track of an attempt was chosen.
@@ -8560,6 +8663,11 @@ export interface components {
         };
         /** @description What a MusicBrainz details lookup did. */
         DetailsReport: {
+            /**
+             * Format: int64
+             * @description Artists looked up for their Wikidata item (one request each).
+             */
+            artists?: number;
             /**
              * Format: int64
              * @description Lookups that failed (tried again next time).
@@ -9836,6 +9944,23 @@ export interface components {
             /** @default null */
             year: string | null;
         };
+        Integrity: {
+            /**
+             * Format: int64
+             * @description Checked since their file last changed.
+             */
+            checked: number;
+            /**
+             * Format: int64
+             * @description Damaged.
+             */
+            damaged: number;
+            /**
+             * Format: int64
+             * @description Tracks of the library (the trash and missing files left out).
+             */
+            tracks: number;
+        };
         IntroInput: {
             /**
              * Format: int32
@@ -10008,6 +10133,8 @@ export interface components {
              *     background.
              */
             fetch_covers?: boolean | null;
+            /** @description Look the tracks without a MusicBrainz match up in the background. */
+            identify_library?: boolean | null;
             /** @description See `docs/library.md#layout`. */
             layout?: string | null;
             /**
@@ -10044,6 +10171,11 @@ export interface components {
              *     the background.
              */
             fetch_covers: boolean;
+            /**
+             * @description Tracks without a MusicBrainz match are looked up in the background;
+             *     what is found waits on *To identify*.
+             */
+            identify_library: boolean;
             layout: string;
             /**
              * Format: int64
@@ -10104,6 +10236,7 @@ export interface components {
             /** Format: int64 */
             id: number;
             plan?: components["schemas"]["OrganizePlan"] | null;
+            preview?: components["schemas"]["ReleasePreview"] | null;
             purge?: components["schemas"]["PurgeReport"] | null;
             relations?: components["schemas"]["RelationsReport"] | null;
             report?: components["schemas"]["BatchReport"] | null;
@@ -10793,6 +10926,24 @@ export interface components {
          * @enum {string}
          */
         Movement: "up" | "down" | "same" | "new" | "reentry";
+        /**
+         * @description A track's MusicBrainz identifiers, as its tags and its MusicBrainz
+         *     details give them. Each is `null` when unknown.
+         */
+        MusicBrainzIds: {
+            /** @description The first credited artist. */
+            artist_id?: string | null;
+            /** @description The artist's Wikidata item (`Q42`). */
+            artist_wikidata_id?: string | null;
+            /**
+             * Format: int32
+             * @description From the MusicBrainz details, else the year tag.
+             */
+            first_release_year?: number | null;
+            recording_id?: string | null;
+            release_group_id?: string | null;
+            release_id?: string | null;
+        };
         /** @enum {string} */
         NameFrom: "artists" | "titles";
         NewGroup: {
@@ -11569,6 +11720,7 @@ export interface components {
              * @description Missing while the track plays.
              */
             ended_at_unix_ms?: number | null;
+            musicbrainz?: components["schemas"]["MusicBrainzIds"] | null;
             /** Format: int64 */
             started_at_unix_ms: number;
             title?: string | null;
@@ -11592,6 +11744,7 @@ export interface components {
              */
             duration_ms: number;
             match?: components["schemas"]["OnAirMatch"] | null;
+            musicbrainz?: components["schemas"]["MusicBrainzIds"] | null;
             /** Format: int64 */
             position_ms: number;
             /** Format: int64 */
@@ -11917,8 +12070,20 @@ export interface components {
             relay_mount?: string | null;
         };
         ReleaseChoice: {
+            /**
+             * @description Fields corrected by hand (title, artist, album, album_artist, year,
+             *     track, disc), written over the release's tags; `null` removes one.
+             */
+            fixes?: {
+                [key: string]: string | null;
+            };
             recording_id: string;
             release_id: string;
+        };
+        /** @description A track's tags, and those a release would give it. */
+        ReleasePreview: {
+            applied: components["schemas"]["StagedTags"];
+            own: components["schemas"]["StagedTags"];
         };
         /** @description A track taken out of a chart. */
         Removed: {
@@ -11988,11 +12153,27 @@ export interface components {
         };
         /** @description A release a track may be on, from AcoustID. */
         ReviewCandidate: {
+            /** @description The album's earliest release date among the editions found. */
+            album_date?: string | null;
+            album_kind?: components["schemas"]["AlbumKind"] | null;
+            artist?: string | null;
             country?: string | null;
             /** @description `YYYY-MM-DD`, `YYYY-MM` or `YYYY`. */
             date?: string | null;
             /** Format: int32 */
             disc?: number | null;
+            /**
+             * Format: int32
+             * @description How many editions of the album were found with the recording.
+             */
+            editions?: number | null;
+            /** @description The release's medium format ("CD", "Digital Media"…). */
+            format?: string | null;
+            /**
+             * Format: int32
+             * @description The recording's length, when known.
+             */
+            length_ms?: number | null;
             recording_id: string;
             release_group_id?: string | null;
             release_group_title?: string | null;
@@ -12000,8 +12181,12 @@ export interface components {
             release_title?: string | null;
             /** Format: double */
             score: number;
+            /** @description The recording's title and artist, when known. */
+            title?: string | null;
             /** Format: int32 */
             track?: number | null;
+            /** Format: int32 */
+            track_count?: number | null;
         };
         ReviewItem: {
             /** @description Best first. */
@@ -12751,6 +12936,14 @@ export interface components {
         } | {
             /** @enum {string} */
             kind: "own";
+        } | {
+            album?: string | null;
+            artist: string;
+            /** @enum {string} */
+            kind: "search";
+            /** @description The kinds of album to look on; none means studio albums. */
+            kinds?: components["schemas"]["AlbumKind"][];
+            title: string;
         };
         StagedFile: {
             /** @description Releases it may be on, best first. */
@@ -12809,7 +13002,7 @@ export interface components {
          * @description Why a file of the buffer zone should be looked at before it is imported.
          * @enum {string}
          */
-        StagedFlag: "duplicate_in_library" | "duplicate_in_buffer" | "same_recording_in_library" | "undecodable" | "too_short" | "unsupported_format";
+        StagedFlag: "duplicate_in_library" | "duplicate_in_buffer" | "same_recording_in_library" | "undecodable" | "too_short" | "unsupported_format" | "broken_seek_table" | "damaged_audio" | "mixed_streams";
         StagedGroup: {
             /** Format: int64 */
             created_at_unix_ms: number;
@@ -13442,6 +13635,27 @@ export interface components {
              */
             tracks: number;
         };
+        TagValue: {
+            /**
+             * @description For an album: its album artist (else its artist). An album of the
+             *     same name by another artist is another value.
+             */
+            album_artist?: string | null;
+            /**
+             * Format: int64
+             * @description The library's tracks with this value.
+             */
+            tracks: number;
+            value: string;
+            /**
+             * Format: int64
+             * @description For an album: the earliest year of its tracks.
+             */
+            year?: number | null;
+        };
+        TagValues: {
+            values: components["schemas"]["TagValue"][];
+        };
         Target: {
             id: components["schemas"]["u64"];
             /** @enum {string} */
@@ -13472,12 +13686,35 @@ export interface components {
         } | {
             /** Format: int32 */
             disc?: number | null;
+            /** @description Fields corrected by hand, written over the release's tags. */
+            fixes?: components["schemas"]["BTreeMap"];
             /** @enum {string} */
             kind: "review_apply";
             recording_id: string;
             release_id: string;
             /** Format: int32 */
             track?: number | null;
+            /** Format: int64 */
+            track_id: number;
+        } | {
+            /** Format: int32 */
+            disc?: number | null;
+            /** @enum {string} */
+            kind: "review_preview";
+            recording_id: string;
+            release_id: string;
+            /** Format: int32 */
+            track?: number | null;
+            /** Format: int64 */
+            track_id: number;
+        } | {
+            album?: string | null;
+            artist: string;
+            /** @enum {string} */
+            kind: "review_search";
+            /** @description The kinds of album to look on; none means studio albums. */
+            kinds?: components["schemas"]["AlbumKind"][];
+            title: string;
             /** Format: int64 */
             track_id: number;
         } | {
@@ -13565,6 +13802,11 @@ export interface components {
         TimeStatus: "planned" | "queued" | "played" | "passed_over" | "none";
         /** @description What there is to do on the library: the counts of the *To do* page. */
         TodoCounts: {
+            /**
+             * Format: int64
+             * @description Tracks whose file is damaged (`GET /tracks?filter=damaged`).
+             */
+            damaged: number;
             /**
              * Format: int64
              * @description Active songs with no cover; `null` while cover art is turned off.
@@ -13812,12 +14054,20 @@ export interface components {
             /** @description Its album's Cover Art Archive candidates, waiting for an operator. */
             cover_candidates: components["schemas"]["CoverCandidate"][];
             /**
+             * @description What the check of its file found (`broken_seek_table`,
+             *     `damaged_audio`, `mixed_streams`); empty for a sound file, or one
+             *     not checked yet.
+             */
+            damage: string[];
+            /**
              * Format: int64
              * @description In the trash since then (purged after `trash_days`).
              */
             deleted_at_unix_ms?: number | null;
             file: components["schemas"]["TrackFile"];
             identification?: components["schemas"]["TrackIdentification"] | null;
+            /** @description The releases its identification found, best first. */
+            identification_candidates: components["schemas"]["ReviewCandidate"][];
             markers?: components["schemas"]["TrackMarkers"] | null;
             musicbrainz?: components["schemas"]["TrackMusicBrainz"] | null;
             overrides: components["schemas"]["TrackOverrides"];
@@ -13859,13 +14109,20 @@ export interface components {
         };
         /** @description The file and its tags, as the scanner read them. */
         TrackFile: {
+            /**
+             * @description The artist's Wikidata item (`Q42`), looked up with the MusicBrainz
+             *     details.
+             */
+            artist_wikidata_id?: string | null;
             /** Format: int32 */
             channels?: number | null;
             /** Format: int32 */
             disc_number?: number | null;
             /** Format: int64 */
             missing_since_unix_ms?: number | null;
+            musicbrainz_artist_id?: string | null;
             musicbrainz_recording_id?: string | null;
+            musicbrainz_release_group_id?: string | null;
             musicbrainz_release_id?: string | null;
             /** Format: int32 */
             sample_rate?: number | null;
@@ -13880,7 +14137,7 @@ export interface components {
             year_tag?: number | null;
         };
         /** @enum {string} */
-        TrackFilter: "playable" | "missing" | "unanalyzed" | "silent" | "disabled" | "needs_review" | "no_cover" | "no_intro" | "no_hook";
+        TrackFilter: "playable" | "missing" | "unanalyzed" | "silent" | "disabled" | "needs_review" | "no_cover" | "no_intro" | "no_hook" | "damaged";
         TrackIdentification: {
             /** @description Why the track needs review. */
             reason?: string | null;
@@ -14169,6 +14426,13 @@ export interface components {
             /** Format: int32 */
             year_min?: number | null;
         };
+        TrackSearch: {
+            album?: string | null;
+            artist: string;
+            /** @description The kinds of album to look on; none means studio albums. */
+            kinds?: components["schemas"]["AlbumKind"][];
+            title: string;
+        };
         /** @description Some tracks: these IDs, or every track matching the filters. */
         TrackSelection: {
             filters?: components["schemas"]["TrackQuery"] | null;
@@ -14396,13 +14660,14 @@ export interface components {
         UpcomingTrack: {
             album?: string | null;
             artist?: string | null;
-            /** @description Its cover, else the station's logo; filled by [`fill_covers`]. */
+            /** @description Its cover, else the station's logo; filled by [`fill_details`]. */
             cover_url?: string | null;
             /**
              * Format: int64
              * @description From the cue-in to the cue-out.
              */
             duration_ms: number;
+            musicbrainz?: components["schemas"]["MusicBrainzIds"] | null;
             /**
              * Format: int64
              * @description When it should start, crossfades included, as the Queue page shows it.
@@ -18629,6 +18894,60 @@ export interface operations {
             };
         };
     };
+    integrity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Integrity"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    check_files_again: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Integrity"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     fetch_details: {
         parameters: {
             query?: never;
@@ -18816,6 +19135,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    tag_values: {
+        parameters: {
+            query: {
+                field: "artist" | "album_artist" | "album";
+                /**
+                 * @description What was typed: 1 to 100 characters, matching the start of a word,
+                 *     ignoring case and accents.
+                 */
+                q: string;
+                /** @description For `album`: this artist's (or album artist's) albums come first. */
+                artist?: string;
+                /** @description 1 to 50, 10 by default. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagValues"];
                 };
             };
             "4XX": {
@@ -28285,7 +28642,7 @@ export interface operations {
                  *     whatever its name), not disabled, not missing. What *To do* lists.
                  */
                 active_songs?: boolean;
-                filter?: "playable" | "missing" | "unanalyzed" | "silent" | "disabled" | "needs_review" | "no_cover" | "no_intro" | "no_hook";
+                filter?: "playable" | "missing" | "unanalyzed" | "silent" | "disabled" | "needs_review" | "no_cover" | "no_intro" | "no_hook" | "damaged";
                 /** @description Tracks with every one of these labels (IDs, comma-separated). */
                 labels_all?: string;
                 /** @description Tracks with at least one of these labels. */
@@ -29120,6 +29477,72 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    preview_release: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseChoice"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
+                };
+            };
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    search_track: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrackSearch"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryTask"];
+                };
             };
             "4XX": {
                 headers: {

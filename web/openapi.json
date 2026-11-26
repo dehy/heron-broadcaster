@@ -5114,6 +5114,62 @@
         }
       }
     },
+    "/api/v1/library/integrity": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "How far the check of the library's files is, and what it found. Files\nare checked in the background, and again when they change.",
+        "operationId": "integrity",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Integrity"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Checks every file of the library again, from the start. Operators and\nadmins.",
+        "operationId": "check_files_again",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Integrity"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/library/musicbrainz-details": {
       "post": {
         "tags": [
@@ -5349,6 +5405,80 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library/tag-values": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "The values a tag already has in the library, the most used first: what\nthe tag editors propose while an artist or an album is typed.",
+        "operationId": "tag_values",
+        "parameters": [
+          {
+            "name": "field",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "A tag whose values are proposed while it is typed.",
+              "enum": [
+                "artist",
+                "album_artist",
+                "album"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "What was typed: 1 to 100 characters, matching the start of a word,\nignoring case and accents.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artist",
+            "in": "query",
+            "description": "For `album`: this artist's (or album artist's) albums come first.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1 to 50, 10 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagValues"
                 }
               }
             }
@@ -19262,7 +19392,8 @@
                 "needs_review",
                 "no_cover",
                 "no_intro",
-                "no_hook"
+                "no_hook",
+                "damaged"
               ]
             }
           },
@@ -20694,6 +20825,108 @@
         }
       }
     },
+    "/api/v1/tracks/{id}/review/preview": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Computes the tags one of the track's candidate releases would give it,\nwritten nowhere: the task's result is `{own, applied}`. Operators and\nadmins.",
+        "operationId": "preview_release",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseChoice"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tracks/{id}/review/search": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Searches MusicBrainz for a track by a title and an artist (an album\nhelps): what is found becomes its candidates on *To identify*.\nOperators and admins.",
+        "operationId": "search_track",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackSearch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tracks/{id}/waveform": {
       "get": {
         "tags": [
@@ -21890,6 +22123,17 @@
         },
         "additionalProperties": false
       },
+      "AlbumKind": {
+        "type": "string",
+        "description": "A kind of album, from its MusicBrainz release group types: what a\nsearch looks on and what its results show.",
+        "enum": [
+          "studio",
+          "live",
+          "compilation",
+          "single",
+          "other"
+        ]
+      },
       "AnalysisQueueStatus": {
         "type": "object",
         "required": [
@@ -22474,6 +22718,37 @@
           "previous": {
             "$ref": "#/components/schemas/Audience"
           }
+        }
+      },
+      "BTreeMap": {
+        "type": "object",
+        "additionalProperties": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "propertyNames": {
+          "type": "string",
+          "description": "A tag Heron edits in the files, besides those identification writes.",
+          "enum": [
+            "title",
+            "artist",
+            "album",
+            "album_artist",
+            "year",
+            "genre",
+            "track",
+            "disc",
+            "isrc",
+            "record_label",
+            "bpm",
+            "mood"
+          ]
         }
       },
       "BackupKey": {
@@ -23987,6 +24262,42 @@
                 "enum": [
                   "own"
                 ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Search MusicBrainz for a title and an artist (an album helps): the\nrecordings found replace the file's candidates.",
+            "required": [
+              "title",
+              "artist",
+              "kind"
+            ],
+            "properties": {
+              "album": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artist": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "search"
+                ]
+              },
+              "kinds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AlbumKind"
+                },
+                "description": "The kinds of album to look on; none means studio albums."
+              },
+              "title": {
+                "type": "string"
               }
             }
           }
@@ -25661,6 +25972,12 @@
           "failed"
         ],
         "properties": {
+          "artists": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Artists looked up for their Wikidata item (one request each).",
+            "minimum": 0
+          },
           "failed": {
             "type": "integer",
             "format": "int64",
@@ -28385,6 +28702,34 @@
         },
         "additionalProperties": false
       },
+      "Integrity": {
+        "type": "object",
+        "required": [
+          "tracks",
+          "checked",
+          "damaged"
+        ],
+        "properties": {
+          "checked": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Checked since their file last changed.",
+            "minimum": 0
+          },
+          "damaged": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Damaged.",
+            "minimum": 0
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tracks of the library (the trash and missing files left out).",
+            "minimum": 0
+          }
+        }
+      },
       "IntroInput": {
         "type": "object",
         "properties": {
@@ -28832,6 +29177,13 @@
             ],
             "description": "Look albums without a cover up on the Cover Art Archive in the\nbackground."
           },
+          "identify_library": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Look the tracks without a MusicBrainz match up in the background."
+          },
           "layout": {
             "type": [
               "string",
@@ -28902,7 +29254,8 @@
           "min_free_mb",
           "trash_days",
           "write_tags",
-          "fetch_covers"
+          "fetch_covers",
+          "identify_library"
         ],
         "properties": {
           "acoustid_key_set": {
@@ -28915,6 +29268,10 @@
           "fetch_covers": {
             "type": "boolean",
             "description": "Albums without a cover are looked up on the Cover Art Archive in\nthe background."
+          },
+          "identify_library": {
+            "type": "boolean",
+            "description": "Tracks without a MusicBrainz match are looked up in the background;\nwhat is found waits on *To identify*."
           },
           "layout": {
             "type": "string"
@@ -29058,6 +29415,17 @@
               {
                 "$ref": "#/components/schemas/OrganizePlan",
                 "description": "The moves of a finished dry run (`organize_plan`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preview": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReleasePreview",
+                "description": "The tags a release would give a track (`review_preview`)."
               },
               {
                 "type": "null"
@@ -30644,6 +31012,53 @@
           "new",
           "reentry"
         ]
+      },
+      "MusicBrainzIds": {
+        "type": "object",
+        "description": "A track's MusicBrainz identifiers, as its tags and its MusicBrainz\ndetails give them. Each is `null` when unknown.",
+        "properties": {
+          "artist_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first credited artist."
+          },
+          "artist_wikidata_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The artist's Wikidata item (`Q42`)."
+          },
+          "first_release_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "From the MusicBrainz details, else the year tag.",
+            "minimum": 0
+          },
+          "recording_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release_group_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "NameFrom": {
         "type": "string",
@@ -32585,6 +33000,17 @@
             "format": "int64",
             "description": "Missing while the track plays."
           },
+          "musicbrainz": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MusicBrainzIds",
+                "description": "Its MusicBrainz identifiers; `null` when it has none."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "started_at_unix_ms": {
             "type": "integer",
             "format": "int64"
@@ -32668,6 +33094,17 @@
               {
                 "$ref": "#/components/schemas/OnAirMatch",
                 "description": "The match it won (`docs/listener-interaction.md#match`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "musicbrainz": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MusicBrainzIds",
+                "description": "Its MusicBrainz identifiers; `null` when it has none."
               },
               {
                 "type": "null"
@@ -33291,6 +33728,19 @@
           "recording_id"
         ],
         "properties": {
+          "fixes": {
+            "type": "object",
+            "description": "Fields corrected by hand (title, artist, album, album_artist, year,\ntrack, disc), written over the release's tags; `null` removes one.",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "recording_id": {
             "type": "string"
           },
@@ -33299,6 +33749,22 @@
           }
         },
         "additionalProperties": false
+      },
+      "ReleasePreview": {
+        "type": "object",
+        "description": "A track's tags, and those a release would give it.",
+        "required": [
+          "own",
+          "applied"
+        ],
+        "properties": {
+          "applied": {
+            "$ref": "#/components/schemas/StagedTags"
+          },
+          "own": {
+            "$ref": "#/components/schemas/StagedTags"
+          }
+        }
       },
       "Removed": {
         "type": "object",
@@ -33536,6 +34002,30 @@
           "release_id"
         ],
         "properties": {
+          "album_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The album's earliest release date among the editions found."
+          },
+          "album_kind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AlbumKind",
+                "description": "The kind of album its release group is, when known."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "artist": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "country": {
             "type": [
               "string",
@@ -33555,6 +34045,31 @@
               "null"
             ],
             "format": "int32",
+            "minimum": 0
+          },
+          "editions": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "How many editions of the album were found with the recording.",
+            "minimum": 0
+          },
+          "format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The release's medium format (\"CD\", \"Digital Media\"…)."
+          },
+          "length_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The recording's length, when known.",
             "minimum": 0
           },
           "recording_id": {
@@ -33585,7 +34100,22 @@
             "type": "number",
             "format": "double"
           },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The recording's title and artist, when known."
+          },
           "track": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "track_count": {
             "type": [
               "integer",
               "null"
@@ -35330,6 +35860,42 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "Search MusicBrainz for these words: the recordings found replace\nits candidates, and it is undecided again.",
+            "required": [
+              "title",
+              "artist",
+              "kind"
+            ],
+            "properties": {
+              "album": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artist": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "search"
+                ]
+              },
+              "kinds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AlbumKind"
+                },
+                "description": "The kinds of album to look on; none means studio albums."
+              },
+              "title": {
+                "type": "string"
+              }
+            }
           }
         ],
         "description": "What a file of the buffer zone is imported as, when not its\nidentification (as stored in `staged_files.choice`)."
@@ -35551,7 +36117,10 @@
           "same_recording_in_library",
           "undecodable",
           "too_short",
-          "unsupported_format"
+          "unsupported_format",
+          "broken_seek_table",
+          "damaged_audio",
+          "mixed_streams"
         ]
       },
       "StagedGroup": {
@@ -37042,6 +37611,52 @@
           }
         }
       },
+      "TagValue": {
+        "type": "object",
+        "required": [
+          "value",
+          "tracks"
+        ],
+        "properties": {
+          "album_artist": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For an album: its album artist (else its artist). An album of the\nsame name by another artist is another value."
+          },
+          "tracks": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The library's tracks with this value."
+          },
+          "value": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "For an album: the earliest year of its tracks."
+          }
+        }
+      },
+      "TagValues": {
+        "type": "object",
+        "required": [
+          "values"
+        ],
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TagValue"
+            }
+          }
+        }
+      },
       "Target": {
         "oneOf": [
           {
@@ -37177,6 +37792,10 @@
                 "format": "int32",
                 "minimum": 0
               },
+              "fixes": {
+                "$ref": "#/components/schemas/BTreeMap",
+                "description": "Fields corrected by hand, written over the release's tags."
+              },
               "kind": {
                 "type": "string",
                 "enum": [
@@ -37196,6 +37815,93 @@
                 ],
                 "format": "int32",
                 "minimum": 0
+              },
+              "track_id": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The tags a release would give a track (its file's and the\nrelease's, merged), without writing them.",
+            "required": [
+              "track_id",
+              "release_id",
+              "recording_id",
+              "kind"
+            ],
+            "properties": {
+              "disc": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "review_preview"
+                ]
+              },
+              "recording_id": {
+                "type": "string"
+              },
+              "release_id": {
+                "type": "string"
+              },
+              "track": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
+              },
+              "track_id": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Searches MusicBrainz for a track by these words: the recordings\nfound are its candidates on *To identify*.",
+            "required": [
+              "track_id",
+              "title",
+              "artist",
+              "kind"
+            ],
+            "properties": {
+              "album": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artist": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "review_search"
+                ]
+              },
+              "kinds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AlbumKind"
+                },
+                "description": "The kinds of album to look on; none means studio albums."
+              },
+              "title": {
+                "type": "string"
               },
               "track_id": {
                 "type": "integer",
@@ -37578,9 +38284,16 @@
         "required": [
           "to_identify",
           "no_intro",
-          "no_hook"
+          "no_hook",
+          "damaged"
         ],
         "properties": {
+          "damaged": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tracks whose file is damaged (`GET /tracks?filter=damaged`).",
+            "minimum": 0
+          },
           "no_cover": {
             "type": [
               "integer",
@@ -38075,6 +38788,8 @@
               "tag_overrides",
               "playout",
               "categories",
+              "identification_candidates",
+              "damage",
               "plays",
               "station_ratios",
               "cover_candidates"
@@ -38122,6 +38837,13 @@
                 },
                 "description": "Its album's Cover Art Archive candidates, waiting for an operator."
               },
+              "damage": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "What the check of its file found (`broken_seek_table`,\n`damaged_audio`, `mixed_streams`); empty for a sound file, or one\nnot checked yet."
+              },
               "deleted_at_unix_ms": {
                 "type": [
                   "integer",
@@ -38142,6 +38864,13 @@
                     "type": "null"
                   }
                 ]
+              },
+              "identification_candidates": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ReviewCandidate"
+                },
+                "description": "The releases its identification found, best first."
               },
               "markers": {
                 "oneOf": [
@@ -38272,6 +39001,13 @@
         "type": "object",
         "description": "The file and its tags, as the scanner read them.",
         "properties": {
+          "artist_wikidata_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The artist's Wikidata item (`Q42`), looked up with the MusicBrainz\ndetails."
+          },
           "channels": {
             "type": [
               "integer",
@@ -38295,7 +39031,19 @@
             ],
             "format": "int64"
           },
+          "musicbrainz_artist_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "musicbrainz_recording_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "musicbrainz_release_group_id": {
             "type": [
               "string",
               "null"
@@ -38353,7 +39101,8 @@
           "needs_review",
           "no_cover",
           "no_intro",
-          "no_hook"
+          "no_hook",
+          "damaged"
         ]
       },
       "TrackIdentification": {
@@ -39039,6 +39788,35 @@
         },
         "additionalProperties": false
       },
+      "TrackSearch": {
+        "type": "object",
+        "required": [
+          "title",
+          "artist"
+        ],
+        "properties": {
+          "album": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artist": {
+            "type": "string"
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlbumKind"
+            },
+            "description": "The kinds of album to look on; none means studio albums."
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "TrackSelection": {
         "type": "object",
         "description": "Some tracks: these IDs, or every track matching the filters.",
@@ -39681,13 +40459,24 @@
               "string",
               "null"
             ],
-            "description": "Its cover, else the station's logo; filled by [`fill_covers`]."
+            "description": "Its cover, else the station's logo; filled by [`fill_details`]."
           },
           "duration_ms": {
             "type": "integer",
             "format": "int64",
             "description": "From the cue-in to the cue-out.",
             "minimum": 0
+          },
+          "musicbrainz": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MusicBrainzIds",
+                "description": "Its MusicBrainz identifiers, filled by [`fill_details`]; `null` when\nit has none."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "planned_start_unix_ms": {
             "type": "integer",

@@ -26,6 +26,30 @@ pub enum TaskRequest {
         recording_id: String,
         disc: Option<u32>,
         track: Option<u32>,
+        /// Fields corrected by hand, written over the release's tags.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        fixes: FieldValues,
+    },
+    /// The tags a release would give a track (its file's and the
+    /// release's, merged), without writing them.
+    ReviewPreview {
+        track_id: u64,
+        release_id: String,
+        recording_id: String,
+        disc: Option<u32>,
+        track: Option<u32>,
+    },
+    /// Searches MusicBrainz for a track by these words: the recordings
+    /// found are its candidates on *To identify*.
+    ReviewSearch {
+        track_id: u64,
+        title: String,
+        artist: String,
+        #[serde(default)]
+        album: Option<String>,
+        /// The kinds of album to look on; none means studio albums.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        kinds: Vec<AlbumKind>,
     },
     /// Looks up the MusicBrainz relationships between the station's
     /// artists ("member of", "is person", …) and suggests the links.
@@ -94,6 +118,8 @@ impl TaskRequest {
             Self::OrganizeApply { .. } => "organize_apply",
             Self::Undo { .. } => "undo",
             Self::ReviewApply { .. } => "review_apply",
+            Self::ReviewSearch { .. } => "review_search",
+            Self::ReviewPreview { .. } => "review_preview",
             Self::ArtistRelations => "artist_relations",
             Self::EditTags { .. } => "edit_tags",
             Self::WriteTagOverrides => "write_tag_overrides",
@@ -254,6 +280,9 @@ pub struct DetailsReport {
     pub releases: u64,
     /// Tracks whose details were saved.
     pub tracks: u64,
+    /// Artists looked up for their Wikidata item (one request each).
+    #[serde(default)]
+    pub artists: u64,
     /// Lookups that failed (tried again next time).
     pub failed: u64,
 }
@@ -315,6 +344,13 @@ pub enum StagedFlag {
     TooShort,
     /// An audio format Heron cannot play.
     UnsupportedFormat,
+    /// Its seek table (VBR header) is empty or wrong: seeking in it lands
+    /// at the start or at the wrong place.
+    BrokenSeekTable,
+    /// Bytes that are not audio between its frames, or cut short.
+    DamagedAudio,
+    /// Its sample rate or channels change along it: files glued together.
+    MixedStreams,
 }
 
 /// The outcome of identifying a file of the buffer zone.
@@ -359,6 +395,54 @@ pub enum StagedChoice {
     },
     /// The file's own tags.
     Own,
+    /// Search MusicBrainz for these words: the recordings found replace
+    /// its candidates, and it is undecided again.
+    Search {
+        title: String,
+        artist: String,
+        album: Option<String>,
+        /// The kinds of album to look on; none means studio albums.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        kinds: Vec<AlbumKind>,
+    },
+}
+
+/// A kind of album, from its MusicBrainz release group types: what a
+/// search looks on and what its results show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum AlbumKind {
+    /// An album with no secondary type.
+    Studio,
+    Live,
+    Compilation,
+    /// A single or an EP.
+    Single,
+    /// Soundtracks, remixes, demos, broadcasts…
+    Other,
+}
+
+impl AlbumKind {
+    /// The kind of a release group with these MusicBrainz types (`Album`,
+    /// `["Live"]`…).
+    #[must_use]
+    pub fn of(primary: Option<&str>, secondary: &[String]) -> Self {
+        let has = |name: &str| secondary.iter().any(|kind| kind.eq_ignore_ascii_case(name));
+        if has("live") {
+            Self::Live
+        } else if has("compilation") {
+            Self::Compilation
+        } else if !secondary.is_empty() {
+            Self::Other
+        } else {
+            match primary.map(str::to_ascii_lowercase).as_deref() {
+                Some("album") => Self::Studio,
+                Some("single" | "ep") => Self::Single,
+                _ => Self::Other,
+            }
+        }
+    }
 }
 
 /// Where uploads are written in a group's folder of the buffer zone until
@@ -405,6 +489,28 @@ pub struct RelationsReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn album_kinds_from_musicbrainz_types() {
+        assert_eq!(AlbumKind::of(Some("Album"), &[]), AlbumKind::Studio);
+        assert_eq!(
+            AlbumKind::of(Some("Album"), &["Live".to_owned()]),
+            AlbumKind::Live
+        );
+        assert_eq!(
+            AlbumKind::of(
+                Some("Album"),
+                &["Compilation".to_owned(), "Live".to_owned()]
+            ),
+            AlbumKind::Live
+        );
+        assert_eq!(AlbumKind::of(Some("EP"), &[]), AlbumKind::Single);
+        assert_eq!(
+            AlbumKind::of(Some("Album"), &["Soundtrack".to_owned()]),
+            AlbumKind::Other
+        );
+        assert_eq!(AlbumKind::of(None, &[]), AlbumKind::Other);
+    }
 
     #[test]
     fn requests_are_tagged_by_kind() {

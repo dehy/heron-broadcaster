@@ -59,6 +59,8 @@ pub enum TrackFilter {
     NoIntro,
     /// No hook.
     NoHook,
+    /// Its file is damaged (`GET /library/integrity`).
+    Damaged,
 }
 
 /// The built-in Song category type (`migrations/…_category_types.sql`):
@@ -567,6 +569,10 @@ impl ListContext {
                                   WHERE tm.track_id = t.id AND tm.hook_in_ms IS NOT NULL
                                     AND tm.hook_out_ms IS NOT NULL)"
             }
+            Some(TrackFilter::Damaged) => {
+                " AND EXISTS (SELECT 1 FROM track_integrity ti
+                              WHERE ti.track_id = t.id AND ti.damage IS NOT NULL)"
+            }
         }
     }
 
@@ -1034,6 +1040,11 @@ pub struct TrackFile {
     pub disc_number: Option<u16>,
     pub musicbrainz_recording_id: Option<String>,
     pub musicbrainz_release_id: Option<String>,
+    pub musicbrainz_release_group_id: Option<String>,
+    pub musicbrainz_artist_id: Option<String>,
+    /// The artist's Wikidata item (`Q42`), looked up with the MusicBrainz
+    /// details.
+    pub artist_wikidata_id: Option<String>,
     pub missing_since_unix_ms: Option<i64>,
 }
 
@@ -1072,6 +1083,12 @@ pub struct TrackDetail {
     pub playout: EffectivePlayout,
     pub categories: Vec<TrackCategory>,
     pub identification: Option<TrackIdentification>,
+    /// The releases its identification found, best first.
+    pub identification_candidates: Vec<crate::librarian::ReviewCandidate>,
+    /// What the check of its file found (`broken_seek_table`,
+    /// `damaged_audio`, `mixed_streams`); empty for a sound file, or one
+    /// not checked yet.
+    pub damage: Vec<String>,
     /// Plays and last play in total and per station.
     pub plays: crate::history::Plays,
     /// Its play ratio and counter on each station, in the stations' order.
@@ -1110,8 +1127,11 @@ async fn get_track(
     let file: TrackFile = sqlx::query_as(
         "SELECT file_size AS size, sample_rate, channels, year AS year_tag, track_number,
                 disc_number, musicbrainz_recording_id, musicbrainz_release_id,
+                musicbrainz_release_group_id, musicbrainz_artist_id,
+                a.wikidata_id AS artist_wikidata_id,
                 CAST(UNIX_TIMESTAMP(missing_since) * 1000 AS SIGNED) AS missing_since_unix_ms
-         FROM tracks WHERE id = ?",
+         FROM tracks t LEFT JOIN musicbrainz_artists a ON a.mbid = t.musicbrainz_artist_id
+         WHERE t.id = ?",
     )
     .bind(id)
     .fetch_one(&state.pool)
@@ -1153,6 +1173,25 @@ async fn get_track(
     .bind(id)
     .fetch_optional(&state.pool)
     .await?;
+    let candidates: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT CAST(candidates AS CHAR) FROM track_identifications WHERE track_id = ?",
+    )
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let identification_candidates = candidates
+        .flatten()
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
+    let damage: Option<Option<String>> =
+        sqlx::query_scalar("SELECT CAST(damage AS CHAR) FROM track_integrity WHERE track_id = ?")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
+    let damage = damage
+        .flatten()
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
     let overrides = load_overrides(&state, id).await?;
     let tag_overrides = heron_library::details::overrides(&state.pool, id)
         .await?
@@ -1182,6 +1221,8 @@ async fn get_track(
         },
         categories,
         identification,
+        identification_candidates,
+        damage,
         plays: crate::history::plays(&state.pool, crate::history::PlaysOf::Track(id)).await?,
         station_ratios,
         cover,
