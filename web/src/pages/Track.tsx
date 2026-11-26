@@ -1339,6 +1339,34 @@ function ProgrammingCard({ track, canEdit }: Readonly<{ track: TrackDetail; canE
             </dd>
           </>
         )}
+        {track.file.musicbrainz_release_group_id && (
+          <>
+            <dt>{t("track.releaseGroup")}</dt>
+            <dd>
+              <a
+                href={`https://musicbrainz.org/release-group/${encodeURIComponent(track.file.musicbrainz_release_group_id)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <code>{track.file.musicbrainz_release_group_id}</code>
+              </a>
+            </dd>
+          </>
+        )}
+        {track.file.artist_wikidata_id && (
+          <>
+            <dt>{t("track.artistWikidata")}</dt>
+            <dd>
+              <a
+                href={`https://www.wikidata.org/wiki/${encodeURIComponent(track.file.artist_wikidata_id)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <code>{track.file.artist_wikidata_id}</code>
+              </a>
+            </dd>
+          </>
+        )}
       </dl>
       <LabelsDialog
         open={dialog === "labels"}

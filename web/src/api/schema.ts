@@ -8665,6 +8665,11 @@ export interface components {
         DetailsReport: {
             /**
              * Format: int64
+             * @description Artists looked up for their Wikidata item (one request each).
+             */
+            artists?: number;
+            /**
+             * Format: int64
              * @description Lookups that failed (tried again next time).
              */
             failed: number;
@@ -10921,6 +10926,24 @@ export interface components {
          * @enum {string}
          */
         Movement: "up" | "down" | "same" | "new" | "reentry";
+        /**
+         * @description A track's MusicBrainz identifiers, as its tags and its MusicBrainz
+         *     details give them. Each is `null` when unknown.
+         */
+        MusicBrainzIds: {
+            /** @description The first credited artist. */
+            artist_id?: string | null;
+            /** @description The artist's Wikidata item (`Q42`). */
+            artist_wikidata_id?: string | null;
+            /**
+             * Format: int32
+             * @description From the MusicBrainz details, else the year tag.
+             */
+            first_release_year?: number | null;
+            recording_id?: string | null;
+            release_group_id?: string | null;
+            release_id?: string | null;
+        };
         /** @enum {string} */
         NameFrom: "artists" | "titles";
         NewGroup: {
@@ -11697,6 +11720,7 @@ export interface components {
              * @description Missing while the track plays.
              */
             ended_at_unix_ms?: number | null;
+            musicbrainz?: components["schemas"]["MusicBrainzIds"] | null;
             /** Format: int64 */
             started_at_unix_ms: number;
             title?: string | null;
@@ -11720,6 +11744,7 @@ export interface components {
              */
             duration_ms: number;
             match?: components["schemas"]["OnAirMatch"] | null;
+            musicbrainz?: components["schemas"]["MusicBrainzIds"] | null;
             /** Format: int64 */
             position_ms: number;
             /** Format: int64 */
@@ -14084,13 +14109,20 @@ export interface components {
         };
         /** @description The file and its tags, as the scanner read them. */
         TrackFile: {
+            /**
+             * @description The artist's Wikidata item (`Q42`), looked up with the MusicBrainz
+             *     details.
+             */
+            artist_wikidata_id?: string | null;
             /** Format: int32 */
             channels?: number | null;
             /** Format: int32 */
             disc_number?: number | null;
             /** Format: int64 */
             missing_since_unix_ms?: number | null;
+            musicbrainz_artist_id?: string | null;
             musicbrainz_recording_id?: string | null;
+            musicbrainz_release_group_id?: string | null;
             musicbrainz_release_id?: string | null;
             /** Format: int32 */
             sample_rate?: number | null;
@@ -14628,13 +14660,14 @@ export interface components {
         UpcomingTrack: {
             album?: string | null;
             artist?: string | null;
-            /** @description Its cover, else the station's logo; filled by [`fill_covers`]. */
+            /** @description Its cover, else the station's logo; filled by [`fill_details`]. */
             cover_url?: string | null;
             /**
              * Format: int64
              * @description From the cue-in to the cue-out.
              */
             duration_ms: number;
+            musicbrainz?: components["schemas"]["MusicBrainzIds"] | null;
             /**
              * Format: int64
              * @description When it should start, crossfades included, as the Queue page shows it.

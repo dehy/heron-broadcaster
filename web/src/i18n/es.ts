@@ -816,6 +816,8 @@ const es = {
   "track.genres": "Géneros",
   "track.genresHelp": "Sugerencias de MusicBrainz: edite los metadatos para usar una",
   "track.lookedUp": "Consultado {ago}",
+  "track.releaseGroup": "Álbum en MusicBrainz",
+  "track.artistWikidata": "Artista en Wikidata",
   "track.notLookedUp": "Aún sin consultar",
   "track.notIdentified": "Sin identificar",
   "track.format": "Formato",

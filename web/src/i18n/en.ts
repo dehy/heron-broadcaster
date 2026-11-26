@@ -814,6 +814,8 @@ const en = {
   "track.genres": "Genres",
   "track.genresHelp": "Suggestions from MusicBrainz: edit the tags to use one",
   "track.lookedUp": "Looked up {ago}",
+  "track.releaseGroup": "Album on MusicBrainz",
+  "track.artistWikidata": "Artist on Wikidata",
   "track.notLookedUp": "Not looked up yet",
   "track.notIdentified": "Not identified",
   "track.format": "Format",

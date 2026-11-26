@@ -102,6 +102,19 @@ describe("Track", () => {
     expect(screen.getByText(t("track.stereo"), { exact: false })).toBeTruthy();
   });
 
+  it("links the album on MusicBrainz and the artist on Wikidata", async () => {
+    const group = "0f0c3e52-0000-4000-8000-000000000002";
+    page({
+      ...TRACK,
+      file: { ...(TRACK.file as object), musicbrainz_release_group_id: group, artist_wikidata_id: "Q15862" },
+    });
+    const album = (await screen.findByText(group)).closest("a");
+    expect(album?.getAttribute("href")).toBe(`https://musicbrainz.org/release-group/${group}`);
+    expect(screen.getByText(t("track.releaseGroup"))).toBeTruthy();
+    const artist = screen.getByText("Q15862").closest("a");
+    expect(artist?.getAttribute("href")).toBe("https://www.wikidata.org/wiki/Q15862");
+  });
+
   it("offers the actions to an operator, not to a viewer", async () => {
     page();
     expect(await screen.findByText(t("track.editTags"))).toBeTruthy();

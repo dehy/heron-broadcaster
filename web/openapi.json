@@ -25972,6 +25972,12 @@
           "failed"
         ],
         "properties": {
+          "artists": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Artists looked up for their Wikidata item (one request each).",
+            "minimum": 0
+          },
           "failed": {
             "type": "integer",
             "format": "int64",
@@ -31007,6 +31013,53 @@
           "reentry"
         ]
       },
+      "MusicBrainzIds": {
+        "type": "object",
+        "description": "A track's MusicBrainz identifiers, as its tags and its MusicBrainz\ndetails give them. Each is `null` when unknown.",
+        "properties": {
+          "artist_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first credited artist."
+          },
+          "artist_wikidata_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The artist's Wikidata item (`Q42`)."
+          },
+          "first_release_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "From the MusicBrainz details, else the year tag.",
+            "minimum": 0
+          },
+          "recording_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release_group_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "NameFrom": {
         "type": "string",
         "enum": [
@@ -32947,6 +33000,17 @@
             "format": "int64",
             "description": "Missing while the track plays."
           },
+          "musicbrainz": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MusicBrainzIds",
+                "description": "Its MusicBrainz identifiers; `null` when it has none."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "started_at_unix_ms": {
             "type": "integer",
             "format": "int64"
@@ -33030,6 +33094,17 @@
               {
                 "$ref": "#/components/schemas/OnAirMatch",
                 "description": "The match it won (`docs/listener-interaction.md#match`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "musicbrainz": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MusicBrainzIds",
+                "description": "Its MusicBrainz identifiers; `null` when it has none."
               },
               {
                 "type": "null"
@@ -38926,6 +39001,13 @@
         "type": "object",
         "description": "The file and its tags, as the scanner read them.",
         "properties": {
+          "artist_wikidata_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The artist's Wikidata item (`Q42`), looked up with the MusicBrainz\ndetails."
+          },
           "channels": {
             "type": [
               "integer",
@@ -38949,7 +39031,19 @@
             ],
             "format": "int64"
           },
+          "musicbrainz_artist_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "musicbrainz_recording_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "musicbrainz_release_group_id": {
             "type": [
               "string",
               "null"
@@ -40365,13 +40459,24 @@
               "string",
               "null"
             ],
-            "description": "Its cover, else the station's logo; filled by [`fill_covers`]."
+            "description": "Its cover, else the station's logo; filled by [`fill_details`]."
           },
           "duration_ms": {
             "type": "integer",
             "format": "int64",
             "description": "From the cue-in to the cue-out.",
             "minimum": 0
+          },
+          "musicbrainz": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MusicBrainzIds",
+                "description": "Its MusicBrainz identifiers, filled by [`fill_details`]; `null` when\nit has none."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "planned_start_unix_ms": {
             "type": "integer",
