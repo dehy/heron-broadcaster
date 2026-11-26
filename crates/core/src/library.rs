@@ -280,6 +280,9 @@ pub struct DetailsReport {
     pub releases: u64,
     /// Tracks whose details were saved.
     pub tracks: u64,
+    /// Artists looked up for their Wikidata item (one request each).
+    #[serde(default)]
+    pub artists: u64,
     /// Lookups that failed (tried again next time).
     pub failed: u64,
 }

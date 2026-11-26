@@ -409,6 +409,26 @@ impl Identifier {
             .collect())
     }
 
+    /// The Wikidata item of the artist `id` (`Q42`), from its MusicBrainz
+    /// URL relationships. `None` when MusicBrainz has no Wikidata link for
+    /// the artist, or does not know it.
+    pub async fn artist_wikidata(&self, id: &str) -> Result<Option<String>, IdentifyError> {
+        let url = format!("{}/artist/{id}", self.endpoints.musicbrainz);
+        let response = self
+            .send("MusicBrainz", &self.musicbrainz, || {
+                self.http
+                    .get(&url)
+                    .query(&[("inc", "url-rels"), ("fmt", "json")])
+            })
+            .await;
+        let artist: MbArtistUrls = match response {
+            Ok(response) => response.json().await?,
+            Err(IdentifyError::Service { status: 404, .. }) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        Ok(artist.wikidata())
+    }
+
     /// The release's front cover (500 px JPEG), if it has one.
     pub async fn cover(&self, release_id: &str) -> Result<Option<Vec<u8>>, IdentifyError> {
         let url = format!(
@@ -1378,6 +1398,44 @@ struct MbRelation {
     artist: Option<MbArtist>,
 }
 
+// MusicBrainz artist lookups (`inc=url-rels`).
+#[derive(Debug, Deserialize)]
+struct MbArtistUrls {
+    #[serde(default)]
+    relations: Vec<MbUrlRelation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbUrlRelation {
+    #[serde(rename = "type")]
+    kind: String,
+    url: Option<MbUrl>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MbUrl {
+    resource: String,
+}
+
+impl MbArtistUrls {
+    /// The item of the first `wikidata` link (`https://www.wikidata.org/wiki/Q42`).
+    fn wikidata(&self) -> Option<String> {
+        self.relations
+            .iter()
+            .filter(|relation| relation.kind == "wikidata")
+            .filter_map(|relation| relation.url.as_ref())
+            .find_map(|url| wikidata_item(&url.resource))
+    }
+}
+
+/// `Q42` from a Wikidata item's address, if it is one.
+fn wikidata_item(address: &str) -> Option<String> {
+    let item = address.trim_end_matches('/').rsplit('/').next()?;
+    let digits = item.strip_prefix('Q')?;
+    (!digits.is_empty() && digits.len() <= 15 && digits.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| item.to_owned())
+}
+
 fn credited(credits: &[MbCredit]) -> Option<String> {
     let name: String = credits
         .iter()
@@ -1835,5 +1893,29 @@ mod tests {
         assert_eq!(so_what.first_release_year, Some(1959));
         let alternate = &recordings["bc80349a-c5d6-4d35-8d29-87d5b10e5d5d"];
         assert_eq!(alternate.first_release_year, Some(1959));
+    }
+
+    #[test]
+    fn an_artist_gets_its_wikidata_item() {
+        let artist: MbArtistUrls = serde_json::from_value(serde_json::json!({
+            "relations": [
+                {"type": "official homepage", "url": {"resource": "https://example.org/"}},
+                {"type": "wikidata", "url": {"resource": "https://www.wikidata.org/wiki/Q15862"}},
+            ]
+        }))
+        .unwrap();
+        assert_eq!(artist.wikidata().as_deref(), Some("Q15862"));
+        let none: MbArtistUrls = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(none.wikidata(), None);
+        assert_eq!(
+            wikidata_item("https://www.wikidata.org/wiki/Q42/"),
+            Some("Q42".into())
+        );
+        assert_eq!(
+            wikidata_item("https://www.wikidata.org/wiki/Property:P31"),
+            None
+        );
+        assert_eq!(wikidata_item("https://www.wikidata.org/wiki/Q"), None);
+        assert_eq!(wikidata_item("https://www.wikidata.org/wiki/Q12x"), None);
     }
 }

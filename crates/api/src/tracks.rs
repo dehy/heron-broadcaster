@@ -1040,6 +1040,11 @@ pub struct TrackFile {
     pub disc_number: Option<u16>,
     pub musicbrainz_recording_id: Option<String>,
     pub musicbrainz_release_id: Option<String>,
+    pub musicbrainz_release_group_id: Option<String>,
+    pub musicbrainz_artist_id: Option<String>,
+    /// The artist's Wikidata item (`Q42`), looked up with the MusicBrainz
+    /// details.
+    pub artist_wikidata_id: Option<String>,
     pub missing_since_unix_ms: Option<i64>,
 }
 
@@ -1122,8 +1127,11 @@ async fn get_track(
     let file: TrackFile = sqlx::query_as(
         "SELECT file_size AS size, sample_rate, channels, year AS year_tag, track_number,
                 disc_number, musicbrainz_recording_id, musicbrainz_release_id,
+                musicbrainz_release_group_id, musicbrainz_artist_id,
+                a.wikidata_id AS artist_wikidata_id,
                 CAST(UNIX_TIMESTAMP(missing_since) * 1000 AS SIGNED) AS missing_since_unix_ms
-         FROM tracks WHERE id = ?",
+         FROM tracks t LEFT JOIN musicbrainz_artists a ON a.mbid = t.musicbrainz_artist_id
+         WHERE t.id = ?",
     )
     .bind(id)
     .fetch_one(&state.pool)

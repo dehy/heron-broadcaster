@@ -338,7 +338,32 @@ async fn musicbrainz_details_of_identified_tracks() {
         .await
         .unwrap();
     }
+    // Their artists: one with a Wikidata link, one without; c's is no
+    // MusicBrainz ID, never sent.
+    const LINKED: &str = "0383dadf-2a4e-4d10-a46a-e9e041da8eb3";
+    const UNLINKED: &str = "1383dadf-2a4e-4d10-a46a-e9e041da8eb3";
+    for (id, artist) in [
+        (ids[0], LINKED),
+        (ids[1], UNLINKED),
+        (ids[2], "../release/rel"),
+    ] {
+        sqlx::query("UPDATE tracks SET musicbrainz_artist_id = ? WHERE id = ?")
+            .bind(artist)
+            .bind(id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
     let mut state = MockState::default();
+    state.artists.insert(
+        LINKED.into(),
+        json!({"id": LINKED, "relations": [
+            {"type": "wikidata", "url": {"resource": "https://www.wikidata.org/wiki/Q15862"}}
+        ]}),
+    );
+    state
+        .artists
+        .insert(UNLINKED.into(), json!({"id": UNLINKED, "relations": []}));
     state.releases.insert(
         "rel".into(),
         json!({
@@ -363,9 +388,26 @@ async fn musicbrainz_details_of_identified_tracks() {
     let task = ask(pool, &TaskRequest::MusicbrainzDetails { all: false }).await;
     let report: DetailsReport = run(&runner, pool, task).await;
     assert_eq!(
-        (report.releases, report.tracks, report.failed),
-        (1, 2, 0),
+        (
+            report.releases,
+            report.tracks,
+            report.artists,
+            report.failed
+        ),
+        (1, 2, 2, 0),
         "{report:?}"
+    );
+    let artists: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT mbid, wikidata_id FROM musicbrainz_artists ORDER BY mbid")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        artists,
+        [
+            (LINKED.to_owned(), Some("Q15862".to_owned())),
+            (UNLINKED.to_owned(), None)
+        ]
     );
     let rows: Vec<(
         u64,
@@ -411,9 +453,9 @@ async fn musicbrainz_details_of_identified_tracks() {
     // Fetched already: only `all` looks them up again.
     let task = ask(pool, &TaskRequest::MusicbrainzDetails { all: false }).await;
     let report: DetailsReport = run(&runner, pool, task).await;
-    assert_eq!(report.releases, 0, "{report:?}");
+    assert_eq!((report.releases, report.artists), (0, 0), "{report:?}");
     let task = ask(pool, &TaskRequest::MusicbrainzDetails { all: true }).await;
     let report: DetailsReport = run(&runner, pool, task).await;
-    assert_eq!(report.releases, 1, "{report:?}");
+    assert_eq!((report.releases, report.artists), (1, 2), "{report:?}");
     db.drop().await;
 }

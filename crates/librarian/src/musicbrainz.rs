@@ -3,7 +3,8 @@
 //! Programming details from MusicBrainz for identified tracks (those whose
 //! tags carry a MusicBrainz recording and release): album, record label
 //! and catalog number, ISRC, first release year and genres. One request per
-//! release, at MusicBrainz's pace (one a second).
+//! release, at MusicBrainz's pace (one a second). Each MusicBrainz artist
+//! the tracks carry is looked up too, once, for its Wikidata item.
 //!
 //! The whole library is looked up on request; after the first request,
 //! tracks that have none yet (new tracks) are looked up in the background.
@@ -68,10 +69,62 @@ pub async fn look_up(
             report.tracks += 1;
         }
     }
-    if report.releases > 0 {
+    let left = limit.map(|limit| limit.saturating_sub(releases.len().min(limit)));
+    look_up_artists(pool, identifier, all, left, &mut report).await?;
+    if report.releases > 0 || report.artists > 0 {
         tracing::info!(?report, "MusicBrainz details fetched");
     }
     Ok(report)
+}
+
+/// Looks up the Wikidata item of the MusicBrainz artists never looked up,
+/// or of every artist with `all`; at most `limit`. An artist without a
+/// Wikidata link is saved without one, and not looked up again.
+async fn look_up_artists(
+    pool: &MySqlPool,
+    identifier: &Identifier,
+    all: bool,
+    limit: Option<usize>,
+    report: &mut DetailsReport,
+) -> Result<(), sqlx::Error> {
+    let stale = if all { "" } else { " AND a.mbid IS NULL" };
+    let artists: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT DISTINCT t.musicbrainz_artist_id
+         FROM tracks t LEFT JOIN musicbrainz_artists a ON a.mbid = t.musicbrainz_artist_id
+         WHERE t.musicbrainz_artist_id IS NOT NULL AND t.deleted_at IS NULL{stale}
+         ORDER BY t.musicbrainz_artist_id"
+    )))
+    .fetch_all(pool)
+    .await?;
+    // Only MusicBrainz IDs go into a request's address.
+    let artists = artists.iter().filter(|id| is_mbid(id));
+    for artist in artists.take(limit.unwrap_or(usize::MAX)) {
+        report.artists += 1;
+        let wikidata = match identifier.artist_wikidata(artist).await {
+            Ok(wikidata) => wikidata,
+            Err(error) => {
+                tracing::warn!(artist, %error, "cannot look up the artist on MusicBrainz");
+                report.failed += 1;
+                continue;
+            }
+        };
+        sqlx::query(
+            "INSERT INTO musicbrainz_artists (mbid, wikidata_id, fetched_at)
+             VALUES (?, ?, NOW(6))
+             ON DUPLICATE KEY UPDATE wikidata_id = VALUES(wikidata_id),
+                 fetched_at = VALUES(fetched_at)",
+        )
+        .bind(artist)
+        .bind(wikidata)
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
+}
+
+/// A MusicBrainz ID: 36 characters, hexadecimal digits and dashes.
+fn is_mbid(id: &str) -> bool {
+    id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
 }
 
 /// Whether tracks are looked up in the background: once the station asked
@@ -119,4 +172,14 @@ async fn save(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_musicbrainz_ids_are_looked_up() {
+        assert!(super::is_mbid("0383dadf-2a4e-4d10-a46a-e9e041da8eb3"));
+        assert!(!super::is_mbid("0383dadf-2a4e-4d10-a46a-e9e041da8eb"));
+        assert!(!super::is_mbid("../../release/x?inc=all&fmt=json&abcdef"));
+    }
 }
